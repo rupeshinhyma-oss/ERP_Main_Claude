@@ -1,0 +1,43 @@
+# =============================================================================
+# ERP Backend - Production Dependencies
+# Python 3.13+
+# =============================================================================
+
+# --- Web framework ---
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+
+# --- Data validation / settings ---
+pydantic==2.10.4
+pydantic-settings==2.7.1
+
+# --- Database ---
+sqlalchemy==2.0.36
+alembic==1.14.0
+asyncpg==0.30.0          # async PostgreSQL driver (runtime)
+psycopg2-binary==2.9.10  # sync driver (used by Alembic migrations)
+
+# --- Utilities ---
+python-dotenv==1.0.1
+orjson==3.10.14          # fast JSON serialization
+tenacity==9.0.0          # retry logic (DB startup, future external calls)
+
+# --- Authentication / Security (Phase 2) ---
+argon2-cffi==23.1.0      # Argon2 password hashing
+pyjwt==2.10.1             # JWT access/refresh token encode/decode
+email-validator==2.2.0   # Pydantic EmailStr support
+
+# --- Logging ---
+python-json-logger==3.2.1
+
+# --- Master Data import/export (Phase 7) ---
+openpyxl==3.1.5         # CSV/Excel import & export for master data modules
+python-multipart==0.0.20  # required by FastAPI for UploadFile/File(...) form parsing
+
+# =============================================================================
+# Dev / test dependencies (install separately in real projects via
+# requirements-dev.txt or an extras group; kept here for Phase 1 convenience)
+# =============================================================================
+pytest==8.3.4
+pytest-asyncio==0.25.1
+httpx==0.28.1

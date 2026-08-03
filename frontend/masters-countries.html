@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Countries — Inhyma ERP</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <div id="sidebarMount"></div>
+    <div class="main-column">
+      <div id="topbarMount"></div>
+      <main class="page">
+        <div class="breadcrumb">
+          <a href="./index.html">Dashboard</a><span class="sep">/</span><span class="current">Master Data</span><span class="sep">/</span><span class="current">Countries</span>
+        </div>
+        <div class="page-header">
+          <div>
+            <h1>Countries</h1>
+            <div class="page-subtitle">The root of the geography hierarchy — referenced by states, cities, and future modules.</div>
+          </div>
+          <div class="page-header-actions">
+            <div class="btn file-btn" id="importBtnWrapper">
+              Import
+              <input type="file" id="importInput" accept=".csv,.xlsx" />
+            </div>
+            <button class="btn" id="exportCsvBtn">Export CSV</button>
+            <button class="btn" id="exportXlsxBtn">Export Excel</button>
+            <button class="btn btn-primary" id="newBtn">+ New Country</button>
+          </div>
+        </div>
+        <div id="banner"></div>
+        <div id="importSummary"></div>
+
+        <div class="card">
+          <div class="toolbar">
+            <input type="text" id="searchInput" placeholder="Search code or name..." />
+            <select id="statusFilter">
+              <option value="">All statuses</option>
+              <option value="active">Active</option>
+              <option value="inactive">Inactive</option>
+            </select>
+          </div>
+
+          <div class="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Code</th>
+                  <th>ISO2 / ISO3</th>
+                  <th>Phone Code</th>
+                  <th>Currency</th>
+                  <th>Status</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="tableBody">
+                <tr><td colspan="7" class="muted">Loading...</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="pagination" id="pagination"></div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="modalBackdrop" style="display:none;">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h2 id="modalTitle">New Country</h2>
+        <button class="modal-close" id="modalCloseBtn">&times;</button>
+      </div>
+      <form id="entityForm">
+        <input type="hidden" id="entityId" />
+        <div class="form-grid">
+          <div class="field">
+            <label for="name">Country Name *</label>
+            <input id="name" required maxlength="150" />
+          </div>
+          <div class="field">
+            <label for="code">Country Code (ISO) *</label>
+            <input id="code" required maxlength="10" />
+          </div>
+          <div class="field">
+            <label for="iso2">ISO2</label>
+            <input id="iso2" maxlength="2" />
+          </div>
+          <div class="field">
+            <label for="iso3">ISO3</label>
+            <input id="iso3" maxlength="3" />
+          </div>
+          <div class="field">
+            <label for="phone_code">Phone Code</label>
+            <input id="phone_code" maxlength="10" placeholder="+91" />
+          </div>
+          <div class="field">
+            <label for="nationality">Nationality</label>
+            <input id="nationality" maxlength="100" />
+          </div>
+          <div class="field">
+            <label for="currency">Currency Code</label>
+            <input id="currency" maxlength="10" placeholder="INR" />
+          </div>
+          <div class="field">
+            <label for="status">Status</label>
+            <select id="status">
+              <option value="active">Active</option>
+              <option value="inactive">Inactive</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="btn btn-primary">Save</button>
+          <button type="button" class="btn" id="cancelBtn">Cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script src="js/api.js"></script>
+  <script src="js/nav.js"></script>
+  <script src="js/masters-common.js"></script>
+  <script>
+    renderShell("masters-countries");
+
+    MasterPage.init({
+      apiBase: "/masters/countries",
+      permissionPrefix: "country",
+      entityName: "country",
+      columns: [
+        { header: "Name", render: (c) => `<span class="cell-primary">${escapeHtml(c.name)}</span>` },
+        { header: "Code", render: (c) => escapeHtml(c.code) },
+        { header: "ISO", render: (c) => `${escapeHtml(c.iso2 || "—")} / ${escapeHtml(c.iso3 || "—")}` },
+        { header: "Phone Code", render: (c) => escapeHtml(c.phone_code || "—") },
+        { header: "Currency", render: (c) => escapeHtml(c.currency || "—") },
+        { header: "Status", render: (c) => MasterPage.badge(c.status) },
+      ],
+      fillForm(item) {
+        MasterPage.setFieldValue("name", item ? item.name : "");
+        MasterPage.setFieldValue("code", item ? item.code : "");
+        MasterPage.setFieldValue("iso2", item ? item.iso2 : "");
+        MasterPage.setFieldValue("iso3", item ? item.iso3 : "");
+        MasterPage.setFieldValue("phone_code", item ? item.phone_code : "");
+        MasterPage.setFieldValue("nationality", item ? item.nationality : "");
+        MasterPage.setFieldValue("currency", item ? item.currency : "");
+        MasterPage.setFieldValue("status", item ? item.status : "active");
+      },
+      toPayload() {
+        return {
+          name: MasterPage.fieldValue("name").trim(),
+          code: MasterPage.fieldValue("code").trim(),
+          iso2: MasterPage.fieldValue("iso2").trim() || null,
+          iso3: MasterPage.fieldValue("iso3").trim() || null,
+          phone_code: MasterPage.fieldValue("phone_code").trim() || null,
+          nationality: MasterPage.fieldValue("nationality").trim() || null,
+          currency: MasterPage.fieldValue("currency").trim() || null,
+          status: MasterPage.fieldValue("status"),
+        };
+      },
+    });
+  </script>
+</body>
+</html>

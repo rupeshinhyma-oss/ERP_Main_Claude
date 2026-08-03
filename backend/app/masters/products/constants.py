@@ -1,0 +1,67 @@
+"""Product Constants."""
+
+from __future__ import annotations
+
+MODULE_NAME = "products"
+DROPDOWN_CACHE_NAME = "products"
+
+IMPORT_HEADERS = [
+    "product_code",
+    "product_name",
+    "barcode",
+    "category_code",
+    "sub_category_code",
+    "brand_code",
+    "hsn_code",
+    "uom_code",
+    "secondary_uom_code",
+    "specification",
+    "description",
+    "weight",
+    "length",
+    "width",
+    "height",
+    "color",
+    "material",
+    "conversion_factor",
+    "minimum_order_quantity",
+    "reorder_level",
+    "standard_cost",
+    "standard_price",
+    "is_purchasable",
+    "is_sellable",
+    "status",
+]
+
+EXPORT_HEADERS = [
+    "id",
+    "product_code",
+    "product_name",
+    "barcode",
+    "category_id",
+    "sub_category_id",
+    "brand_id",
+    "hsn_id",
+    "uom_id",
+    "secondary_uom_id",
+    "specification",
+    "description",
+    "images",
+    "weight",
+    "length",
+    "width",
+    "height",
+    "color",
+    "material",
+    "conversion_factor",
+    "minimum_order_quantity",
+    "reorder_level",
+    "standard_cost",
+    "standard_price",
+    "is_purchasable",
+    "is_sellable",
+    "is_active_for_inventory",
+    "status",
+    "created_at",
+    "updated_at",
+]

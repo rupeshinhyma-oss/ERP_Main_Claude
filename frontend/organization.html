@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Organization — Inhyma ERP</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <div id="sidebarMount"></div>
+    <div class="main-column">
+      <div id="topbarMount"></div>
+      <main class="page">
+    <div class="page-header">
+      <h1>Organization settings</h1>
+    </div>
+    <div id="banner"></div>
+
+    <div class="card">
+      <form id="orgForm">
+        <div class="form-grid">
+          <div class="field">
+            <label for="company_name">Company name *</label>
+            <input id="company_name" required maxlength="200" />
+          </div>
+          <div class="field">
+            <label for="legal_name">Legal name</label>
+            <input id="legal_name" maxlength="200" />
+          </div>
+          <div class="field">
+            <label for="email">Email</label>
+            <input id="email" type="email" />
+          </div>
+          <div class="field">
+            <label for="phone">Phone</label>
+            <input id="phone" maxlength="30" />
+          </div>
+          <div class="field">
+            <label for="website">Website</label>
+            <input id="website" maxlength="255" />
+          </div>
+          <div class="field">
+            <label for="gst_number">GST number</label>
+            <input id="gst_number" maxlength="50" />
+          </div>
+          <div class="field">
+            <label for="pan_number">PAN number</label>
+            <input id="pan_number" maxlength="50" />
+          </div>
+          <div class="field">
+            <label for="timezone">Timezone</label>
+            <input id="timezone" maxlength="50" placeholder="UTC" />
+          </div>
+          <div class="field">
+            <label for="currency">Currency</label>
+            <input id="currency" maxlength="10" placeholder="USD" />
+          </div>
+          <div class="field">
+            <label for="status">Status</label>
+            <select id="status">
+              <option value="ACTIVE">Active</option>
+              <option value="INACTIVE">Inactive</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="address">Address</label>
+          <textarea id="address"></textarea>
+        </div>
+        <div class="form-grid">
+          <div class="field">
+            <label for="city">City</label>
+            <input id="city" maxlength="100" />
+          </div>
+          <div class="field">
+            <label for="state">State</label>
+            <input id="state" maxlength="100" />
+          </div>
+          <div class="field">
+            <label for="country">Country</label>
+            <input id="country" maxlength="100" />
+          </div>
+          <div class="field">
+            <label for="postal_code">Postal code</label>
+            <input id="postal_code" maxlength="20" />
+          </div>
+        </div>
+        <div class="field">
+          <label for="business_hours">Business hours</label>
+          <input id="business_hours" maxlength="255" placeholder="Mon–Fri, 9am–6pm" />
+        </div>
+
+        <div class="form-actions">
+          <button type="submit" class="btn btn-primary" id="saveBtn">Save</button>
+        </div>
+      </form>
+    </div>
+
+  <script src="js/api.js"></script>
+  <script src="js/nav.js"></script>
+  <script>
+    renderNav("organization");
+
+    const banner = document.getElementById("banner");
+    const form = document.getElementById("orgForm");
+    const saveBtn = document.getElementById("saveBtn");
+
+    let mode = "create"; // or "update", once an org record exists
+
+    const fieldIds = [
+      "company_name", "legal_name", "email", "phone", "website", "gst_number",
+      "pan_number", "timezone", "currency", "status", "address", "city",
+      "state", "country", "postal_code", "business_hours",
+    ];
+
+    function readForm() {
+      const payload = {};
+      for (const id of fieldIds) {
+        const el = document.getElementById(id);
+        const value = el.value.trim();
+        payload[id] = value === "" ? null : value;
+      }
+      if (!payload.timezone) payload.timezone = "UTC";
+      if (!payload.currency) payload.currency = "USD";
+      return payload;
+    }
+
+    function fillForm(org) {
+      for (const id of fieldIds) {
+        const el = document.getElementById(id);
+        el.value = org[id] ?? "";
+      }
+    }
+
+    async function load() {
+      try {
+        const { data } = await apiGet("/organizations");
+        fillForm(data);
+        mode = "update";
+      } catch (err) {
+        if (err.status === 404) {
+          mode = "create";
+        } else {
+          showError(banner, err);
+        }
+      }
+    }
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      banner.innerHTML = "";
+      saveBtn.disabled = true;
+      const payload = readForm();
+
+      try {
+        if (mode === "create") {
+          const { data } = await apiPost("/organizations", payload);
+          fillForm(data);
+          mode = "update";
+        } else {
+          const { data } = await apiPatch("/organizations", payload);
+          fillForm(data);
+        }
+        banner.innerHTML = '<div class="success-banner">Saved.</div>';
+      } catch (err) {
+        showError(banner, err);
+      } finally {
+        saveBtn.disabled = false;
+      }
+    });
+
+    load();
+  </script>
+      </main>
+    </div>
+  </div>
+</body>
+</html>

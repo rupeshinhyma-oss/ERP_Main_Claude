@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>HSN Codes — Inhyma ERP</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <div id="sidebarMount"></div>
+    <div class="main-column">
+      <div id="topbarMount"></div>
+      <main class="page">
+        <div class="breadcrumb">
+          <a href="./index.html">Dashboard</a><span class="sep">/</span><span class="current">Master Data</span><span class="sep">/</span><span class="current">HSN Codes</span>
+        </div>
+        <div class="page-header">
+          <div>
+            <h1>HSN Codes</h1>
+            <div class="page-subtitle">Harmonized System Nomenclature codes for GST classification.</div>
+          </div>
+          <div class="page-header-actions">
+            <div class="btn file-btn" id="importBtnWrapper">
+              Import
+              <input type="file" id="importInput" accept=".csv,.xlsx" />
+            </div>
+            <button class="btn" id="exportCsvBtn">Export CSV</button>
+            <button class="btn" id="exportXlsxBtn">Export Excel</button>
+            <button class="btn btn-primary" id="newBtn">+ New HSN Code</button>
+          </div>
+        </div>
+        <div id="banner"></div>
+        <div id="importSummary"></div>
+
+        <div class="card">
+          <div class="toolbar">
+            <input type="text" id="searchInput" placeholder="Search code or description..." />
+            <select id="statusFilter">
+              <option value="">All statuses</option>
+              <option value="active">Active</option>
+              <option value="inactive">Inactive</option>
+            </select>
+          </div>
+
+          <div class="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>HSN Code</th>
+                  <th>Description</th>
+                  <th>GST %</th>
+                  <th>Status</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="tableBody">
+                <tr><td colspan="5" class="muted">Loading...</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="pagination" id="pagination"></div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="modalBackdrop" style="display:none;">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h2 id="modalTitle">New HSN Code</h2>
+        <button class="modal-close" id="modalCloseBtn">&times;</button>
+      </div>
+      <form id="entityForm">
+        <input type="hidden" id="entityId" />
+        <div class="form-grid">
+          <div class="field">
+            <label for="code">HSN Code *</label>
+            <input id="code" required maxlength="20" />
+          </div>
+          <div class="field">
+            <label for="gst_percent">GST %</label>
+            <input id="gst_percent" type="number" min="0" max="100" step="0.01" value="0" />
+          </div>
+          <div class="field">
+            <label for="status">Status</label>
+            <select id="status">
+              <option value="active">Active</option>
+              <option value="inactive">Inactive</option>
+            </select>
+          </div>
+        </div>
+        <div class="field">
+          <label for="description">Description</label>
+          <textarea id="description"></textarea>
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="btn btn-primary">Save</button>
+          <button type="button" class="btn" id="cancelBtn">Cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script src="js/api.js"></script>
+  <script src="js/nav.js"></script>
+  <script src="js/masters-common.js"></script>
+  <script>
+    renderShell("masters-hsn");
+
+    MasterPage.init({
+      apiBase: "/masters/hsn",
+      permissionPrefix: "hsn",
+      entityName: "HSN code",
+      columns: [
+        { header: "HSN Code", render: (h) => `<span class="cell-primary">${escapeHtml(h.code)}</span>` },
+        { header: "Description", render: (h) => escapeHtml(h.description || "—") },
+        { header: "GST %", render: (h) => `${h.gst_percent}%` },
+        { header: "Status", render: (h) => MasterPage.badge(h.status) },
+      ],
+      fillForm(item) {
+        MasterPage.setFieldValue("code", item ? item.code : "");
+        MasterPage.setFieldValue("gst_percent", item ? item.gst_percent : 0);
+        MasterPage.setFieldValue("description", item ? item.description : "");
+        MasterPage.setFieldValue("status", item ? item.status : "active");
+      },
+      toPayload() {
+        return {
+          code: MasterPage.fieldValue("code").trim(),
+          gst_percent: parseFloat(MasterPage.fieldValue("gst_percent")) || 0,
+          description: MasterPage.fieldValue("description").trim() || null,
+          status: MasterPage.fieldValue("status"),
+        };
+      },
+    });
+  </script>
+</body>
+</html>

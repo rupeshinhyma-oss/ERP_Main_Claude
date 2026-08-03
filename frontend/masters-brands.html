@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Brands — Inhyma ERP</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <div id="sidebarMount"></div>
+    <div class="main-column">
+      <div id="topbarMount"></div>
+      <main class="page">
+        <div class="breadcrumb">
+          <a href="./index.html">Dashboard</a><span class="sep">/</span><span class="current">Master Data</span><span class="sep">/</span><span class="current">Brands</span>
+        </div>
+        <div class="page-header">
+          <div>
+            <h1>Brands</h1>
+            <div class="page-subtitle">Product brand names, referenced by the Product master.</div>
+          </div>
+          <div class="page-header-actions">
+            <div class="btn file-btn" id="importBtnWrapper">
+              Import
+              <input type="file" id="importInput" accept=".csv,.xlsx" />
+            </div>
+            <button class="btn" id="exportCsvBtn">Export CSV</button>
+            <button class="btn" id="exportXlsxBtn">Export Excel</button>
+            <button class="btn btn-primary" id="newBtn">+ New Brand</button>
+          </div>
+        </div>
+        <div id="banner"></div>
+        <div id="importSummary"></div>
+
+        <div class="card">
+          <div class="toolbar">
+            <input type="text" id="searchInput" placeholder="Search name or code..." />
+            <select id="statusFilter">
+              <option value="">All statuses</option>
+              <option value="active">Active</option>
+              <option value="inactive">Inactive</option>
+            </select>
+          </div>
+
+          <div class="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Code</th>
+                  <th>Description</th>
+                  <th>Status</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="tableBody">
+                <tr><td colspan="5" class="muted">Loading...</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="pagination" id="pagination"></div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="modalBackdrop" style="display:none;">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h2 id="modalTitle">New Brand</h2>
+        <button class="modal-close" id="modalCloseBtn">&times;</button>
+      </div>
+      <form id="entityForm">
+        <input type="hidden" id="entityId" />
+        <div class="form-grid">
+          <div class="field">
+            <label for="name">Brand Name *</label>
+            <input id="name" required maxlength="150" />
+          </div>
+          <div class="field">
+            <label for="code">Brand Code *</label>
+            <input id="code" required maxlength="50" />
+          </div>
+          <div class="field">
+            <label for="logo_url">Logo URL</label>
+            <input id="logo_url" maxlength="500" placeholder="https://..." />
+          </div>
+          <div class="field">
+            <label for="status">Status</label>
+            <select id="status">
+              <option value="active">Active</option>
+              <option value="inactive">Inactive</option>
+            </select>
+          </div>
+        </div>
+        <div class="field">
+          <label for="description">Description</label>
+          <textarea id="description"></textarea>
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="btn btn-primary">Save</button>
+          <button type="button" class="btn" id="cancelBtn">Cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script src="js/api.js"></script>
+  <script src="js/nav.js"></script>
+  <script src="js/masters-common.js"></script>
+  <script>
+    renderShell("masters-brands");
+
+    MasterPage.init({
+      apiBase: "/masters/brands",
+      permissionPrefix: "brand",
+      entityName: "brand",
+      columns: [
+        { header: "Name", render: (b) => `<span class="cell-primary">${escapeHtml(b.name)}</span>` },
+        { header: "Code", render: (b) => escapeHtml(b.code) },
+        { header: "Description", render: (b) => escapeHtml(b.description || "—") },
+        { header: "Status", render: (b) => MasterPage.badge(b.status) },
+      ],
+      fillForm(item) {
+        MasterPage.setFieldValue("name", item ? item.name : "");
+        MasterPage.setFieldValue("code", item ? item.code : "");
+        MasterPage.setFieldValue("logo_url", item ? item.logo_url : "");
+        MasterPage.setFieldValue("description", item ? item.description : "");
+        MasterPage.setFieldValue("status", item ? item.status : "active");
+      },
+      toPayload() {
+        return {
+          name: MasterPage.fieldValue("name").trim(),
+          code: MasterPage.fieldValue("code").trim(),
+          logo_url: MasterPage.fieldValue("logo_url").trim() || null,
+          description: MasterPage.fieldValue("description").trim() || null,
+          status: MasterPage.fieldValue("status"),
+        };
+      },
+    });
+  </script>
+</body>
+</html>

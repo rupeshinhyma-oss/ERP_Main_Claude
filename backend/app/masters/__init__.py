@@ -1,0 +1,1 @@
+"""Master Data Management module."""

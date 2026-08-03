@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Roles &amp; Permissions — Inhyma ERP</title>
+  <link rel="stylesheet" href="css/style.css" />
+  <style>
+    .permission-group { margin-bottom: var(--space-3); }
+    .permission-group-title { font-weight: 700; font-size: 12.5px; text-transform: uppercase; color: var(--color-muted); margin-bottom: 6px; }
+    .permission-checks { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 6px; }
+    .permission-checks label { display: flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 400; }
+    .role-card { border: 1px solid var(--color-border); border-radius: var(--radius); padding: var(--space-3); margin-bottom: var(--space-3); }
+    .role-card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--space-2); }
+    .role-card-header h3 { margin: 0; font-size: 15px; }
+  </style>
+</head>
+<body>
+  <div class="app-shell">
+    <div id="sidebarMount"></div>
+    <div class="main-column">
+      <div id="topbarMount"></div>
+      <main class="page">
+        <div class="breadcrumb">
+          <a href="./index.html">Dashboard</a><span class="sep">/</span><span class="current">Roles &amp; Permissions</span>
+        </div>
+        <div class="page-header">
+          <div>
+            <h1>Roles &amp; Permissions</h1>
+            <div class="page-subtitle">Manage system roles and the permissions granted to each.</div>
+          </div>
+          <div class="page-header-actions">
+            <button class="btn btn-primary" id="newRoleBtn">+ New Role</button>
+          </div>
+        </div>
+        <div id="banner"></div>
+
+        <div id="rolesContainer">
+          <p class="muted">Loading roles...</p>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <!-- Create / Edit Role Modal -->
+  <div class="modal-backdrop" id="modalBackdrop" style="display:none;">
+    <div class="modal-card" style="max-width: 700px;">
+      <div class="modal-header">
+        <h2 id="modalTitle">New Role</h2>
+        <button class="modal-close" id="modalCloseBtn">&times;</button>
+      </div>
+      <form id="roleForm">
+        <input type="hidden" id="roleId" />
+        <div class="form-grid">
+          <div class="field">
+            <label for="roleName">Role Name *</label>
+            <input id="roleName" required minlength="2" maxlength="100" />
+          </div>
+          <div class="field">
+            <label for="roleDescription">Description</label>
+            <input id="roleDescription" maxlength="255" />
+          </div>
+        </div>
+        <div class="section-title" style="margin-top: 0;">Permissions</div>
+        <div id="permissionGroups"></div>
+        <div class="form-actions">
+          <button type="submit" class="btn btn-primary">Save Role</button>
+          <button type="button" class="btn" id="cancelBtn">Cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script src="js/api.js"></script>
+  <script src="js/nav.js"></script>
+  <script>
+    renderShell("rbac");
+
+    const banner = document.getElementById("banner");
+    const rolesContainer = document.getElementById("rolesContainer");
+    const modalBackdrop = document.getElementById("modalBackdrop");
+    const roleForm = document.getElementById("roleForm");
+
+    const canManage = Auth.hasPermission("settings.manage");
+    if (!canManage) {
+      document.getElementById("newRoleBtn").style.display = "none";
+    }
+
+    let allPermissions = [];
+    let allRoles = [];
+    let editingRole = null; // the RoleWithPermissions object currently being edited, or null for create
+
+    function groupPermissionsByModule(permissions) {
+      const groups = {};
+      for (const p of permissions) {
+        if (!groups[p.module]) groups[p.module] = [];
+        groups[p.module].push(p);
+      }
+      return groups;
+    }
+
+    function renderPermissionCheckboxes(grantedCodes) {
+      const granted = new Set(grantedCodes || []);
+      const groups = groupPermissionsByModule(allPermissions);
+      const wrapper = document.getElementById("permissionGroups");
+      wrapper.innerHTML = Object.keys(groups).sort().map((moduleName) => {
+        const checks = groups[moduleName].map((p) => `
+          <label>
+            <input type="checkbox" class="perm-check" value="${p.code}" ${granted.has(p.code) ? "checked" : ""} />
+            ${escapeHtml(p.code)}
+          </label>`).join("");
+        return `
+          <div class="permission-group">
+            <div class="permission-group-title">${escapeHtml(moduleName)}</div>
+            <div class="permission-checks">${checks}</div>
+          </div>`;
+      }).join("");
+    }
+
+    function selectedPermissionCodes() {
+      return Array.from(document.querySelectorAll(".perm-check:checked")).map((el) => el.value);
+    }
+
+    function openModal(role) {
+      editingRole = role || null;
+      roleForm.reset();
+      document.getElementById("roleId").value = role ? role.id : "";
+      document.getElementById("modalTitle").textContent = role ? `Edit ${role.name}` : "New Role";
+      document.getElementById("roleName").value = role ? role.name : "";
+      document.getElementById("roleDescription").value = role ? (role.description || "") : "";
+      const nameInput = document.getElementById("roleName");
+      nameInput.disabled = Boolean(role && role.is_system);
+      renderPermissionCheckboxes(role ? role.permissions : []);
+      modalBackdrop.style.display = "flex";
+    }
+
+    function closeModal() {
+      modalBackdrop.style.display = "none";
+      editingRole = null;
+    }
+
+    document.getElementById("newRoleBtn").addEventListener("click", () => openModal(null));
+    document.getElementById("cancelBtn").addEventListener("click", closeModal);
+    document.getElementById("modalCloseBtn").addEventListener("click", closeModal);
+    modalBackdrop.addEventListener("click", (e) => { if (e.target === modalBackdrop) closeModal(); });
+
+    function roleCardHtml(role) {
+      const permCount = role.permissions.length;
+      const badge = role.is_system ? '<span class="badge badge-neutral">System</span>' : "";
+      const permsPreview = role.permissions.slice(0, 8).map((c) => `<span class="chip" style="display:inline-block;background:var(--color-neutral-soft);border-radius:20px;padding:2px 9px;font-size:11.5px;margin:2px;">${escapeHtml(c)}</span>`).join("");
+      const more = permCount > 8 ? `<span class="muted"> +${permCount - 8} more</span>` : "";
+      return `
+        <div class="role-card" data-role-id="${role.id}">
+          <div class="role-card-header">
+            <h3>${escapeHtml(role.name)} ${badge}</h3>
+            <div>
+              ${canManage ? `<button class="btn btn-small" data-edit="${role.id}">Edit</button>` : ""}
+              ${canManage && !role.is_system ? `<button class="btn btn-small btn-danger" data-delete="${role.id}">Delete</button>` : ""}
+            </div>
+          </div>
+          <div class="muted" style="margin-bottom:8px;">${role.description ? escapeHtml(role.description) : "No description."}</div>
+          <div>${permsPreview}${more}</div>
+          <div class="muted" style="margin-top:6px; font-size:12px;">${permCount} permission${permCount === 1 ? "" : "s"} granted</div>
+        </div>`;
+    }
+
+    async function loadRoles() {
+      rolesContainer.innerHTML = '<p class="muted">Loading roles...</p>';
+      try {
+        const [rolesRes, permsRes] = await Promise.all([
+          apiGet("/rbac/roles"),
+          apiGet("/rbac/permissions"),
+        ]);
+        allRoles = rolesRes.data;
+        allPermissions = permsRes.data;
+        rolesContainer.innerHTML = allRoles.length
+          ? allRoles.map(roleCardHtml).join("")
+          : '<p class="muted">No roles found.</p>';
+      } catch (err) {
+        rolesContainer.innerHTML = "";
+        showError(banner, err);
+      }
+    }
+
+    rolesContainer.addEventListener("click", async (e) => {
+      const editId = e.target.getAttribute("data-edit");
+      const deleteId = e.target.getAttribute("data-delete");
+      if (editId) {
+        const role = allRoles.find((r) => r.id === editId);
+        if (role) openModal(role);
+      } else if (deleteId) {
+        if (!confirm("Delete this role? This cannot be undone.")) return;
+        try {
+          await apiDelete(`/rbac/roles/${deleteId}`);
+          await loadRoles();
+        } catch (err) {
+          showError(banner, err);
+        }
+      }
+    });
+
+    roleForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      banner.innerHTML = "";
+      const roleId = document.getElementById("roleId").value;
+      const name = document.getElementById("roleName").value.trim();
+      const description = document.getElementById("roleDescription").value.trim() || null;
+      const desiredCodes = new Set(selectedPermissionCodes());
+
+      try {
+        if (roleId) {
+          // Update name/description (system roles reject renaming server-side too).
+          await apiPatch(`/rbac/roles/${roleId}`, { name, description });
+
+          // Reconcile permission grants: grant newly-checked codes, revoke newly-unchecked ones.
+          const currentCodes = new Set(editingRole ? editingRole.permissions : []);
+          const codeToId = {};
+          for (const p of allPermissions) codeToId[p.code] = p.id;
+
+          const toGrant = [...desiredCodes].filter((c) => !currentCodes.has(c));
+          const toRevoke = [...currentCodes].filter((c) => !desiredCodes.has(c));
+
+          for (const code of toGrant) {
+            await apiPost(`/rbac/roles/${roleId}/permissions`, { permission_id: codeToId[code] });
+          }
+          for (const code of toRevoke) {
+            await apiDelete(`/rbac/roles/${roleId}/permissions/${codeToId[code]}`);
+          }
+        } else {
+          await apiPost("/rbac/roles", {
+            name,
+            description,
+            permission_codes: [...desiredCodes],
+          });
+        }
+        closeModal();
+        await loadRoles();
+      } catch (err) {
+        showError(banner, err);
+      }
+    });
+
+    loadRoles();
+  </script>
+</body>
+</html>

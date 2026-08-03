@@ -1,0 +1,363 @@
+"""
+User Management Routes.
+
+Implements the admin-facing user-management API: create user, list/get
+users, update profile, reset password, activate/deactivate/unlock, role
+assignment, and session/force-logout management. Every route is gated by a
+specific RBAC permission via ``require_permission()``.
+"""
+
+from __future__ import annotations
+
+import uuid
+
+from fastapi import APIRouter, Depends, Query, Request, status
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.audit.constants import AuditAction
+from app.audit.dependencies import get_audit_service
+from app.audit.service import AuditService
+from app.auth.dependencies import get_auth_service
+from app.auth.schemas import SessionRead
+from app.auth.service import AuthService, CurrentUser
+from app.common.pagination import PageParams
+from app.core.responses import build_success_response
+from app.database.session import get_db_session
+from app.rbac.dependencies import get_rbac_service, require_permission
+from app.rbac.repository import UserRoleRepository
+from app.rbac.service import RBACService
+from app.users.repository import UserRepository
+from app.users.schemas import (
+    AssignRoleRequest,
+    ResetPasswordResponse,
+    UserCreate,
+    UserRead,
+    UserUpdate,
+    UserWithRoles,
+)
+from app.users.service import UserService
+
+router = APIRouter(prefix="/users", tags=["Users"])
+
+
+def get_user_service(
+    db: AsyncSession = Depends(get_db_session),
+    rbac_service: RBACService = Depends(get_rbac_service),
+    auth_service: AuthService = Depends(get_auth_service),
+) -> UserService:
+    """Build a request-scoped :class:`UserService` wired to its repositories and collaborators."""
+    return UserService(
+        user_repository=UserRepository(db),
+        user_role_repository=UserRoleRepository(db),
+        rbac_service=rbac_service,
+        auth_service=auth_service,
+    )
+
+
+async def _user_with_roles(user, rbac_service: RBACService) -> UserWithRoles:  # type: ignore[no-untyped-def]
+    """Shape a ``User`` ORM instance into the response schema, with role names expanded."""
+    roles = await rbac_service.list_roles_for_user(user.id)
+    return UserWithRoles(**UserRead.model_validate(user).model_dump(), roles=[r.name for r in roles])
+
+
+async def _record_user_action(
+    *,
+    audit_service: AuditService,
+    request: Request,
+    action: AuditAction,
+    actor: CurrentUser,
+    target_user_id: uuid.UUID,
+    description: str,
+    new_values: dict | None = None,
+) -> None:
+    """Shared helper: record an admin action against a target user and mark the request as logged."""
+    await audit_service.record(
+        action=action,
+        module="users",
+        user_id=actor.id,
+        username_snapshot=actor.username,
+        entity_type="User",
+        entity_id=str(target_user_id),
+        new_values=new_values,
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+        request_id=request.state.request_id,
+        http_method=request.method,
+        endpoint=request.url.path,
+        response_status=status.HTTP_200_OK,
+        description=description,
+    )
+    request.state.audit_logged = True
+
+
+@router.post("", status_code=status.HTTP_201_CREATED, summary="Create a user (admin)")
+async def create_user(
+    payload: UserCreate,
+    request: Request,
+    user_service: UserService = Depends(get_user_service),
+    rbac_service: RBACService = Depends(get_rbac_service),
+    current_user: CurrentUser = Depends(require_permission("user.create")),
+    audit_service: AuditService = Depends(get_audit_service),
+) -> dict:
+    """Create a new user account with a generated temporary password and optional initial roles."""
+    user, temporary_password = await user_service.create_user(
+        employee_code=payload.employee_code,
+        username=payload.username,
+        email=payload.email,
+        phone=payload.phone,
+        role_ids=payload.role_ids,
+        created_by=current_user.id,
+    )
+    user_data = await _user_with_roles(user, rbac_service)
+    await _record_user_action(
+        audit_service=audit_service,
+        request=request,
+        action=AuditAction.CREATE,
+        actor=current_user,
+        target_user_id=user.id,
+        description=f"Created user {user.username!r}.",
+        new_values={
+            "username": payload.username,
+            "email": payload.email,
+            "employee_code": payload.employee_code,
+            "phone": payload.phone,
+            "role_ids": [str(rid) for rid in (payload.role_ids or [])],
+        },
+    )
+    data = {**user_data.model_dump(mode="json"), "temporary_password": temporary_password}
+    return build_success_response(data=data, request_id=request.state.request_id)
+
+
+@router.get("", summary="List users (admin)")
+async def list_users(
+    request: Request,
+    page_params: PageParams = Depends(),
+    user_service: UserService = Depends(get_user_service),
+    _current_user: CurrentUser = Depends(require_permission("user.read")),
+) -> dict:
+    """List users, paginated."""
+    users, total = await user_service.list_users(offset=page_params.offset, limit=page_params.limit)
+    data = {
+        "items": [UserRead.model_validate(u).model_dump(mode="json") for u in users],
+        "total": total,
+        "offset": page_params.offset,
+        "limit": page_params.limit,
+    }
+    return build_success_response(data=data, request_id=request.state.request_id)
+
+
+@router.get("/{user_id}", summary="Get a user (admin)")
+async def get_user(
+    user_id: uuid.UUID,
+    request: Request,
+    user_service: UserService = Depends(get_user_service),
+    rbac_service: RBACService = Depends(get_rbac_service),
+    _current_user: CurrentUser = Depends(require_permission("user.read")),
+) -> dict:
+    """Fetch a single user, with assigned role names expanded."""
+    user = await user_service.get_by_id_or_raise(user_id)
+    data = (await _user_with_roles(user, rbac_service)).model_dump(mode="json")
+    return build_success_response(data=data, request_id=request.state.request_id)
+
+
+@router.patch("/{user_id}", summary="Update a user's profile (admin)")
+async def update_user(
+    user_id: uuid.UUID,
+    payload: UserUpdate,
+    request: Request,
+    user_service: UserService = Depends(get_user_service),
+    current_user: CurrentUser = Depends(require_permission("user.update")),
+    audit_service: AuditService = Depends(get_audit_service),
+) -> dict:
+    """Update a user's non-credential profile fields."""
+    user = await user_service.update_user(
+        user_id,
+        updated_by=current_user.id,
+        employee_code=payload.employee_code,
+        email=payload.email,
+        phone=payload.phone,
+    )
+    await _record_user_action(
+        audit_service=audit_service,
+        request=request,
+        action=AuditAction.UPDATE,
+        actor=current_user,
+        target_user_id=user_id,
+        description=f"Updated profile for user {user.username!r}.",
+        new_values={"employee_code": payload.employee_code, "email": payload.email, "phone": payload.phone},
+    )
+    data = UserRead.model_validate(user).model_dump(mode="json")
+    return build_success_response(data=data, request_id=request.state.request_id)
+
+
+@router.post("/{user_id}/reset-password", summary="Admin-generated password reset")
+async def reset_password(
+    user_id: uuid.UUID,
+    request: Request,
+    user_service: UserService = Depends(get_user_service),
+    current_user: CurrentUser = Depends(require_permission("user.update")),
+    audit_service: AuditService = Depends(get_audit_service),
+) -> dict:
+    """Generate a new temporary password for a user, forcing a change on next login."""
+    temporary_password = await user_service.admin_reset_password(user_id)
+    await _record_user_action(
+        audit_service=audit_service,
+        request=request,
+        action=AuditAction.PASSWORD_RESET,
+        actor=current_user,
+        target_user_id=user_id,
+        description="Administrator generated a temporary password for this user.",
+    )
+    data = ResetPasswordResponse(temporary_password=temporary_password).model_dump(mode="json")
+    return build_success_response(data=data, request_id=request.state.request_id)
+
+
+@router.post("/{user_id}/activate", summary="Activate a user")
+async def activate_user(
+    user_id: uuid.UUID,
+    request: Request,
+    user_service: UserService = Depends(get_user_service),
+    current_user: CurrentUser = Depends(require_permission("user.update")),
+    audit_service: AuditService = Depends(get_audit_service),
+) -> dict:
+    """Activate a pending or inactive user account."""
+    user = await user_service.activate_user(user_id, updated_by=current_user.id)
+    await _record_user_action(
+        audit_service=audit_service,
+        request=request,
+        action=AuditAction.UPDATE,
+        actor=current_user,
+        target_user_id=user_id,
+        description=f"Activated user {user.username!r}.",
+        new_values={"status": user.status.value, "is_active": True},
+    )
+    data = UserRead.model_validate(user).model_dump(mode="json")
+    return build_success_response(data=data, request_id=request.state.request_id)
+
+
+@router.post("/{user_id}/deactivate", summary="Deactivate a user")
+async def deactivate_user(
+    user_id: uuid.UUID,
+    request: Request,
+    user_service: UserService = Depends(get_user_service),
+    current_user: CurrentUser = Depends(require_permission("user.update")),
+    audit_service: AuditService = Depends(get_audit_service),
+) -> dict:
+    """Deactivate a user account and force-logout all of their active sessions."""
+    user = await user_service.deactivate_user(user_id, updated_by=current_user.id)
+    await _record_user_action(
+        audit_service=audit_service,
+        request=request,
+        action=AuditAction.UPDATE,
+        actor=current_user,
+        target_user_id=user_id,
+        description=f"Deactivated user {user.username!r}; all sessions revoked.",
+        new_values={"status": user.status.value, "is_active": False},
+    )
+    data = UserRead.model_validate(user).model_dump(mode="json")
+    return build_success_response(data=data, request_id=request.state.request_id)
+
+
+@router.post("/{user_id}/unlock", summary="Unlock a locked-out user")
+async def unlock_user(
+    user_id: uuid.UUID,
+    request: Request,
+    user_service: UserService = Depends(get_user_service),
+    current_user: CurrentUser = Depends(require_permission("user.update")),
+    audit_service: AuditService = Depends(get_audit_service),
+) -> dict:
+    """Clear a user's failed-login lockout state."""
+    user = await user_service.unlock_user(user_id, updated_by=current_user.id)
+    await _record_user_action(
+        audit_service=audit_service,
+        request=request,
+        action=AuditAction.UPDATE,
+        actor=current_user,
+        target_user_id=user_id,
+        description=f"Cleared lockout for user {user.username!r}.",
+    )
+    data = UserRead.model_validate(user).model_dump(mode="json")
+    return build_success_response(data=data, request_id=request.state.request_id)
+
+
+@router.post("/{user_id}/roles", summary="Assign a role to a user")
+async def assign_role(
+    user_id: uuid.UUID,
+    payload: AssignRoleRequest,
+    request: Request,
+    user_service: UserService = Depends(get_user_service),
+    current_user: CurrentUser = Depends(require_permission("user.update")),
+    audit_service: AuditService = Depends(get_audit_service),
+) -> dict:
+    """Assign a role to a user."""
+    await user_service.assign_role(user_id, payload.role_id, assigned_by=current_user.id)
+    await _record_user_action(
+        audit_service=audit_service,
+        request=request,
+        action=AuditAction.ROLE_ASSIGNED,
+        actor=current_user,
+        target_user_id=user_id,
+        description=f"Assigned role {payload.role_id} to user.",
+        new_values={"role_id": str(payload.role_id)},
+    )
+    return build_success_response(data={"assigned": True}, request_id=request.state.request_id)
+
+
+@router.delete("/{user_id}/roles/{role_id}", summary="Remove a role from a user")
+async def remove_role(
+    user_id: uuid.UUID,
+    role_id: uuid.UUID,
+    request: Request,
+    user_service: UserService = Depends(get_user_service),
+    current_user: CurrentUser = Depends(require_permission("user.update")),
+    audit_service: AuditService = Depends(get_audit_service),
+) -> dict:
+    """Remove a role assignment from a user."""
+    await user_service.remove_role(user_id, role_id)
+    await _record_user_action(
+        audit_service=audit_service,
+        request=request,
+        action=AuditAction.ROLE_REMOVED,
+        actor=current_user,
+        target_user_id=user_id,
+        description=f"Removed role {role_id} from user.",
+        new_values={"role_id": str(role_id)},
+    )
+    return build_success_response(data={"removed": True}, request_id=request.state.request_id)
+
+
+@router.get("/{user_id}/sessions", summary="View a user's active sessions")
+async def view_sessions(
+    user_id: uuid.UUID,
+    request: Request,
+    user_service: UserService = Depends(get_user_service),
+    _current_user: CurrentUser = Depends(require_permission("user.read")),
+) -> dict:
+    """List a user's currently active login sessions (device, IP, timestamps)."""
+    sessions = await user_service.view_active_sessions(user_id)
+    data = [SessionRead.model_validate(s).model_dump(mode="json") for s in sessions]
+    return build_success_response(data=data, request_id=request.state.request_id)
+
+
+@router.post("/{user_id}/force-logout", summary="Force logout a user from all sessions")
+async def force_logout(
+    user_id: uuid.UUID,
+    request: Request,
+    user_service: UserService = Depends(get_user_service),
+    current_user: CurrentUser = Depends(require_permission("user.update")),
+    audit_service: AuditService = Depends(get_audit_service),
+) -> dict:
+    """Revoke every active session for a user, immediately invalidating their refresh tokens."""
+    revoked_count = await user_service.force_logout_user(user_id)
+    await _record_user_action(
+        audit_service=audit_service,
+        request=request,
+        action=AuditAction.LOGOUT,
+        actor=current_user,
+        target_user_id=user_id,
+        description=f"Administrator force-logged-out user; {revoked_count} session(s) revoked.",
+        new_values={"revoked_sessions": revoked_count},
+    )
+    return build_success_response(
+        data={"revoked_sessions": revoked_count}, request_id=request.state.request_id
+    )

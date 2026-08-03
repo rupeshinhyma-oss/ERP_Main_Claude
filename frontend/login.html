@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Log in — Inhyma ERP</title>
+  <link rel="stylesheet" href="css/style.css" />
+  <style>
+    .login-wrap {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(160deg, #101828 0%, #101828 45%, #f4f6fa 45%);
+    }
+    .login-card {
+      width: 100%;
+      max-width: 380px;
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-pop);
+    }
+    .login-brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      justify-content: center;
+      margin-bottom: var(--space-4);
+    }
+    .login-brand .logo-mark {
+      width: 40px;
+      height: 40px;
+      border-radius: 10px;
+      background: linear-gradient(135deg, #2563eb, #1d4ed8);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      font-weight: 800;
+      font-size: 16px;
+    }
+    .login-brand .brand-title {
+      font-size: 19px;
+      font-weight: 700;
+      color: var(--color-text);
+    }
+    .login-card .login-subtitle {
+      text-align: center;
+      color: var(--color-muted);
+      font-size: 13.5px;
+      margin: -8px 0 var(--space-4);
+    }
+  </style>
+</head>
+<body>
+  <div class="login-wrap">
+    <div class="card login-card">
+      <div class="login-brand">
+        <div class="logo-mark">IN</div>
+        <div class="brand-title">Inhyma ERP</div>
+      </div>
+      <div class="login-subtitle">Sign in to your admin account</div>
+      <div id="banner"></div>
+      <form id="loginForm">
+        <div class="field">
+          <label for="identifier">Username or email</label>
+          <input id="identifier" name="identifier" type="text" required autocomplete="username" />
+        </div>
+        <div class="field">
+          <label for="password">Password</label>
+          <input id="password" name="password" type="password" required autocomplete="current-password" />
+        </div>
+        <div class="form-actions" style="border-top: none; padding-top: 0; margin-top: var(--space-2);">
+          <button type="submit" class="btn btn-primary" id="submitBtn" style="width: 100%; justify-content: center; padding: 10px;">Log in</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script src="js/api.js"></script>
+  <script>
+    if (Auth.isLoggedIn()) {
+      window.location.href = "./index.html";
+    }
+
+    const form = document.getElementById("loginForm");
+    const banner = document.getElementById("banner");
+    const submitBtn = document.getElementById("submitBtn");
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      banner.innerHTML = "";
+      submitBtn.disabled = true;
+      submitBtn.textContent = "Logging in...";
+
+      const identifier = document.getElementById("identifier").value.trim();
+      const password = document.getElementById("password").value;
+
+      try {
+        const { data: tokens } = await apiPost("/auth/login", { identifier, password });
+        Auth.setSession(tokens);
+
+        const { data: profile } = await apiGet("/auth/profile");
+        Auth.updateProfile(profile);
+
+        window.location.href = "./index.html";
+      } catch (err) {
+        showError(banner, err);
+        submitBtn.disabled = false;
+        submitBtn.textContent = "Log in";
+      }
+    });
+  </script>
+</body>
+</html>

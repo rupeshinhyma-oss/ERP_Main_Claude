@@ -37,35 +37,9 @@ const NAV_SECTIONS = [
   {
     label: "Organization",
     items: [
-      { key: "organization", label: "Organization", href: "./organization.html", icon: "building" },
       { key: "departments", label: "Departments", href: "./departments.html", icon: "briefcase" },
       { key: "designations", label: "Designations", href: "./designations.html", icon: "award" },
       { key: "employees", label: "Employees", href: "./employees.html", icon: "users" },
-    ],
-  },
-  {
-    label: "Master Data — Geography",
-    items: [
-      { key: "masters-countries", label: "Countries", href: "./masters-countries.html", icon: "globe" },
-      { key: "masters-states", label: "States", href: "./masters-states.html", icon: "map" },
-      { key: "masters-cities", label: "Cities", href: "./masters-cities.html", icon: "pin" },
-    ],
-  },
-  {
-    label: "Master Data — Commercial",
-    items: [
-      { key: "masters-currencies", label: "Currencies", href: "./masters-currencies.html", icon: "coins" },
-      { key: "masters-uom", label: "Units of Measurement", href: "./masters-uom.html", icon: "ruler" },
-      { key: "masters-hsn", label: "HSN Codes", href: "./masters-hsn.html", icon: "tag" },
-    ],
-  },
-  {
-    label: "Master Data — Products",
-    items: [
-      { key: "masters-brands", label: "Brands", href: "./masters-brands.html", icon: "award" },
-      { key: "masters-categories", label: "Categories", href: "./masters-categories.html", icon: "layers" },
-      { key: "masters-subcategories", label: "Sub-Categories", href: "./masters-subcategories.html", icon: "layersplus" },
-      { key: "masters-products", label: "Products", href: "./masters-products.html", icon: "box" },
     ],
   },
   {
@@ -75,8 +49,24 @@ const NAV_SECTIONS = [
     ],
   },
   {
-    label: "System",
+    label: "Configurations",
     items: [
+      { key: "masters-countries", label: "Countries", href: "./masters-countries.html", icon: "globe" },
+      { key: "masters-states", label: "States", href: "./masters-states.html", icon: "map" },
+      { key: "masters-cities", label: "Cities", href: "./masters-cities.html", icon: "pin" },
+      { key: "masters-currencies", label: "Currencies", href: "./masters-currencies.html", icon: "coins" },
+      { key: "masters-uom", label: "Units of Measurement", href: "./masters-uom.html", icon: "ruler" },
+      { key: "masters-hsn", label: "HSN Codes", href: "./masters-hsn.html", icon: "tag" },
+      { key: "masters-brands", label: "Brands", href: "./masters-brands.html", icon: "award" },
+      { key: "masters-categories", label: "Categories", href: "./masters-categories.html", icon: "layers" },
+      { key: "masters-subcategories", label: "Sub-Categories", href: "./masters-subcategories.html", icon: "layersplus" },
+      { key: "masters-products", label: "Products", href: "./masters-products.html", icon: "box" },
+    ],
+  },
+  {
+    label: "Settings",
+    items: [
+      { key: "organization", label: "Organization Settings", href: "./organization.html", icon: "building" },
       { key: "audit", label: "Audit Log", href: "./audit.html", icon: "clock" },
       { key: "rbac", label: "Roles & Permissions", href: "./rbac.html", icon: "shield" },
     ],
@@ -85,7 +75,7 @@ const NAV_SECTIONS = [
 
 const PAGE_TITLES = {
   dashboard: "Dashboard",
-  organization: "Organization",
+  organization: "Organization Settings",
   departments: "Departments",
   designations: "Designations",
   employees: "Employees",
@@ -107,6 +97,33 @@ const PAGE_TITLES = {
 function initials(name) {
   if (!name) return "?";
   return name.trim().slice(0, 2).toUpperCase();
+}
+
+const DEFAULT_BRAND_NAME = "ERP Admin";
+
+/**
+ * Resolve the sidebar's brand text from the Organization Settings' Company
+ * Name, instead of a hardcoded product name. Cached in sessionStorage so
+ * every page navigation doesn't re-fetch it, and fails gracefully (falls
+ * back to a generic name) for users without the organization.manage
+ * permission or before an organization profile has been created yet.
+ */
+async function resolveBrandName() {
+  const cached = sessionStorage.getItem("erp_org_company_name");
+  if (cached) return cached;
+  try {
+    const { data } = await apiGet("/organizations");
+    const name = (data && data.company_name) || DEFAULT_BRAND_NAME;
+    sessionStorage.setItem("erp_org_company_name", name);
+    return name;
+  } catch (e) {
+    return DEFAULT_BRAND_NAME; // not created yet, or this user lacks organization.manage -- not an error to surface here
+  }
+}
+
+/** Call after saving Organization Settings so the sidebar picks up a renamed company immediately. */
+function invalidateBrandNameCache() {
+  sessionStorage.removeItem("erp_org_company_name");
 }
 
 function renderShell(activeKey) {
@@ -139,8 +156,8 @@ function renderShell(activeKey) {
     sidebarMount.outerHTML = `
       <aside class="sidebar" id="sidebarMount">
         <div class="sidebar-brand">
-          <div class="logo-mark">IN</div>
-          <span class="brand-text">Inhyma ERP</span>
+          <div class="logo-mark" id="sidebarLogoMark">--</div>
+          <span class="brand-text" id="sidebarBrandText">${DEFAULT_BRAND_NAME}</span>
         </div>
         <nav class="sidebar-nav">${groups}</nav>
         <div class="sidebar-footer">
@@ -153,6 +170,16 @@ function renderShell(activeKey) {
           </div>
         </div>
       </aside>`;
+
+    // Fill in the real company name once resolved -- rendered synchronously
+    // above with a generic fallback first so the sidebar never waits on a
+    // network round-trip before appearing.
+    resolveBrandName().then((name) => {
+      const brandTextEl = document.getElementById("sidebarBrandText");
+      const logoMarkEl = document.getElementById("sidebarLogoMark");
+      if (brandTextEl) brandTextEl.textContent = name;
+      if (logoMarkEl) logoMarkEl.textContent = initials(name);
+    });
 
     const userBtn = document.getElementById("sidebarUser");
     if (userBtn) {

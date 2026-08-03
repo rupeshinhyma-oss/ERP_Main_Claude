@@ -131,11 +131,11 @@
       const nameInput = document.getElementById("roleName");
       nameInput.disabled = Boolean(role && role.is_system);
       renderPermissionCheckboxes(role ? role.permissions : []);
-      modalBackdrop.style.display = "flex";
+      openModalShell(modalBackdrop);
     }
 
     function closeModal() {
-      modalBackdrop.style.display = "none";
+      closeModalShell(modalBackdrop);
       editingRole = null;
     }
 

@@ -21,6 +21,11 @@ const MasterPage = (() => {
     return el.value;
   }
 
+  // Modal scroll-lock helpers (lockBodyScroll/unlockBodyScroll/
+  // openModalShell/closeModalShell) now live in api.js, shared by every
+  // page -- re-exported here for backwards compatibility with any code
+  // still calling MasterPage.openModalShell(...) etc.
+
   function setFieldValue(id, value) {
     const el = document.getElementById(id);
     if (!el) return;
@@ -77,11 +82,11 @@ const MasterPage = (() => {
         ? `Edit ${config.entityName}`
         : `New ${config.entityName}`;
       if (config.fillForm) config.fillForm(item);
-      modalBackdrop.style.display = "flex";
+      openModalShell(modalBackdrop);
     }
 
     function closeModal() {
-      modalBackdrop.style.display = "none";
+      closeModalShell(modalBackdrop);
     }
 
     if (newBtn) newBtn.addEventListener("click", () => openModal(null));

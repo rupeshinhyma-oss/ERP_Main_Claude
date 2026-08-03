@@ -243,6 +243,49 @@ function escapeHtml(value) {
 }
 
 /**
+ * Lock/unlock body scroll while a modal is open, and open/close a modal
+ * backdrop element with its scroll position reset to the top.
+ *
+ * Without this, if the page had already been scrolled down when a modal
+ * opened, the fixed-position overlay could render with its own content
+ * (especially Save/Cancel buttons at the bottom of a long form) partially
+ * below the viewport -- forcing an extra scroll to find them, with no
+ * visual indication there was more below. Used by every page with a
+ * .modal-backdrop (all Master Data pages, Suppliers, Audit Log, Roles &
+ * Permissions).
+ */
+function lockBodyScroll() {
+  document.body.dataset.scrollY = String(window.scrollY);
+  document.body.style.position = "fixed";
+  document.body.style.top = `-${window.scrollY}px`;
+  document.body.style.left = "0";
+  document.body.style.right = "0";
+}
+
+function unlockBodyScroll() {
+  const scrollY = document.body.dataset.scrollY || "0";
+  document.body.style.position = "";
+  document.body.style.top = "";
+  document.body.style.left = "";
+  document.body.style.right = "";
+  window.scrollTo(0, parseInt(scrollY, 10));
+  delete document.body.dataset.scrollY;
+}
+
+function openModalShell(modalBackdropEl) {
+  lockBodyScroll();
+  modalBackdropEl.style.display = "flex";
+  modalBackdropEl.scrollTop = 0;
+  const card = modalBackdropEl.querySelector(".modal-card");
+  if (card) card.scrollTop = 0;
+}
+
+function closeModalShell(modalBackdropEl) {
+  modalBackdropEl.style.display = "none";
+  unlockBodyScroll();
+}
+
+/**
  * A small debounced-search + request-cancellation helper for type-ahead
  * inputs (used by the searchable dropdown component in dropdown-search.js).
  * Each call to `.run(fn)` cancels any previous still-pending call's

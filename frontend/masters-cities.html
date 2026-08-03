@@ -145,8 +145,8 @@
       async loadLookups() {
         try {
           const [countryRes, stateRes] = await Promise.all([
-            apiGet("/masters/countries" + toQueryString({ page: 1, page_size: 250, sort_order: "asc", status: "active" })),
-            apiGet("/masters/states" + toQueryString({ page: 1, page_size: 1000, sort_order: "asc", status: "active" })),
+            apiGet("/masters/countries" + toQueryString({ page: 1, page_size: 100, sort_order: "asc", status: "active" })),
+            apiGet("/masters/states" + toQueryString({ page: 1, page_size: 100, sort_order: "asc", status: "active" })),
           ]);
           countriesCache = countryRes.data;
           statesCache = stateRes.data;

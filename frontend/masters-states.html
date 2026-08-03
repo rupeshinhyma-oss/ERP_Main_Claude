@@ -134,7 +134,7 @@
       },
       async loadLookups() {
         try {
-          const { data } = await apiGet("/masters/countries" + toQueryString({ page: 1, page_size: 250, sort_order: "asc", status: "active" }));
+          const { data } = await apiGet("/masters/countries" + toQueryString({ page: 1, page_size: 100, sort_order: "asc", status: "active" }));
           countriesCache = data;
           const countrySelect = document.getElementById("country_id");
           const countryFilter = document.getElementById("countryFilter");

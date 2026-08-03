@@ -394,11 +394,11 @@ const SupplierPage = (() => {
     }
 
     showTab("first");
-    document.getElementById("modalBackdrop").style.display = "flex";
+    openModalShell(document.getElementById("modalBackdrop"));
   }
 
   function closeModal() {
-    document.getElementById("modalBackdrop").style.display = "none";
+    closeModalShell(document.getElementById("modalBackdrop"));
     currentSupplierId = null;
   }
 

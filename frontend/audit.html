@@ -183,7 +183,7 @@
         `;
         document.getElementById("oldValues").textContent = entry.old_values || "—";
         document.getElementById("newValues").textContent = entry.new_values || "—";
-        document.getElementById("modalBackdrop").style.display = "flex";
+        openModalShell(document.getElementById("modalBackdrop"));
       } catch (err) {
         showError(banner, err);
       }
@@ -194,11 +194,11 @@
       if (viewId) openDetail(viewId);
     });
     document.getElementById("modalCloseBtn").addEventListener("click", () => {
-      document.getElementById("modalBackdrop").style.display = "none";
+      closeModalShell(document.getElementById("modalBackdrop"));
     });
     document.getElementById("modalBackdrop").addEventListener("click", (e) => {
       if (e.target === document.getElementById("modalBackdrop")) {
-        document.getElementById("modalBackdrop").style.display = "none";
+        closeModalShell(document.getElementById("modalBackdrop"));
       }
     });
 

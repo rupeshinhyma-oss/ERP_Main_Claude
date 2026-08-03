@@ -101,8 +101,11 @@ svg {
   top: 0;
   left: 0;
   bottom: 0;
-  overflow-y: auto;
   z-index: 30;
+  /* The sidebar itself never scrolls -- only .sidebar-nav does (below),
+     so the brand header and footer/user block stay pinned in place while
+     the nav list scrolls independently. */
+  overflow: hidden;
 }
 
 .sidebar-brand {
@@ -115,6 +118,7 @@ svg {
   font-size: 16px;
   border-bottom: 1px solid var(--sidebar-border);
   white-space: nowrap;
+  flex-shrink: 0;
 }
 .sidebar-brand .logo-mark {
   width: 30px;
@@ -133,6 +137,20 @@ svg {
 .sidebar-nav {
   flex: 1;
   padding: var(--space-3) var(--space-2);
+  overflow-y: auto;
+  scroll-behavior: smooth;
+  /* Hide the scrollbar visually while keeping the region scrollable.
+     Firefox: */
+  scrollbar-width: none;
+  /* IE/legacy Edge: */
+  -ms-overflow-style: none;
+}
+/* WebKit browsers (Chrome, Edge, Safari): hiding a scrollbar has no
+   standard CSS property, only this pseudo-element approach. */
+.sidebar-nav::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
 }
 
 .nav-group {
@@ -160,6 +178,7 @@ svg {
   margin-bottom: 2px;
   white-space: nowrap;
   cursor: pointer;
+  transition: background-color 0.12s ease, color 0.12s ease;
 }
 .nav-item:hover {
   background: var(--sidebar-bg-hover);
@@ -189,6 +208,7 @@ svg {
 .sidebar-footer {
   padding: var(--space-3);
   border-top: 1px solid var(--sidebar-border);
+  flex-shrink: 0;
 }
 .sidebar-user {
   display: flex;
@@ -605,6 +625,12 @@ svg {
   width: 100%;
   max-width: 640px;
   padding: var(--space-4);
+  /* Cap height to the viewport (minus the backdrop's own top/bottom
+     padding) so a long form scrolls WITHIN the card instead of pushing
+     its Save/Cancel buttons below the fold with no visual indication
+     there was more content below. */
+  max-height: calc(100vh - 96px);
+  overflow-y: auto;
 }
 .modal-card .modal-header {
   display: flex;

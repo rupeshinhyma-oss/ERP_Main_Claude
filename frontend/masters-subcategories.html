@@ -140,7 +140,7 @@
       },
       async loadLookups() {
         try {
-          const { data } = await apiGet("/masters/product-categories" + toQueryString({ page: 1, page_size: 250, sort_order: "asc", status: "active" }));
+          const { data } = await apiGet("/masters/product-categories" + toQueryString({ page: 1, page_size: 100, sort_order: "asc", status: "active" }));
           categoriesCache = data;
           const categorySelect = document.getElementById("category_id");
           const categoryFilter = document.getElementById("categoryFilter");

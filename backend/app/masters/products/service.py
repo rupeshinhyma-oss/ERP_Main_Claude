@@ -221,41 +221,57 @@ class ProductService:
 
             category = await self.category_repository.get_by_code(category_code)
             if category is None:
-                raise ValueError(f"Category code {category_code!r} does not exist.")
+                # Fallback to name search
+                cat_list = await self.category_repository.list(limit=100)
+                category = next((c for c in cat_list if c.code.lower() == category_code.lower() or c.name.lower() == category_code.lower()), None)
+            if category is None:
+                raise ValueError(f"Category '{category_code}' does not exist.")
             field_values["category_id"] = category.id
 
             if sub_category_code:
                 sub_category = await self.sub_category_repository.get_by_code(sub_category_code)
                 if sub_category is None:
-                    raise ValueError(f"Sub-category code {sub_category_code!r} does not exist.")
+                    sub_cats = await self.sub_category_repository.list(limit=200)
+                    sub_category = next((sc for sc in sub_cats if sc.code.lower() == sub_category_code.lower() or sc.name.lower() == sub_category_code.lower()), None)
+                if sub_category is None:
+                    raise ValueError(f"Sub-category '{sub_category_code}' does not exist.")
                 if sub_category.category_id != category.id:
                     raise ValueError(
-                        f"Sub-category {sub_category_code!r} does not belong to category {category_code!r}."
+                        f"Sub-category '{sub_category_code}' does not belong to category '{category_code}'."
                     )
                 field_values["sub_category_id"] = sub_category.id
 
             if brand_code:
                 brand = await self.brand_repository.get_by_code(brand_code)
                 if brand is None:
-                    raise ValueError(f"Brand code {brand_code!r} does not exist.")
+                    brands = await self.brand_repository.list(limit=100)
+                    brand = next((b for b in brands if b.code.lower() == brand_code.lower() or b.name.lower() == brand_code.lower()), None)
+                if brand is None:
+                    raise ValueError(f"Brand '{brand_code}' does not exist.")
                 field_values["brand_id"] = brand.id
 
             if hsn_code:
                 hsn = await self.hsn_repository.get_by_code(hsn_code)
                 if hsn is None:
-                    raise ValueError(f"HSN code {hsn_code!r} does not exist.")
-                field_values["hsn_id"] = hsn.id
+                    field_values["hsn_id"] = None
+                else:
+                    field_values["hsn_id"] = hsn.id
 
             uom = await self.uom_repository.get_by_code(uom_code)
             if uom is None:
-                raise ValueError(f"UOM code {uom_code!r} does not exist.")
+                uoms = await self.uom_repository.list(limit=100)
+                uom = next((u for u in uoms if u.code.lower() == uom_code.lower() or u.name.lower() == uom_code.lower()), None)
+            if uom is None:
+                raise ValueError(f"UOM '{uom_code}' does not exist.")
             field_values["uom_id"] = uom.id
 
             if secondary_uom_code:
                 secondary_uom = await self.uom_repository.get_by_code(secondary_uom_code)
                 if secondary_uom is None:
-                    raise ValueError(f"Secondary UOM code {secondary_uom_code!r} does not exist.")
-                field_values["secondary_uom_id"] = secondary_uom.id
+                    uoms = await self.uom_repository.list(limit=100)
+                    secondary_uom = next((u for u in uoms if u.code.lower() == secondary_uom_code.lower() or u.name.lower() == secondary_uom_code.lower()), None)
+                if secondary_uom is not None:
+                    field_values["secondary_uom_id"] = secondary_uom.id
 
             product_code = field_values["product_code"]
             if await self.repository.code_exists(product_code):

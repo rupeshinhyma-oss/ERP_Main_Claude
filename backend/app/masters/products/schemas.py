@@ -115,7 +115,7 @@ class ProductRead(BaseModel):
 
     id: uuid.UUID
     product_code: str
-    product_name_tally: str
+    product_name_tally: str | None = None
     product_name_invoice: str | None = None
     product_name: str
     barcode: str | None

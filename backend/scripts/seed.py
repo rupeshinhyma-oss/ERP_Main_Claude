@@ -110,6 +110,31 @@ BOOTSTRAP_PERMISSIONS: list[tuple[str, str, str]] = [
 ]
 
 SUPER_ADMIN_ROLE_NAME = "super_admin"
+EMPLOYEE_ROLE_NAME = "employee"
+
+# Default permission set for a regular team member created via the Teams
+# "Add Member" flow: enough to use the day-to-day parts of the ERP, with
+# NO access to user/role/settings/audit management. In particular,
+# "audit.read" is deliberately excluded so that only super_admin (or any
+# other role an admin explicitly grants it to) can view the Audit Log --
+# satisfying "only admin can see audit logs" through the existing
+# permission system rather than a hardcoded role-name check.
+EMPLOYEE_ROLE_PERMISSION_CODES: list[str] = [
+    "employee.read",
+    "department.read",
+    "designation.read",
+    "country.read",
+    "state.read",
+    "city.read",
+    "currency.read",
+    "uom.read",
+    "hsn.read",
+    "brand.read",
+    "category.read",
+    "subcategory.read",
+    "product.read",
+    "supplier.read",
+]
 
 
 async def seed() -> None:
@@ -144,6 +169,26 @@ async def seed() -> None:
             logger.info("Seeded role.", extra={"role_name": SUPER_ADMIN_ROLE_NAME})
             for permission in created_permissions:
                 session.add(RolePermission(role_id=role.id, permission_id=permission.id))
+            await session.flush()
+
+        # --- 2b. employee role, granted a safe view-mostly permission subset -----------
+        employee_role = await role_repo.get_by_name(EMPLOYEE_ROLE_NAME)
+        if employee_role is None:
+            employee_role = await role_repo.create(
+                name=EMPLOYEE_ROLE_NAME,
+                description=(
+                    "Default role for team members added via the Teams 'Add Member' flow. "
+                    "View-mostly access; no user/role/settings/audit-log access."
+                ),
+                is_system=True,
+            )
+            logger.info("Seeded role.", extra={"role_name": EMPLOYEE_ROLE_NAME})
+            for code in EMPLOYEE_ROLE_PERMISSION_CODES:
+                permission = await permission_repo.get_by_code(code)
+                if permission is None:
+                    logger.warning("Skipping unknown permission code for employee role.", extra={"code": code})
+                    continue
+                session.add(RolePermission(role_id=employee_role.id, permission_id=permission.id))
             await session.flush()
 
         # --- 3. Bootstrap admin user ----------------------------------------------------

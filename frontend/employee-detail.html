@@ -102,13 +102,13 @@
   <script src="js/api.js"></script>
   <script src="js/nav.js"></script>
   <script>
-    renderNav("employees");
+    renderNav("teams");
 
     const banner = document.getElementById("banner");
     const params = new URLSearchParams(window.location.search);
     const employeeId = params.get("id");
     if (!employeeId) {
-      window.location.href = "./employees.html";
+      window.location.href = "./teams.html";
     }
 
     const canUpdate = Auth.hasPermission("employee.update");
@@ -286,7 +286,7 @@
       if (!confirm("Delete this employee? This cannot be undone.")) return;
       try {
         await apiDelete(`/employees/${employeeId}`);
-        window.location.href = "./employees.html";
+        window.location.href = "./teams.html";
       } catch (err) { showError(banner, err); }
     });
 

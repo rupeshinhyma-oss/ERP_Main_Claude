@@ -37,9 +37,7 @@ const NAV_SECTIONS = [
   {
     label: "Organization",
     items: [
-      { key: "departments", label: "Departments", href: "./departments.html", icon: "briefcase" },
-      { key: "designations", label: "Designations", href: "./designations.html", icon: "award" },
-      { key: "employees", label: "Employees", href: "./employees.html", icon: "users" },
+      { key: "teams", label: "Teams", href: "./teams.html", icon: "users" },
     ],
   },
   {
@@ -76,9 +74,7 @@ const NAV_SECTIONS = [
 const PAGE_TITLES = {
   dashboard: "Dashboard",
   organization: "Organization Settings",
-  departments: "Departments",
-  designations: "Designations",
-  employees: "Employees",
+  teams: "Teams",
   "masters-countries": "Countries",
   "masters-states": "States",
   "masters-cities": "Cities",

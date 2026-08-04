@@ -25,6 +25,7 @@ tenacity==9.0.0          # retry logic (DB startup, future external calls)
 # --- Authentication / Security (Phase 2) ---
 argon2-cffi==23.1.0      # Argon2 password hashing
 pyjwt==2.10.1             # JWT access/refresh token encode/decode
+cryptography==43.0.3      # Reversible encryption for the Teams admin-recoverable password feature (app.members)
 email-validator==2.2.0   # Pydantic EmailStr support
 
 # --- Logging ---

@@ -145,6 +145,13 @@ class Settings(BaseSettings):
         "in every non-local environment.",
     )
     JWT_ALGORITHM: str = "HS256"
+    MEMBER_PASSWORD_ENCRYPTION_KEY: str = Field(
+        default="CHANGE-ME-IN-PRODUCTION-this-is-a-local-dev-only-secret-2",
+        description="Encryption key for the Teams 'Add Member' admin-recoverable password "
+        "feature (app.members). MUST be overridden via env, and MUST differ from "
+        "JWT_SECRET_KEY, in every non-local environment. Rotating this key makes every "
+        "previously-encrypted member password unrecoverable.",
+    )
     JWT_ISSUER: str = "erp-backend"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
@@ -220,6 +227,12 @@ class Settings(BaseSettings):
             raise RuntimeError(
                 "JWT_SECRET_KEY is still set to its placeholder value in a production "
                 "environment. Set a strong, random JWT_SECRET_KEY via the environment."
+            )
+        if self.is_production and "CHANGE-ME" in self.MEMBER_PASSWORD_ENCRYPTION_KEY:
+            raise RuntimeError(
+                "MEMBER_PASSWORD_ENCRYPTION_KEY is still set to its placeholder value in a "
+                "production environment. Set a strong, random MEMBER_PASSWORD_ENCRYPTION_KEY "
+                "via the environment."
             )
 
     @property

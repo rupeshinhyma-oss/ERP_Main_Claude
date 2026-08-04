@@ -75,7 +75,7 @@ def main() -> None:
 
     _check_env_file()
 
-    python = sys.executable  # the interpreter currently running this script (i.e. the active venv's python)
+    python = str(Path(sys.executable).resolve())  # the interpreter currently running this script (i.e. the active venv's python)
 
     if not args.skip_migrate:
         _run_step("Applying database migrations (alembic upgrade head)", [python, "-m", "alembic", "upgrade", "head"])
@@ -96,19 +96,8 @@ def main() -> None:
         uvicorn_command.append("--reload")
 
     print(f"\n{'=' * 70}\n>>> Starting API server: http://{args.host}:{args.port}\n{'=' * 70}\n")
-    # Replaces this process with uvicorn (rather than subprocess.run) so
-    # Ctrl+C, reload-triggered restarts, and exit codes all behave exactly
-    # as if you'd typed the uvicorn command yourself.
-    try:
-        import os
-
-        os.chdir(BACKEND_DIR)
-        os.execv(python, uvicorn_command)
-    except AttributeError:
-        # os.execv isn't available on some platforms/terminals (e.g. certain
-        # Windows shells) -- fall back to a plain subprocess call.
-        result = subprocess.run(uvicorn_command, cwd=BACKEND_DIR)
-        sys.exit(result.returncode)
+    result = subprocess.run(uvicorn_command, cwd=BACKEND_DIR)
+    sys.exit(result.returncode)
 
 
 if __name__ == "__main__":

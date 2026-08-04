@@ -78,6 +78,6 @@ class AuditService:
         except Exception:  # noqa: BLE001 - audit logging must never break the caller's request.
             logger.exception(
                 "Failed to write audit log entry.",
-                extra={"action": action.value, "module": module, "entity_type": entity_type},
+                extra={"audit_action": action.value, "audit_module": module, "entity_type": entity_type},
             )
             return None

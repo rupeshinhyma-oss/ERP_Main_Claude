@@ -54,19 +54,25 @@ const SearchableDropdown = (() => {
     const style = document.createElement("style");
     style.id = "sd-styles";
     style.textContent = `
-      .sd-wrap { width: 100%; }
+      .sd-wrap { width: 100%; position: relative; }
       .sd-input { width: 100%; border: 1px solid var(--color-border-strong); border-radius: var(--radius-sm);
-        padding: 9px 11px; font-size: 13.5px; font-family: inherit; background: var(--color-surface); color: var(--color-text); }
+        padding: 9px 11px; font-size: 13.5px; font-family: inherit; background: var(--color-surface); color: var(--color-text);
+        transition: border-color 0.15s ease, box-shadow 0.15s ease; }
       .sd-input:focus { outline: none; border-color: var(--color-primary); box-shadow: 0 0 0 3px var(--color-primary-soft); }
       .sd-results { position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 40;
         background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-sm);
-        box-shadow: var(--shadow-pop); max-height: 240px; overflow-y: auto; }
-      .sd-option { padding: 8px 11px; font-size: 13px; cursor: pointer; }
-      .sd-option:hover, .sd-option.sd-active { background: var(--color-primary-soft); }
+        box-shadow: 0 10px 25px -5px rgba(16, 24, 40, 0.15); max-height: 240px; overflow-y: auto;
+        animation: sdMenuSlide 0.18s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+      @keyframes sdMenuSlide {
+        from { opacity: 0; transform: translateY(-4px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+      .sd-option { padding: 8px 11px; font-size: 13px; cursor: pointer; transition: background-color 0.1s ease; }
+      .sd-option:hover, .sd-option.sd-active { background: var(--color-primary-soft); color: var(--color-primary-hover); }
       .sd-empty { padding: 8px 11px; font-size: 12.5px; color: var(--color-muted); }
       .sd-chip-area { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
       .sd-chip { display: inline-flex; align-items: center; gap: 6px; background: var(--color-neutral-soft);
-        border-radius: 20px; padding: 3px 6px 3px 10px; font-size: 12px; }
+        border-radius: 20px; padding: 3px 6px 3px 10px; font-size: 12px; transition: background-color 0.15s ease; }
       .sd-chip button { border: none; background: none; cursor: pointer; color: var(--color-muted); font-size: 14px; line-height: 1; padding: 0 2px; }
       .sd-chip button:hover { color: var(--color-danger); }
     `;

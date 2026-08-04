@@ -54,6 +54,7 @@ import app.masters.product_categories.models  # noqa: F401,E402 - Phase 7
 import app.masters.product_sub_categories.models  # noqa: F401,E402 - Phase 7
 import app.masters.products.models  # noqa: F401,E402 - Phase 7
 import app.suppliers.models  # noqa: F401,E402 - Phase 8
+import app.members.models  # noqa: F401,E402 - Phase 9
 
 # This is the Alembic Config object, providing access to the values within
 # the .ini file in use.

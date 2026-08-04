@@ -80,15 +80,17 @@
         <div class="form-grid">
           <div class="field">
             <label for="category_id">Category *</label>
-            <select id="category_id" required></select>
-          </div>
-          <div class="field">
-            <label for="code">Sub-Category Code *</label>
-            <input id="code" required maxlength="50" />
+            <select id="category_id" required>
+              <option value="">-- Select Category --</option>
+            </select>
           </div>
           <div class="field">
             <label for="name">Sub-Category Name *</label>
-            <input id="name" required maxlength="150" />
+            <input id="name" required maxlength="150" placeholder="e.g. Band Sealer, Citric Acid" />
+          </div>
+          <div class="field">
+            <label for="code">Sub-Category Code (Optional)</label>
+            <input id="code" maxlength="50" placeholder="Auto-generated if left blank" />
           </div>
           <div class="field">
             <label for="status">Status</label>
@@ -140,10 +142,17 @@
       },
       async loadLookups() {
         try {
-          const { data } = await apiGet("/masters/product-categories" + toQueryString({ page: 1, page_size: 100, sort_order: "asc", status: "active" }));
-          categoriesCache = data;
+          const { data } = await apiGet("/masters/product-categories" + toQueryString({ page: 1, page_size: 250, sort_order: "asc", status: "active" }));
+          categoriesCache = data || [];
           const categorySelect = document.getElementById("category_id");
           const categoryFilter = document.getElementById("categoryFilter");
+          
+          categorySelect.innerHTML = categoriesCache.length 
+            ? '<option value="">-- Select Category --</option>' 
+            : '<option value="">-- No Categories Found! Create Category First --</option>';
+          
+          categoryFilter.innerHTML = '<option value="">All categories</option>';
+
           for (const c of categoriesCache) {
             const opt1 = document.createElement("option");
             opt1.value = c.id;
@@ -159,7 +168,7 @@
             document.getElementById("searchInput").dispatchEvent(new Event("input"));
           });
         } catch (e) {
-          /* lookups are a nice-to-have */
+          /* lookups handling */
         }
       },
       fillForm(item) {
@@ -170,9 +179,13 @@
         MasterPage.setFieldValue("status", item ? item.status : "active");
       },
       toPayload() {
+        const catId = MasterPage.fieldValue("category_id");
+        if (!catId) {
+          throw new Error("Please select a valid Category.");
+        }
         return {
-          category_id: MasterPage.fieldValue("category_id"),
-          code: MasterPage.fieldValue("code").trim(),
+          category_id: catId,
+          code: MasterPage.fieldValue("code").trim() || null,
           name: MasterPage.fieldValue("name").trim(),
           description: MasterPage.fieldValue("description").trim() || null,
           status: MasterPage.fieldValue("status"),

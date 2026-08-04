@@ -82,6 +82,17 @@ class ProductSubCategoryService:
         code = field_values.get("code")
         name = field_values.get("name")
         await self._validate_category(category_id)
+
+        if not code and name:
+            clean_name = "".join(c if c.isalnum() else "-" for c in name.upper())
+            base_code = "-".join(filter(None, clean_name.split("-")))[:45] or "SUB-CAT"
+            code = base_code
+            counter = 1
+            while await self.repository.code_exists(code):
+                code = f"{base_code}-{counter}"
+                counter += 1
+            field_values["code"] = code
+
         if code and await self.repository.code_exists(code):
             raise ConflictException(f"Sub-category code {code!r} is already in use.")
         if name and await self.repository.name_exists_in_category(category_id, name):

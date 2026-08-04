@@ -1,0 +1,289 @@
+1) Add Buyer (Client) Data Form (Yinglima)
+Name of Company* (keyword suggestion any part of name)
+Product Category (drop down menu) (multiple)
+Product Sub Category (potential products for buying from us) (multiple based on Product Category selected)
+Buyer Type – Manufacturer / Trader / Select
+Country* (dropdown menu) by default Uganda 
+City (description field)
+Address
+Mr. / Mrs / Ms - Full Name (primary contact)
+Designation
+Calling Number (with country code) maximum 10 digit restriction to give. (in country master, max. digit selection option is given, but that restriction is not affected here.
+Whatsapp Number (with country code) - same as above
+Email ID (multiple emails) hyperlink
+Tax ID Number (TIN / GST)
+Website (hyperlink) 
+Current Status - Existing/New / Select (by default Select) (once changed to Existing, then it cannot change back to new, means 1 way only.
+Product Range they manufacture or supply 
+Potential - Yes / No / Select (by default Select)
+If Potential is No, then reason 
+Client Grade – A, B, C 
+Currently Buying from 
+Overall Observation / Remarks 
+
+
+
+Add Contacts of Buyer (Client)
+Mr. / Mrs / Ms – Full Name
+Designation
+Country (dropdown menu) by default Uganda
+Calling Number  (with country code based on country selected) maximum 10 digit restriction to give. (in country master, max. digit selection option is given, but that restriction is not affected here.
+Whatsapp Number (with country code based on country selected) - same as above
+Email ID
+Action - Edit / Delete
+______________________________________________________________________________
+
+In Top, Filter Fields 
+Added Date Range
+Buyer Type
+Current Status 
+Product Category
+Product Sub Category
+Country
+Potential
+Client Grade 
+
+
+
+Fields in List
+Select (check box)
+Name of Company (hyperlink to open View Details)
+Buyer Type
+Product Category - (5 items to show in list, if more then that to view by eye button) 
+Product Sub Category (same as above)
+Country
+Current Status 
+Potential
+Client Grade
+Added On
+Action (Edit) 
+____________________________________________________________________________
+Notes
+Some Fields in Form and List to make smaller and some longer as required.
+If Current Status is “New or Select” and Potential is “No or Select”, then only to allow c. If Current Status is “Existing” or Potential is “Yes” (any one), cannot DELETE that data. However, can make it “Inactive” - to check thoroughly.
+Main Form contact details should appear in Contact list also. 
+Overall Form to squeeze to make it small to fit in 1 screen. (scroll not needed)
+For detecting Duplication, Criteria is if matches with Company Name, Calling Number and Whatsapp Number. (Currently showing “it exists” only for calling number, but also to do same for whatsapp number. - to check thoroughly.
+
+
+
+
+2)Fields in Product Master Form (Add Products)
+Product Name (As per Tally)
+Product Name (As per Invoice)
+Product Code
+Product Sub Category (dropdown)
+Product Category (dropdown) (as for example, Machines, Spares)
+Brand (dropdown)
+HSN CODE (Tax % to remove) (dropdown)
+Refund VAT % (auto based on HSN Code) (Import Duty field to remove and add this) :-Done
+Any License / Certificate (if needed) - this is description field. (when this product selected in Inquiry, it should highlight in RED colour and show it in Remark)
+UOM (Unit of Measure) like KG, Ltrs, Mtr, Ft. etc. (dropdown)
+Packaging Quantity (unit)
+Packaging Net Weight (unit)
+Packaging Gross Weight (unit)
+Dimensions in CM (L X W X H)
+Packaging Unit CBM (auto computed)
+Specifications (Description)
+Image (photo) of product	
+(As compared to Inhyma Product Master, only Import Duty Field replaced with Refund VAT, Rest Same)
+
+
+Top Filter in Product Master
+Product Sub Category, Product Category, Brand (this 3 only)
+
+
+Fields in Product List
+Select (check box)
+Product Name (As per Tally)
+Product Code 
+Brand
+Product Sub Category
+HSN code
+UOM (Unit of Measure) 
+Packaging Quantity (unit)
+Packaging Gross Weight (unit)
+Packaging Unit CBM
+Status - Active / Inactive Button  (enabled ONLY at admin user rights level) - to give here or in product stock list ??? (inactive to do only if stock is Zero, positive or negative should not do)
+Action –Edit / Delete Buttons. Delete option only if status is Inactive. Inactive can be done only if stock is Zero. Also, Delete option enabled only at admin level. Also, confusion is whether to give this in product stock list or here?? Either we can give Edit option here and delete option in product stock list, because we cannot delete here without knowing stock is zero and there is nothing to Edit in product stock list. 
+
+(SAME AS INHYMA PRODUCT MASTER LIST)
+
+
+Fields in Add Product Category, Sub Category or Brand Form
+Name (only name field)
+In Add Sub Category form, Product Category (dropdown) field to give. This to be added new.
+
+Add Product Category, Sub Category or Brand List
+Select (check box) – not needed as there will be few data only.
+Name 
+In Sub Category list, Product Category column to add.
+Status - Active / Inactive Button
+Action –Edit / Delete Buttons. (Delete option only if status is Inactive.)
+(SAME AS INHYMA PRODUCT MASTER LIST)
+
+
+Notes
+Status – By Default it should be Active.
+Active / Inactive list View Buttons to show separate below Product Master top panel. Same like in companies in Inhyma. But, this not needed in Category, Sub Category or Brand.
+As for example – Product Category “Machines, Spares”, Product Sub Category “Band Sealer, Spares for Band Sealer” & Product (as per tally) “FR900 MSH Band Sealer”, Teflon Belt 750mm.
+Product Name Clickable link to open “View Details” and it should have all info.
+Delete Button for bulk delete (next to Add New Button) to keep as it is, but not required in Product Category, Product Sub Category and Brands.
+Product Master Delete Rights only at admin. level.
+Product Sub Category – Master to add in Panel (Total 4 masters to give – Product, Product Category, Product Sub Category and Brands.)
+If we do Brands, Product Category or Product Sub Category “Inactive” from the list, what happens to Products under that? All becomes Inactive?? What happens to the existing products having stock?
+To Avoid Duplication (1) For Manual Entry, name keyword suggestion to show (any part of the name (not the starting only) same like tally. If Product ID duplicate, it shows “already exists”. Does not allow to save if matches with name and product code (2) For bulk import it detects as Duplication and does not allow to save, if it matches with name and product code. (to ensure that same product with slightly different name is not created as new product by accounts like it happens in Tally)
+
+Definition of Product Category, Sub Category and Item
+For F&B – Category “food Ingredients”, Sub Category “Citric Acid” & Item “Citric Acid Anhydrous 30-100 mesh”
+For One Stop - Category “Chemicals”, Sub Category “Caustic Soda” & Item “Caustic Soda Flakes”
+For Inhyma - Category “Machines”, Sub Category “Band Sealer” & Item “FR900 MSH Band Sealer”
+
+
+3)First data form (Supplier) - Yinglima 
+Name of Company* (keyword suggestion - any part of the word)
+Product Category (drop down menu) (multiple)
+Supplier Type – Manufacturer / Trader / Select
+Brand of Suppliers Products (description)
+Country* (default China but editable)
+Province* (dropdown menu)
+City* (dropdown menu)
+Mr. / Mrs / Ms - Full Name
+Designation
+Calling Number (with Country Code & number of Digits based on country selected) - Also, maximum 11 digit restriction to give. (7 to 11 digit allowed) If not correct number of digits, it is showing error when trying to save, but it should show when going to next field.
+Whatsapp Number (same as above)
+Wechat Number (same as above)
+Email ID (multiple emails)	
+
+Second Form (main data profile form) (supplier)
+Tax ID Number
+Address
+Town
+Primary Website (hyperlink) 
+Secondary Website (hyperlink) 
+Suppliers Key Strength Product Sub Category (dropdown menu) (multiple) 
+Supplier’s Grade – A, B, C, Select
+Current Status - Existing/New/Select (by default Select)
+Potential - Yes / No / Select (by default Select)
+Key Reason for Potential / Not potential
+Suppliers/Manufacturer’s Secondary Products they can supply (This field will be description). 
+Visited their Factory/Office? Yes / No (by default No)
+Visit Remarks (if in above yes, then only this field opens)
+Visit Photos / Videos (provision to attach multiple factory Videos / Photos)
+Overall Remarks / Key Strengths
+______________________________________________________________________________
+
+
+
+Add Contacts Form
+Mr. / Mrs / Ms -Person Name
+Designation
+Handling Territory (local, Export India, Export Africa etc.) 
+Country (dropdown menu) (by default China)
+Calling Number (country code based on country selected)
+Whatsapp Number (country code based on country selected) same as calling
+Wechat Number (country code based on country selected) same as calling
+Email 
+
+Add Contacts List
+Mr. / Mrs / Ms -Person Name / Designation (combined)
+Calling Number / Whatsapp Number (combined) hyperlink (with country code)
+Wechat Number (with country code) / Email (combined) hyperlink - In heading, to add email “Wechat / Email”  :- Done
+Handling Territory
+Action - Edit / Delete
+
+
+Top Filter Fields 
+Product Category
+Key Strength Product Sub Category
+Country 
+Province
+City
+Supplier Type (manufacturer/trader/All / Blank
+Supplier’s Grade (A,B,C, All, Blank
+Current Status (Existing / New / All / Blank)
+Potential (Yes / No / All / Blank)
+Visited Factory/Office?
+
+
+Fields in List
+Select (check box)
+Company Name (hyperlink to open View Details)
+Product Category (5 items to show in list, if more then that to view by eye button)
+Key Strength Product Sub Category - same as above 
+Secondary Products  - same as above 
+Country
+City, Province (combined)
+Brand of Suppliers Products (if any) (description)
+Supplier Type (manufacturer/trader)
+Current Status (Existing / New)
+Supplier’s Grade (editable dropdown in list)
+Potential (editable dropdown in list)
+Action (Edit)
+
+
+
+
+
+Definition of Product Category, Sub Category and Item
+For F&B – Category “food Ingredients”, Sub Category “Citric Acid” & Item “Citric Acid Anhydrous 30-100 mesh”
+For One Stop - Category “Chemicals”, Sub Category “Caustic Soda” & Item “Caustic Soda Flakes”
+For Inhyma - Category “Machines”, Sub Category “Band Sealer” & Item “FR900 MSH Band Sealer”
+Product Category  – food Ingredients, chemicals, tech/feed grade Ingredients, Machines, Filteration, Pumps, etc
+______________________________________________________________________________
+
+Notes
+Key strength product may not be necessarily product of our current portfolio. Could be others also, so that in future, if we want to add new products, we can search in data.
+In Current Status, once changed from “New” to “Existing”, then cannot edit back to “New” (only 1 way can change – new to existing)
+If Current Status is “New or Select” and Potential is “No or Select”, then only to allow Delete. If Current Status is “Existing” or Potential is “Yes” (any one), cannot DELETE that data. However, can make it “Inactive”
+First Form contact details should appear in the Contact list also.
+ To avoid duplication while bulk data excel import, criteria is if matches with “Name of Company” & “City”, then to consider as duplicate and should not save or import in data base) - or to give Calling number / Whatsapp or Wechat to detect duplicate?? This to keep pending to decide. (in company name issue of Co or company, ltd or limited etc will come) 
+
+
+
+4)Inquiry (Requirement) Form (1st Step in Process)
+Fields in Form (Quick Access & Add New both forms
+Inquiry by (buyer company name) (default from login but editable) as for example, F&B, One Stop, Inhyma. But, admin. can choose the company for which this inquiry is generated. – to add this field in Quick Add Form.
+
+Inquiry consignment code - as for example FB1, FB2, OS1, OS2 (these are for Uganda consignments for F&B and One Stop, then ING1, ING2 (for Inhyma India Gujarat), INM1, INM2 (for Inhyma Mumbai), INC1 (for Chennai), INI1 (for Indore) etc. (respective company users should see only relevant options to choose, but admin can see all) – Master to create and choose from dropdown menu – this field to add in Add New Main Inquiry form.
+
+Product Name (to choose from dropdown menu from masters & keyword suggestions)
+Quantity / UOM (UOM to reflect automatically as per inventory master of that item)
+Brand Preference (description) – By Default should be prefilled as per last but editable.
+Product Specs / Remarks – By Default should be prefilled as per last but editable.
+Status - Proposed / Approved (by default Proposed)
+
+______________________________________________________________________
+
+If any product is selected in inquiry that requires “Any License / Certificate” (field data existing in master), it should highlight in RED colour and show that in Remark in List.
+From above fields, “Brand Preference and Product Specs/Remarks” – these 2 fields Optional, Rest all Mandatory fields in both forms (quick add and add new)
+In List – for example, FB1, FB2 should be seen in 1 window in separate columns (like our excel sheet of master planning) & should be editable to shift between each other.
+Overall List (summary) of all consignments (company wise) should be editable like our Master Planning Excel Sheet (pls refer our master planning sheet of India and Uganda for better understanding)
+Process Flow – First we choose Buyer company (as for example F&B, One Stop or Inhyma (at admin level). At user level they can see only their relevant company. Once we click company, then it opens like our excel master planning sheet with all columns with editable in quantity, shifting between FB1 & FB2 (but weight, CBM etc will not be editable)
+Proposed / Approved Date and Proposed / Approved By (field not needed, but auto generated from user login). This will be separate for each item and seen when we go inside company list.
+Tally Entry Posted ? (to show pending by default in inquiry (consignment) list for each item separately and then some easy way to select and change multiple items to “Posted”. All pending entries to show on top by default. User can see only Approved Items (proposed or rejected items not seen)
+Remarks (by Yinglima China Procurement Team) – To show in list column with “View” Eye Button and can be added or edited from “Action” Panel.
+
+
+
+Columns in List (1ST Layer – company wise)
+Select (Check Box)
+Inquiry by (buyer company name) – Clickable to go inside and see all consignments of that company, then should be possible to edit.
+Inquiry consignment code - for example FB1, FB2, OS1, ING1, INC1 etc – clickable to go inside and see all items of that consignment with details. Then to be possible to edit.
+Status - Proposed / Fully Approved / Partial Approved (because in a consignment, we may have approved some items and some proposed (pending to be approved)
+Total CBM of that consignment (including approved and proposed items)
+Total Weight of that consignment (including approved and proposed items)
+Consignment Proposed / Approved Date and Proposed / Approved By 
+Action – View Details, Edit, Delete.
+
+
+
+Fields in Top Filter (1ST Layer – company wise)
+Top Filters will not be needed in this, as will have few consignments at a time.
+Will use small search filter if need to filter anything.
+However, at inside consignment layer, will need top filters.
+
+
+Clarification
+For Inquiry List (Display Summary), there will be 2 layers in this. 1st layer summary is company wise (for example, F&B, One Stop, Inhyma etc) and then once we click company, goes to 2nd layer and again summary list, Top filters, Actions etc. will appear for that particular consignment code of that company (for example, FB1, OS1, INM1, INM2).
+

@@ -14,7 +14,7 @@ class ProductSubCategoryCreate(BaseModel):
     """Payload to create a new product sub-category."""
 
     category_id: uuid.UUID
-    code: str = Field(..., min_length=1, max_length=50)
+    code: str | None = Field(default=None, max_length=50)
     name: str = Field(..., min_length=1, max_length=150)
     description: str | None = None
     status: RecordStatus = RecordStatus.ACTIVE

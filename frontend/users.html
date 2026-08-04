@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>User Accounts &amp; Passwords — Inhyma ERP</title>
+  <link rel="stylesheet" href="css/style.css" />
+  <style>
+    .pass-display { background: #eff6ff; border: 1px solid #bfdbfe; color: #1e40af; padding: 10px 14px; border-radius: 6px; font-family: monospace; font-size: 14px; font-weight: 700; display: inline-block; margin-top: 6px; user-select: all; }
+  </style>
+</head>
+<body>
+  <div class="app-shell">
+    <div id="sidebarMount"></div>
+    <div class="main-column">
+      <div id="topbarMount"></div>
+      <main class="page">
+        <div class="breadcrumb">
+          <a href="./index.html">Dashboard</a><span class="sep">/</span><span class="current">System</span><span class="sep">/</span><span class="current">User Accounts &amp; Passwords</span>
+        </div>
+        <div class="page-header">
+          <div>
+            <h1>User Accounts &amp; Passwords</h1>
+            <div class="page-subtitle">Manage employee login credentials, assign roles, and generate temporary passwords.</div>
+          </div>
+          <div class="page-header-actions">
+            <button class="btn btn-primary" id="newUserBtn">+ Create User Account</button>
+          </div>
+        </div>
+        <div id="banner"></div>
+
+        <div class="card">
+          <div class="toolbar">
+            <input type="text" id="searchInput" placeholder="Search username, email, employee code..." />
+            <select id="statusFilter">
+              <option value="">All statuses</option>
+              <option value="active">Active</option>
+              <option value="inactive">Inactive</option>
+            </select>
+          </div>
+
+          <div class="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Username</th>
+                  <th>Email</th>
+                  <th>Employee Code</th>
+                  <th>Assigned Roles</th>
+                  <th>Status</th>
+                  <th>Last Login</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody id="tableBody">
+                <tr><td colspan="7" class="muted">Loading user accounts...</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="pagination" id="pagination"></div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <!-- Create User Account Modal -->
+  <div class="modal-backdrop" id="modalBackdrop" style="display:none;">
+    <div class="modal-card" style="max-width: 600px;">
+      <div class="modal-header">
+        <h2 id="modalTitle">Create Employee User Login</h2>
+        <button class="modal-close" id="modalCloseBtn">&times;</button>
+      </div>
+      <form id="userForm">
+        <div class="form-grid">
+          <div class="field">
+            <label for="username">Username *</label>
+            <input id="username" required minlength="3" maxlength="100" placeholder="e.g. john.doe" />
+          </div>
+          <div class="field">
+            <label for="email">Work Email *</label>
+            <input id="email" type="email" required placeholder="e.g. john@inhyma.com" />
+          </div>
+          <div class="field">
+            <label for="employee_code">Employee Code</label>
+            <input id="employee_code" placeholder="e.g. EMP-001" />
+          </div>
+          <div class="field">
+            <label for="phone">Phone</label>
+            <input id="phone" placeholder="+256..." />
+          </div>
+          <div class="field" style="grid-column: span 2;">
+            <label for="role_id">Assign Initial Role</label>
+            <select id="role_id">
+              <option value="">-- Select System Role --</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-actions">
+          <button type="submit" class="btn btn-primary">Generate Login Account</button>
+          <button type="button" class="btn" id="cancelBtn">Cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Password Result Modal -->
+  <div class="modal-backdrop" id="passModalBackdrop" style="display:none;">
+    <div class="modal-card" style="max-width: 500px; text-align: center;">
+      <div class="modal-header">
+        <h2>🔑 Password Generated</h2>
+        <button class="modal-close" id="passModalCloseBtn">&times;</button>
+      </div>
+      <p>A new temporary login password has been created for this account:</p>
+      <div class="pass-display" id="passDisplay">TempPass!123</div>
+      <p class="muted" style="margin-top: 12px; font-size: 13px;">Please copy and share this password with the employee. They will be prompted to change it on their first login.</p>
+      <div class="form-actions" style="justify-content: center; margin-top: 20px;">
+        <button type="button" class="btn btn-primary" id="copyPassBtn">Copy Password</button>
+        <button type="button" class="btn" id="closePassModalBtn">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/api.js"></script>
+  <script src="js/nav.js"></script>
+  <script>
+    renderShell("users");
+
+    const banner = document.getElementById("banner");
+    const tableBody = document.getElementById("tableBody");
+    const modalBackdrop = document.getElementById("modalBackdrop");
+    const passModalBackdrop = document.getElementById("passModalBackdrop");
+    const userForm = document.getElementById("userForm");
+
+    let allRoles = [];
+
+    async function loadRoles() {
+      try {
+        const { data } = await apiGet("/rbac/roles");
+        allRoles = data || [];
+        const roleSelect = document.getElementById("role_id");
+        roleSelect.innerHTML = '<option value="">-- Select System Role --</option>';
+        for (const r of allRoles) {
+          const opt = document.createElement("option");
+          opt.value = r.id;
+          opt.textContent = r.name + (r.is_system ? " (System)" : "");
+          roleSelect.appendChild(opt);
+        }
+      } catch (e) {}
+    }
+
+    async function loadUsers() {
+      tableBody.innerHTML = '<tr><td colspan="7" class="muted">Loading user accounts...</td></tr>';
+      try {
+        const { data } = await apiGet("/users?page=1&page_size=100");
+        const items = data.items || [];
+        if (!items.length) {
+          tableBody.innerHTML = '<tr><td colspan="7" class="muted">No user accounts found.</td></tr>';
+          return;
+        }
+
+        tableBody.innerHTML = items.map((u) => `
+          <tr>
+            <td><strong class="cell-primary">${escapeHtml(u.username)}</strong></td>
+            <td>${escapeHtml(u.email)}</td>
+            <td>${escapeHtml(u.employee_code || "—")}</td>
+            <td>${u.roles && u.roles.length ? u.roles.map(r => `<span class="badge badge-neutral">${escapeHtml(r)}</span>`).join(" ") : "<em>No Role</em>"}</td>
+            <td>${u.is_active ? '<span class="badge badge-active">Active</span>' : '<span class="badge badge-inactive">Inactive</span>'}</td>
+            <td>${u.last_login_at ? new Date(u.last_login_at).toLocaleString() : "Never"}</td>
+            <td>
+              <button class="btn btn-small" onclick="resetUserPassword('${u.id}', '${escapeHtml(u.username)}')">🔑 Reset Password</button>
+            </td>
+          </tr>`).join("");
+      } catch (err) {
+        showError(banner, err);
+      }
+    }
+
+    window.resetUserPassword = async function(userId, username) {
+      if (!confirm(`Reset password for user '${username}'? This will generate a new temporary password.`)) return;
+      try {
+        const { data } = await apiPost(`/users/${userId}/reset-password`);
+        document.getElementById("passDisplay").textContent = data.temporary_password;
+        passModalBackdrop.style.display = "flex";
+      } catch (err) {
+        showError(banner, err);
+      }
+    };
+
+    document.getElementById("newUserBtn").addEventListener("click", () => {
+      userForm.reset();
+      modalBackdrop.style.display = "flex";
+    });
+
+    const closeModal = () => { modalBackdrop.style.display = "none"; };
+    const closePassModal = () => { passModalBackdrop.style.display = "none"; };
+
+    document.getElementById("cancelBtn").addEventListener("click", closeModal);
+    document.getElementById("modalCloseBtn").addEventListener("click", closeModal);
+    document.getElementById("passModalCloseBtn").addEventListener("click", closePassModal);
+    document.getElementById("closePassModalBtn").addEventListener("click", closePassModal);
+
+    document.getElementById("copyPassBtn").addEventListener("click", () => {
+      const pass = document.getElementById("passDisplay").textContent;
+      navigator.clipboard.writeText(pass);
+      alert("Password copied to clipboard!");
+    });
+
+    userForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      banner.innerHTML = "";
+      const roleId = document.getElementById("role_id").value;
+      const payload = {
+        username: document.getElementById("username").value.trim(),
+        email: document.getElementById("email").value.trim(),
+        employee_code: document.getElementById("employee_code").value.trim() || null,
+        phone: document.getElementById("phone").value.trim() || null,
+        role_ids: roleId ? [roleId] : [],
+      };
+
+      try {
+        const { data } = await apiPost("/users", payload);
+        closeModal();
+        await loadUsers();
+        document.getElementById("passDisplay").textContent = data.temporary_password;
+        passModalBackdrop.style.display = "flex";
+      } catch (err) {
+        showError(banner, err);
+      }
+    });
+
+    loadRoles();
+    loadUsers();
+  </script>
+</body>
+</html>

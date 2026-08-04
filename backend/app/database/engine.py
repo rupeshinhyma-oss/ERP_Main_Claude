@@ -45,6 +45,7 @@ def get_engine() -> AsyncEngine:
             # errors under load. Session-mode poolers / direct connections
             # (e.g. Supabase's port 5432) don't need this.
             connect_args["statement_cache_size"] = 0
+            connect_args["prepared_statement_name_func"] = lambda: ""
 
         _engine = create_async_engine(
             str(settings.DATABASE_URL),

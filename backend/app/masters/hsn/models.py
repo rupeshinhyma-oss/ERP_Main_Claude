@@ -24,6 +24,7 @@ class HsnCode(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
     code: Mapped[str] = mapped_column(String(20), unique=True, nullable=False, index=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     gst_percent: Mapped[float] = mapped_column(Numeric(5, 2), nullable=False, default=0)
+    refund_vat_percent: Mapped[float] = mapped_column(Numeric(5, 2), nullable=False, default=0)
 
     status: Mapped[RecordStatus] = mapped_column(
         SAEnum(RecordStatus, name="hsn_status", native_enum=False, length=20),

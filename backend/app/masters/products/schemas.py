@@ -14,7 +14,9 @@ class ProductCreate(BaseModel):
     """Payload to create a new product."""
 
     product_code: str = Field(..., min_length=1, max_length=50)
-    product_name: str = Field(..., min_length=1, max_length=255)
+    product_name_tally: str = Field(..., min_length=1, max_length=255)
+    product_name_invoice: str | None = Field(default=None, max_length=255)
+    product_name: str | None = Field(default=None, max_length=255)  # Optional alias (defaults to product_name_tally)
     barcode: str | None = Field(default=None, max_length=100)
 
     category_id: uuid.UUID
@@ -24,14 +26,24 @@ class ProductCreate(BaseModel):
     uom_id: uuid.UUID
     secondary_uom_id: uuid.UUID | None = None
 
+    refund_vat_percent: float | None = Field(default=None, ge=0, le=100)
+    license_certificate_required: str | None = None
+
     specification: str | None = None
     description: str | None = None
     images: list[str] | None = None
 
+    packaging_quantity: float | None = Field(default=None, ge=0)
+    packaging_net_weight: float | None = Field(default=None, ge=0)
+    packaging_gross_weight: float | None = Field(default=None, ge=0)
     weight: float | None = Field(default=None, ge=0)
     length: float | None = Field(default=None, ge=0)
     width: float | None = Field(default=None, ge=0)
     height: float | None = Field(default=None, ge=0)
+    length_cm: float | None = Field(default=None, ge=0)
+    width_cm: float | None = Field(default=None, ge=0)
+    height_cm: float | None = Field(default=None, ge=0)
+    packaging_unit_cbm: float | None = Field(default=None, ge=0)
     color: str | None = Field(default=None, max_length=50)
     material: str | None = Field(default=None, max_length=100)
 
@@ -51,7 +63,9 @@ class ProductUpdate(BaseModel):
     """Payload to update an existing product. All fields optional (partial update)."""
 
     product_code: str | None = Field(default=None, min_length=1, max_length=50)
-    product_name: str | None = Field(default=None, min_length=1, max_length=255)
+    product_name_tally: str | None = Field(default=None, min_length=1, max_length=255)
+    product_name_invoice: str | None = Field(default=None, max_length=255)
+    product_name: str | None = Field(default=None, max_length=255)
     barcode: str | None = Field(default=None, max_length=100)
 
     category_id: uuid.UUID | None = None
@@ -61,14 +75,24 @@ class ProductUpdate(BaseModel):
     uom_id: uuid.UUID | None = None
     secondary_uom_id: uuid.UUID | None = None
 
+    refund_vat_percent: float | None = Field(default=None, ge=0, le=100)
+    license_certificate_required: str | None = None
+
     specification: str | None = None
     description: str | None = None
     images: list[str] | None = None
 
+    packaging_quantity: float | None = Field(default=None, ge=0)
+    packaging_net_weight: float | None = Field(default=None, ge=0)
+    packaging_gross_weight: float | None = Field(default=None, ge=0)
     weight: float | None = Field(default=None, ge=0)
     length: float | None = Field(default=None, ge=0)
     width: float | None = Field(default=None, ge=0)
     height: float | None = Field(default=None, ge=0)
+    length_cm: float | None = Field(default=None, ge=0)
+    width_cm: float | None = Field(default=None, ge=0)
+    height_cm: float | None = Field(default=None, ge=0)
+    packaging_unit_cbm: float | None = Field(default=None, ge=0)
     color: str | None = Field(default=None, max_length=50)
     material: str | None = Field(default=None, max_length=100)
 
@@ -91,6 +115,8 @@ class ProductRead(BaseModel):
 
     id: uuid.UUID
     product_code: str
+    product_name_tally: str
+    product_name_invoice: str | None = None
     product_name: str
     barcode: str | None
 
@@ -101,17 +127,28 @@ class ProductRead(BaseModel):
     uom_id: uuid.UUID
     secondary_uom_id: uuid.UUID | None
 
+    refund_vat_percent: float = 0.0
+    license_certificate_required: str | None = None
+
     specification: str | None
     description: str | None
     images: list[str] | None
 
+    packaging_quantity: float | None = None
+    packaging_net_weight: float | None = None
+    packaging_gross_weight: float | None = None
     weight: float | None
     length: float | None
     width: float | None
     height: float | None
+    length_cm: float | None = None
+    width_cm: float | None = None
+    height_cm: float | None = None
+    packaging_unit_cbm: float | None = None
     color: str | None
     material: str | None
 
+    current_stock: float = 0.0
     conversion_factor: float | None
     minimum_order_quantity: float | None
     reorder_level: float | None

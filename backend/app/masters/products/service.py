@@ -124,6 +124,28 @@ class ProductService:
             raise ConflictException(f"Product code {product_code!r} is already in use.")
         await self._validate_references(field_values)
 
+        # Handle Tally product name aliases
+        p_tally = field_values.get("product_name_tally")
+        p_name = field_values.get("product_name")
+        if p_tally and not p_name:
+            field_values["product_name"] = p_tally
+        elif p_name and not p_tally:
+            field_values["product_name_tally"] = p_name
+
+        # Auto-compute CBM if dimensions present
+        l = field_values.get("length_cm") or field_values.get("length")
+        w = field_values.get("width_cm") or field_values.get("width")
+        h = field_values.get("height_cm") or field_values.get("height")
+        if l is not None and w is not None and h is not None:
+            field_values["packaging_unit_cbm"] = round((float(l) * float(w) * float(h)) / 1000000.0, 6)
+
+        # Auto-inherit refund_vat_percent from HSN if not explicitly set
+        hsn_id = field_values.get("hsn_id")
+        if hsn_id and field_values.get("refund_vat_percent") is None:
+            hsn_obj = await self.hsn_repository.get_by_id(hsn_id)
+            if hsn_obj and getattr(hsn_obj, "refund_vat_percent", None) is not None:
+                field_values["refund_vat_percent"] = hsn_obj.refund_vat_percent
+
         product = await self.repository.create(**field_values)
         await self._invalidate_cache()
         return product
@@ -135,9 +157,6 @@ class ProductService:
         if product_code and await self.repository.code_exists(product_code, exclude_id=product_id):
             raise ConflictException(f"Product code {product_code!r} is already in use.")
 
-        # Merge with existing values so cross-field checks (e.g. sub-category
-        # belongs to category) are validated against the resulting full state,
-        # not just the fields present in this particular PATCH.
         merged = {
             "category_id": field_values.get("category_id", product.category_id),
             "sub_category_id": field_values.get("sub_category_id", product.sub_category_id),
@@ -147,6 +166,13 @@ class ProductService:
             "secondary_uom_id": field_values.get("secondary_uom_id", product.secondary_uom_id),
         }
         await self._validate_references(merged)
+
+        # Auto-compute CBM if dimensions updated
+        l = field_values.get("length_cm") if "length_cm" in field_values else (field_values.get("length") or product.length_cm or product.length)
+        w = field_values.get("width_cm") if "width_cm" in field_values else (field_values.get("width") or product.width_cm or product.width)
+        h = field_values.get("height_cm") if "height_cm" in field_values else (field_values.get("height") or product.height_cm or product.height)
+        if l is not None and w is not None and h is not None:
+            field_values["packaging_unit_cbm"] = round((float(l) * float(w) * float(h)) / 1000000.0, 6)
 
         changes = {k: v for k, v in field_values.items() if v is not None}
         if changes:
@@ -159,12 +185,19 @@ class ProductService:
         return await self.update(product_id, status=RecordStatus.ACTIVE)
 
     async def deactivate(self, product_id: uuid.UUID) -> Product:
-        """Set a product's status to INACTIVE."""
+        """Set a product's status to INACTIVE only if stock is zero."""
+        product = await self.get_by_id_or_raise(product_id)
+        if getattr(product, "current_stock", 0) != 0:
+            raise BadRequestException("Product cannot be set to Inactive when current stock is non-zero.")
         return await self.update(product_id, status=RecordStatus.INACTIVE)
 
     async def delete(self, product_id: uuid.UUID) -> None:
-        """Soft-delete a product, refusing if it is referenced elsewhere."""
+        """Soft-delete a product, requiring status to be Inactive and stock = 0."""
         product = await self.get_by_id_or_raise(product_id)
+        if product.status != RecordStatus.INACTIVE:
+            raise BadRequestException("Product deletion is allowed only if status is Inactive.")
+        if getattr(product, "current_stock", 0) != 0:
+            raise BadRequestException("Product deletion is allowed only if stock is Zero.")
         if await self.repository.is_referenced(product_id):
             raise ConflictException("This product cannot be deleted because it is referenced elsewhere.")
         await self.repository.delete(product)

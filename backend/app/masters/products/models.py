@@ -33,7 +33,9 @@ class Product(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
 
     # --- Identity -----------------------------------------------------------------
     product_code: Mapped[str] = mapped_column(String(50), unique=True, nullable=False, index=True)
-    product_name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    product_name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)  # Legacy alias
+    product_name_tally: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    product_name_invoice: Mapped[str | None] = mapped_column(String(255), nullable=True)
     barcode: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
 
     # --- Classification (foreign keys into the other Master Data tables) ----------
@@ -56,20 +58,32 @@ class Product(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
         GUID(), ForeignKey("units_of_measurement.id", ondelete="RESTRICT"), nullable=True, index=True
     )
 
+    # --- Tax & Compliance ---------------------------------------------------------
+    refund_vat_percent: Mapped[float] = mapped_column(Numeric(5, 2), default=0.0, nullable=False)
+    license_certificate_required: Mapped[str | None] = mapped_column(Text, nullable=True)  # Highlight RED in Inquiry if set
+
     # --- Descriptive ----------------------------------------------------------------
     specification: Mapped[str | None] = mapped_column(Text, nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     images: Mapped[list | None] = mapped_column(JSON, nullable=True)  # list[str] of image URLs/paths
 
-    # --- Physical attributes ------------------------------------------------------
+    # --- Physical & Packaging Attributes ------------------------------------------
+    packaging_quantity: Mapped[float | None] = mapped_column(Numeric(12, 3), nullable=True)
+    packaging_net_weight: Mapped[float | None] = mapped_column(Numeric(12, 3), nullable=True)
+    packaging_gross_weight: Mapped[float | None] = mapped_column(Numeric(12, 3), nullable=True)
     weight: Mapped[float | None] = mapped_column(Numeric(12, 3), nullable=True)  # in kg
     length: Mapped[float | None] = mapped_column(Numeric(12, 3), nullable=True)  # in cm
     width: Mapped[float | None] = mapped_column(Numeric(12, 3), nullable=True)  # in cm
     height: Mapped[float | None] = mapped_column(Numeric(12, 3), nullable=True)  # in cm
+    length_cm: Mapped[float | None] = mapped_column(Numeric(12, 3), nullable=True)
+    width_cm: Mapped[float | None] = mapped_column(Numeric(12, 3), nullable=True)
+    height_cm: Mapped[float | None] = mapped_column(Numeric(12, 3), nullable=True)
+    packaging_unit_cbm: Mapped[float | None] = mapped_column(Numeric(12, 6), nullable=True)  # Auto computed: L*W*H/1,000,000
     color: Mapped[str | None] = mapped_column(String(50), nullable=True)
     material: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
-    # --- Commercial / inventory planning -------------------------------------------
+    # --- Inventory & Commercial ---------------------------------------------------
+    current_stock: Mapped[float] = mapped_column(Numeric(14, 3), default=0.0, nullable=False)
     conversion_factor: Mapped[float | None] = mapped_column(
         Numeric(12, 4), nullable=True
     )  # secondary_uom per 1 primary uom, when secondary_uom_id is set

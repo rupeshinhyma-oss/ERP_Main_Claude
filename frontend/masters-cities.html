@@ -73,14 +73,17 @@
       </div>
       <form id="entityForm">
         <input type="hidden" id="entityId" />
-        <div class="form-grid">
-          <div class="field">
+        <div class="form-grid">          <div class="field">
             <label for="country_id">Country *</label>
-            <select id="country_id" required></select>
+            <select id="country_id" required>
+              <option value="">-- Select Country --</option>
+            </select>
           </div>
           <div class="field">
             <label for="state_id">State *</label>
-            <select id="state_id" required></select>
+            <select id="state_id" required>
+              <option value="">-- Select State --</option>
+            </select>
           </div>
           <div class="field">
             <label for="name">City Name *</label>
@@ -122,8 +125,11 @@
 
     function populateStateOptions(countryId) {
       const stateSelect = document.getElementById("state_id");
-      stateSelect.innerHTML = "";
       const filtered = countryId ? statesCache.filter((s) => s.country_id === countryId) : statesCache;
+      stateSelect.innerHTML = filtered.length 
+        ? '<option value="">-- Select State --</option>' 
+        : '<option value="">-- No States Found! Create State First --</option>';
+
       for (const s of filtered) {
         const opt = document.createElement("option");
         opt.value = s.id;
@@ -145,13 +151,17 @@
       async loadLookups() {
         try {
           const [countryRes, stateRes] = await Promise.all([
-            apiGet("/masters/countries" + toQueryString({ page: 1, page_size: 100, sort_order: "asc", status: "active" })),
-            apiGet("/masters/states" + toQueryString({ page: 1, page_size: 100, sort_order: "asc", status: "active" })),
+            apiGet("/masters/countries" + toQueryString({ page: 1, page_size: 250, sort_order: "asc", status: "active" })),
+            apiGet("/masters/states" + toQueryString({ page: 1, page_size: 1000, sort_order: "asc", status: "active" })),
           ]);
-          countriesCache = countryRes.data;
-          statesCache = stateRes.data;
+          countriesCache = countryRes.data || [];
+          statesCache = stateRes.data || [];
 
           const countrySelect = document.getElementById("country_id");
+          countrySelect.innerHTML = countriesCache.length 
+            ? '<option value="">-- Select Country --</option>' 
+            : '<option value="">-- No Countries Found! Create Country First --</option>';
+
           for (const c of countriesCache) {
             const opt = document.createElement("option");
             opt.value = c.id;
@@ -161,7 +171,7 @@
           populateStateOptions(countrySelect.value);
           countrySelect.addEventListener("change", () => populateStateOptions(countrySelect.value));
         } catch (e) {
-          /* lookups are a nice-to-have */
+          /* lookups handling */
         }
       },
       fillForm(item) {
@@ -172,9 +182,14 @@
         MasterPage.setFieldValue("status", item ? item.status : "active");
       },
       toPayload() {
+        const cId = MasterPage.fieldValue("country_id");
+        const sId = MasterPage.fieldValue("state_id");
+        if (!cId) throw new Error("Please select a valid Country.");
+        if (!sId) throw new Error("Please select a valid State.");
+
         return {
-          country_id: MasterPage.fieldValue("country_id"),
-          state_id: MasterPage.fieldValue("state_id"),
+          country_id: cId,
+          state_id: sId,
           name: MasterPage.fieldValue("name").trim(),
           status: MasterPage.fieldValue("status"),
         };

@@ -65,6 +65,7 @@ const NAV_SECTIONS = [
     label: "Settings",
     items: [
       { key: "organization", label: "Organization Settings", href: "./organization.html", icon: "building" },
+      { key: "users", label: "User Accounts & Passwords", href: "./users.html", icon: "users" },
       { key: "audit", label: "Audit Log", href: "./audit.html", icon: "clock" },
       { key: "rbac", label: "Roles & Permissions", href: "./rbac.html", icon: "shield" },
     ],
@@ -75,6 +76,7 @@ const PAGE_TITLES = {
   dashboard: "Dashboard",
   organization: "Organization Settings",
   teams: "Teams",
+  users: "User Accounts & Passwords",
   "masters-countries": "Countries",
   "masters-states": "States",
   "masters-cities": "Cities",

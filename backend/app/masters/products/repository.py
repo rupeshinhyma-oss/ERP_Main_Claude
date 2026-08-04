@@ -28,8 +28,9 @@ class ProductRepository(BaseRepository[Product]):
         return result.scalar_one_or_none()
 
     async def code_exists(self, product_code: str, *, exclude_id: uuid.UUID | None = None) -> bool:
-        """Return True if another (non-deleted) product already uses this code."""
-        stmt = self._base_select().with_only_columns(Product.id).where(Product.product_code == product_code)
+        """Return True if another product already uses this code."""
+        from sqlalchemy import select
+        stmt = select(Product.id).where(Product.product_code == product_code)
         if exclude_id is not None:
             stmt = stmt.where(Product.id != exclude_id)
         result = await self.session.execute(stmt)

@@ -6,13 +6,27 @@
   <title>Roles &amp; Permissions — Inhyma ERP</title>
   <link rel="stylesheet" href="css/style.css" />
   <style>
-    .permission-group { margin-bottom: var(--space-3); }
-    .permission-group-title { font-weight: 700; font-size: 12.5px; text-transform: uppercase; color: var(--color-muted); margin-bottom: 6px; }
-    .permission-checks { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 6px; }
-    .permission-checks label { display: flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 400; }
-    .role-card { border: 1px solid var(--color-border); border-radius: var(--radius); padding: var(--space-3); margin-bottom: var(--space-3); }
-    .role-card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--space-2); }
-    .role-card-header h3 { margin: 0; font-size: 15px; }
+    .role-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 16px; margin-top: 16px; }
+    .role-card { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-lg, 10px); padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); transition: transform 0.15s ease, box-shadow 0.15s ease; }
+    .role-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
+    .role-card-header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 8px; }
+    .role-card-title { font-size: 16px; font-weight: 700; color: var(--color-text); margin: 0; display: flex; align-items: center; gap: 8px; }
+    .role-description { font-size: 13px; color: var(--color-muted); margin-bottom: 14px; min-height: 38px; line-height: 1.4; }
+    
+    .perm-summary-grid { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
+    .module-badge { font-size: 11.5px; font-weight: 600; padding: 4px 10px; border-radius: 20px; background: var(--color-surface-hover); color: var(--color-text); border: 1px solid var(--color-border); }
+    .module-badge.full { background: #dcfce7; color: #15803d; border-color: #bbf7d0; }
+    .module-badge.partial { background: #e0f2fe; color: #0369a1; border-color: #bae6fd; }
+
+    .permission-group { background: var(--color-surface-hover, #f8fafc); border: 1px solid var(--color-border); border-radius: 8px; padding: 12px 14px; margin-bottom: 14px; }
+    .permission-group-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; border-bottom: 1px solid var(--color-border); padding-bottom: 6px; }
+    .permission-group-title { font-weight: 700; font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--color-primary); }
+    .permission-checks { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 8px; }
+    .permission-checks label { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 500; cursor: pointer; user-select: none; }
+    .permission-checks input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--color-primary); }
+
+    .toggle-btn { background: none; border: none; font-size: 12px; font-weight: 600; color: var(--color-primary); cursor: pointer; padding: 2px 6px; border-radius: 4px; }
+    .toggle-btn:hover { background: var(--color-border); }
   </style>
 </head>
 <body>
@@ -26,8 +40,8 @@
         </div>
         <div class="page-header">
           <div>
-            <h1>Roles &amp; Permissions</h1>
-            <div class="page-subtitle">Manage system roles and the permissions granted to each.</div>
+            <h1>Roles &amp; Access Control</h1>
+            <div class="page-subtitle">Configure user roles, assign permissions, and control access across modules.</div>
           </div>
           <div class="page-header-actions">
             <button class="btn btn-primary" id="newRoleBtn">+ New Role</button>
@@ -35,8 +49,8 @@
         </div>
         <div id="banner"></div>
 
-        <div id="rolesContainer">
-          <p class="muted">Loading roles...</p>
+        <div id="rolesContainer" class="role-grid">
+          <p class="muted">Loading system roles...</p>
         </div>
       </main>
     </div>
@@ -44,25 +58,34 @@
 
   <!-- Create / Edit Role Modal -->
   <div class="modal-backdrop" id="modalBackdrop" style="display:none;">
-    <div class="modal-card" style="max-width: 700px;">
+    <div class="modal-card" style="max-width: 840px; width: 92vw;">
       <div class="modal-header">
         <h2 id="modalTitle">New Role</h2>
         <button class="modal-close" id="modalCloseBtn">&times;</button>
       </div>
       <form id="roleForm">
         <input type="hidden" id="roleId" />
-        <div class="form-grid">
+        <div class="form-grid" style="margin-bottom: 16px;">
           <div class="field">
             <label for="roleName">Role Name *</label>
-            <input id="roleName" required minlength="2" maxlength="100" />
+            <input id="roleName" required minlength="2" maxlength="100" placeholder="e.g. Sales Manager, Accountant, Storekeeper" />
           </div>
           <div class="field">
             <label for="roleDescription">Description</label>
-            <input id="roleDescription" maxlength="255" />
+            <input id="roleDescription" maxlength="255" placeholder="Brief summary of what this role does" />
           </div>
         </div>
-        <div class="section-title" style="margin-top: 0;">Permissions</div>
-        <div id="permissionGroups"></div>
+
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+          <div class="section-title" style="margin: 0;">Module Permissions</div>
+          <div>
+            <button type="button" class="btn btn-small" id="selectAllBtn">Select All</button>
+            <button type="button" class="btn btn-small" id="deselectAllBtn">Deselect All</button>
+          </div>
+        </div>
+
+        <div id="permissionGroups" style="max-height: 52vh; overflow-y: auto; padding-right: 6px;"></div>
+
         <div class="form-actions">
           <button type="submit" class="btn btn-primary">Save Role</button>
           <button type="button" class="btn" id="cancelBtn">Cancel</button>
@@ -88,13 +111,50 @@
 
     let allPermissions = [];
     let allRoles = [];
-    let editingRole = null; // the RoleWithPermissions object currently being edited, or null for create
+    let editingRole = null;
+
+    // Friendly Category Mapping for Modules
+    const MODULE_NAMES = {
+      product: "Products Master",
+      category: "Categories",
+      subcategory: "Sub-Categories",
+      brand: "Brands",
+      hsn: "HSN Codes",
+      uom: "Units of Measurement (UOM)",
+      currency: "Currencies",
+      country: "Countries",
+      state: "States",
+      city: "Cities",
+      employee: "Employees & HR",
+      department: "Departments",
+      designation: "Designations",
+      organization: "Organizations",
+      supplier: "Supplier Profiles",
+      audit: "System Audit Logs",
+      settings: "System Settings",
+      rbac: "Roles & Permissions"
+    };
+
+    // Friendly Action Label Mapping
+    function getFriendlyPermissionLabel(code) {
+      const parts = code.split(".");
+      const action = parts[parts.length - 1];
+      const actionMap = {
+        read: "👁️ View",
+        create: "➕ Create",
+        update: "✏️ Edit",
+        delete: "🗑️ Delete",
+        manage: "⚙️ Manage All"
+      };
+      return actionMap[action] || code;
+    }
 
     function groupPermissionsByModule(permissions) {
       const groups = {};
       for (const p of permissions) {
-        if (!groups[p.module]) groups[p.module] = [];
-        groups[p.module].push(p);
+        const modKey = p.module || p.code.split(".")[0];
+        if (!groups[modKey]) groups[modKey] = [];
+        groups[modKey].push(p);
       }
       return groups;
     }
@@ -103,19 +163,44 @@
       const granted = new Set(grantedCodes || []);
       const groups = groupPermissionsByModule(allPermissions);
       const wrapper = document.getElementById("permissionGroups");
-      wrapper.innerHTML = Object.keys(groups).sort().map((moduleName) => {
-        const checks = groups[moduleName].map((p) => `
+
+      wrapper.innerHTML = Object.keys(groups).sort().map((modKey) => {
+        const modTitle = MODULE_NAMES[modKey] || modKey.toUpperCase();
+        const items = groups[modKey];
+        const allCheckedInMod = items.every(p => granted.has(p.code));
+
+        const checks = items.map((p) => `
           <label>
-            <input type="checkbox" class="perm-check" value="${p.code}" ${granted.has(p.code) ? "checked" : ""} />
-            ${escapeHtml(p.code)}
+            <input type="checkbox" class="perm-check perm-mod-${modKey}" value="${p.code}" ${granted.has(p.code) ? "checked" : ""} />
+            ${escapeHtml(getFriendlyPermissionLabel(p.code))}
           </label>`).join("");
+
         return `
           <div class="permission-group">
-            <div class="permission-group-title">${escapeHtml(moduleName)}</div>
+            <div class="permission-group-header">
+              <div class="permission-group-title">${escapeHtml(modTitle)}</div>
+              <button type="button" class="toggle-btn" onclick="toggleModuleCheckboxes('${modKey}', this)">
+                ${allCheckedInMod ? "Deselect Group" : "Select Group"}
+              </button>
+            </div>
             <div class="permission-checks">${checks}</div>
           </div>`;
       }).join("");
     }
+
+    window.toggleModuleCheckboxes = function(modKey, btnEl) {
+      const checkboxes = document.querySelectorAll(`.perm-mod-${modKey}`);
+      const anyUnchecked = Array.from(checkboxes).some(cb => !cb.checked);
+      checkboxes.forEach(cb => cb.checked = anyUnchecked);
+      btnEl.textContent = anyUnchecked ? "Deselect Group" : "Select Group";
+    };
+
+    document.getElementById("selectAllBtn").addEventListener("click", () => {
+      document.querySelectorAll(".perm-check").forEach(cb => cb.checked = true);
+    });
+    document.getElementById("deselectAllBtn").addEventListener("click", () => {
+      document.querySelectorAll(".perm-check").forEach(cb => cb.checked = false);
+    });
 
     function selectedPermissionCodes() {
       return Array.from(document.querySelectorAll(".perm-check:checked")).map((el) => el.value);
@@ -125,17 +210,17 @@
       editingRole = role || null;
       roleForm.reset();
       document.getElementById("roleId").value = role ? role.id : "";
-      document.getElementById("modalTitle").textContent = role ? `Edit ${role.name}` : "New Role";
+      document.getElementById("modalTitle").textContent = role ? `Edit Role: ${role.name}` : "New Role";
       document.getElementById("roleName").value = role ? role.name : "";
       document.getElementById("roleDescription").value = role ? (role.description || "") : "";
       const nameInput = document.getElementById("roleName");
       nameInput.disabled = Boolean(role && role.is_system);
       renderPermissionCheckboxes(role ? role.permissions : []);
-      openModalShell(modalBackdrop);
+      modalBackdrop.style.display = "flex";
     }
 
     function closeModal() {
-      closeModalShell(modalBackdrop);
+      modalBackdrop.style.display = "none";
       editingRole = null;
     }
 
@@ -145,34 +230,60 @@
     modalBackdrop.addEventListener("click", (e) => { if (e.target === modalBackdrop) closeModal(); });
 
     function roleCardHtml(role) {
-      const permCount = role.permissions.length;
-      const badge = role.is_system ? '<span class="badge badge-neutral">System</span>' : "";
-      const permsPreview = role.permissions.slice(0, 8).map((c) => `<span class="chip" style="display:inline-block;background:var(--color-neutral-soft);border-radius:20px;padding:2px 9px;font-size:11.5px;margin:2px;">${escapeHtml(c)}</span>`).join("");
-      const more = permCount > 8 ? `<span class="muted"> +${permCount - 8} more</span>` : "";
+      const permSet = new Set(role.permissions || []);
+      const permCount = permSet.size;
+      const isSystem = role.is_system;
+
+      // Group granted permissions by module for clean badge display
+      const groups = groupPermissionsByModule(allPermissions);
+      const moduleSummary = [];
+
+      for (const modKey of Object.keys(groups)) {
+        const modTitle = MODULE_NAMES[modKey] || modKey;
+        const total = groups[modKey].length;
+        const grantedCount = groups[modKey].filter(p => permSet.has(p.code)).length;
+
+        if (grantedCount === total && total > 0) {
+          moduleSummary.push(`<span class="module-badge full">✓ ${escapeHtml(modTitle)}</span>`);
+        } else if (grantedCount > 0) {
+          moduleSummary.push(`<span class="module-badge partial">${escapeHtml(modTitle)} (${grantedCount}/${total})</span>`);
+        }
+      }
+
+      const badgesHtml = moduleSummary.length 
+        ? moduleSummary.join("") 
+        : '<span class="muted" style="font-size:12px;">No permissions assigned</span>';
+
       return `
         <div class="role-card" data-role-id="${role.id}">
           <div class="role-card-header">
-            <h3>${escapeHtml(role.name)} ${badge}</h3>
-            <div>
+            <h3 class="role-card-title">
+              ${escapeHtml(role.name)}
+              ${isSystem ? '<span class="badge badge-neutral">System Role</span>' : ''}
+            </h3>
+            <div style="display:flex; gap:6px;">
               ${canManage ? `<button class="btn btn-small" data-edit="${role.id}">Edit</button>` : ""}
-              ${canManage && !role.is_system ? `<button class="btn btn-small btn-danger" data-delete="${role.id}">Delete</button>` : ""}
+              ${canManage && !isSystem ? `<button class="btn btn-small btn-danger" data-delete="${role.id}">Delete</button>` : ""}
             </div>
           </div>
-          <div class="muted" style="margin-bottom:8px;">${role.description ? escapeHtml(role.description) : "No description."}</div>
-          <div>${permsPreview}${more}</div>
-          <div class="muted" style="margin-top:6px; font-size:12px;">${permCount} permission${permCount === 1 ? "" : "s"} granted</div>
+          <div class="role-description">${role.description ? escapeHtml(role.description) : "No description provided."}</div>
+          <div class="perm-summary-grid">${badgesHtml}</div>
+          <div style="display:flex; align-items:center; justify-content:space-between; font-size:12px; color:var(--color-muted); border-top:1px solid var(--color-border); padding-top:10px;">
+            <span><strong>${permCount}</strong> / ${allPermissions.length} permissions granted</span>
+            <span>${isSystem ? '🔒 Protected' : '✏️ Custom Role'}</span>
+          </div>
         </div>`;
     }
 
     async function loadRoles() {
-      rolesContainer.innerHTML = '<p class="muted">Loading roles...</p>';
+      rolesContainer.innerHTML = '<p class="muted">Loading system roles...</p>';
       try {
         const [rolesRes, permsRes] = await Promise.all([
           apiGet("/rbac/roles"),
           apiGet("/rbac/permissions"),
         ]);
-        allRoles = rolesRes.data;
-        allPermissions = permsRes.data;
+        allRoles = rolesRes.data || [];
+        allPermissions = permsRes.data || [];
         rolesContainer.innerHTML = allRoles.length
           ? allRoles.map(roleCardHtml).join("")
           : '<p class="muted">No roles found.</p>';
@@ -189,7 +300,7 @@
         const role = allRoles.find((r) => r.id === editId);
         if (role) openModal(role);
       } else if (deleteId) {
-        if (!confirm("Delete this role? This cannot be undone.")) return;
+        if (!confirm("Delete this role? Users assigned to this role will lose its permissions.")) return;
         try {
           await apiDelete(`/rbac/roles/${deleteId}`);
           await loadRoles();
@@ -209,10 +320,7 @@
 
       try {
         if (roleId) {
-          // Update name/description (system roles reject renaming server-side too).
           await apiPatch(`/rbac/roles/${roleId}`, { name, description });
-
-          // Reconcile permission grants: grant newly-checked codes, revoke newly-unchecked ones.
           const currentCodes = new Set(editingRole ? editingRole.permissions : []);
           const codeToId = {};
           for (const p of allPermissions) codeToId[p.code] = p.id;

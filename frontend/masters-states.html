@@ -79,7 +79,9 @@
         <div class="form-grid">
           <div class="field">
             <label for="country_id">Country *</label>
-            <select id="country_id" required></select>
+            <select id="country_id" required>
+              <option value="">-- Select Country --</option>
+            </select>
           </div>
           <div class="field">
             <label for="name">State Name *</label>
@@ -134,10 +136,17 @@
       },
       async loadLookups() {
         try {
-          const { data } = await apiGet("/masters/countries" + toQueryString({ page: 1, page_size: 100, sort_order: "asc", status: "active" }));
-          countriesCache = data;
+          const { data } = await apiGet("/masters/countries" + toQueryString({ page: 1, page_size: 250, sort_order: "asc", status: "active" }));
+          countriesCache = data || [];
           const countrySelect = document.getElementById("country_id");
           const countryFilter = document.getElementById("countryFilter");
+          
+          countrySelect.innerHTML = countriesCache.length 
+            ? '<option value="">-- Select Country --</option>' 
+            : '<option value="">-- No Countries Found! Create Country First --</option>';
+
+          countryFilter.innerHTML = '<option value="">All countries</option>';
+
           for (const c of countriesCache) {
             const opt1 = document.createElement("option");
             opt1.value = c.id;
@@ -153,7 +162,7 @@
             document.getElementById("searchInput").dispatchEvent(new Event("input"));
           });
         } catch (e) {
-          /* lookups are a nice-to-have */
+          /* lookups handling */
         }
       },
       fillForm(item) {
@@ -163,8 +172,12 @@
         MasterPage.setFieldValue("status", item ? item.status : "active");
       },
       toPayload() {
+        const cId = MasterPage.fieldValue("country_id");
+        if (!cId) {
+          throw new Error("Please select a valid Country.");
+        }
         return {
-          country_id: MasterPage.fieldValue("country_id"),
+          country_id: cId,
           name: MasterPage.fieldValue("name").trim(),
           code: MasterPage.fieldValue("code").trim() || null,
           status: MasterPage.fieldValue("status"),

@@ -16,6 +16,7 @@ class HsnCreate(BaseModel):
     code: str = Field(..., min_length=1, max_length=20)
     description: str | None = None
     gst_percent: float = Field(default=0, ge=0, le=100)
+    refund_vat_percent: float = Field(default=0, ge=0, le=100)
     status: RecordStatus = RecordStatus.ACTIVE
 
 
@@ -25,6 +26,7 @@ class HsnUpdate(BaseModel):
     code: str | None = Field(default=None, min_length=1, max_length=20)
     description: str | None = None
     gst_percent: float | None = Field(default=None, ge=0, le=100)
+    refund_vat_percent: float | None = Field(default=None, ge=0, le=100)
     status: RecordStatus | None = None
 
 
@@ -37,6 +39,7 @@ class HsnRead(BaseModel):
     code: str
     description: str | None
     gst_percent: float
+    refund_vat_percent: float | None = 0.0
     status: RecordStatus
     created_at: datetime
     updated_at: datetime

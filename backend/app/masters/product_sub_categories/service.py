@@ -20,6 +20,7 @@ from app.masters.import_export import (
     ImportSummary,
     build_csv_export,
     build_excel_export,
+    model_to_dict,
     parse_rows_from_file,
     run_import,
 )
@@ -82,21 +83,29 @@ class ProductSubCategoryService:
         code = field_values.get("code")
         name = field_values.get("name")
         await self._validate_category(category_id)
-
         if not code and name:
             clean_name = "".join(c if c.isalnum() else "-" for c in name.upper())
             base_code = "-".join(filter(None, clean_name.split("-")))[:45] or "SUB-CAT"
             code = base_code
             counter = 1
-            while await self.repository.code_exists(code):
+            while await self.repository.get_by_code(code):
                 code = f"{base_code}-{counter}"
                 counter += 1
             field_values["code"] = code
 
-        if code and await self.repository.code_exists(code):
-            raise ConflictException(f"Sub-category code {code!r} is already in use.")
-        if name and await self.repository.name_exists_in_category(category_id, name):
-            raise ConflictException(f"Sub-category name {name!r} already exists in this category.")
+        if code:
+            existing = await self.repository.get_by_code(code)
+            if existing is not None:
+                raise ConflictException(
+                    f"Sub-category code {code!r} is already in use.", details={"existing": model_to_dict(existing)}
+                )
+        if name:
+            existing = await self.repository.get_by_name_in_category(category_id, name)
+            if existing is not None:
+                raise ConflictException(
+                    f"Sub-category name {name!r} already exists in this category.",
+                    details={"existing": model_to_dict(existing)},
+                )
 
         sub_category = await self.repository.create(**field_values)
         await self._invalidate_cache()
@@ -110,10 +119,19 @@ class ProductSubCategoryService:
         name = field_values.get("name")
         if field_values.get("category_id") is not None:
             await self._validate_category(category_id)
-        if code and await self.repository.code_exists(code, exclude_id=sub_category_id):
-            raise ConflictException(f"Sub-category code {code!r} is already in use.")
-        if name and await self.repository.name_exists_in_category(category_id, name, exclude_id=sub_category_id):
-            raise ConflictException(f"Sub-category name {name!r} already exists in this category.")
+        if code:
+            existing = await self.repository.get_by_code(code)
+            if existing is not None and existing.id != sub_category_id:
+                raise ConflictException(
+                    f"Sub-category code {code!r} is already in use.", details={"existing": model_to_dict(existing)}
+                )
+        if name:
+            existing = await self.repository.get_by_name_in_category(category_id, name, exclude_id=sub_category_id)
+            if existing is not None:
+                raise ConflictException(
+                    f"Sub-category name {name!r} already exists in this category.",
+                    details={"existing": model_to_dict(existing)},
+                )
 
         changes = {k: v for k, v in field_values.items() if v is not None}
         if changes:
@@ -155,10 +173,18 @@ class ProductSubCategoryService:
             field_values["category_id"] = category.id
             code = field_values["code"]
             name = field_values["name"]
-            if await self.repository.code_exists(code):
-                raise ValueError(f"Sub-category code {code!r} already exists.")
-            if await self.repository.name_exists_in_category(category.id, name):
-                raise ValueError(f"Sub-category {name!r} already exists in category {category_code!r}.")
+            existing_by_code = await self.repository.get_by_code(code)
+            if existing_by_code is not None:
+                raise ConflictException(
+                    f"Sub-category code {code!r} already exists.",
+                    details={"existing": model_to_dict(existing_by_code)},
+                )
+            existing_by_name = await self.repository.get_by_name_in_category(category.id, name)
+            if existing_by_name is not None:
+                raise ConflictException(
+                    f"Sub-category {name!r} already exists in category {category_code!r}.",
+                    details={"existing": model_to_dict(existing_by_name)},
+                )
             return await self.repository.create(**field_values)
 
         summary = await run_import(rows, row_validator=validate_product_sub_category_row, row_creator=_create)

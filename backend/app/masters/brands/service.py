@@ -17,6 +17,7 @@ from app.masters.import_export import (
     ImportSummary,
     build_csv_export,
     build_excel_export,
+    model_to_dict,
     parse_rows_from_file,
     run_import,
 )
@@ -60,10 +61,18 @@ class BrandService:
         """Create a new brand, validating name/code uniqueness."""
         name = field_values.get("name")
         code = field_values.get("code")
-        if name and await self.repository.name_exists(name):
-            raise ConflictException(f"Brand name {name!r} is already in use.")
-        if code and await self.repository.code_exists(code):
-            raise ConflictException(f"Brand code {code!r} is already in use.")
+        if name:
+            existing = await self.repository.get_by_name(name)
+            if existing is not None:
+                raise ConflictException(
+                    f"Brand name {name!r} is already in use.", details={"existing": model_to_dict(existing)}
+                )
+        if code:
+            existing = await self.repository.get_by_code(code)
+            if existing is not None:
+                raise ConflictException(
+                    f"Brand code {code!r} is already in use.", details={"existing": model_to_dict(existing)}
+                )
 
         brand = await self.repository.create(**field_values)
         await self._invalidate_cache()
@@ -74,10 +83,18 @@ class BrandService:
         brand = await self.get_by_id_or_raise(brand_id)
         name = field_values.get("name")
         code = field_values.get("code")
-        if name and await self.repository.name_exists(name, exclude_id=brand_id):
-            raise ConflictException(f"Brand name {name!r} is already in use.")
-        if code and await self.repository.code_exists(code, exclude_id=brand_id):
-            raise ConflictException(f"Brand code {code!r} is already in use.")
+        if name:
+            existing = await self.repository.get_by_name(name, exclude_id=brand_id)
+            if existing is not None:
+                raise ConflictException(
+                    f"Brand name {name!r} is already in use.", details={"existing": model_to_dict(existing)}
+                )
+        if code:
+            existing = await self.repository.get_by_code(code)
+            if existing is not None and existing.id != brand_id:
+                raise ConflictException(
+                    f"Brand code {code!r} is already in use.", details={"existing": model_to_dict(existing)}
+                )
 
         changes = {k: v for k, v in field_values.items() if v is not None}
         if changes:
@@ -112,10 +129,16 @@ class BrandService:
         async def _create(field_values: dict[str, Any]) -> Brand:
             name = field_values["name"]
             code = field_values["code"]
-            if await self.repository.name_exists(name):
-                raise ValueError(f"Brand name {name!r} already exists.")
-            if await self.repository.code_exists(code):
-                raise ValueError(f"Brand code {code!r} already exists.")
+            existing_by_name = await self.repository.get_by_name(name)
+            if existing_by_name is not None:
+                raise ConflictException(
+                    f"Brand name {name!r} already exists.", details={"existing": model_to_dict(existing_by_name)}
+                )
+            existing_by_code = await self.repository.get_by_code(code)
+            if existing_by_code is not None:
+                raise ConflictException(
+                    f"Brand code {code!r} already exists.", details={"existing": model_to_dict(existing_by_code)}
+                )
             return await self.repository.create(**field_values)
 
         summary = await run_import(rows, row_validator=validate_brand_row, row_creator=_create)

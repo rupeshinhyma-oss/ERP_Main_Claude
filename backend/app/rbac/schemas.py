@@ -16,6 +16,9 @@ class PermissionRead(BaseModel):
     id: uuid.UUID
     code: str
     module: str
+    page: str | None = None
+    action: str | None = None
+    scope: str | None = "ALL"
     description: str | None
     created_at: datetime
 
@@ -57,6 +60,36 @@ class RoleWithPermissions(RoleRead):
 
 
 class GrantPermissionRequest(BaseModel):
-    """Payload to grant a permission to a role."""
+    """Payload to grant a permission to a role, department, or designation."""
 
     permission_id: uuid.UUID
+
+
+class AssignUserPermissionRequest(BaseModel):
+    """Payload to grant or revoke an individual user permission."""
+
+    permission_id: uuid.UUID
+    is_granted: bool = Field(default=True, description="True to grant permission override, False to explicitly deny/revoke.")
+
+
+class ClonePermissionSetRequest(BaseModel):
+    """Payload to clone permission set between entities (role, department, designation, user)."""
+
+    source_type: str = Field(..., description="'role', 'department', 'designation', or 'user'")
+    source_id: uuid.UUID
+    target_type: str = Field(..., description="'role', 'department', 'designation', or 'user'")
+    target_id: uuid.UUID
+
+
+class EffectivePermissionsBreakdown(BaseModel):
+    """Effective permissions breakdown for a user."""
+
+    is_super_admin: bool
+    department_id: str | None = None
+    designation_id: str | None = None
+    role_permissions: list[str] = Field(default_factory=list)
+    department_permissions: list[str] = Field(default_factory=list)
+    designation_permissions: list[str] = Field(default_factory=list)
+    user_grants: list[str] = Field(default_factory=list)
+    user_denies: list[str] = Field(default_factory=list)
+    effective_permissions: list[str] = Field(default_factory=list)

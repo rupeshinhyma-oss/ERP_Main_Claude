@@ -47,11 +47,13 @@ async def _record_org_action(
     request.state.audit_logged = True
 
 
+from app.auth.dependencies import get_current_user
+
 @router.get("", summary="Get the organization profile")
 async def get_organization(
     request: Request,
     organization_service: OrganizationService = Depends(get_organization_service),
-    _current_user: CurrentUser = Depends(require_permission("organization.manage")),
+    _current_user: CurrentUser = Depends(get_current_user),
 ) -> dict:
     """Fetch the single company profile."""
     organization = await organization_service.get_or_raise()

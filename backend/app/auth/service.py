@@ -49,15 +49,14 @@ class CurrentUser:
 
     Built once per request by ``app.auth.dependencies.get_current_user`` from
     a verified access token, and passed down to route handlers /
-    ``require_permission`` checks. Permissions are the token's embedded
-    ``perms`` claim (see ``app.auth.security.create_access_token``), not a
-    fresh DB read, by design.
+    ``require_permission`` checks.
     """
 
     id: uuid.UUID
     username: str
     permissions: set[str] = field(default_factory=set)
     access_token_jti: str = ""
+    must_change_password: bool = False
 
 
 class AuthService:
@@ -100,16 +99,22 @@ class AuthService:
         attempts = (await self.cache.get(key) or 0) + 1
         await self.cache.set(key, attempts, ttl_seconds=settings.LOGIN_RATE_LIMIT_WINDOW_SECONDS)
 
+    # --- Effective Permissions helper ---------------------------------------
+    async def get_user_effective_permissions(self, user_id: uuid.UUID) -> set[str]:
+        """Fetch user's effective permissions with caching and immediate invalidation support."""
+        cache_key = CacheBackend.build_key("user_perms", str(user_id))
+        cached = await self.cache.get(cache_key)
+        if cached is not None and isinstance(cached, list):
+            return set(cached)
+
+        perms = await self.role_repository.get_permission_codes_for_user(user_id)
+        await self.cache.set(cache_key, list(perms), ttl_seconds=3600)
+        return perms
+
     # --- Login --------------------------------------------------------------
     async def login(self, *, identifier: str, password: str, context: LoginContext) -> tuple[User, str, str]:
         """
         Verify credentials and, on success, issue a new access/refresh token pair.
-
-        Returns ``(user, access_token, refresh_token)``. Raises
-        :class:`UnauthorizedException` for every failure mode (unknown user,
-        bad password, locked/inactive account, rate limited) with a
-        deliberately generic message so failed-login responses don't leak
-        which part of the credential was wrong.
         """
         await self._check_rate_limit(identifier)
 
@@ -118,7 +123,7 @@ class AuthService:
             await self._record_rate_limit_attempt(identifier)
             raise UnauthorizedException("Invalid username/email or password.")
 
-        if user.is_locked:
+        if user.is_locked or user.status == UserStatus.LOCKED:
             raise UnauthorizedException(
                 "This account is temporarily locked due to repeated failed login attempts. "
                 "Please try again later or contact an administrator."
@@ -142,15 +147,16 @@ class AuthService:
         return user, access_token, refresh_token
 
     async def _register_failed_attempt(self, user: User) -> None:
-        """Increment a user's failed-login counter, locking the account if the threshold is hit."""
+        """Increment a user's failed-login counter, locking the account if threshold is hit."""
         user.failed_login_count += 1
         if user.failed_login_count >= settings.MAX_FAILED_LOGIN_ATTEMPTS:
             user.locked_until = datetime.now(timezone.utc) + timedelta(minutes=settings.ACCOUNT_LOCK_MINUTES)
+            user.status = UserStatus.LOCKED
         await self.user_repository.update(user)
 
     async def _issue_token_pair(self, user: User, context: LoginContext) -> tuple[str, str]:
         """Issue a fresh access + refresh token pair and persist the new session row."""
-        permissions = await self.role_repository.get_permission_codes_for_user(user.id)
+        permissions = await self.get_user_effective_permissions(user.id)
         access = create_access_token(user.id, permissions=list(permissions))
         refresh = create_refresh_token(user.id)
 
@@ -167,13 +173,7 @@ class AuthService:
 
     # --- Refresh --------------------------------------------------------------
     async def refresh(self, *, refresh_token: str, context: LoginContext) -> tuple[str, str]:
-        """
-        Rotate a refresh token: verify it, revoke it, and issue a brand new pair.
-
-        Rotation-on-use means a stolen-and-replayed refresh token is only
-        usable once before its session is revoked, limiting the blast
-        radius of a leaked refresh token.
-        """
+        """Rotate a refresh token: verify it, revoke it, and issue a brand new pair."""
         try:
             payload = decode_token(refresh_token, expected_type=TokenType.REFRESH)
         except InvalidTokenError as exc:
@@ -218,7 +218,7 @@ class AuthService:
         try:
             payload = decode_token(refresh_token, expected_type=TokenType.REFRESH)
         except InvalidTokenError:
-            return  # Access token is already invalidated; a malformed refresh token is not fatal here.
+            return
 
         session = await self.session_repository.get_by_refresh_jti(payload["jti"])
         if session is not None and session.is_active:
@@ -232,7 +232,7 @@ class AuthService:
             )
 
     async def force_logout_user(self, user_id: uuid.UUID, *, reason: str = "admin_force_logout") -> int:
-        """Revoke every active session for a user (admin action or security response)."""
+        """Revoke every active session for a user."""
         return await self.session_repository.revoke_all_for_user(user_id, reason=reason)
 
     # --- Sessions -----------------------------------------------------------------
@@ -242,15 +242,20 @@ class AuthService:
 
     # --- Password management --------------------------------------------------------
     async def change_password(self, user: User, *, current_password: str, new_password: str) -> None:
-        """Change a user's own password, verifying the current password and history/strength policy."""
+        """Change a user's own password, verifying current password and strength policy."""
         if not verify_password(current_password, user.password_hash):
             raise UnauthorizedException("Current password is incorrect.")
-        await self._set_password(user, new_password)
+        await self._set_password(user, new_password, require_change_on_next_login=False)
+        if user.status == UserStatus.PASSWORD_CHANGE_REQUIRED:
+            user.status = UserStatus.ACTIVE
+            await self.user_repository.update(user)
         await self.force_logout_user(user.id, reason="password_changed")
 
     async def admin_reset_password(self, user: User, new_password: str) -> None:
-        """Admin-driven password reset (see ``app.users.service`` for temp-password generation)."""
+        """Admin-driven password reset."""
         await self._set_password(user, new_password, require_change_on_next_login=True)
+        user.status = UserStatus.PASSWORD_CHANGE_REQUIRED
+        await self.user_repository.update(user)
         await self.force_logout_user(user.id, reason="password_reset")
 
     async def _set_password(
@@ -276,30 +281,22 @@ class AuthService:
         user.password_hash = new_hash
         user.password_changed_at = datetime.now(timezone.utc)
         user.must_change_password = require_change_on_next_login
+        if require_change_on_next_login:
+            user.status = UserStatus.PASSWORD_CHANGE_REQUIRED
         await self.user_repository.update(user)
 
     async def forgot_password(self, identifier: str) -> None:
-        """
-        Record a self-service password-reset request.
-
-        Per the "admin-generated reset" security model, this endpoint never
-        emails or discloses a token itself -- it only flags the account so
-        an administrator can action ``POST /users/{id}/reset-password``.
-        The response is identical whether or not the identifier matches a
-        real account, to avoid leaking which usernames/emails exist.
-        """
+        """Record a self-service password-reset request."""
         user = await self.user_repository.get_by_username_or_email(identifier)
         if user is None:
             return
-        # Flagging via must_change_password ensures that even if an admin resets the
-        # password out-of-band without using the reset-password endpoint, the user is
-        # still forced to change it on next login.
         user.must_change_password = True
+        user.status = UserStatus.PASSWORD_CHANGE_REQUIRED
         await self.user_repository.update(user)
 
-    # --- Access-token verification (used by the get_current_user dependency) ---
+    # --- Access-token verification (used by get_current_user dependency) ---
     async def verify_access_token(self, token: str) -> CurrentUser:
-        """Decode and verify an access token, checking the blacklist, and return a :class:`CurrentUser`."""
+        """Decode and verify an access token, checking blacklist and fetching live effective permissions."""
         try:
             payload = decode_token(token, expected_type=TokenType.ACCESS)
         except InvalidTokenError as exc:
@@ -308,15 +305,20 @@ class AuthService:
         if await self.token_blacklist_repository.is_blacklisted(payload["jti"]):
             raise UnauthorizedException("This access token has been revoked.")
 
-        user = await self.user_repository.get_by_id(uuid.UUID(payload["sub"]))
+        user_id = uuid.UUID(payload["sub"])
+        user = await self.user_repository.get_by_id(user_id)
         if user is None:
             raise UnauthorizedException("User account no longer exists.")
         if not user.can_login:
             raise ForbiddenException("This account is not active.")
 
+        # Dynamically fetch effective permissions (backed by cache with instant invalidation)
+        live_permissions = await self.get_user_effective_permissions(user_id)
+
         return CurrentUser(
             id=user.id,
             username=user.username,
-            permissions=set(payload.get("perms", [])),
+            permissions=live_permissions,
             access_token_jti=payload["jti"],
+            must_change_password=user.must_change_password,
         )

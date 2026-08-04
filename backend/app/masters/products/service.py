@@ -23,6 +23,7 @@ from app.masters.import_export import (
     ImportSummary,
     build_csv_export,
     build_excel_export,
+    model_to_dict,
     parse_rows_from_file,
     run_import,
 )
@@ -120,8 +121,13 @@ class ProductService:
     async def create(self, **field_values: Any) -> Product:
         """Create a new product, validating code uniqueness and every foreign-key reference."""
         product_code = field_values.get("product_code")
-        if product_code and await self.repository.code_exists(product_code):
-            raise ConflictException(f"Product code {product_code!r} is already in use.")
+        if product_code:
+            existing = await self.repository.get_by_code(product_code)
+            if existing is not None:
+                raise ConflictException(
+                    f"Product code {product_code!r} is already in use.",
+                    details={"existing": model_to_dict(existing)},
+                )
         await self._validate_references(field_values)
 
         # Handle Tally product name aliases
@@ -154,8 +160,13 @@ class ProductService:
         """Update an existing product, validating code uniqueness and every foreign-key reference."""
         product = await self.get_by_id_or_raise(product_id)
         product_code = field_values.get("product_code")
-        if product_code and await self.repository.code_exists(product_code, exclude_id=product_id):
-            raise ConflictException(f"Product code {product_code!r} is already in use.")
+        if product_code:
+            existing = await self.repository.get_by_code(product_code)
+            if existing is not None and existing.id != product_id:
+                raise ConflictException(
+                    f"Product code {product_code!r} is already in use.",
+                    details={"existing": model_to_dict(existing)},
+                )
 
         merged = {
             "category_id": field_values.get("category_id", product.category_id),
@@ -274,8 +285,11 @@ class ProductService:
                     field_values["secondary_uom_id"] = secondary_uom.id
 
             product_code = field_values["product_code"]
-            if await self.repository.code_exists(product_code):
-                raise ValueError(f"Product code {product_code!r} already exists.")
+            existing = await self.repository.get_by_code(product_code)
+            if existing is not None:
+                raise ConflictException(
+                    f"Product code {product_code!r} already exists.", details={"existing": model_to_dict(existing)}
+                )
             return await self.repository.create(**field_values)
 
         summary = await run_import(rows, row_validator=validate_product_row, row_creator=_create)

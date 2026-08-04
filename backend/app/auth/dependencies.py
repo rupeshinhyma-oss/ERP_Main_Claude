@@ -43,7 +43,18 @@ def get_auth_service(
     )
 
 
+from app.core.exceptions import ForbiddenException
+
+_ALLOWED_PATHS_WHEN_MUST_CHANGE_PASSWORD = {
+    "/api/v1/auth/change-password",
+    "/api/v1/auth/logout",
+    "/api/v1/auth/profile",
+    "/api/v1/auth/refresh",
+}
+
+
 async def get_current_user(
+    request: Request,
     credentials: HTTPAuthorizationCredentials = Depends(_bearer_scheme),
     auth_service: AuthService = Depends(get_auth_service),
 ) -> CurrentUser:
@@ -53,7 +64,11 @@ async def get_current_user(
     This is the single dependency every protected route should depend on
     (directly, or transitively via ``require_permission()``).
     """
-    return await auth_service.verify_access_token(credentials.credentials)
+    user = await auth_service.verify_access_token(credentials.credentials)
+    path = request.url.path.rstrip("/")
+    if user.must_change_password and path not in _ALLOWED_PATHS_WHEN_MUST_CHANGE_PASSWORD:
+        raise ForbiddenException("Password change required. Please change your password to continue.")
+    return user
 
 
 def get_client_ip(request: Request) -> str | None:

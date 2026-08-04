@@ -5,6 +5,27 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Employee — Inhyma ERP</title>
   <link rel="stylesheet" href="css/style.css" />
+  <style>
+    .eye-toggle-btn {
+      border: none;
+      background: none;
+      cursor: pointer;
+      font-size: 15px;
+      padding: 4px 6px;
+      line-height: 1;
+      border-radius: var(--radius-sm);
+      opacity: 0.7;
+    }
+    .eye-toggle-btn:hover { opacity: 1; background: var(--color-bg); }
+    .password-cell {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-family: monospace;
+      font-size: 13px;
+    }
+    .password-cell .password-dots { color: var(--color-muted); }
+  </style>
 </head>
 <body>
   <div class="app-shell">
@@ -91,6 +112,18 @@
           <label>&nbsp;</label>
           <button class="btn" id="linkUserBtn">Link</button>
         </div>
+
+        <div class="field" id="passwordField" style="display:none;">
+          <label>Password</label>
+          <div class="password-cell" id="passwordCell">
+            <span class="password-dots" id="passwordDisplay">••••••••</span>
+            <button type="button" class="eye-toggle-btn" id="passwordRevealBtn" title="Show password">👁</button>
+          </div>
+        </div>
+        <div class="field" id="passwordResetBtnField" style="display:none;">
+          <label>&nbsp;</label>
+          <button class="btn" id="openPasswordResetBtn">Reset Password</button>
+        </div>
       </div>
 
       <div class="form-actions">
@@ -98,6 +131,31 @@
         <button class="btn" id="reactivateBtn">Reactivate</button>
       </div>
     </div>
+
+  <!-- ============================= PASSWORD RESET MODAL ============================= -->
+  <div class="modal-backdrop" id="passwordResetBackdrop" style="display:none;">
+    <div class="modal-card" style="max-width: 440px;">
+      <div class="modal-header">
+        <h2>Reset Password</h2>
+        <button class="modal-close" id="passwordResetCloseBtn">&times;</button>
+      </div>
+      <div id="passwordResetBanner"></div>
+      <form id="passwordResetForm">
+        <div class="field">
+          <label for="reset_password">New Password <span style="color:var(--color-danger)">*</span></label>
+          <div style="position:relative;">
+            <input id="reset_password" type="password" required maxlength="255" style="padding-right:40px;" autocomplete="new-password" />
+            <button type="button" class="eye-toggle-btn" id="resetPasswordToggle" title="Show password" style="position:absolute; right:6px; top:50%; transform:translateY(-50%);">👁</button>
+          </div>
+          <span class="hint">Min 10 characters, with uppercase, lowercase, a digit, and a special character.</span>
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="btn btn-primary">Reset Password</button>
+          <button type="button" class="btn" id="passwordResetCancelBtn">Cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
 
   <script src="js/api.js"></script>
   <script src="js/nav.js"></script>
@@ -114,6 +172,10 @@
     const canUpdate = Auth.hasPermission("employee.update");
     const canDelete = Auth.hasPermission("employee.delete");
     const canReadUsers = Auth.hasPermission("user.read");
+    // Same permission the backend's reveal/reset endpoints require (see
+    // app.members.routes) -- the UI never offers an action that would just 403.
+    const canManagePasswords = Auth.hasPermission("settings.manage");
+    let currentLinkedUserId = null;
 
     document.getElementById("editBtn").href = `./employee-form.html?id=${employeeId}`;
     if (!canUpdate) document.getElementById("editBtn").style.display = "none";
@@ -169,6 +231,18 @@
         document.getElementById("linkUserBtnField").style.display = "none";
       }
 
+      currentLinkedUserId = e.user_id || null;
+      const showPasswordPanel = Boolean(currentLinkedUserId) && canManagePasswords;
+      document.getElementById("passwordField").style.display = showPasswordPanel ? "block" : "none";
+      document.getElementById("passwordResetBtnField").style.display = showPasswordPanel ? "block" : "none";
+      // Re-collapse any previously-revealed password whenever the page
+      // (re)loads -- e.g. after a reset -- so a stale plaintext value never
+      // lingers on screen after the underlying password has changed.
+      const revealBtn = document.getElementById("passwordRevealBtn");
+      document.getElementById("passwordDisplay").textContent = "••••••••";
+      revealBtn.setAttribute("data-revealed", "false");
+      revealBtn.title = "Show password";
+
       return e;
     }
 
@@ -212,7 +286,12 @@
 
       if (canReadUsers && results[3] && results[3].status === "fulfilled") {
         const userSelect = document.getElementById("linkUser");
-        for (const u of results[3].value.data) {
+        const usersList = Array.isArray(results[3].value.data)
+          ? results[3].value.data
+          : (results[3].value.data && Array.isArray(results[3].value.data.items))
+            ? results[3].value.data.items
+            : [];
+        for (const u of usersList) {
           const opt = document.createElement("option");
           opt.value = u.id;
           opt.textContent = `${u.username} (${u.email})`;
@@ -253,6 +332,69 @@
         banner.innerHTML = '<div class="success-banner">Manager updated.</div>';
         await loadDetail();
       } catch (err) { showError(banner, err); }
+    });
+
+    document.getElementById("passwordRevealBtn").addEventListener("click", async () => {
+      const revealBtn = document.getElementById("passwordRevealBtn");
+      const display = document.getElementById("passwordDisplay");
+      const isRevealed = revealBtn.getAttribute("data-revealed") === "true";
+      if (isRevealed) {
+        display.textContent = "••••••••";
+        revealBtn.setAttribute("data-revealed", "false");
+        revealBtn.title = "Show password";
+        return;
+      }
+      if (!currentLinkedUserId) return;
+      try {
+        const { data } = await apiGet(`/members/${currentLinkedUserId}/password`);
+        display.textContent = data.password;
+        revealBtn.setAttribute("data-revealed", "true");
+        revealBtn.title = "Hide password";
+      } catch (err) {
+        showError(banner, err);
+      }
+    });
+
+    function openPasswordResetModal() {
+      document.getElementById("passwordResetForm").reset();
+      document.getElementById("passwordResetBanner").innerHTML = "";
+      openModalShell(document.getElementById("passwordResetBackdrop"));
+    }
+    function closePasswordResetModal() {
+      closeModalShell(document.getElementById("passwordResetBackdrop"));
+    }
+
+    document.getElementById("openPasswordResetBtn").addEventListener("click", openPasswordResetModal);
+    document.getElementById("passwordResetCloseBtn").addEventListener("click", closePasswordResetModal);
+    document.getElementById("passwordResetCancelBtn").addEventListener("click", closePasswordResetModal);
+    document.getElementById("passwordResetBackdrop").addEventListener("click", (e) => {
+      if (e.target === document.getElementById("passwordResetBackdrop")) closePasswordResetModal();
+    });
+
+    (() => {
+      const input = document.getElementById("reset_password");
+      const toggleBtn = document.getElementById("resetPasswordToggle");
+      toggleBtn.addEventListener("click", () => {
+        const showing = input.type === "text";
+        input.type = showing ? "password" : "text";
+        toggleBtn.title = showing ? "Show password" : "Hide password";
+      });
+    })();
+
+    document.getElementById("passwordResetForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const resetBanner = document.getElementById("passwordResetBanner");
+      resetBanner.innerHTML = "";
+      const newPassword = document.getElementById("reset_password").value;
+      if (!currentLinkedUserId) return;
+      try {
+        await apiPatch(`/members/${currentLinkedUserId}/password`, { password: newPassword });
+        closePasswordResetModal();
+        banner.innerHTML = '<div class="success-banner">Password reset.</div>';
+        await loadDetail(); // re-collapse any previously-revealed password
+      } catch (err) {
+        showError(resetBanner, err);
+      }
     });
 
     document.getElementById("linkUserBtn").addEventListener("click", async () => {

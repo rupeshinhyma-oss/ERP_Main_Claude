@@ -37,37 +37,38 @@ const NAV_SECTIONS = [
   {
     label: "Organization",
     items: [
-      { key: "teams", label: "Teams", href: "./teams.html", icon: "users" },
+      { key: "teams", label: "Teams", href: "./teams.html", icon: "users", permission: "employee.view" },
     ],
   },
   {
     label: "Suppliers",
     items: [
-      { key: "suppliers", label: "Supplier Profiles", href: "./suppliers.html", icon: "truck" },
+      { key: "suppliers", label: "Supplier Profiles", href: "./suppliers.html", icon: "truck", permission: "supplier.view" },
     ],
   },
   {
     label: "Configurations",
     items: [
-      { key: "masters-countries", label: "Countries", href: "./masters-countries.html", icon: "globe" },
-      { key: "masters-states", label: "States", href: "./masters-states.html", icon: "map" },
-      { key: "masters-cities", label: "Cities", href: "./masters-cities.html", icon: "pin" },
-      { key: "masters-currencies", label: "Currencies", href: "./masters-currencies.html", icon: "coins" },
-      { key: "masters-uom", label: "Units of Measurement", href: "./masters-uom.html", icon: "ruler" },
-      { key: "masters-hsn", label: "HSN Codes", href: "./masters-hsn.html", icon: "tag" },
-      { key: "masters-brands", label: "Brands", href: "./masters-brands.html", icon: "award" },
-      { key: "masters-categories", label: "Categories", href: "./masters-categories.html", icon: "layers" },
-      { key: "masters-subcategories", label: "Sub-Categories", href: "./masters-subcategories.html", icon: "layersplus" },
-      { key: "masters-products", label: "Products", href: "./masters-products.html", icon: "box" },
+      { key: "masters-countries", label: "Countries", href: "./masters-countries.html", icon: "globe", permission: "country.view" },
+      { key: "masters-states", label: "States", href: "./masters-states.html", icon: "map", permission: "state.view" },
+      { key: "masters-cities", label: "Cities", href: "./masters-cities.html", icon: "pin", permission: "city.view" },
+      { key: "masters-currencies", label: "Currencies", href: "./masters-currencies.html", icon: "coins", permission: "currency.view" },
+      { key: "masters-uom", label: "Units of Measurement", href: "./masters-uom.html", icon: "ruler", permission: "uom.view" },
+      { key: "masters-hsn", label: "HSN Codes", href: "./masters-hsn.html", icon: "tag", permission: "hsn.view" },
+      { key: "masters-brands", label: "Brands", href: "./masters-brands.html", icon: "award", permission: "brand.view" },
+      { key: "masters-categories", label: "Categories", href: "./masters-categories.html", icon: "layers", permission: "category.view" },
+      { key: "masters-subcategories", label: "Sub-Categories", href: "./masters-subcategories.html", icon: "layersplus", permission: "subcategory.view" },
+      { key: "masters-products", label: "Products", href: "./masters-products.html", icon: "box", permission: "product.view" },
     ],
   },
   {
     label: "Settings",
     items: [
-      { key: "organization", label: "Organization Settings", href: "./organization.html", icon: "building" },
+      { key: "organization", label: "Organization Settings", href: "./organization.html", icon: "building", permission: "organization.manage" },
       { key: "users", label: "User Accounts & Passwords", href: "./users.html", icon: "users" },
-      { key: "audit", label: "Audit Log", href: "./audit.html", icon: "clock" },
-      { key: "rbac", label: "Roles & Permissions", href: "./rbac.html", icon: "shield" },
+      { key: "audit", label: "Audit Log", href: "./audit.html", icon: "clock", permission: "audit.view" },
+      { key: "rbac", label: "Roles & Permissions", href: "./rbac.html", icon: "shield", permission: "settings.manage" },
+      { key: "effective-permissions", label: "Effective Permissions", href: "./effective-permissions.html", icon: "shield", permission: "settings.manage" },
     ],
   },
 ];
@@ -90,6 +91,7 @@ const PAGE_TITLES = {
   suppliers: "Supplier Profiles",
   audit: "Audit Log",
   rbac: "Roles & Permissions",
+  "effective-permissions": "Effective Permissions",
 };
 
 function initials(name) {
@@ -99,13 +101,6 @@ function initials(name) {
 
 const DEFAULT_BRAND_NAME = "ERP Admin";
 
-/**
- * Resolve the sidebar's brand text from the Organization Settings' Company
- * Name, instead of a hardcoded product name. Cached in sessionStorage so
- * every page navigation doesn't re-fetch it, and fails gracefully (falls
- * back to a generic name) for users without the organization.manage
- * permission or before an organization profile has been created yet.
- */
 async function resolveBrandName() {
   const cached = sessionStorage.getItem("erp_org_company_name");
   if (cached) return cached;
@@ -115,25 +110,102 @@ async function resolveBrandName() {
     sessionStorage.setItem("erp_org_company_name", name);
     return name;
   } catch (e) {
-    return DEFAULT_BRAND_NAME; // not created yet, or this user lacks organization.manage -- not an error to surface here
+    return DEFAULT_BRAND_NAME;
   }
 }
 
-/** Call after saving Organization Settings so the sidebar picks up a renamed company immediately. */
 function invalidateBrandNameCache() {
   sessionStorage.removeItem("erp_org_company_name");
+}
+
+function renderForcePasswordChangeModal() {
+  if (document.getElementById("forcePasswordModal")) return;
+  const overlay = document.createElement("div");
+  overlay.id = "forcePasswordModal";
+  overlay.style.cssText =
+    "position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.75);z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px;";
+  overlay.innerHTML = `
+    <div style="background:#fff;border-radius:12px;padding:32px;max-width:440px;width:100%;box-shadow:0 20px 25px -5px rgba(0,0,0,0.1);">
+      <h2 style="margin:0 0 8px 0;font-size:20px;font-weight:600;color:#1a202c;">Password Change Required</h2>
+      <p style="margin:0 0 20px 0;font-size:14px;color:#4a5568;">Your account requires a password change before continuing to the ERP.</p>
+      <div id="forcePasswordError" style="margin-bottom:12px;"></div>
+      <form id="forcePasswordForm">
+        <div style="margin-bottom:16px;">
+          <label style="display:block;font-size:13px;font-weight:500;margin-bottom:6px;color:#2d3748;">Current / Temporary Password</label>
+          <input type="password" id="forceCurrentPwd" required style="width:100%;padding:10px 12px;border:1px solid #cbd5e0;border-radius:6px;font-size:14px;" />
+        </div>
+        <div style="margin-bottom:16px;">
+          <label style="display:block;font-size:13px;font-weight:500;margin-bottom:6px;color:#2d3748;">New Password</label>
+          <input type="password" id="forceNewPwd" required style="width:100%;padding:10px 12px;border:1px solid #cbd5e0;border-radius:6px;font-size:14px;" />
+        </div>
+        <div style="margin-bottom:24px;">
+          <label style="display:block;font-size:13px;font-weight:500;margin-bottom:6px;color:#2d3748;">Confirm New Password</label>
+          <input type="password" id="forceConfirmPwd" required style="width:100%;padding:10px 12px;border:1px solid #cbd5e0;border-radius:6px;font-size:14px;" />
+        </div>
+        <button type="submit" id="forceSubmitBtn" class="btn btn-primary" style="width:100%;padding:12px;font-size:14px;font-weight:600;border-radius:6px;cursor:pointer;">Update Password & Continue</button>
+      </form>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  const form = document.getElementById("forcePasswordForm");
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const current_password = document.getElementById("forceCurrentPwd").value;
+    const new_password = document.getElementById("forceNewPwd").value;
+    const confirm_password = document.getElementById("forceConfirmPwd").value;
+    const errContainer = document.getElementById("forcePasswordError");
+    errContainer.innerHTML = "";
+    if (new_password !== confirm_password) {
+      showError(errContainer, new Error("New password and confirm password do not match."));
+      return;
+    }
+    const btn = document.getElementById("forceSubmitBtn");
+    btn.disabled = true;
+    btn.textContent = "Updating...";
+    try {
+      await apiPost("/auth/change-password", { current_password, new_password });
+      const profile = Auth.getProfile();
+      if (profile) {
+        profile.must_change_password = false;
+        Auth.updateProfile(profile);
+      }
+      overlay.remove();
+      window.location.reload();
+    } catch (err) {
+      btn.disabled = false;
+      btn.textContent = "Update Password & Continue";
+      showError(errContainer, err);
+    }
+  });
 }
 
 function renderShell(activeKey) {
   Auth.requireLogin();
 
   const profile = Auth.getProfile();
+
+  if (profile && profile.must_change_password) {
+    renderForcePasswordChangeModal();
+  }
+
+  // Check page level access permission
+  const currentNavItem = NAV_SECTIONS.flatMap((s) => s.items).find((i) => i.key === activeKey);
+  let accessDenied = false;
+  if (currentNavItem && currentNavItem.permission && !Auth.hasPermission(currentNavItem.permission)) {
+    accessDenied = true;
+  }
+
   const sidebarMount = document.getElementById("sidebarMount");
   const topbarMount = document.getElementById("topbarMount");
 
   if (sidebarMount) {
     const groups = NAV_SECTIONS.map((section) => {
-      const items = section.items
+      const visibleItems = section.items.filter(
+        (item) => !item.permission || Auth.hasPermission(item.permission)
+      );
+      if (visibleItems.length === 0) return "";
+      const items = visibleItems
         .map(
           (item) => `
         <a href="${item.href}" class="nav-item ${item.key === activeKey ? "active" : ""}">
@@ -150,6 +222,11 @@ function renderShell(activeKey) {
     }).join("");
 
     const displayName = profile ? escapeHtml(profile.username) : "User";
+    const displayRole = profile && Array.isArray(profile.roles) && profile.roles.includes("super_admin")
+      ? "Super Administrator"
+      : profile && Array.isArray(profile.roles) && profile.roles.includes("admin")
+      ? "Administrator"
+      : "User";
 
     sidebarMount.outerHTML = `
       <aside class="sidebar" id="sidebarMount">
@@ -163,15 +240,12 @@ function renderShell(activeKey) {
             <div class="avatar">${initials(displayName)}</div>
             <div class="user-meta">
               <div class="user-name">${displayName}</div>
-              <div class="user-role">Administrator</div>
+              <div class="user-role">${displayRole}</div>
             </div>
           </div>
         </div>
       </aside>`;
 
-    // Fill in the real company name once resolved -- rendered synchronously
-    // above with a generic fallback first so the sidebar never waits on a
-    // network round-trip before appearing.
     resolveBrandName().then((name) => {
       const brandTextEl = document.getElementById("sidebarBrandText");
       const logoMarkEl = document.getElementById("sidebarLogoMark");
@@ -185,9 +259,7 @@ function renderShell(activeKey) {
         if (!confirm("Log out?")) return;
         try {
           await apiPost("/auth/logout", { refresh_token: Auth.getRefreshToken() });
-        } catch (e) {
-          /* ignore -- clearing session locally regardless */
-        }
+        } catch (e) {}
         Auth.clear();
         window.location.href = "./login.html";
       });
@@ -214,17 +286,37 @@ function renderShell(activeKey) {
       logoutBtn.addEventListener("click", async () => {
         try {
           await apiPost("/auth/logout", { refresh_token: Auth.getRefreshToken() });
-        } catch (e) {
-          /* ignore */
-        }
+        } catch (e) {}
         Auth.clear();
         window.location.href = "./login.html";
       });
     }
   }
+
+  if (accessDenied) {
+    setTimeout(() => {
+      const mainEl = document.querySelector(".app-main") || document.querySelector("main") || document.body;
+      if (mainEl) {
+        mainEl.innerHTML = `
+          <div style="max-width: 560px; margin: 80px auto; padding: 40px; text-align: center; background: #ffffff; border-radius: 12px; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.1); border: 1px solid #e2e8f0;">
+            <div style="font-size: 56px; margin-bottom: 16px;">🚫</div>
+            <h2 style="font-size: 22px; font-weight: 700; color: #1a202c; margin-bottom: 8px;">Access Restricted</h2>
+            <p style="color: #4a5568; font-size: 15px; line-height: 1.5; margin-bottom: 24px;">
+              You do not have permission to access the <strong>${PAGE_TITLES[activeKey] || activeKey}</strong> module.
+            </p>
+            <a href="./index.html" class="btn btn-primary" style="display: inline-block; padding: 10px 24px; text-decoration: none; border-radius: 6px; font-weight: 600; background-color: #3182ce; color: #ffffff;">Return to Dashboard</a>
+          </div>
+        `;
+      }
+    }, 0);
+  }
+
+  // Apply button-level permission hiding across all action buttons in the DOM
+  setTimeout(() => {
+    Auth.applyPermissionVisibility();
+  }, 50);
 }
 
-// Backwards-compatible alias: older pages call renderNav(key) directly.
 function renderNav(activeKey) {
   renderShell(activeKey);
 }

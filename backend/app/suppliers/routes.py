@@ -111,6 +111,7 @@ async def _to_supplier_read(service: SupplierService, supplier) -> dict:
         "emails": [e.email for e in supplier.emails],
         "category_ids": await service.get_category_ids(supplier.id),
         "sub_category_ids": await service.get_sub_category_ids(supplier.id),
+        "product_ids": await service.get_product_ids(supplier.id),
         "contacts": [SupplierContactRead.model_validate(c) for c in supplier.contacts],
     }
     return SupplierRead.model_validate(payload).model_dump(mode="json")
@@ -121,6 +122,7 @@ async def _to_list_item(service: SupplierService, supplier) -> dict:
     data = SupplierListItemRead.model_validate(supplier).model_dump(mode="json")
     data["category_ids"] = [str(cid) for cid in await service.get_category_ids(supplier.id)]
     data["sub_category_ids"] = [str(cid) for cid in await service.get_sub_category_ids(supplier.id)]
+    data["product_ids"] = [str(pid) for pid in await service.get_product_ids(supplier.id)]
     return data
 
 
@@ -158,6 +160,7 @@ async def list_suppliers(
     query: ListQueryParams = Depends(get_list_query_params),
     category_id: uuid.UUID | None = None,
     sub_category_id: uuid.UUID | None = None,
+    product_id: uuid.UUID | None = None,
     service: SupplierService = Depends(get_supplier_service),
     _current_user: CurrentUser = Depends(require_permission("supplier.read")),
 ) -> dict:
@@ -168,9 +171,13 @@ async def list_suppliers(
     ``country_id``, ``state_id``, ``city_id``, ``supplier_type``,
     ``supplier_grade``, ``current_status``, ``potential``,
     ``visited_factory_office``, ``is_active`` (dynamic exact-match filters),
-    plus ``category_id``/``sub_category_id`` (many-to-many, handled explicitly).
+    plus ``category_id``/``sub_category_id``/``product_id`` (many-to-many,
+    handled explicitly) -- ``product_id`` answers "which suppliers supply
+    this exact SKU?".
     """
-    suppliers, total = await service.list_paginated(query, category_id=category_id, sub_category_id=sub_category_id)
+    suppliers, total = await service.list_paginated(
+        query, category_id=category_id, sub_category_id=sub_category_id, product_id=product_id
+    )
     meta = PageMeta.build(page=query.page.page, page_size=query.page.page_size, total_records=total).as_meta_dict()
     data = [await _to_list_item(service, s) for s in suppliers]
     return build_success_response(data=data, request_id=request.state.request_id, meta=meta)

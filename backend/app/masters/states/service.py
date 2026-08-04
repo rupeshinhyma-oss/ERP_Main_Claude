@@ -20,6 +20,7 @@ from app.masters.import_export import (
     ImportSummary,
     build_csv_export,
     build_excel_export,
+    model_to_dict,
     parse_rows_from_file,
     run_import,
 )
@@ -80,8 +81,13 @@ class StateService:
         country_id = field_values["country_id"]
         name = field_values.get("name")
         await self._validate_country(country_id)
-        if name and await self.repository.name_exists_in_country(country_id, name):
-            raise ConflictException(f"State name {name!r} already exists in this country.")
+        if name:
+            existing = await self.repository.get_by_name_in_country(country_id, name)
+            if existing is not None:
+                raise ConflictException(
+                    f"State name {name!r} already exists in this country.",
+                    details={"existing": model_to_dict(existing)},
+                )
 
         state = await self.repository.create(**field_values)
         await self._invalidate_cache()
@@ -94,8 +100,13 @@ class StateService:
         name = field_values.get("name")
         if field_values.get("country_id") is not None:
             await self._validate_country(country_id)
-        if name and await self.repository.name_exists_in_country(country_id, name, exclude_id=state_id):
-            raise ConflictException(f"State name {name!r} already exists in this country.")
+        if name:
+            existing = await self.repository.get_by_name_in_country(country_id, name, exclude_id=state_id)
+            if existing is not None:
+                raise ConflictException(
+                    f"State name {name!r} already exists in this country.",
+                    details={"existing": model_to_dict(existing)},
+                )
 
         changes = {k: v for k, v in field_values.items() if v is not None}
         if changes:
@@ -134,8 +145,12 @@ class StateService:
                 raise ValueError(f"Country code {country_code!r} does not exist.")
             field_values["country_id"] = country.id
             name = field_values["name"]
-            if await self.repository.name_exists_in_country(country.id, name):
-                raise ValueError(f"State {name!r} already exists in country {country_code!r}.")
+            existing = await self.repository.get_by_name_in_country(country.id, name)
+            if existing is not None:
+                raise ConflictException(
+                    f"State {name!r} already exists in country {country_code!r}.",
+                    details={"existing": model_to_dict(existing)},
+                )
             return await self.repository.create(**field_values)
 
         summary = await run_import(rows, row_validator=validate_state_row, row_creator=_create)

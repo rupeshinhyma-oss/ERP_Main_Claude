@@ -36,6 +36,16 @@ class StateRepository(BaseRepository[State]):
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none() is not None
 
+    async def get_by_name_in_country(
+        self, country_id: uuid.UUID, name: str, *, exclude_id: uuid.UUID | None = None
+    ) -> State | None:
+        """Fetch the state in this country with this name, if one exists (for duplicate-compare)."""
+        stmt = self._base_select().where(State.country_id == country_id, State.name == name)
+        if exclude_id is not None:
+            stmt = stmt.where(State.id != exclude_id)
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+
     async def list_all(self) -> list[State]:
         """Return every non-deleted state, ordered by name."""
         stmt = self._base_select().order_by(State.name)

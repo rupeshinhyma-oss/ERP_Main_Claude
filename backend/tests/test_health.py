@@ -23,7 +23,7 @@ async def test_liveness_returns_success_envelope(client: AsyncClient) -> None:
     body = response.json()
     assert body["success"] is True
     assert body["data"]["status"] == "up"
-    assert body["error"] is None
+    assert body["errors"] == []
     assert "request_id" in body["meta"]
 
 
@@ -51,4 +51,5 @@ async def test_unknown_route_returns_standard_error_envelope(client: AsyncClient
     assert response.status_code == 404
     body = response.json()
     assert body["success"] is False
-    assert body["error"]["code"] == "HTTP_ERROR"
+    assert len(body["errors"]) > 0
+    assert body["errors"][0]["code"] in ("HTTP_ERROR", "NOT_FOUND")

@@ -1,5 +1,0 @@
-product_code,product_name,category_code,sub_category_code,brand_code,hsn_code,uom_code,length,width,height,weight,status,specification
-DB-TEST-01,FR900 Continuous Band Sealer,MAC,SUB-BAND,BR-INH,84223000,PCS,50,30,40,25.5,active,Continuous band sealing machine for foil and plastic bags
-DB-TEST-02,Citric Acid Anhydrous Food Grade,ING,SUB-CITRIC,BR-INH,29181400,KG,0,0,0,25.0,active,Pure Citric Acid Anhydrous 99.5% mesh 8-80
-DB-TEST-03,Caustic Soda Flakes 99%,CHM,SUB-CAUSTIC,BR-INH,28151100,KG,0,0,0,25.0,active,Industrial Grade Sodium Hydroxide Flakes
-DB-TEST-04,Centrifugal Water Pump 2HP,PMP,,BR-INH,84137090,PCS,40,25,35,18.0,active,High efficiency centrifugal pump for liquid transfer

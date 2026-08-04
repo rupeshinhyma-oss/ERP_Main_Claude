@@ -46,9 +46,18 @@ class ProductRepository(BaseRepository[Product]):
         """
         Return True if any other module references this product.
 
-        No consumers exist yet (Products is the leaf/richest master here);
-        this is a documented extension point for future modules
-        (Inventory, Sales, Purchase) to check against before allowing
-        deletion.
+        Products is the central item master every other module keys off
+        of rather than duplicating (see this module's docstring), so this
+        check grows as new modules link to Product by foreign key.
+        Currently checks: Suppliers (``supplier_product_links``). Future
+        modules (Inventory, Sales, Purchase) should extend this same
+        method rather than adding their own separate "can I delete this
+        product" check.
         """
-        return False
+        from sqlalchemy import exists, select
+
+        from app.suppliers.models import SupplierProductLink
+
+        stmt = select(exists().where(SupplierProductLink.product_id == product_id))
+        result = await self.session.execute(stmt)
+        return bool(result.scalar())

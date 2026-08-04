@@ -35,7 +35,7 @@
 
         <div class="card">
           <div class="toolbar">
-            <input type="text" id="searchInput" placeholder="Search code or description..." />
+            <input type="text" id="searchInput" placeholder="Search code or description or Sr. No..." />
             <select id="statusFilter">
               <option value="">All statuses</option>
               <option value="active">Active</option>
@@ -47,6 +47,7 @@
             <table>
               <thead>
                 <tr>
+                  <th>Sr. No.</th>
                   <th>HSN Code</th>
                   <th>Description</th>
                   <th>GST %</th>
@@ -109,6 +110,7 @@
 
   <script src="js/api.js"></script>
   <script src="js/nav.js"></script>
+  <script src="js/import-wizard.js"></script>
   <script src="js/masters-common.js"></script>
   <script>
     renderShell("masters-hsn");
@@ -117,6 +119,12 @@
       apiBase: "/masters/hsn",
       permissionPrefix: "hsn",
       entityName: "HSN code",
+      importHeaders: [
+        { key: "code", label: "HSN Code", required: true },
+        { key: "description", label: "Description" },
+        { key: "gst_percent", label: "GST %" },
+        { key: "status", label: "Status (active/inactive)" },
+      ],
       columns: [
         { header: "HSN Code", render: (h) => `<span class="cell-primary">${escapeHtml(h.code)}</span>` },
         { header: "Description", render: (h) => escapeHtml(h.description || "—") },

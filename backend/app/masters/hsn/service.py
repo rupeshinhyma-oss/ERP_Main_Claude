@@ -17,6 +17,7 @@ from app.masters.import_export import (
     ImportSummary,
     build_csv_export,
     build_excel_export,
+    model_to_dict,
     parse_rows_from_file,
     run_import,
 )
@@ -59,8 +60,12 @@ class HsnService:
     async def create(self, **field_values: Any) -> HsnCode:
         """Create a new HSN code, validating code uniqueness."""
         code = field_values.get("code")
-        if code and await self.repository.code_exists(code):
-            raise ConflictException(f"HSN code {code!r} is already in use.")
+        if code:
+            existing = await self.repository.get_by_code(code)
+            if existing is not None:
+                raise ConflictException(
+                    f"HSN code {code!r} is already in use.", details={"existing": model_to_dict(existing)}
+                )
 
         hsn = await self.repository.create(**field_values)
         await self._invalidate_cache()
@@ -70,8 +75,12 @@ class HsnService:
         """Update an existing HSN code, validating code uniqueness."""
         hsn = await self.get_by_id_or_raise(hsn_id)
         code = field_values.get("code")
-        if code and await self.repository.code_exists(code, exclude_id=hsn_id):
-            raise ConflictException(f"HSN code {code!r} is already in use.")
+        if code:
+            existing = await self.repository.get_by_code(code)
+            if existing is not None and existing.id != hsn_id:
+                raise ConflictException(
+                    f"HSN code {code!r} is already in use.", details={"existing": model_to_dict(existing)}
+                )
 
         changes = {k: v for k, v in field_values.items() if v is not None}
         if changes:
@@ -105,8 +114,11 @@ class HsnService:
 
         async def _create(field_values: dict[str, Any]) -> HsnCode:
             code = field_values["code"]
-            if await self.repository.code_exists(code):
-                raise ValueError(f"HSN code {code!r} already exists.")
+            existing = await self.repository.get_by_code(code)
+            if existing is not None:
+                raise ConflictException(
+                    f"HSN code {code!r} already exists.", details={"existing": model_to_dict(existing)}
+                )
             return await self.repository.create(**field_values)
 
         summary = await run_import(rows, row_validator=validate_hsn_row, row_creator=_create)

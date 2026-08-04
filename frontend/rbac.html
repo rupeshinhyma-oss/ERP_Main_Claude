@@ -6,6 +6,7 @@
   <title>Roles &amp; Permissions — Inhyma ERP</title>
   <link rel="stylesheet" href="css/style.css" />
   <style>
+<<<<<<< HEAD
     .role-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 16px; margin-top: 16px; }
     .role-card { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-lg, 10px); padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); transition: transform 0.15s ease, box-shadow 0.15s ease; }
     .role-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
@@ -27,6 +28,30 @@
 
     .toggle-btn { background: none; border: none; font-size: 12px; font-weight: 600; color: var(--color-primary); cursor: pointer; padding: 2px 6px; border-radius: 4px; }
     .toggle-btn:hover { background: var(--color-border); }
+=======
+    .tabs-nav { display: flex; gap: 8px; border-bottom: 2px solid var(--color-border); margin-bottom: var(--space-3); }
+    .tab-btn { padding: 10px 18px; font-weight: 600; font-size: 14px; background: none; border: none; border-bottom: 2px solid transparent; margin-bottom: -2px; cursor: pointer; color: var(--color-muted); }
+    .tab-btn.active { color: var(--color-primary, #3182ce); border-bottom-color: var(--color-primary, #3182ce); }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+    
+    .toolbar-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: var(--space-3); }
+    .search-filter-box { display: flex; gap: 10px; flex: 1; max-width: 500px; }
+    .search-filter-box input, .search-filter-box select { padding: 8px 12px; border: 1px solid var(--color-border); border-radius: var(--radius); font-size: 13.5px; }
+
+    .permission-group { margin-bottom: var(--space-3); background: #f8fafc; padding: 12px; border-radius: 8px; border: 1px solid #e2e8f0; }
+    .permission-group-title { font-weight: 700; font-size: 12.5px; text-transform: uppercase; color: #475569; margin-bottom: 8px; }
+    .permission-checks { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px; }
+    .permission-checks label { display: flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 400; cursor: pointer; }
+
+    .item-card { border: 1px solid var(--color-border); border-radius: var(--radius); padding: var(--space-3); margin-bottom: var(--space-3); background: #fff; }
+    .item-card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--space-2); }
+    .item-card-header h3 { margin: 0; font-size: 15px; font-weight: 600; }
+
+    .chip { display: inline-block; background: #e2e8f0; border-radius: 20px; padding: 2px 9px; font-size: 11.5px; margin: 2px; color: #334155; }
+    .chip-grant { background: #dcfce7; color: #166534; }
+    .chip-deny { background: #fee2e2; color: #991b1b; }
+>>>>>>> c07206f (Update ERP features, RBAC enhancements, supplier links, and UI improvements)
   </style>
 </head>
 <body>
@@ -40,41 +65,83 @@
         </div>
         <div class="page-header">
           <div>
+<<<<<<< HEAD
             <h1>Roles &amp; Access Control</h1>
             <div class="page-subtitle">Configure user roles, assign permissions, and control access across modules.</div>
+=======
+            <h1>Role &amp; Permission Management</h1>
+            <div class="page-subtitle">Configure Role-Based Access Controls (RBAC) and Individual User Permission Overrides.</div>
+>>>>>>> c07206f (Update ERP features, RBAC enhancements, supplier links, and UI improvements)
           </div>
           <div class="page-header-actions">
-            <button class="btn btn-primary" id="newRoleBtn">+ New Role</button>
+            <button class="btn" id="cloneBtn" data-permission="settings.manage">Clone Role Permissions</button>
+            <button class="btn btn-primary" id="newRoleBtn" data-permission="settings.manage">+ New Role</button>
           </div>
         </div>
         <div id="banner"></div>
 
+<<<<<<< HEAD
         <div id="rolesContainer" class="role-grid">
           <p class="muted">Loading system roles...</p>
+=======
+        <!-- Navigation Tabs -->
+        <div class="tabs-nav">
+          <button class="tab-btn active" data-tab="tab-roles">Roles (Default Permissions)</button>
+          <button class="tab-btn" data-tab="tab-users">Individual User Overrides</button>
+        </div>
+
+        <!-- Tab 1: System & Custom Roles -->
+        <div class="tab-content active" id="tab-roles">
+          <div class="toolbar-row">
+            <div class="search-filter-box">
+              <input type="text" id="roleSearch" placeholder="Search roles..." style="flex:1;" />
+            </div>
+          </div>
+          <div id="rolesContainer"><p class="muted">Loading roles...</p></div>
+        </div>
+
+        <!-- Tab 2: Individual User Permissions -->
+        <div class="tab-content" id="tab-users">
+          <div class="toolbar-row">
+            <div class="search-filter-box" style="max-width:600px;">
+              <select id="userSelect" style="flex:1;"><option value="">Select User...</option></select>
+            </div>
+          </div>
+          <div id="userEffectiveContainer"><p class="muted">Select a user above to view effective permissions and manage direct overrides.</p></div>
+>>>>>>> c07206f (Update ERP features, RBAC enhancements, supplier links, and UI improvements)
         </div>
       </main>
     </div>
   </div>
 
-  <!-- Create / Edit Role Modal -->
+  <!-- Create / Edit Role Permissions Modal -->
   <div class="modal-backdrop" id="modalBackdrop" style="display:none;">
+<<<<<<< HEAD
     <div class="modal-card" style="max-width: 840px; width: 92vw;">
+=======
+    <div class="modal-card" style="max-width: 760px;">
+>>>>>>> c07206f (Update ERP features, RBAC enhancements, supplier links, and UI improvements)
       <div class="modal-header">
-        <h2 id="modalTitle">New Role</h2>
+        <h2 id="modalTitle">Configure Role Permissions</h2>
         <button class="modal-close" id="modalCloseBtn">&times;</button>
       </div>
-      <form id="roleForm">
+      <form id="permissionForm">
         <input type="hidden" id="roleId" />
         <div class="form-grid" style="margin-bottom: 16px;">
           <div class="field">
             <label for="roleName">Role Name *</label>
+<<<<<<< HEAD
             <input id="roleName" required minlength="2" maxlength="100" placeholder="e.g. Sales Manager, Accountant, Storekeeper" />
+=======
+            <input id="roleName" minlength="2" maxlength="100" required />
+>>>>>>> c07206f (Update ERP features, RBAC enhancements, supplier links, and UI improvements)
           </div>
           <div class="field">
             <label for="roleDescription">Description</label>
             <input id="roleDescription" maxlength="255" placeholder="Brief summary of what this role does" />
           </div>
         </div>
+<<<<<<< HEAD
 
         <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
           <div class="section-title" style="margin: 0;">Module Permissions</div>
@@ -86,9 +153,69 @@
 
         <div id="permissionGroups" style="max-height: 52vh; overflow-y: auto; padding-right: 6px;"></div>
 
+=======
+        <div class="section-title" style="margin-top: 0;">Assigned Permissions</div>
+        <div id="permissionGroups"></div>
+>>>>>>> c07206f (Update ERP features, RBAC enhancements, supplier links, and UI improvements)
         <div class="form-actions">
           <button type="submit" class="btn btn-primary">Save Role</button>
           <button type="button" class="btn" id="cancelBtn">Cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Add User Override Modal -->
+  <div class="modal-backdrop" id="userOverrideModal" style="display:none;">
+    <div class="modal-card" style="max-width: 600px;">
+      <div class="modal-header">
+        <h2>Add Individual Permission Override</h2>
+        <button class="modal-close" id="overrideCloseBtn">&times;</button>
+      </div>
+      <form id="overrideForm">
+        <input type="hidden" id="overrideUserId" />
+        <div class="form-grid" style="grid-template-columns: 1fr;">
+          <div class="field">
+            <label>Permission *</label>
+            <select id="overridePermissionId" required><option value="">Select Permission...</option></select>
+          </div>
+          <div class="field">
+            <label>Override Action *</label>
+            <select id="overrideGrantType" required>
+              <option value="true">GRANT (Explicit Grant)</option>
+              <option value="false">DENY (Explicit Revoke)</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="btn btn-primary">Save Override</button>
+          <button type="button" class="btn" id="overrideCancelBtn">Cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Clone Permission Set Modal -->
+  <div class="modal-backdrop" id="cloneModalBackdrop" style="display:none;">
+    <div class="modal-card" style="max-width: 540px;">
+      <div class="modal-header">
+        <h2>Clone Role Permissions</h2>
+        <button class="modal-close" id="cloneModalCloseBtn">&times;</button>
+      </div>
+      <form id="cloneForm">
+        <div class="form-grid" style="grid-template-columns: 1fr;">
+          <div class="field">
+            <label>Source Role</label>
+            <select id="cloneSourceId" required><option value="">Select source role...</option></select>
+          </div>
+          <div class="field">
+            <label>Target Role</label>
+            <select id="cloneTargetId" required><option value="">Select target role...</option></select>
+          </div>
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="btn btn-primary">Clone Permissions</button>
+          <button type="button" class="btn" id="cloneCancelBtn">Cancel</button>
         </div>
       </form>
     </div>
@@ -100,17 +227,11 @@
     renderShell("rbac");
 
     const banner = document.getElementById("banner");
-    const rolesContainer = document.getElementById("rolesContainer");
-    const modalBackdrop = document.getElementById("modalBackdrop");
-    const roleForm = document.getElementById("roleForm");
-
     const canManage = Auth.hasPermission("settings.manage");
-    if (!canManage) {
-      document.getElementById("newRoleBtn").style.display = "none";
-    }
 
     let allPermissions = [];
     let allRoles = [];
+<<<<<<< HEAD
     let editingRole = null;
 
     // Friendly Category Mapping for Modules
@@ -148,6 +269,20 @@
       };
       return actionMap[action] || code;
     }
+=======
+    let allUsers = [];
+
+    // --- Tab Switching ---
+    document.querySelectorAll(".tab-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
+        document.querySelectorAll(".tab-content").forEach((c) => c.classList.remove("active"));
+        btn.classList.add("active");
+        const target = document.getElementById(btn.dataset.tab);
+        if (target) target.classList.add("active");
+      });
+    });
+>>>>>>> c07206f (Update ERP features, RBAC enhancements, supplier links, and UI improvements)
 
     function groupPermissionsByModule(permissions) {
       const groups = {};
@@ -206,6 +341,7 @@
       return Array.from(document.querySelectorAll(".perm-check:checked")).map((el) => el.value);
     }
 
+<<<<<<< HEAD
     function openModal(role) {
       editingRole = role || null;
       roleForm.reset();
@@ -264,6 +400,21 @@
             <div style="display:flex; gap:6px;">
               ${canManage ? `<button class="btn btn-small" data-edit="${role.id}">Edit</button>` : ""}
               ${canManage && !isSystem ? `<button class="btn btn-small btn-danger" data-delete="${role.id}">Delete</button>` : ""}
+=======
+    // --- System & Custom Roles Tab ---
+    function roleCardHtml(role) {
+      const permCount = role.permissions.length;
+      const badge = role.is_system ? '<span class="badge badge-neutral">System Role</span>' : '<span class="badge badge-active">Custom Role</span>';
+      const permsPreview = role.permissions.slice(0, 8).map((c) => `<span class="chip">${escapeHtml(c)}</span>`).join("");
+      const more = permCount > 8 ? `<span class="muted"> +${permCount - 8} more</span>` : "";
+      return `
+        <div class="item-card">
+          <div class="item-card-header">
+            <h3>${escapeHtml(role.name)} ${badge}</h3>
+            <div>
+              ${canManage ? `<button class="btn btn-small" data-edit-role="${role.id}">Edit Permissions</button>` : ""}
+              ${canManage && !role.is_system ? `<button class="btn btn-small btn-danger" data-delete-role="${role.id}">Delete</button>` : ""}
+>>>>>>> c07206f (Update ERP features, RBAC enhancements, supplier links, and UI improvements)
             </div>
           </div>
           <div class="role-description">${role.description ? escapeHtml(role.description) : "No description provided."}</div>
@@ -276,6 +427,7 @@
     }
 
     async function loadRoles() {
+<<<<<<< HEAD
       rolesContainer.innerHTML = '<p class="muted">Loading system roles...</p>';
       try {
         const [rolesRes, permsRes] = await Promise.all([
@@ -287,12 +439,19 @@
         rolesContainer.innerHTML = allRoles.length
           ? allRoles.map(roleCardHtml).join("")
           : '<p class="muted">No roles found.</p>';
+=======
+      const container = document.getElementById("rolesContainer");
+      try {
+        const res = await apiGet("/rbac/roles");
+        allRoles = res.data;
+        renderRolesList();
+>>>>>>> c07206f (Update ERP features, RBAC enhancements, supplier links, and UI improvements)
       } catch (err) {
-        rolesContainer.innerHTML = "";
         showError(banner, err);
       }
     }
 
+<<<<<<< HEAD
     rolesContainer.addEventListener("click", async (e) => {
       const editId = e.target.getAttribute("data-edit");
       const deleteId = e.target.getAttribute("data-delete");
@@ -301,54 +460,237 @@
         if (role) openModal(role);
       } else if (deleteId) {
         if (!confirm("Delete this role? Users assigned to this role will lose its permissions.")) return;
+=======
+    function renderRolesList() {
+      const container = document.getElementById("rolesContainer");
+      const q = (document.getElementById("roleSearch").value || "").toLowerCase();
+      const filtered = allRoles.filter((r) => r.name.toLowerCase().includes(q) || (r.description || "").toLowerCase().includes(q));
+      container.innerHTML = filtered.length ? filtered.map(roleCardHtml).join("") : '<p class="muted">No roles found.</p>';
+    }
+
+    document.getElementById("roleSearch").addEventListener("input", renderRolesList);
+
+    // --- Individual User Permissions Tab ---
+    async function loadUsers() {
+      const select = document.getElementById("userSelect");
+      try {
+        const res = await apiGet("/users?limit=200");
+        allUsers = res.data.items || [];
+        select.innerHTML = '<option value="">Select User to inspect & override permissions...</option>' +
+          allUsers.map((u) => `<option value="${u.id}">${escapeHtml(u.username)} (${escapeHtml(u.email)}) - Status: ${u.status}</option>`).join("");
+      } catch (err) {
+        showError(banner, err);
+      }
+    }
+
+    document.getElementById("userSelect").addEventListener("change", async (e) => {
+      const userId = e.target.value;
+      const container = document.getElementById("userEffectiveContainer");
+      if (!userId) {
+        container.innerHTML = '<p class="muted">Select a user above to view effective permissions and manage direct overrides.</p>';
+        return;
+      }
+      container.innerHTML = '<p class="muted">Calculating effective permissions...</p>';
+      try {
+        const [effRes, userPermsRes] = await Promise.all([
+          apiGet(`/rbac/users/${userId}/effective-permissions`),
+          apiGet(`/rbac/users/${userId}/permissions`),
+        ]);
+        const breakdown = effRes.data;
+        const userOverrides = userPermsRes.data;
+
+        let overrideHtml = `
+          <div class="item-card" style="border-left:4px solid #3182ce;">
+            <div class="item-card-header">
+              <h3>Individual User Overrides</h3>
+              ${canManage ? `<button class="btn btn-small btn-primary" id="addUserOverrideBtn" data-user-id="${userId}">+ Add Direct Permission Override</button>` : ""}
+            </div>
+            <div>
+              ${userOverrides.length ? userOverrides.map((o) => `
+                <span class="chip ${o.is_granted ? "chip-grant" : "chip-deny"}">
+                  ${o.is_granted ? "GRANT" : "DENY"}: ${escapeHtml(o.code)}
+                  ${canManage ? `<a href="#" style="margin-left:6px;color:inherit;" data-delete-user-perm="${o.id}" data-user-id="${userId}">&times;</a>` : ""}
+                </span>`).join("") : '<span class="muted">No direct user overrides. User inherits default permissions from assigned System Roles.</span>'}
+            </div>
+          </div>`;
+
+        let breakdownHtml = `
+          <div class="item-card">
+            <h3>Calculated Effective Permissions (${breakdown.effective_permissions.length})</h3>
+            <div class="muted" style="margin-bottom:12px;font-size:13px;">Final effective permission set applied immediately on new requests:</div>
+            <div>
+              ${breakdown.effective_permissions.map((c) => `<span class="chip" style="background:#f1f5f9;border:1px solid #cbd5e0;">${escapeHtml(c)}</span>`).join("")}
+            </div>
+          </div>
+          <div class="item-card" style="margin-top:16px;">
+            <h4>From Assigned Roles (${breakdown.role_permissions.length})</h4>
+            <div>${breakdown.role_permissions.map((c) => `<span class="chip">${escapeHtml(c)}</span>`).join("")}</div>
+          </div>`;
+
+        container.innerHTML = overrideHtml + breakdownHtml;
+
+        const addOverrideBtn = document.getElementById("addUserOverrideBtn");
+        if (addOverrideBtn) {
+          addOverrideBtn.addEventListener("click", () => openUserOverrideModal(userId));
+        }
+      } catch (err) {
+        showError(banner, err);
+      }
+    });
+
+    // Handle user override deletes
+    document.getElementById("userEffectiveContainer").addEventListener("click", async (e) => {
+      const deletePermId = e.target.getAttribute("data-delete-user-perm");
+      const userId = e.target.getAttribute("data-user-id");
+      if (deletePermId && userId) {
+        e.preventDefault();
         try {
-          await apiDelete(`/rbac/roles/${deleteId}`);
-          await loadRoles();
+          await apiDelete(`/rbac/users/${userId}/permissions/${deletePermId}`);
+          document.getElementById("userSelect").dispatchEvent(new Event("change"));
         } catch (err) {
           showError(banner, err);
         }
       }
     });
 
-    roleForm.addEventListener("submit", async (e) => {
+    // --- Add User Override Modal ---
+    const userOverrideModal = document.getElementById("userOverrideModal");
+    function openUserOverrideModal(userId) {
+      document.getElementById("overrideUserId").value = userId;
+      const permSelect = document.getElementById("overridePermissionId");
+      permSelect.innerHTML = '<option value="">Select Permission...</option>' +
+        allPermissions.map((p) => `<option value="${p.id}">${escapeHtml(p.code)} (${escapeHtml(p.module)})</option>`).join("");
+      openModalShell(userOverrideModal);
+    }
+
+    document.getElementById("overrideCloseBtn").addEventListener("click", () => closeModalShell(userOverrideModal));
+    document.getElementById("overrideCancelBtn").addEventListener("click", () => closeModalShell(userOverrideModal));
+
+    document.getElementById("overrideForm").addEventListener("submit", async (e) => {
       e.preventDefault();
-      banner.innerHTML = "";
-      const roleId = document.getElementById("roleId").value;
-      const name = document.getElementById("roleName").value.trim();
-      const description = document.getElementById("roleDescription").value.trim() || null;
-      const desiredCodes = new Set(selectedPermissionCodes());
-
+      const userId = document.getElementById("overrideUserId").value;
+      const permission_id = document.getElementById("overridePermissionId").value;
+      const is_granted = document.getElementById("overrideGrantType").value === "true";
       try {
-        if (roleId) {
-          await apiPatch(`/rbac/roles/${roleId}`, { name, description });
-          const currentCodes = new Set(editingRole ? editingRole.permissions : []);
-          const codeToId = {};
-          for (const p of allPermissions) codeToId[p.code] = p.id;
-
-          const toGrant = [...desiredCodes].filter((c) => !currentCodes.has(c));
-          const toRevoke = [...currentCodes].filter((c) => !desiredCodes.has(c));
-
-          for (const code of toGrant) {
-            await apiPost(`/rbac/roles/${roleId}/permissions`, { permission_id: codeToId[code] });
-          }
-          for (const code of toRevoke) {
-            await apiDelete(`/rbac/roles/${roleId}/permissions/${codeToId[code]}`);
-          }
-        } else {
-          await apiPost("/rbac/roles", {
-            name,
-            description,
-            permission_codes: [...desiredCodes],
-          });
-        }
-        closeModal();
-        await loadRoles();
+        await apiPost(`/rbac/users/${userId}/permissions`, { permission_id, is_granted });
+        closeModalShell(userOverrideModal);
+        document.getElementById("userSelect").dispatchEvent(new Event("change"));
       } catch (err) {
         showError(banner, err);
       }
     });
 
-    loadRoles();
+    // --- Role Modal Handlers ---
+    const modalBackdrop = document.getElementById("modalBackdrop");
+    const permissionForm = document.getElementById("permissionForm");
+
+    function openRoleModal(role) {
+      document.getElementById("roleId").value = role ? role.id : "";
+      document.getElementById("modalTitle").textContent = role ? `Edit Role: ${role.name}` : "New Role";
+      document.getElementById("roleName").value = role ? role.name : "";
+      document.getElementById("roleDescription").value = role ? (role.description || "") : "";
+      document.getElementById("roleName").disabled = Boolean(role && role.is_system);
+
+      renderPermissionCheckboxes(role ? role.permissions : []);
+      openModalShell(modalBackdrop);
+    }
+
+    function closeModal() {
+      closeModalShell(modalBackdrop);
+    }
+
+    document.getElementById("cancelBtn").addEventListener("click", closeModal);
+    document.getElementById("modalCloseBtn").addEventListener("click", closeModal);
+    document.getElementById("newRoleBtn").addEventListener("click", () => openRoleModal(null));
+
+    // Edit Delegation
+    document.addEventListener("click", async (e) => {
+      const editRole = e.target.getAttribute("data-edit-role");
+      const deleteRole = e.target.getAttribute("data-delete-role");
+
+      if (editRole) {
+        const role = allRoles.find((r) => r.id === editRole);
+        if (role) openRoleModal(role);
+      } else if (deleteRole) {
+        if (!confirm("Delete this system role?")) return;
+        try {
+          await apiDelete(`/rbac/roles/${deleteRole}`);
+          await loadRoles();
+        } catch (err) { showError(banner, err); }
+      }
+    });
+
+    permissionForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      banner.innerHTML = "";
+      const id = document.getElementById("roleId").value;
+      const name = document.getElementById("roleName").value.trim();
+      const description = document.getElementById("roleDescription").value.trim() || null;
+      const desiredCodes = new Set(selectedPermissionCodes());
+      const codeToId = {};
+      for (const p of allPermissions) codeToId[p.code] = p.id;
+
+      try {
+        let roleId = id;
+        if (roleId) {
+          await apiPatch(`/rbac/roles/${roleId}`, { name, description });
+        } else {
+          const newRole = await apiPost("/rbac/roles", { name, description, permission_codes: [] });
+          roleId = newRole.data.id;
+        }
+        const roleRes = await apiGet(`/rbac/roles/${roleId}`);
+        const currentCodes = new Set(roleRes.data.permissions || []);
+        for (const code of [...desiredCodes].filter((c) => !currentCodes.has(c))) {
+          await apiPost(`/rbac/roles/${roleId}/permissions`, { permission_id: codeToId[code] });
+        }
+        for (const code of [...currentCodes].filter((c) => !desiredCodes.has(c))) {
+          await apiDelete(`/rbac/roles/${roleId}/permissions/${codeToId[code]}`);
+        }
+        await loadRoles();
+        closeModal();
+      } catch (err) {
+        showError(banner, err);
+      }
+    });
+
+    // --- Clone Role Permissions Modal Handlers ---
+    const cloneModal = document.getElementById("cloneModalBackdrop");
+    document.getElementById("cloneBtn").addEventListener("click", () => {
+      const srcSelect = document.getElementById("cloneSourceId");
+      const tgtSelect = document.getElementById("cloneTargetId");
+      srcSelect.innerHTML = '<option value="">Select source role...</option>' + allRoles.map((r) => `<option value="${r.id}">${escapeHtml(r.name)}</option>`).join("");
+      tgtSelect.innerHTML = '<option value="">Select target role...</option>' + allRoles.map((r) => `<option value="${r.id}">${escapeHtml(r.name)}</option>`).join("");
+      openModalShell(cloneModal);
+    });
+    document.getElementById("cloneCancelBtn").addEventListener("click", () => closeModalShell(cloneModal));
+    document.getElementById("cloneModalCloseBtn").addEventListener("click", () => closeModalShell(cloneModal));
+
+    document.getElementById("cloneForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const source_id = document.getElementById("cloneSourceId").value;
+      const target_id = document.getElementById("cloneTargetId").value;
+      try {
+        const res = await apiPost("/rbac/clone-permissions", { source_type: "role", source_id, target_type: "role", target_id });
+        alert(`Successfully cloned ${res.data.cloned_count} permission(s).`);
+        closeModalShell(cloneModal);
+        loadRoles();
+      } catch (err) {
+        showError(banner, err);
+      }
+    });
+
+    // --- Init ---
+    async function init() {
+      try {
+        const permsRes = await apiGet("/rbac/permissions");
+        allPermissions = permsRes.data;
+        await Promise.all([loadRoles(), loadUsers()]);
+      } catch (err) {
+        showError(banner, err);
+      }
+    }
+
+    init();
   </script>
 </body>
 </html>

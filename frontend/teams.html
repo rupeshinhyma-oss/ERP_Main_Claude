@@ -81,7 +81,7 @@
             <div class="page-subtitle">Employees, departments, and designations for your organization.</div>
           </div>
           <div class="page-header-actions">
-            <button class="btn btn-primary" id="addMemberBtn">+ Add Member</button>
+            <button class="btn btn-primary" id="addMemberBtn" data-permission="employee.create">+ Add Member</button>
           </div>
         </div>
         <div id="banner"></div>
@@ -96,7 +96,7 @@
         <div class="subtab-panel active" id="panel-employees">
           <div class="card">
             <div class="toolbar">
-              <input type="text" id="empSearchInput" placeholder="Search name, code, email, phone..." />
+              <input type="text" id="empSearchInput" placeholder="Search name, code, email, phone, or Sr. No..." />
               <select id="empDepartmentFilter"><option value="">All departments</option></select>
               <select id="empDesignationFilter"><option value="">All designations</option></select>
               <select id="empStatusFilter">
@@ -112,6 +112,7 @@
               <table>
                 <thead>
                   <tr>
+                    <th>Sr. No.</th>
                     <th>Code</th>
                     <th>Name</th>
                     <th>Department</th>
@@ -122,7 +123,7 @@
                   </tr>
                 </thead>
                 <tbody id="empTableBody">
-                  <tr><td colspan="7" class="muted">Loading...</td></tr>
+                  <tr><td colspan="8" class="muted">Loading...</td></tr>
                 </tbody>
               </table>
             </div>
@@ -176,7 +177,7 @@
           </div>
           <div class="card">
             <div class="toolbar">
-              <input type="text" id="deptSearchInput" placeholder="Search code or name..." />
+              <input type="text" id="deptSearchInput" placeholder="Search code or name or Sr. No..." />
               <select id="deptStatusFilter">
                 <option value="">All statuses</option>
                 <option value="active">Active</option>
@@ -187,6 +188,7 @@
               <table>
                 <thead>
                   <tr>
+                    <th>Sr. No.</th>
                     <th>Code</th>
                     <th>Name</th>
                     <th>Parent</th>
@@ -196,7 +198,7 @@
                   </tr>
                 </thead>
                 <tbody id="deptTableBody">
-                  <tr><td colspan="6" class="muted">Loading...</td></tr>
+                  <tr><td colspan="7" class="muted">Loading...</td></tr>
                 </tbody>
               </table>
             </div>
@@ -246,7 +248,7 @@
           </div>
           <div class="card">
             <div class="toolbar">
-              <input type="text" id="desigSearchInput" placeholder="Search code or title..." />
+              <input type="text" id="desigSearchInput" placeholder="Search code or title or Sr. No..." />
               <select id="desigStatusFilter">
                 <option value="">All statuses</option>
                 <option value="active">Active</option>
@@ -257,6 +259,7 @@
               <table>
                 <thead>
                   <tr>
+                    <th>Sr. No.</th>
                     <th>Code</th>
                     <th>Title</th>
                     <th>Level</th>
@@ -265,7 +268,7 @@
                   </tr>
                 </thead>
                 <tbody id="desigTableBody">
-                  <tr><td colspan="5" class="muted">Loading...</td></tr>
+                  <tr><td colspan="6" class="muted">Loading...</td></tr>
                 </tbody>
               </table>
             </div>

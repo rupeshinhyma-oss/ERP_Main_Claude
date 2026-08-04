@@ -40,15 +40,17 @@ class Permission(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     """
     A single, fine-grained permission code (e.g. ``"user.create"``).
 
-    Permissions are grouped by ``module`` purely for display/organization in
-    the admin UI (e.g. listing all ``"user.*"`` permissions together); the
-    authorization check itself only ever compares the full ``code``.
+    Permissions are grouped by ``module``, ``page``, ``action``, and ``scope`` for display/organization
+    and fine-grained access control.
     """
 
     __tablename__ = "permissions"
 
     code: Mapped[str] = mapped_column(String(150), unique=True, nullable=False, index=True)
     module: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    page: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+    action: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
+    scope: Mapped[str | None] = mapped_column(String(50), default="ALL", nullable=True)
     description: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     def __repr__(self) -> str:
@@ -120,3 +122,72 @@ class UserRole(Base, UUIDPrimaryKeyMixin):
     def __repr__(self) -> str:
         """Return a debug-friendly representation."""
         return f"<UserRole user_id={self.user_id} role_id={self.role_id}>"
+
+
+class UserPermission(Base, UUIDPrimaryKeyMixin):
+    """Direct permission override/grant for an individual User."""
+
+    __tablename__ = "user_permissions"
+    __table_args__ = (UniqueConstraint("user_id", "permission_id", name="uq_user_permission"),)
+
+    user_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    permission_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(), ForeignKey("permissions.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    is_granted: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    granted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    granted_by: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+
+    permission: Mapped[Permission] = relationship(lazy="selectin")
+
+    def __repr__(self) -> str:
+        return f"<UserPermission user_id={self.user_id} permission_id={self.permission_id} is_granted={self.is_granted}>"
+
+
+class DepartmentPermission(Base, UUIDPrimaryKeyMixin):
+    """Default permission granted to all employees in a Department."""
+
+    __tablename__ = "department_permissions"
+    __table_args__ = (UniqueConstraint("department_id", "permission_id", name="uq_department_permission"),)
+
+    department_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(), ForeignKey("departments.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    permission_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(), ForeignKey("permissions.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    granted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    granted_by: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+
+    permission: Mapped[Permission] = relationship(lazy="selectin")
+
+    def __repr__(self) -> str:
+        return f"<DepartmentPermission department_id={self.department_id} permission_id={self.permission_id}>"
+
+
+class DesignationPermission(Base, UUIDPrimaryKeyMixin):
+    """Default permission granted to all employees with a Designation."""
+
+    __tablename__ = "designation_permissions"
+    __table_args__ = (UniqueConstraint("designation_id", "permission_id", name="uq_designation_permission"),)
+
+    designation_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(), ForeignKey("designations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    permission_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(), ForeignKey("permissions.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    granted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    granted_by: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+
+    permission: Mapped[Permission] = relationship(lazy="selectin")
+
+    def __repr__(self) -> str:
+        return f"<DesignationPermission designation_id={self.designation_id} permission_id={self.permission_id}>"
+

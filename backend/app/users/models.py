@@ -20,19 +20,14 @@ from app.database.base import GUID, Base, TimestampMixin, UUIDPrimaryKeyMixin
 
 
 class UserStatus(str, Enum):
-    """Coarse-grained account lifecycle state, independent of ``is_active``.
-
-    ``is_active`` is the single boolean that actually gates login (kept for
-    a fast, simple WHERE clause); ``status`` carries the richer lifecycle
-    reason (e.g. a user can be ``INACTIVE`` because they were deliberately
-    deactivated, or ``PENDING`` because they haven't completed onboarding
-    yet) for display and reporting purposes.
-    """
+    """Coarse-grained account lifecycle state, independent of ``is_active``."""
 
     PENDING = "PENDING"
     ACTIVE = "ACTIVE"
     INACTIVE = "INACTIVE"
     SUSPENDED = "SUSPENDED"
+    LOCKED = "LOCKED"
+    PASSWORD_CHANGE_REQUIRED = "PASSWORD_CHANGE_REQUIRED"
 
 
 class User(Base, UUIDPrimaryKeyMixin, TimestampMixin):
@@ -55,7 +50,7 @@ class User(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
 
     status: Mapped[UserStatus] = mapped_column(
-        SAEnum(UserStatus, name="user_status", native_enum=False, length=20),
+        SAEnum(UserStatus, name="user_status", native_enum=False, length=30),
         default=UserStatus.PENDING,
         nullable=False,
         index=True,
@@ -88,12 +83,18 @@ class User(Base, UUIDPrimaryKeyMixin, TimestampMixin):
             return False
         locked_until = self.locked_until
         if locked_until.tzinfo is None:
-            # PostgreSQL always round-trips TIMESTAMPTZ as tz-aware; non-Postgres
-            # backends used in local testing (e.g. SQLite) drop tzinfo on read.
             locked_until = locked_until.replace(tzinfo=timezone.utc)
         return locked_until > datetime.now(timezone.utc)
 
     @property
     def can_login(self) -> bool:
         """Return True if the account is active and in a status that permits authentication."""
-        return self.is_active and self.status in (UserStatus.ACTIVE, UserStatus.PENDING)
+        if self.is_locked or self.status == UserStatus.LOCKED:
+            return False
+        if self.status in (UserStatus.INACTIVE, UserStatus.SUSPENDED):
+            return False
+        return self.is_active and self.status in (
+            UserStatus.ACTIVE,
+            UserStatus.PENDING,
+            UserStatus.PASSWORD_CHANGE_REQUIRED,
+        )

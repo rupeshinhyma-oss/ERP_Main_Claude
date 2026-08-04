@@ -43,6 +43,14 @@ class BrandRepository(BaseRepository[Brand]):
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none() is not None
 
+    async def get_by_name(self, name: str, *, exclude_id: uuid.UUID | None = None) -> Brand | None:
+        """Fetch the record with this name, if one exists (for duplicate-compare)."""
+        stmt = self._base_select().where(Brand.name == name)
+        if exclude_id is not None:
+            stmt = stmt.where(Brand.id != exclude_id)
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+
     async def list_all(self) -> list[Brand]:
         """Return every non-deleted brand, ordered by name."""
         stmt = self._base_select().order_by(Brand.name)

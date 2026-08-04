@@ -21,6 +21,7 @@ from app.suppliers.models import (
     SupplierCategoryLink,
     SupplierContact,
     SupplierEmail,
+    SupplierProductLink,
     SupplierSubCategoryLink,
 )
 
@@ -81,6 +82,16 @@ class SupplierRepository(BaseRepository[Supplier]):
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none() is not None
 
+    async def get_by_name_city(
+        self, company_name: str, city_id: uuid.UUID, *, exclude_id: uuid.UUID | None = None
+    ) -> Supplier | None:
+        """Fetch the supplier matching this Company Name + City, if one exists (for duplicate-compare)."""
+        stmt = self._base_select().where(Supplier.city_id == city_id, Supplier.company_name.ilike(company_name))
+        if exclude_id is not None:
+            stmt = stmt.where(Supplier.id != exclude_id)
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+
     async def get_with_relations(self, supplier_id: uuid.UUID) -> Supplier | None:
         """Fetch a supplier by ID with its emails/contacts/category links eagerly loaded."""
         # emails/contacts/category_links/sub_category_links are all
@@ -134,6 +145,39 @@ class SupplierRepository(BaseRepository[Supplier]):
                 SupplierSubCategoryLink(supplier_id=supplier_id, sub_category_id=sub_category_id)
             )
         await self.session.flush()
+
+    async def list_all_product_ids(self, supplier_id: uuid.UUID) -> list[uuid.UUID]:
+        """Return every Product ID linked to a supplier (the specific SKUs this supplier supplies)."""
+        stmt = select(SupplierProductLink.product_id).where(SupplierProductLink.supplier_id == supplier_id)
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def replace_product_links(self, supplier_id: uuid.UUID, product_ids: list[uuid.UUID]) -> None:
+        """Replace a supplier's linked-product set with exactly the given set."""
+        existing = await self.session.execute(
+            select(SupplierProductLink).where(SupplierProductLink.supplier_id == supplier_id)
+        )
+        for link in existing.scalars().all():
+            await self.session.delete(link)
+        await self.session.flush()
+        seen: set[uuid.UUID] = set()
+        for product_id in product_ids:
+            if product_id in seen:
+                continue
+            seen.add(product_id)
+            self.session.add(SupplierProductLink(supplier_id=supplier_id, product_id=product_id))
+        await self.session.flush()
+
+    def apply_product_filter(self, stmt: Select, product_id: uuid.UUID) -> Select:
+        """Restrict a supplier SELECT to suppliers linked to the given product."""
+        return stmt.where(
+            exists().where(
+                and_(
+                    SupplierProductLink.supplier_id == Supplier.id,
+                    SupplierProductLink.product_id == product_id,
+                )
+            )
+        )
 
     async def replace_emails(self, supplier_id: uuid.UUID, emails: list[str]) -> None:
         """Replace a supplier's email addresses with exactly the given list."""

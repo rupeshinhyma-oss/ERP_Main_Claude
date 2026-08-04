@@ -35,13 +35,9 @@
 
         <div class="card">
           <div class="toolbar">
-            <input type="text" id="searchInput" placeholder="Search code, name, or barcode..." />
-            <select id="categoryFilter" style="min-width: 180px;">
-              <option value="">All categories</option>
-            </select>
-            <select id="brandFilter" style="min-width: 180px;">
-              <option value="">All brands</option>
-            </select>
+            <input type="text" id="searchInput" placeholder="Search code, name, or barcode or Sr. No..." />
+            <div id="categoryFilterMount" style="min-width: 220px;"></div>
+            <div id="brandFilterMount" style="min-width: 220px;"></div>
             <select id="statusFilter">
               <option value="">All statuses</option>
               <option value="active">Active</option>
@@ -53,8 +49,10 @@
             <table>
               <thead>
                 <tr>
-                  <th>Product Name (Tally)</th>
-                  <th>Product Code</th>
+                  <th>Sr. No.</th>
+                  <th>Product</th>
+                  <th>Code</th>
+                  <th>Category / Sub-Cat.</th>
                   <th>Brand</th>
                   <th>Sub-Category</th>
                   <th>HSN Code</th>
@@ -265,6 +263,8 @@
 
   <script src="js/api.js"></script>
   <script src="js/nav.js"></script>
+  <script src="js/dropdown-search.js"></script>
+  <script src="js/import-wizard.js"></script>
   <script src="js/masters-common.js"></script>
   <script>
     renderShell("masters-products");
@@ -295,6 +295,33 @@
       apiBase: "/masters/products",
       permissionPrefix: "product",
       entityName: "product",
+      importHeaders: [
+        { key: "product_code", label: "Product Code", required: true },
+        { key: "product_name", label: "Product Name", required: true },
+        { key: "barcode", label: "Barcode" },
+        { key: "category_code", label: "Category Code", required: true },
+        { key: "sub_category_code", label: "Sub-Category Code" },
+        { key: "brand_code", label: "Brand Code" },
+        { key: "hsn_code", label: "HSN Code" },
+        { key: "uom_code", label: "UOM Code", required: true },
+        { key: "secondary_uom_code", label: "Secondary UOM Code" },
+        { key: "specification", label: "Specification" },
+        { key: "description", label: "Description" },
+        { key: "weight", label: "Weight (kg)" },
+        { key: "length", label: "Length (cm)" },
+        { key: "width", label: "Width (cm)" },
+        { key: "height", label: "Height (cm)" },
+        { key: "color", label: "Color" },
+        { key: "material", label: "Material" },
+        { key: "conversion_factor", label: "Conversion Factor" },
+        { key: "minimum_order_quantity", label: "Min. Order Qty" },
+        { key: "reorder_level", label: "Reorder Level" },
+        { key: "standard_cost", label: "Standard Cost" },
+        { key: "standard_price", label: "Standard Price" },
+        { key: "is_purchasable", label: "Purchasable (true/false)" },
+        { key: "is_sellable", label: "Sellable (true/false)" },
+        { key: "status", label: "Status (active/inactive)" },
+      ],
       columns: [
         {
           header: "Product Name (Tally)",

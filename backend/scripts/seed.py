@@ -35,105 +35,153 @@ from app.users.repository import UserRepository
 
 logger = get_logger(__name__)
 
-# --- Bootstrap permission set (module.action convention, per the Phase 2 spec) ---
-BOOTSTRAP_PERMISSIONS: list[tuple[str, str, str]] = [
-    # (code, module, description)
-    ("user.create", "user", "Create user accounts."),
-    ("user.read", "user", "View user accounts."),
-    ("user.update", "user", "Update, activate/deactivate, unlock, and reset passwords for users."),
-    ("user.delete", "user", "Delete user accounts."),
-    ("employee.create", "employee", "Create employee records."),
-    ("employee.read", "employee", "View employee records."),
-    ("employee.update", "employee", "Update, transfer, deactivate/reactivate employee records."),
-    ("employee.delete", "employee", "Delete employee records."),
-    ("department.create", "department", "Create departments."),
-    ("department.read", "department", "View departments."),
-    ("department.update", "department", "Update departments."),
-    ("department.delete", "department", "Delete departments."),
-    ("designation.create", "designation", "Create designations."),
-    ("designation.read", "designation", "View designations."),
-    ("designation.update", "designation", "Update designations."),
-    ("designation.delete", "designation", "Delete designations."),
-    ("organization.manage", "organization", "View and manage the single company profile."),
-    ("inventory.create", "inventory", "Create inventory records."),
-    ("inventory.update", "inventory", "Update inventory records."),
-    ("crm.view", "crm", "View CRM data."),
-    ("reports.export", "reports", "Export reports."),
-    ("settings.manage", "settings", "Manage system settings, roles, and permissions."),
-    ("audit.read", "audit", "View audit log entries."),
-    # --- Master Data Management (Phase 7) ---
-    ("country.create", "country", "Create countries."),
-    ("country.read", "country", "View countries."),
-    ("country.update", "country", "Update, activate/deactivate countries."),
-    ("country.delete", "country", "Delete countries."),
-    ("state.create", "state", "Create states."),
-    ("state.read", "state", "View states."),
-    ("state.update", "state", "Update, activate/deactivate states."),
-    ("state.delete", "state", "Delete states."),
-    ("city.create", "city", "Create cities."),
-    ("city.read", "city", "View cities."),
-    ("city.update", "city", "Update, activate/deactivate cities."),
-    ("city.delete", "city", "Delete cities."),
-    ("currency.create", "currency", "Create currencies."),
-    ("currency.read", "currency", "View currencies."),
-    ("currency.update", "currency", "Update, activate/deactivate currencies."),
-    ("currency.delete", "currency", "Delete currencies."),
-    ("uom.create", "uom", "Create units of measurement."),
-    ("uom.read", "uom", "View units of measurement."),
-    ("uom.update", "uom", "Update, activate/deactivate units of measurement."),
-    ("uom.delete", "uom", "Delete units of measurement."),
-    ("hsn.create", "hsn", "Create HSN codes."),
-    ("hsn.read", "hsn", "View HSN codes."),
-    ("hsn.update", "hsn", "Update, activate/deactivate HSN codes."),
-    ("hsn.delete", "hsn", "Delete HSN codes."),
-    ("brand.create", "brand", "Create brands."),
-    ("brand.read", "brand", "View brands."),
-    ("brand.update", "brand", "Update, activate/deactivate brands."),
-    ("brand.delete", "brand", "Delete brands."),
-    ("category.create", "category", "Create product categories."),
-    ("category.read", "category", "View product categories."),
-    ("category.update", "category", "Update, activate/deactivate product categories."),
-    ("category.delete", "category", "Delete product categories."),
-    ("subcategory.create", "subcategory", "Create product sub-categories."),
-    ("subcategory.read", "subcategory", "View product sub-categories."),
-    ("subcategory.update", "subcategory", "Update, activate/deactivate product sub-categories."),
-    ("subcategory.delete", "subcategory", "Delete product sub-categories."),
-    ("product.create", "product", "Create products."),
-    ("product.read", "product", "View products."),
-    ("product.update", "product", "Update, activate/deactivate products."),
-    ("product.delete", "product", "Delete products."),
-    # --- Supplier Management (Phase 8) ---
-    ("supplier.create", "supplier", "Create suppliers and add supplier contacts."),
-    ("supplier.read", "supplier", "View suppliers and their contacts."),
-    ("supplier.update", "supplier", "Update, activate/deactivate suppliers; update grade/potential; edit contacts."),
-    ("supplier.delete", "supplier", "Delete suppliers and remove supplier contacts."),
+# --- Bootstrap permission set (Module -> Page -> Action -> Scope hierarchy) ---
+BOOTSTRAP_PERMISSIONS: list[tuple[str, str, str, str, str, str]] = [
+    # (code, module, page, action, scope, description)
+    # Users & Teams
+    ("user.create", "user", "teams", "create", "ALL", "Create user accounts."),
+    ("user.read", "user", "teams", "view", "ALL", "View user accounts."),
+    ("user.view", "user", "teams", "view", "ALL", "View user accounts."),
+    ("user.update", "user", "teams", "update", "ALL", "Update, activate/deactivate, unlock, and reset passwords for users."),
+    ("user.delete", "user", "teams", "delete", "ALL", "Delete user accounts."),
+    ("user.export", "user", "teams", "export", "ALL", "Export user accounts data."),
+    ("user.import", "user", "teams", "import", "ALL", "Import user accounts data."),
+    # Employees
+    ("employee.create", "employee", "teams", "create", "ALL", "Create employee records."),
+    ("employee.read", "employee", "teams", "view", "ALL", "View employee records."),
+    ("employee.view", "employee", "teams", "view", "ALL", "View employee records."),
+    ("employee.update", "employee", "teams", "update", "ALL", "Update, transfer, deactivate/reactivate employee records."),
+    ("employee.delete", "employee", "teams", "delete", "ALL", "Delete employee records."),
+    ("employee.export", "employee", "teams", "export", "ALL", "Export employee records."),
+    ("employee.import", "employee", "teams", "import", "ALL", "Import employee records."),
+    ("employee.approve", "employee", "teams", "approve", "ALL", "Approve employee applications or changes."),
+    # Departments & Designations
+    ("department.create", "department", "teams", "create", "ALL", "Create departments."),
+    ("department.read", "department", "teams", "view", "ALL", "View departments."),
+    ("department.view", "department", "teams", "view", "ALL", "View departments."),
+    ("department.update", "department", "teams", "update", "ALL", "Update departments."),
+    ("department.delete", "department", "teams", "delete", "ALL", "Delete departments."),
+    ("designation.create", "designation", "teams", "create", "ALL", "Create designations."),
+    ("designation.read", "designation", "teams", "view", "ALL", "View designations."),
+    ("designation.view", "designation", "teams", "view", "ALL", "View designations."),
+    ("designation.update", "designation", "teams", "update", "ALL", "Update designations."),
+    ("designation.delete", "designation", "teams", "delete", "ALL", "Delete designations."),
+    # Organization Settings (Super Admin system-level)
+    ("organization.manage", "organization", "organization", "manage", "ALL", "View and manage system organization profile."),
+    # Suppliers
+    ("supplier.create", "supplier", "suppliers", "create", "ALL", "Create suppliers and add supplier contacts."),
+    ("supplier.read", "supplier", "suppliers", "view", "ALL", "View suppliers and their contacts."),
+    ("supplier.view", "supplier", "suppliers", "view", "ALL", "View suppliers and their contacts."),
+    ("supplier.update", "supplier", "suppliers", "update", "ALL", "Update, activate/deactivate suppliers; update grade/potential; edit contacts."),
+    ("supplier.delete", "supplier", "suppliers", "delete", "ALL", "Delete suppliers and remove supplier contacts."),
+    ("supplier.export", "supplier", "suppliers", "export", "ALL", "Export supplier data."),
+    ("supplier.import", "supplier", "suppliers", "import", "ALL", "Import supplier data."),
+    # Master Data Configurations
+    ("country.create", "country", "masters-countries", "create", "ALL", "Create countries."),
+    ("country.read", "country", "masters-countries", "view", "ALL", "View countries."),
+    ("country.view", "country", "masters-countries", "view", "ALL", "View countries."),
+    ("country.update", "country", "masters-countries", "update", "ALL", "Update countries."),
+    ("country.delete", "country", "masters-countries", "delete", "ALL", "Delete countries."),
+    ("state.create", "state", "masters-states", "create", "ALL", "Create states."),
+    ("state.read", "state", "masters-states", "view", "ALL", "View states."),
+    ("state.view", "state", "masters-states", "view", "ALL", "View states."),
+    ("state.update", "state", "masters-states", "update", "ALL", "Update states."),
+    ("state.delete", "state", "masters-states", "delete", "ALL", "Delete states."),
+    ("city.create", "city", "masters-cities", "create", "ALL", "Create cities."),
+    ("city.read", "city", "masters-cities", "view", "ALL", "View cities."),
+    ("city.view", "city", "masters-cities", "view", "ALL", "View cities."),
+    ("city.update", "city", "masters-cities", "update", "ALL", "Update cities."),
+    ("city.delete", "city", "masters-cities", "delete", "ALL", "Delete cities."),
+    ("currency.create", "currency", "masters-currencies", "create", "ALL", "Create currencies."),
+    ("currency.read", "currency", "masters-currencies", "view", "ALL", "View currencies."),
+    ("currency.view", "currency", "masters-currencies", "view", "ALL", "View currencies."),
+    ("currency.update", "currency", "masters-currencies", "update", "ALL", "Update currencies."),
+    ("currency.delete", "currency", "masters-currencies", "delete", "ALL", "Delete currencies."),
+    ("uom.create", "uom", "masters-uom", "create", "ALL", "Create units of measurement."),
+    ("uom.read", "uom", "masters-uom", "view", "ALL", "View units of measurement."),
+    ("uom.view", "uom", "masters-uom", "view", "ALL", "View units of measurement."),
+    ("uom.update", "uom", "masters-uom", "update", "ALL", "Update units of measurement."),
+    ("uom.delete", "uom", "masters-uom", "delete", "ALL", "Delete units of measurement."),
+    ("hsn.create", "hsn", "masters-hsn", "create", "ALL", "Create HSN codes."),
+    ("hsn.read", "hsn", "masters-hsn", "view", "ALL", "View HSN codes."),
+    ("hsn.view", "hsn", "masters-hsn", "view", "ALL", "View HSN codes."),
+    ("hsn.update", "hsn", "masters-hsn", "update", "ALL", "Update HSN codes."),
+    ("hsn.delete", "hsn", "masters-hsn", "delete", "ALL", "Delete HSN codes."),
+    ("brand.create", "brand", "masters-brands", "create", "ALL", "Create brands."),
+    ("brand.read", "brand", "masters-brands", "view", "ALL", "View brands."),
+    ("brand.view", "brand", "masters-brands", "view", "ALL", "View brands."),
+    ("brand.update", "brand", "masters-brands", "update", "ALL", "Update brands."),
+    ("brand.delete", "brand", "masters-brands", "delete", "ALL", "Delete brands."),
+    ("masters.brand.create", "brand", "masters-brands", "create", "ALL", "Create brands (hierarchical)."),
+    ("masters.brand.view", "brand", "masters-brands", "view", "ALL", "View brands (hierarchical)."),
+    ("category.create", "category", "masters-categories", "create", "ALL", "Create product categories."),
+    ("category.read", "category", "masters-categories", "view", "ALL", "View product categories."),
+    ("category.view", "category", "masters-categories", "view", "ALL", "View product categories."),
+    ("category.update", "category", "masters-categories", "update", "ALL", "Update product categories."),
+    ("category.delete", "category", "masters-categories", "delete", "ALL", "Delete product categories."),
+    ("subcategory.create", "subcategory", "masters-subcategories", "create", "ALL", "Create product sub-categories."),
+    ("subcategory.read", "subcategory", "masters-subcategories", "view", "ALL", "View product sub-categories."),
+    ("subcategory.view", "subcategory", "masters-subcategories", "view", "ALL", "View product sub-categories."),
+    ("subcategory.update", "subcategory", "masters-subcategories", "update", "ALL", "Update product sub-categories."),
+    ("subcategory.delete", "subcategory", "masters-subcategories", "delete", "ALL", "Delete product sub-categories."),
+    ("product.create", "product", "masters-products", "create", "ALL", "Create products."),
+    ("product.read", "product", "masters-products", "view", "ALL", "View products."),
+    ("product.view", "product", "masters-products", "view", "ALL", "View products."),
+    ("product.update", "product", "masters-products", "update", "ALL", "Update products."),
+    ("product.delete", "product", "masters-products", "delete", "ALL", "Delete products."),
+    ("masters.product.view", "product", "masters-products", "view", "ALL", "View products (hierarchical)."),
+    # Inventory & Reports
+    ("inventory.create", "inventory", "inventory", "create", "ALL", "Create inventory records."),
+    ("inventory.read", "inventory", "inventory", "view", "ALL", "View inventory records."),
+    ("inventory.view", "inventory", "inventory", "view", "ALL", "View inventory records."),
+    ("inventory.update", "inventory", "inventory", "update", "ALL", "Update inventory records."),
+    ("inventory.delete", "inventory", "inventory", "delete", "ALL", "Delete inventory records."),
+    ("crm.view", "crm", "crm", "view", "ALL", "View CRM data."),
+    ("reports.read", "reports", "reports", "view", "ALL", "View system reports."),
+    ("reports.view", "reports", "reports", "view", "ALL", "View system reports."),
+    ("reports.export", "reports", "reports", "export", "ALL", "Export reports."),
+    # Settings, Audit & System
+    ("settings.manage", "settings", "rbac", "manage", "ALL", "Manage system settings, roles, and permissions."),
+    ("audit.read", "audit", "audit", "view", "ALL", "View audit log entries."),
+    ("audit.view", "audit", "audit", "view", "ALL", "View audit log entries."),
+    ("queue.read", "queue", "queue", "view", "ALL", "View background queue status."),
+    ("queue.manage", "queue", "queue", "manage", "ALL", "Manage background job queues."),
+    ("cache.read", "cache", "cache", "view", "ALL", "View cache status."),
+    ("cache.manage", "cache", "cache", "manage", "ALL", "Manage system cache."),
 ]
 
 SUPER_ADMIN_ROLE_NAME = "super_admin"
 EMPLOYEE_ROLE_NAME = "employee"
 
-# Default permission set for a regular team member created via the Teams
-# "Add Member" flow: enough to use the day-to-day parts of the ERP, with
-# NO access to user/role/settings/audit management. In particular,
-# "audit.read" is deliberately excluded so that only super_admin (or any
-# other role an admin explicitly grants it to) can view the Audit Log --
-# satisfying "only admin can see audit logs" through the existing
-# permission system rather than a hardcoded role-name check.
 EMPLOYEE_ROLE_PERMISSION_CODES: list[str] = [
     "employee.read",
+    "employee.view",
     "department.read",
+    "department.view",
     "designation.read",
+    "designation.view",
     "country.read",
+    "country.view",
     "state.read",
+    "state.view",
     "city.read",
+    "city.view",
     "currency.read",
+    "currency.view",
     "uom.read",
+    "uom.view",
     "hsn.read",
+    "hsn.view",
     "brand.read",
+    "brand.view",
     "category.read",
+    "category.view",
     "subcategory.read",
+    "subcategory.view",
     "product.read",
+    "product.view",
     "supplier.read",
+    "supplier.view",
 ]
 
 
@@ -149,16 +197,28 @@ async def seed() -> None:
 
         # --- 1. Permissions --------------------------------------------------------
         created_permissions: list[Permission] = []
-        for code, module, description in BOOTSTRAP_PERMISSIONS:
+        for code, module, page, action, scope, description in BOOTSTRAP_PERMISSIONS:
             existing = await permission_repo.get_by_code(code)
             if existing is not None:
+                if existing.page != page or existing.action != action or existing.scope != scope:
+                    existing.page = page
+                    existing.action = action
+                    existing.scope = scope
+                    await session.flush()
                 created_permissions.append(existing)
                 continue
-            permission = await permission_repo.create(code=code, module=module, description=description)
+            permission = await permission_repo.create(
+                code=code,
+                module=module,
+                page=page,
+                action=action,
+                scope=scope,
+                description=description,
+            )
             created_permissions.append(permission)
             logger.info("Seeded permission.", extra={"code": code})
 
-        # --- 2. super_admin role, granted every permission -----------------------------
+        # --- 2. System roles -----------------------------------------------------------
         role = await role_repo.get_by_name(SUPER_ADMIN_ROLE_NAME)
         if role is None:
             role = await role_repo.create(
@@ -171,24 +231,34 @@ async def seed() -> None:
                 session.add(RolePermission(role_id=role.id, permission_id=permission.id))
             await session.flush()
 
-        # --- 2b. employee role, granted a safe view-mostly permission subset -----------
-        employee_role = await role_repo.get_by_name(EMPLOYEE_ROLE_NAME)
-        if employee_role is None:
-            employee_role = await role_repo.create(
-                name=EMPLOYEE_ROLE_NAME,
-                description=(
-                    "Default role for team members added via the Teams 'Add Member' flow. "
-                    "View-mostly access; no user/role/settings/audit-log access."
-                ),
+        admin_role = await role_repo.get_by_name("admin")
+        if admin_role is None:
+            admin_role = await role_repo.create(
+                name="admin",
+                description="Administrator system role with full management privileges.",
                 is_system=True,
             )
-            logger.info("Seeded role.", extra={"role_name": EMPLOYEE_ROLE_NAME})
+            logger.info("Seeded role.", extra={"role_name": "admin"})
+            for permission in created_permissions:
+                session.add(RolePermission(role_id=admin_role.id, permission_id=permission.id))
+            await session.flush()
+        else:
+            org_perm = await permission_repo.get_by_code("organization.manage")
+            if org_perm:
+                await role_repo.add_permission(admin_role, org_perm)
+
+        user_role = await role_repo.get_by_name("user")
+        if user_role is None:
+            user_role = await role_repo.create(
+                name="user",
+                description="Standard user system role for base application access.",
+                is_system=True,
+            )
+            logger.info("Seeded role.", extra={"role_name": "user"})
             for code in EMPLOYEE_ROLE_PERMISSION_CODES:
                 permission = await permission_repo.get_by_code(code)
-                if permission is None:
-                    logger.warning("Skipping unknown permission code for employee role.", extra={"code": code})
-                    continue
-                session.add(RolePermission(role_id=employee_role.id, permission_id=permission.id))
+                if permission:
+                    session.add(RolePermission(role_id=user_role.id, permission_id=permission.id))
             await session.flush()
 
         # --- 3. Bootstrap admin user ----------------------------------------------------

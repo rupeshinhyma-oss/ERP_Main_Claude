@@ -339,7 +339,6 @@ const MasterPage = (() => {
     if (exportCsvBtn) exportCsvBtn.addEventListener("click", () => doExport("csv"));
     if (exportXlsxBtn) exportXlsxBtn.addEventListener("click", () => doExport("xlsx"));
 
-<<<<<<< HEAD
     // --- Sample CSV Templates ---
     const SAMPLE_TEMPLATES = {
       "product": {

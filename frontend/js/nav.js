@@ -91,24 +91,10 @@ function getDynamicNavSections() {
 
 const PAGE_TITLES = {
   dashboard: "Dashboard",
-<<<<<<< HEAD
   tasks: "Tasks & Work Management",
-  reports: "Reports & Analytics",
-  buyer: "Buyer Profiles",
-  inquiry: "Inquiries",
-  crm: "Customer Relationship Management",
-  sales: "Sales Orders",
-  purchase: "Purchasing",
-  inventory: "Inventory Management",
-  manufacturing: "Manufacturing",
-  finance: "Finance & Accounts",
-  hrms: "Human Resource Management",
-  organization: "Organization Settings",
-=======
   buyers: "Buyer Profiles",
   suppliers: "Supplier Profiles",
   inquiries: "Inquiries & Consignments",
->>>>>>> origin/main
   teams: "Teams",
   organization: "Organization Settings",
   users: "User Accounts & Passwords",
@@ -358,22 +344,10 @@ function renderShell(activeKey) {
         </div>
       </aside>`;
 
-<<<<<<< HEAD
     const navEl = document.querySelector(".sidebar-nav");
     if (navEl) {
       positionNavScroll(navEl);
       persistNavScroll(navEl);
-=======
-    const newSidebar = document.getElementById("sidebarMount");
-    if (newSidebar) {
-      const activeItem = newSidebar.querySelector(".nav-item.active");
-      if (activeItem) {
-        activeItem.scrollIntoView({ block: "nearest" });
-      }
-      newSidebar.addEventListener("scroll", () => {
-        sessionStorage.setItem("erp_sidebar_scroll", newSidebar.scrollTop);
-      });
->>>>>>> origin/main
     }
 
     resolveBrandName().then((name) => {

@@ -80,11 +80,7 @@
             <table>
               <thead>
                 <tr>
-<<<<<<< HEAD
                   <th style="width: 40px;"><input type="checkbox" class="select-all-checkbox" /></th>
-=======
-                  <th style="width:28px;"><input type="checkbox" id="selectAllProducts" /></th>
->>>>>>> origin/main
                   <th>Sr. No.</th>
                   <th>Product Name (Tally)</th>
                   <th>Product Code</th>
@@ -394,17 +390,12 @@
       ],
       extraFilters() {
         const filters = {};
-<<<<<<< HEAD
-        const catVal = document.getElementById("categoryFilter")?.value;
-        const brandVal = document.getElementById("brandFilter")?.value;
-=======
         const catEl = document.getElementById("categoryFilter");
         const subCatEl = document.getElementById("subCategoryFilter");
         const brandEl = document.getElementById("brandFilter");
         const catVal = catEl ? catEl.value : "";
         const subCatVal = subCatEl ? subCatEl.value : "";
         const brandVal = brandEl ? brandEl.value : "";
->>>>>>> origin/main
         if (catVal) filters.category_id = catVal;
         if (subCatVal) filters.sub_category_id = subCatVal;
         if (brandVal) filters.brand_id = brandVal;
@@ -429,15 +420,10 @@
           // Populate Category Selects
           const catSelect = document.getElementById("category_id");
           const catFilter = document.getElementById("categoryFilter");
-<<<<<<< HEAD
-          if (catSelect) catSelect.innerHTML = '<option value="">-- Select Category --</option>';
-          if (catFilter) catFilter.innerHTML = '<option value="">All categories</option>';
-=======
           const subCatFilter = document.getElementById("subCategoryFilter");
 
-          catSelect.innerHTML = '<option value="">-- Select Category --</option>';
-          catFilter.innerHTML = '<option value="">All Categories</option>';
->>>>>>> origin/main
+          if (catSelect) catSelect.innerHTML = '<option value="">-- Select Category --</option>';
+          if (catFilter) catFilter.innerHTML = '<option value="">All Categories</option>';
           for (const c of categoriesCache) {
             if (catSelect) {
               const opt1 = document.createElement("option"); opt1.value = c.id; opt1.textContent = c.name; catSelect.appendChild(opt1);

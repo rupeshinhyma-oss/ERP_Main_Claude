@@ -27,6 +27,7 @@ from app.masters.product_sub_categories.routes import router as product_sub_cate
 from app.masters.products.routes import router as products_router
 from app.masters.states.routes import router as states_router
 from app.masters.uom.routes import router as uom_router
+from app.members.routes import router as members_router
 from app.organizations.routes import router as organizations_router
 from app.queue.routes import router as queue_router
 from app.rbac.routes import router as rbac_router
@@ -39,6 +40,7 @@ api_router = APIRouter()
 api_router.include_router(health_router)
 api_router.include_router(auth_router)
 api_router.include_router(users_router)
+api_router.include_router(members_router)
 api_router.include_router(rbac_router)
 api_router.include_router(queue_router)
 api_router.include_router(cache_router)

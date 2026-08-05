@@ -40,8 +40,9 @@ class EmployeeRepository(BaseRepository[Employee]):
     )
 
     def __init__(self, session: AsyncSession) -> None:
-        """Bind to a DB session, operating on the ``Employee`` model."""
-        super().__init__(session, Employee)
+        """Bind to a DB session, operating on the unified ``User`` model."""
+        from app.users.models import User
+        super().__init__(session, User)
 
     async def get_by_email(self, email: str) -> Employee | None:
         """Fetch an employee by their exact email address (ignores soft-deleted rows)."""

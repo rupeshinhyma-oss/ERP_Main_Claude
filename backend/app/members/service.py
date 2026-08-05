@@ -138,12 +138,19 @@ class TeamMemberService:
         # have done (role assignment) is still done via the existing
         # UserService.assign_role() below, so this only diverges from the
         # existing flow at the one point it must.
+        first_name, last_name = _split_full_name(full_name)
         user = await self.user_service.user_repository.create(
+            first_name=first_name,
+            last_name=last_name,
+            display_name=full_name.strip(),
             employee_code=None,
             username=username,
             email=email,
             phone=None,
             password_hash=hash_password(password),
+            department_id=department_id,
+            designation_id=designation_id,
+            date_of_joining=date.today(),
             status=UserStatus.PENDING,
             is_active=True,
             must_change_password=False,  # the admin set this password deliberately; don't force an immediate change
@@ -154,45 +161,10 @@ class TeamMemberService:
         await self.user_service.assign_role(user.id, default_role.id, assigned_by=created_by)
         await self.password_vault_repository.upsert(user.id, encrypt_password(password))
 
-        first_name, last_name = _split_full_name(full_name)
-        try:
-            employee = await self.employee_service.create(
-                created_by=created_by,
-                first_name=first_name,
-                last_name=last_name,
-                display_name=full_name.strip(),
-                email=email,
-                phone=None,
-                date_of_birth=None,
-                gender=None,
-                date_of_joining=date.today(),
-                department_id=department_id,
-                designation_id=designation_id,
-                manager_id=None,
-                employment_type=EmploymentType.FULL_TIME,
-                profile_picture_url=None,
-                address=None,
-                city=None,
-                state=None,
-                country=None,
-                postal_code=None,
-                notes=None,
-                user_id=user.id,
-            )
-        except ConflictException:
-            # The User account (and its vault entry) was already created
-            # and committed at this point (a genuinely separate, real
-            # account); re-raise with a clearer message rather than
-            # silently leaving an orphaned user with no employee profile.
-            raise ConflictException(
-                f"User {username!r} was created, but an employee profile with email {email!r} "
-                "already exists. Please check for a duplicate employee record."
-            )
-
         return {
             "user_id": user.id,
-            "employee_id": employee.id,
-            "employee_code": employee.employee_code,
+            "employee_id": user.id,
+            "employee_code": user.employee_code,
             "full_name": full_name.strip(),
             "username": username,
             "email": email,

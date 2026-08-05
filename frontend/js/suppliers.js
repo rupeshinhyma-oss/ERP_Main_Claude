@@ -840,33 +840,6 @@ const SupplierPage = (() => {
       });
     }
 
-    // Import
-    document.getElementById("importInput").addEventListener("change", async (e) => {
-      const file = e.target.files[0];
-      if (!file) return;
-      const formData = new FormData();
-      formData.append("file", file);
-      try {
-        const token = Auth.getAccessToken();
-        const res = await fetch(`${API_ORIGIN}/api/v1/suppliers/import`, {
-          method: "POST",
-          headers: { Authorization: `Bearer ${token}` },
-          body: formData,
-        });
-        const body = await res.json();
-        if (!res.ok || body.success === false) throw new Error(body.message || "Import failed.");
-        const s = body.data;
-        const errorLines = (s.errors || []).map((er) => `Row ${er.row}: ${escapeHtml(er.error)}`).join("<br>");
-        document.getElementById("importSummary").innerHTML = `
-          <div class="import-summary">
-            <div class="import-stats">
-              <div class="import-stat"><b>${s.total_rows}</b><span class="muted">Total rows</span></div>
-              <div class="import-stat"><b style="color:var(--color-success)">${s.created}</b><span class="muted">Created</span></div>
-              <div class="import-stat"><b style="color:var(--color-danger)">${s.failed}</b><span class="muted">Failed</span></div>
-            </div>
-            ${errorLines ? `<div class="import-errors">${errorLines}</div>` : ""}
-          </div>`;
-=======
     // Import (column-mapping wizard: pick file -> map columns -> import)
     ImportWizard.attach({
       triggerInputEl: document.getElementById("importInput"),
@@ -903,7 +876,6 @@ const SupplierPage = (() => {
       ],
       summaryEl: document.getElementById("importSummary"),
       onComplete: async () => {
->>>>>>> origin/main
         await loadTable();
       },
     });

@@ -411,10 +411,7 @@ const MasterPage = (() => {
       });
     }
 
-    // --- Import ---
-=======
     // --- Import (column-mapping wizard: pick file -> map columns -> import) ---
->>>>>>> origin/main
     const importInput = document.getElementById("importInput");
     if (importInput && config.importHeaders) {
       ImportWizard.attach({

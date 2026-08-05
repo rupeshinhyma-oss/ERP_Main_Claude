@@ -355,10 +355,6 @@
       ],
       columns: [
         {
-          header: '<input type="checkbox" id="selectAllProducts" />',
-          render: (p) => `<input type="checkbox" class="select-row-cb" data-id="${p.id}" />`,
-        },
-        {
           header: "Product Name (Tally)",
           render: (p) => `<a href="#" onclick="event.preventDefault(); alert('Item: ' + escapeHtml(p.product_name_tally || p.product_name) + '\\nInvoice Name: ' + escapeHtml(p.product_name_invoice || '-') + '\\nRefund VAT: ' + (p.refund_vat_percent || 0) + '%\\nLicense Requirement: ' + escapeHtml(p.license_certificate_required || 'None'));" class="cell-primary" style="color:var(--color-primary); font-weight:600;">${escapeHtml(p.product_name_tally || p.product_name)}</a>${p.license_certificate_required ? `<br><span style="color:#ef4444; font-size:11px; font-weight:bold;">⚠️ License Required</span>` : ""}`,
         },

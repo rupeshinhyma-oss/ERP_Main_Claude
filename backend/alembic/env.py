@@ -42,7 +42,6 @@ import app.audit.models  # noqa: F401,E402
 import app.organizations.models  # noqa: F401,E402 - Phase 6
 import app.designations.models  # noqa: F401,E402 - Phase 6 (imported before departments: no FK dependency)
 import app.departments.models  # noqa: F401,E402 - Phase 6
-import app.employees.models  # noqa: F401,E402 - Phase 6
 import app.masters.countries.models  # noqa: F401,E402 - Phase 7
 import app.masters.states.models  # noqa: F401,E402 - Phase 7
 import app.masters.cities.models  # noqa: F401,E402 - Phase 7

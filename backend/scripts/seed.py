@@ -124,22 +124,40 @@ BOOTSTRAP_PERMISSIONS: list[tuple[str, str, str, str, str, str]] = [
     ("subcategory.view", "subcategory", "masters-subcategories", "view", "ALL", "View product sub-categories."),
     ("subcategory.update", "subcategory", "masters-subcategories", "update", "ALL", "Update product sub-categories."),
     ("subcategory.delete", "subcategory", "masters-subcategories", "delete", "ALL", "Delete product sub-categories."),
+    # Product & Masters Management
     ("product.create", "product", "masters-products", "create", "ALL", "Create products."),
     ("product.read", "product", "masters-products", "view", "ALL", "View products."),
     ("product.view", "product", "masters-products", "view", "ALL", "View products."),
     ("product.update", "product", "masters-products", "update", "ALL", "Update products."),
     ("product.delete", "product", "masters-products", "delete", "ALL", "Delete products."),
+    ("product.export", "product", "masters-products", "export", "ALL", "Export product records."),
+    ("product.import", "product", "masters-products", "import", "ALL", "Import product records."),
+    ("product.approve", "product", "masters-products", "approve", "ALL", "Approve product listings."),
+    ("product.print", "product", "masters-products", "print", "ALL", "Print product details."),
     ("masters.product.view", "product", "masters-products", "view", "ALL", "View products (hierarchical)."),
+    ("masters.product.manage", "product", "masters-products", "manage", "ALL", "Manage product catalog."),
     # Inventory & Reports
     ("inventory.create", "inventory", "inventory", "create", "ALL", "Create inventory records."),
     ("inventory.read", "inventory", "inventory", "view", "ALL", "View inventory records."),
     ("inventory.view", "inventory", "inventory", "view", "ALL", "View inventory records."),
     ("inventory.update", "inventory", "inventory", "update", "ALL", "Update inventory records."),
     ("inventory.delete", "inventory", "inventory", "delete", "ALL", "Delete inventory records."),
+    ("inventory.approve", "inventory", "inventory", "approve", "ALL", "Approve inventory adjustments and transfers."),
+    ("inventory.export", "inventory", "inventory", "export", "ALL", "Export inventory data."),
+    ("inventory.import", "inventory", "inventory", "import", "ALL", "Import inventory data."),
+    ("inventory.print", "inventory", "inventory", "print", "ALL", "Print inventory tags/reports."),
+    ("inventory.manage", "inventory", "inventory", "manage", "ALL", "Manage inventory control."),
     ("crm.view", "crm", "crm", "view", "ALL", "View CRM data."),
     ("reports.read", "reports", "reports", "view", "ALL", "View system reports."),
     ("reports.view", "reports", "reports", "view", "ALL", "View system reports."),
     ("reports.export", "reports", "reports", "export", "ALL", "Export reports."),
+    ("reports.print", "reports", "reports", "print", "ALL", "Print system reports."),
+    # Tasks & Work Management
+    ("task.create", "task", "tasks", "create", "ALL", "Create tasks."),
+    ("task.read", "task", "tasks", "view", "ALL", "View tasks."),
+    ("task.view", "task", "tasks", "view", "ALL", "View tasks."),
+    ("task.update", "task", "tasks", "update", "ALL", "Update and reassign tasks."),
+    ("task.delete", "task", "tasks", "delete", "ALL", "Delete tasks."),
     # Settings, Audit & System
     ("settings.manage", "settings", "rbac", "manage", "ALL", "Manage system settings, roles, and permissions."),
     ("audit.read", "audit", "audit", "view", "ALL", "View audit log entries."),
@@ -152,6 +170,24 @@ BOOTSTRAP_PERMISSIONS: list[tuple[str, str, str, str, str, str]] = [
 
 SUPER_ADMIN_ROLE_NAME = "super_admin"
 EMPLOYEE_ROLE_NAME = "employee"
+
+DEFAULT_BUSINESS_ROLES = [
+    ("sales", "Sales Department Role for Managing Clients, Inquiries, and Suppliers.", [
+        "supplier.view", "supplier.create", "product.view", "brand.view", "category.view", "subcategory.view"
+    ]),
+    ("purchase", "Purchase Department Role for Supplier Management and Procurement.", [
+        "supplier.view", "supplier.create", "supplier.update", "supplier.export", "supplier.import", "product.view", "uom.view", "hsn.view"
+    ]),
+    ("hr", "Human Resources Department Role for Employee and Team Management.", [
+        "employee.view", "employee.create", "employee.update", "employee.export", "employee.import", "employee.approve", "department.view", "department.create", "department.update", "designation.view", "designation.create", "designation.update", "user.view"
+    ]),
+    ("accounts", "Accounts & Finance Role for Tax, Currencies, and Financial Reports.", [
+        "currency.view", "currency.create", "currency.update", "hsn.view", "hsn.create", "hsn.update", "supplier.view", "reports.view", "reports.export"
+    ]),
+    ("inventory", "Inventory & Warehouse Management Role.", [
+        "inventory.view", "inventory.create", "inventory.update", "inventory.approve", "inventory.export", "inventory.import", "product.view", "product.create", "product.update", "uom.view", "category.view", "subcategory.view"
+    ]),
+]
 
 EMPLOYEE_ROLE_PERMISSION_CODES: list[str] = [
     "employee.read",
@@ -182,6 +218,10 @@ EMPLOYEE_ROLE_PERMISSION_CODES: list[str] = [
     "product.view",
     "supplier.read",
     "supplier.view",
+    "task.read",
+    "task.view",
+    "task.create",
+    "task.update",
 ]
 
 
@@ -247,19 +287,20 @@ async def seed() -> None:
             if org_perm:
                 await role_repo.add_permission(admin_role, org_perm)
 
-        user_role = await role_repo.get_by_name("user")
-        if user_role is None:
-            user_role = await role_repo.create(
-                name="user",
-                description="Standard user system role for base application access.",
-                is_system=True,
-            )
-            logger.info("Seeded role.", extra={"role_name": "user"})
-            for code in EMPLOYEE_ROLE_PERMISSION_CODES:
-                permission = await permission_repo.get_by_code(code)
-                if permission:
-                    session.add(RolePermission(role_id=user_role.id, permission_id=permission.id))
-            await session.flush()
+        for r_name, r_desc, r_perms in DEFAULT_BUSINESS_ROLES:
+            b_role = await role_repo.get_by_name(r_name)
+            if b_role is None:
+                b_role = await role_repo.create(
+                    name=r_name,
+                    description=r_desc,
+                    is_system=False,
+                )
+                logger.info("Seeded business role.", extra={"role_name": r_name})
+                for code in r_perms:
+                    permission = await permission_repo.get_by_code(code)
+                    if permission:
+                        session.add(RolePermission(role_id=b_role.id, permission_id=permission.id))
+                await session.flush()
 
         # --- 3. Bootstrap admin user ----------------------------------------------------
         admin = await user_repo.get_by_username(settings.BOOTSTRAP_ADMIN_USERNAME)

@@ -6,7 +6,7 @@
   <title>Effective Permissions — Inhyma ERP</title>
   <link rel="stylesheet" href="css/style.css" />
   <style>
-    .info-card { background: #ffffff; border: 1px solid var(--color-border); border-radius: var(--radius); padding: var(--space-3); margin-bottom: var(--space-3); }
+    .info-card { background: #ffffff; border: 1px solid var(--color-border); border-radius: var(--radius); padding: var(--space-3); margin-bottom: var(--space-3); box-shadow: 0 1px 3px rgba(0,0,0,0.04); }
     .info-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin-top: 12px; }
     .info-label { font-size: 11px; text-transform: uppercase; font-weight: 700; color: var(--color-muted); margin-bottom: 4px; }
     .info-value { font-size: 14.5px; font-weight: 600; color: #1e293b; }
@@ -16,6 +16,14 @@
     .source-role { background: #e2e8f0; color: #334155; border: 1px solid #cbd5e0; }
     .source-admin { background: #dcfce7; color: #166534; border: 1px solid #bbf7d0; }
 
+    .chip { display: inline-block; border-radius: 20px; padding: 4px 10px; font-size: 12px; margin: 3px; font-weight: 500; }
+    .chip-role { background: #f1f5f9; color: #334155; border: 1px solid #cbd5e0; }
+    .chip-grant { background: #dcfce7; color: #166534; border: 1px solid #bbf7d0; }
+    .chip-deny { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; }
+    .chip-effective { background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; font-family: monospace; font-weight: 600; }
+
+    .section-header-title { font-size: 15px; font-weight: 700; color: #1e293b; margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between; }
+    
     .data-table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 13.5px; }
     .data-table th { text-align: left; padding: 10px 14px; background: #f8fafc; border-bottom: 2px solid #e2e8f0; color: #475569; font-weight: 600; }
     .data-table td { padding: 10px 14px; border-bottom: 1px solid #e2e8f0; vertical-align: middle; }
@@ -44,14 +52,14 @@
 
         <!-- User Selector -->
         <div class="info-card" style="border-left: 4px solid var(--color-primary, #3182ce);">
-          <label style="display:block; font-size:13px; font-weight:600; margin-bottom:6px; color:#334155;">Select User to Inspect:</label>
+          <label style="display:block; font-size:13px; font-weight:600; margin-bottom:6px; color:#334155;">Select User Account to Inspect:</label>
           <select id="userSelect" style="width:100%; max-width:540px; padding:10px; border:1px solid #cbd5e0; border-radius:6px; font-size:14px;">
             <option value="">Select User...</option>
           </select>
         </div>
 
         <div id="inspectorMount">
-          <p class="muted">Select a user above to view their effective access report.</p>
+          <p class="muted">Select a user account above to view their effective access report.</p>
         </div>
       </main>
     </div>
@@ -64,6 +72,8 @@
 
     const banner = document.getElementById("banner");
     let currentBreakdown = null;
+    let tableCurrentPage = 1;
+    let tablePageSize = 20;
 
     async function loadUserList() {
       const select = document.getElementById("userSelect");
@@ -71,7 +81,15 @@
         const res = await apiGet("/users?limit=200");
         const users = res.data.items || [];
         select.innerHTML = '<option value="">Select User...</option>' +
-          users.map((u) => `<option value="${u.id}">${escapeHtml(u.username)} (${escapeHtml(u.email)})</option>`).join("");
+          users.map((u) => `<option value="${u.id}">${escapeHtml(u.username)} (${escapeHtml(u.email)}) - Status: ${u.status}</option>`).join("");
+
+        // Auto-select user if passed in query param
+        const params = new URLSearchParams(window.location.search);
+        const userParam = params.get("user_id");
+        if (userParam && select) {
+          select.value = userParam;
+          select.dispatchEvent(new Event("change"));
+        }
       } catch (err) {
         showError(banner, err);
       }
@@ -81,13 +99,14 @@
       const userId = e.target.value;
       const mount = document.getElementById("inspectorMount");
       if (!userId) {
-        mount.innerHTML = '<p class="muted">Select a user above to view their effective access report.</p>';
+        mount.innerHTML = '<p class="muted">Select a user account above to view their effective access report.</p>';
         return;
       }
       mount.innerHTML = '<p class="muted">Calculating effective permissions and tracing sources...</p>';
       try {
         const res = await apiGet(`/rbac/users/${userId}/effective-permissions`);
         currentBreakdown = res.data;
+        tableCurrentPage = 1;
         renderInspectorView();
       } catch (err) {
         showError(banner, err);
@@ -109,12 +128,19 @@
 
       const info = currentBreakdown.user_info;
       const sources = currentBreakdown.permission_sources || [];
+      const rolePerms = currentBreakdown.role_permissions || [];
+      const userGrants = currentBreakdown.user_grants || [];
+      const userDenies = currentBreakdown.user_denies || [];
+      const effectivePerms = currentBreakdown.effective_permissions || [];
       const rolesText = (info.system_roles || []).join(", ") || "User";
 
+      // Extract unique modules for filter dropdown
+      const modules = Array.from(new Set(sources.map((s) => s.module))).sort();
+
       let html = `
-        <!-- User Information Header Card -->
+        <!-- Section 1: User Information -->
         <div class="info-card">
-          <div style="font-size:15px; font-weight:700; color:#1e293b; margin-bottom:8px;">User Information</div>
+          <div class="section-header-title">👤 User Information</div>
           <div class="info-grid">
             <div>
               <div class="info-label">Employee Name</div>
@@ -133,7 +159,7 @@
               <div class="info-value">${escapeHtml(info.designation)}</div>
             </div>
             <div>
-              <div class="info-label">Assigned Roles</div>
+              <div class="info-label">Assigned Role(s)</div>
               <div class="info-value">${escapeHtml(rolesText)}</div>
             </div>
             <div>
@@ -143,14 +169,64 @@
           </div>
         </div>
 
-        <!-- Permission Sources & Tracing -->
+        <!-- Section 2: Role Permissions -->
         <div class="info-card">
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-            <div style="font-size:15px; font-weight:700; color:#1e293b;">Permission Sources (${sources.length})</div>
+          <div class="section-header-title">
+            <span>🛡️ Role Permissions (${rolePerms.length})</span>
+            <span style="font-size:12px; font-weight:normal; color:var(--color-muted);">Inherited across assigned System & Custom Roles</span>
           </div>
+          <div>
+            ${rolePerms.length 
+              ? rolePerms.map((c) => `<span class="chip chip-role">${escapeHtml(c)}</span>`).join("") 
+              : '<p class="muted" style="font-size:13px;">No permissions inherited from assigned roles.</p>'}
+          </div>
+        </div>
 
+        <!-- Section 3: Individual User Permission Overrides -->
+        <div class="info-card">
+          <div class="section-header-title">⚡ Individual User Permission Overrides</div>
+          <div style="display:grid; grid-template-columns: 1fr 1fr; gap:16px; margin-top:8px;">
+            <div>
+              <div style="font-size:12px; font-weight:700; color:#166534; margin-bottom:6px;">Extra Granted Permissions (${userGrants.length})</div>
+              <div>
+                ${userGrants.length 
+                  ? userGrants.map((c) => `<span class="chip chip-grant">✓ GRANT: ${escapeHtml(c)}</span>`).join("") 
+                  : '<span class="muted" style="font-size:13px;">None</span>'}
+              </div>
+            </div>
+            <div>
+              <div style="font-size:12px; font-weight:700; color:#991b1b; margin-bottom:6px;">Extra Revoked Permissions (${userDenies.length})</div>
+              <div>
+                ${userDenies.length 
+                  ? userDenies.map((c) => `<span class="chip chip-deny">✗ DENY: ${escapeHtml(c)}</span>`).join("") 
+                  : '<span class="muted" style="font-size:13px;">None</span>'}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Section 4: Final Effective Permissions Summary -->
+        <div class="info-card">
+          <div class="section-header-title">
+            <span>🔑 Final Calculated Effective Permissions (${effectivePerms.length})</span>
+            <span style="font-size:12px; font-weight:normal; color:var(--color-muted);">Exact permission set authorized by backend</span>
+          </div>
+          <div style="margin-top:8px;">
+            ${effectivePerms.length 
+              ? effectivePerms.map((c) => `<span class="chip chip-effective">${escapeHtml(c)}</span>`).join("") 
+              : '<p class="muted" style="font-size:13px;">No permissions authorized for this user account.</p>'}
+          </div>
+        </div>
+
+        <!-- Section 5: Troubleshooting & Source Tracing Table -->
+        <div class="info-card">
+          <div class="section-header-title">🔍 Debug &amp; Permission Tracing Log</div>
           <div class="filter-bar">
-            <input type="text" id="tableSearch" placeholder="Search permissions or modules..." style="flex:1; max-width:320px;" />
+            <input type="text" id="tableSearch" placeholder="Search permission code or module..." style="flex:1; max-width:320px;" />
+            <select id="moduleFilter" style="max-width:200px;">
+              <option value="">All Modules</option>
+              ${modules.map((m) => `<option value="${escapeHtml(m)}">${escapeHtml(m.toUpperCase())}</option>`).join("")}
+            </select>
             <select id="sourceFilter" style="max-width:200px;">
               <option value="">All Permission Sources</option>
               <option value="System Role">System Role</option>
@@ -164,6 +240,8 @@
               <tr>
                 <th>Permission Code</th>
                 <th>Module</th>
+                <th>Inherited Role(s)</th>
+                <th>Override Status</th>
                 <th>Calculated Source</th>
               </tr>
             </thead>
@@ -171,48 +249,77 @@
               ${renderTableRows(sources)}
             </tbody>
           </table>
-        </div>
-
-        <!-- Final Effective Permissions Summary -->
-        <div class="info-card">
-          <div style="font-size:15px; font-weight:700; color:#1e293b; margin-bottom:12px;">Final Calculated Effective Permissions</div>
-          <div>
-            ${currentBreakdown.effective_permissions.map((c) => `<span class="chip" style="background:#f1f5f9;border:1px solid #cbd5e0;padding:4px 10px;font-size:12px;margin:3px;display:inline-block;">${escapeHtml(c)}</span>`).join("")}
-          </div>
+          <div id="paginationMount" style="margin-top:16px;"></div>
         </div>
       `;
 
       mount.innerHTML = html;
 
-      document.getElementById("tableSearch").addEventListener("input", filterTable);
-      document.getElementById("sourceFilter").addEventListener("change", filterTable);
+      document.getElementById("tableSearch").addEventListener("input", () => { tableCurrentPage = 1; filterTable(); });
+      document.getElementById("moduleFilter").addEventListener("change", () => { tableCurrentPage = 1; filterTable(); });
+      document.getElementById("sourceFilter").addEventListener("change", () => { tableCurrentPage = 1; filterTable(); });
     }
 
     function renderTableRows(sources) {
       if (!sources || !sources.length) {
-        return '<tr><td colspan="3" class="muted" style="text-align:center;">No permissions granted.</td></tr>';
+        return '<tr><td colspan="5" class="muted" style="text-align:center;">No permissions found.</td></tr>';
       }
-      return sources.map((item) => `
+
+      // Pagination slice
+      const start = (tableCurrentPage - 1) * tablePageSize;
+      const pageItems = sources.slice(start, start + tablePageSize);
+
+      const rows = pageItems.map((item) => {
+        const rolesList = (item.role_names || []).join(", ") || "—";
+        let overrideBadge = '<span class="badge badge-neutral">None</span>';
+        if (item.override_type === "Granted") overrideBadge = '<span class="badge badge-success">✓ Granted</span>';
+        if (item.override_type === "Revoked") overrideBadge = '<span class="badge badge-danger">✗ Revoked</span>';
+
+        return `
         <tr>
           <td><strong style="font-family:monospace; color:#0f172a;">${escapeHtml(item.code)}</strong></td>
           <td><span class="badge badge-neutral" style="text-transform:capitalize;">${escapeHtml(item.module)}</span></td>
+          <td>${escapeHtml(rolesList)}</td>
+          <td>${overrideBadge}</td>
           <td><span class="source-badge ${getSourceBadgeClass(item.source)}">${escapeHtml(item.source)}</span></td>
-        </tr>`).join("");
+        </tr>`;
+      }).join("");
+
+      return rows;
     }
 
     function filterTable() {
       if (!currentBreakdown) return;
       const q = (document.getElementById("tableSearch").value || "").toLowerCase();
+      const mFilter = document.getElementById("moduleFilter").value;
       const sFilter = document.getElementById("sourceFilter").value;
       const sources = currentBreakdown.permission_sources || [];
 
       const filtered = sources.filter((item) => {
         const matchesQ = item.code.toLowerCase().includes(q) || item.module.toLowerCase().includes(q);
+        const matchesModule = !mFilter || item.module === mFilter;
         const matchesSource = !sFilter || item.source === sFilter;
-        return matchesQ && matchesSource;
+        return matchesQ && matchesModule && matchesSource;
       });
 
       document.getElementById("sourcesTbody").innerHTML = renderTableRows(filtered);
+
+      // Render pagination controls
+      const paginationMount = document.getElementById("paginationMount");
+      if (paginationMount) {
+        renderFlexiblePagination("paginationMount", {
+          total_items: filtered.length,
+          total_pages: Math.ceil(filtered.length / tablePageSize) || 1,
+          current_page: tableCurrentPage,
+          page_size: tablePageSize,
+        }, {
+          pageSize: tablePageSize,
+          onPageChange: (newPage) => {
+            tableCurrentPage = newPage;
+            filterTable();
+          }
+        });
+      }
     }
 
     loadUserList();

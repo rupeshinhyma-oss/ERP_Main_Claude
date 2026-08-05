@@ -3,7 +3,6 @@ from app.database.engine import get_engine
 from app.database.base import Base
 import app.rbac.models
 import app.users.models
-import app.employees.models
 import app.departments.models
 import app.designations.models
 import app.auth.models

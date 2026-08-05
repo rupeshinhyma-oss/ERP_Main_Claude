@@ -7,6 +7,12 @@
   <link rel="stylesheet" href="css/style.css" />
   <style>
     .pass-display { background: #eff6ff; border: 1px solid #bfdbfe; color: #1e40af; padding: 10px 14px; border-radius: 6px; font-family: monospace; font-size: 14px; font-weight: 700; display: inline-block; margin-top: 6px; user-select: all; }
+    .action-btn-group { display: flex; gap: 4px; flex-wrap: wrap; }
+    .badge-suspended { background: #fef3c7; color: #92400e; }
+    .badge-locked { background: #fee2e2; color: #991b1b; }
+    .badge-pwd-req { background: #f3e8ff; color: #6b21a8; }
+    .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; font-size: 14px; text-align: left; }
+    .detail-label { font-weight: 600; color: #4b5563; }
   </style>
 </head>
 <body>
@@ -21,10 +27,10 @@
         <div class="page-header">
           <div>
             <h1>User Accounts &amp; Passwords</h1>
-            <div class="page-subtitle">Manage employee login credentials, assign roles, and generate temporary passwords.</div>
+            <div class="page-subtitle">Manage employee login credentials, assign roles, enforce account status, and manage sessions.</div>
           </div>
           <div class="page-header-actions">
-            <button class="btn btn-primary" id="newUserBtn">+ Create User Account</button>
+            <button class="btn btn-primary" id="newUserBtn" data-permission="user.create">+ Create User Account</button>
           </div>
         </div>
         <div id="banner"></div>
@@ -34,8 +40,11 @@
             <input type="text" id="searchInput" placeholder="Search username, email, employee code..." />
             <select id="statusFilter">
               <option value="">All statuses</option>
-              <option value="active">Active</option>
-              <option value="inactive">Inactive</option>
+              <option value="ACTIVE">Active</option>
+              <option value="INACTIVE">Inactive</option>
+              <option value="SUSPENDED">Suspended</option>
+              <option value="LOCKED">Locked</option>
+              <option value="PASSWORD_CHANGE_REQUIRED">Password Change Required</option>
             </select>
           </div>
 
@@ -43,17 +52,20 @@
             <table>
               <thead>
                 <tr>
+                  <th style="width: 40px;"><input type="checkbox" class="select-all-checkbox" /></th>
+                  <th>User</th>
                   <th>Username</th>
                   <th>Email</th>
-                  <th>Employee Code</th>
-                  <th>Assigned Roles</th>
+                  <th>Role</th>
                   <th>Status</th>
+                  <th>Department</th>
+                  <th>Designation</th>
                   <th>Last Login</th>
-                  <th>Action</th>
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody id="tableBody">
-                <tr><td colspan="7" class="muted">Loading user accounts...</td></tr>
+                <tr><td colspan="10" class="muted">Loading user accounts...</td></tr>
               </tbody>
             </table>
           </div>
@@ -65,13 +77,21 @@
 
   <!-- Create User Account Modal -->
   <div class="modal-backdrop" id="modalBackdrop" style="display:none;">
-    <div class="modal-card" style="max-width: 600px;">
+    <div class="modal-card" style="max-width: 650px;">
       <div class="modal-header">
-        <h2 id="modalTitle">Create Employee User Login</h2>
+        <h2 id="modalTitle">Create User Account</h2>
         <button class="modal-close" id="modalCloseBtn">&times;</button>
       </div>
       <form id="userForm">
         <div class="form-grid">
+          <div class="field">
+            <label for="first_name">First Name *</label>
+            <input id="first_name" required maxlength="100" placeholder="e.g. John" />
+          </div>
+          <div class="field">
+            <label for="last_name">Last Name *</label>
+            <input id="last_name" required maxlength="100" placeholder="e.g. Doe" />
+          </div>
           <div class="field">
             <label for="username">Username *</label>
             <input id="username" required minlength="3" maxlength="100" placeholder="e.g. john.doe" />
@@ -85,8 +105,20 @@
             <input id="employee_code" placeholder="e.g. EMP-001" />
           </div>
           <div class="field">
-            <label for="phone">Phone</label>
+            <label for="phone">Mobile Number</label>
             <input id="phone" placeholder="+256..." />
+          </div>
+          <div class="field">
+            <label for="department_id">Department</label>
+            <select id="department_id">
+              <option value="">-- Select Department --</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="designation_id">Designation</label>
+            <select id="designation_id">
+              <option value="">-- Select Designation --</option>
+            </select>
           </div>
           <div class="field" style="grid-column: span 2;">
             <label for="role_id">Assign Initial Role</label>
@@ -97,8 +129,98 @@
         </div>
 
         <div class="form-actions">
-          <button type="submit" class="btn btn-primary">Generate Login Account</button>
+          <button type="submit" class="btn btn-primary">Create User Account</button>
           <button type="button" class="btn" id="cancelBtn">Cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Edit User Modal -->
+  <div class="modal-backdrop" id="editModalBackdrop" style="display:none;">
+    <div class="modal-card" style="max-width: 600px;">
+      <div class="modal-header">
+        <h2>Edit User Profile</h2>
+        <button class="modal-close" id="editModalCloseBtn">&times;</button>
+      </div>
+      <form id="editUserForm">
+        <input type="hidden" id="editUserId" />
+        <div class="form-grid">
+          <div class="field">
+            <label for="editFirstName">First Name</label>
+            <input id="editFirstName" maxlength="100" />
+          </div>
+          <div class="field">
+            <label for="editLastName">Last Name</label>
+            <input id="editLastName" maxlength="100" />
+          </div>
+          <div class="field">
+            <label for="editEmail">Work Email</label>
+            <input id="editEmail" type="email" required />
+          </div>
+          <div class="field">
+            <label for="editEmployeeCode">Employee Code</label>
+            <input id="editEmployeeCode" />
+          </div>
+          <div class="field">
+            <label for="editPhone">Mobile Number</label>
+            <input id="editPhone" />
+          </div>
+          <div class="field">
+            <label for="editDepartmentId">Department</label>
+            <select id="editDepartmentId">
+              <option value="">-- Select Department --</option>
+            </select>
+          </div>
+          <div class="field" style="grid-column: span 2;">
+            <label for="editDesignationId">Designation</label>
+            <select id="editDesignationId">
+              <option value="">-- Select Designation --</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="btn btn-primary">Save Changes</button>
+          <button type="button" class="btn" id="cancelEditBtn">Cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- View User Modal -->
+  <div class="modal-backdrop" id="viewModalBackdrop" style="display:none;">
+    <div class="modal-card" style="max-width: 600px;">
+      <div class="modal-header">
+        <h2>User Account Details</h2>
+        <button class="modal-close" id="viewModalCloseBtn">&times;</button>
+      </div>
+      <div id="viewUserContent" style="padding: 10px 0;">
+        <div class="muted">Loading details...</div>
+      </div>
+      <div class="form-actions" style="justify-content: flex-end;">
+        <button type="button" class="btn" id="closeViewModalBtn">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Assign Roles Modal -->
+  <div class="modal-backdrop" id="rolesModalBackdrop" style="display:none;">
+    <div class="modal-card" style="max-width: 500px;">
+      <div class="modal-header">
+        <h2>Assign Role</h2>
+        <button class="modal-close" id="rolesModalCloseBtn">&times;</button>
+      </div>
+      <form id="assignRoleForm">
+        <input type="hidden" id="assignRoleUserId" />
+        <div class="field" style="margin-bottom: 16px;">
+          <label for="assignRoleId">Select Role to Assign</label>
+          <select id="assignRoleId" required>
+            <option value="">-- Select Role --</option>
+          </select>
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="btn btn-primary">Assign Role</button>
+          <button type="button" class="btn" id="cancelRolesBtn">Cancel</button>
         </div>
       </form>
     </div>
@@ -122,59 +244,354 @@
   </div>
 
   <script src="js/api.js"></script>
-  <script src="js/nav.js"></script>
+  <script src="js/nav.js?v=2"></script>
   <script>
     renderShell("users");
 
     const banner = document.getElementById("banner");
     const tableBody = document.getElementById("tableBody");
+    const searchInput = document.getElementById("searchInput");
+    const statusFilter = document.getElementById("statusFilter");
+
     const modalBackdrop = document.getElementById("modalBackdrop");
     const passModalBackdrop = document.getElementById("passModalBackdrop");
+    const editModalBackdrop = document.getElementById("editModalBackdrop");
+    const viewModalBackdrop = document.getElementById("viewModalBackdrop");
+    const rolesModalBackdrop = document.getElementById("rolesModalBackdrop");
+
     const userForm = document.getElementById("userForm");
+    const editUserForm = document.getElementById("editUserForm");
+    const assignRoleForm = document.getElementById("assignRoleForm");
 
     let allRoles = [];
+    let currentLoadedUsers = [];
+    let currentPage = 1;
+    let pageSize = 20;
+    let searchDebounce = null;
+
+    function renderStatusBadge(status, isActive) {
+      const s = (status || "").toUpperCase();
+      if (s === "ACTIVE") return '<span class="badge badge-active">Active</span>';
+      if (s === "INACTIVE") return '<span class="badge badge-inactive">Inactive</span>';
+      if (s === "SUSPENDED") return '<span class="badge badge-suspended">Suspended</span>';
+      if (s === "LOCKED") return '<span class="badge badge-locked">Locked</span>';
+      if (s === "PASSWORD_CHANGE_REQUIRED") return '<span class="badge badge-pwd-req">Pass Change Req</span>';
+      return isActive ? '<span class="badge badge-active">Active</span>' : '<span class="badge badge-inactive">Inactive</span>';
+    }
 
     async function loadRoles() {
       try {
         const { data } = await apiGet("/rbac/roles");
         allRoles = data || [];
         const roleSelect = document.getElementById("role_id");
+        const assignRoleSelect = document.getElementById("assignRoleId");
         roleSelect.innerHTML = '<option value="">-- Select System Role --</option>';
+        assignRoleSelect.innerHTML = '<option value="">-- Select System Role --</option>';
         for (const r of allRoles) {
           const opt = document.createElement("option");
           opt.value = r.id;
           opt.textContent = r.name + (r.is_system ? " (System)" : "");
-          roleSelect.appendChild(opt);
+          roleSelect.appendChild(opt.cloneNode(true));
+          assignRoleSelect.appendChild(opt);
         }
       } catch (e) {}
     }
 
     async function loadUsers() {
-      tableBody.innerHTML = '<tr><td colspan="7" class="muted">Loading user accounts...</td></tr>';
+      tableBody.innerHTML = '<tr><td colspan="9" class="muted">Loading user accounts...</td></tr>';
       try {
-        const { data } = await apiGet("/users?page=1&page_size=100");
-        const items = data.items || [];
-        if (!items.length) {
-          tableBody.innerHTML = '<tr><td colspan="7" class="muted">No user accounts found.</td></tr>';
-          return;
-        }
+        const query = searchInput.value.trim();
+        const status = statusFilter.value;
+        let url = `/users?page=${currentPage}&page_size=${pageSize}`;
+        if (query) url += `&query=${encodeURIComponent(query)}`;
+        if (status) url += `&status=${encodeURIComponent(status)}`;
 
-        tableBody.innerHTML = items.map((u) => `
-          <tr>
-            <td><strong class="cell-primary">${escapeHtml(u.username)}</strong></td>
-            <td>${escapeHtml(u.email)}</td>
-            <td>${escapeHtml(u.employee_code || "—")}</td>
-            <td>${u.roles && u.roles.length ? u.roles.map(r => `<span class="badge badge-neutral">${escapeHtml(r)}</span>`).join(" ") : "<em>No Role</em>"}</td>
-            <td>${u.is_active ? '<span class="badge badge-active">Active</span>' : '<span class="badge badge-inactive">Inactive</span>'}</td>
-            <td>${u.last_login_at ? new Date(u.last_login_at).toLocaleString() : "Never"}</td>
-            <td>
-              <button class="btn btn-small" onclick="resetUserPassword('${u.id}', '${escapeHtml(u.username)}')">🔑 Reset Password</button>
-            </td>
-          </tr>`).join("");
+        const { data, meta } = await apiGet(url);
+        const items = data.items || [];
+        currentLoadedUsers = items;
+        const currentProf = Auth.getProfile();
+        const isCurrentSuperAdmin = currentProf && Array.isArray(currentProf.roles) && currentProf.roles.includes("super_admin");
+
+        if (!items.length) {
+          tableBody.innerHTML = '<tr><td colspan="9" class="muted">No user accounts found.</td></tr>';
+        } else {
+          tableBody.innerHTML = items.map((u) => {
+            const statusUpper = (u.status || "").toUpperCase();
+            const isTargetSuperAdmin = u.roles && u.roles.includes("super_admin");
+            const canViewUser = Auth.hasPermission("user.view");
+            const canUpdateUser = Auth.hasPermission("user.update");
+            const canManage = Auth.hasPermission("settings.manage");
+            const canModifyTarget = canUpdateUser && (!isTargetSuperAdmin || isCurrentSuperAdmin);
+
+            const rolesHtml = u.roles && u.roles.length 
+              ? u.roles.map(r => `<span class="badge badge-neutral">${escapeHtml(r)}</span>`).join(" ")
+              : "<em>No Role</em>";
+            const displayName = u.full_name || u.display_name || u.employee_name || u.username;
+            const safeUsername = escapeHtml(u.username);
+
+            const actions = [];
+            if (canViewUser) {
+              actions.push(`<button class="btn btn-small" onclick="viewUser('${u.id}')" title="View details">👁️ View</button>`);
+            }
+            if (canModifyTarget) {
+              actions.push(`<button class="btn btn-small" onclick="openEditUserById('${u.id}')" title="Edit profile">✏️ Edit</button>`);
+              if (canManage) {
+                actions.push(`<button class="btn btn-small" onclick="resetUserPassword('${u.id}', '${safeUsername}')" title="Reset Password">🔑 Reset Pass</button>`);
+                actions.push(`<button class="btn btn-small" onclick="openAssignRole('${u.id}')" title="Assign Role">🛡️ Role</button>`);
+              }
+              if (statusUpper === 'ACTIVE') {
+                actions.push(`<button class="btn btn-small" onclick="deactivateUser('${u.id}', '${safeUsername}')">Deactivate</button>`);
+              }
+              if (statusUpper === 'INACTIVE' || statusUpper === 'PENDING') {
+                actions.push(`<button class="btn btn-small" onclick="activateUser('${u.id}', '${safeUsername}')">Activate</button>`);
+              }
+              if (statusUpper !== 'SUSPENDED') {
+                actions.push(`<button class="btn btn-small" onclick="suspendUser('${u.id}', '${safeUsername}')">Suspend</button>`);
+              }
+              if (statusUpper === 'LOCKED') {
+                actions.push(`<button class="btn btn-small" onclick="unlockUser('${u.id}', '${safeUsername}')">Unlock</button>`);
+              }
+              if (canManage) {
+                actions.push(`<button class="btn btn-small btn-danger" onclick="forceLogoutUser('${u.id}', '${safeUsername}')" title="Force Logout">Logout All</button>`);
+              }
+            }
+
+            return `
+            <tr>
+              <td class="cell-checkbox"><input type="checkbox" class="row-checkbox" value="${u.id}" /></td>
+              <td><strong>${escapeHtml(displayName)}</strong></td>
+              <td><strong class="cell-primary">${escapeHtml(u.username)}</strong></td>
+              <td>${escapeHtml(u.email)}</td>
+              <td>${rolesHtml}</td>
+              <td>${renderStatusBadge(u.status, u.is_active)}</td>
+              <td>${escapeHtml(u.department_name || "—")}</td>
+              <td>${escapeHtml(u.designation_name || "—")}</td>
+              <td>${u.last_login_at ? new Date(u.last_login_at).toLocaleString() : "Never"}</td>
+              <td>
+                <div class="action-btn-group">
+                  ${actions.join(" ")}
+                </div>
+              </td>
+            </tr>`;
+          }).join("");
+        }
+        if (meta && meta.pagination) {
+          renderFlexiblePagination("pagination", meta.pagination, {
+            pageSize: pageSize,
+            onPageChange: (newPage) => {
+              currentPage = newPage;
+              loadUsers();
+            },
+            onPageSizeChange: (newSize) => {
+              pageSize = newSize;
+              currentPage = 1;
+              loadUsers();
+            },
+          });
+        }
       } catch (err) {
         showError(banner, err);
       }
     }
+
+    // Search and Filter Handlers
+    document.addEventListener("change", (e) => {
+      if (e.target && (e.target.classList.contains("select-all-checkbox") || e.target.id === "selectAll")) {
+        const isChecked = e.target.checked;
+        const table = e.target.closest("table");
+        if (table) {
+          table.querySelectorAll(".row-checkbox").forEach((cb) => {
+            cb.checked = isChecked;
+          });
+        }
+      }
+    });
+
+    searchInput.addEventListener("input", () => {
+      clearTimeout(searchDebounce);
+      searchDebounce = setTimeout(() => {
+        currentPage = 1;
+        loadUsers();
+      }, 300);
+    });
+
+    statusFilter.addEventListener("change", () => {
+      currentPage = 1;
+      loadUsers();
+    });
+
+    // View User Details
+    window.viewUser = async function(userId) {
+      const content = document.getElementById("viewUserContent");
+      content.innerHTML = '<div class="muted">Loading details...</div>';
+      viewModalBackdrop.style.display = "flex";
+      try {
+        const { data } = await apiGet(`/users/${userId}`);
+        let sessionsHtml = '<p class="muted">No active sessions.</p>';
+        try {
+          const sessRes = await apiGet(`/users/${userId}/sessions`);
+          if (sessRes.data && sessRes.data.length) {
+            sessionsHtml = sessRes.data.map(s => `<div>IP: <code>${escapeHtml(s.ip_address || 'Unknown')}</code> — Device: <em>${escapeHtml(s.user_agent || 'Unknown')}</em> (Active)</div>`).join("");
+          }
+        } catch(e) {}
+
+        content.innerHTML = `
+          <div class="detail-grid">
+            <div><span class="detail-label">Username:</span> ${escapeHtml(data.username)}</div>
+            <div><span class="detail-label">Work Email:</span> ${escapeHtml(data.email)}</div>
+            <div><span class="detail-label">Employee Code:</span> ${escapeHtml(data.employee_code || "—")}</div>
+            <div><span class="detail-label">Full Name:</span> ${escapeHtml(data.full_name || data.display_name || data.employee_name || "—")}</div>
+            <div><span class="detail-label">Department:</span> ${escapeHtml(data.department_name || "—")}</div>
+            <div><span class="detail-label">Designation:</span> ${escapeHtml(data.designation_name || "—")}</div>
+            <div><span class="detail-label">Status:</span> ${renderStatusBadge(data.status, data.is_active)}</div>
+            <div><span class="detail-label">Failed Logins:</span> ${data.failed_login_count || 0}</div>
+            <div><span class="detail-label">Last Login:</span> ${data.last_login_at ? new Date(data.last_login_at).toLocaleString() : "Never"}</div>
+            <div><span class="detail-label">Must Change Pass:</span> ${data.must_change_password ? "Yes" : "No"}</div>
+          </div>
+          <div style="margin-top: 16px;">
+            <span class="detail-label">Assigned Roles:</span>
+            <div style="margin-top: 4px;">${data.roles && data.roles.length ? data.roles.map(r => `<span class="badge badge-neutral">${escapeHtml(r)}</span>`).join(" ") : "None"}</div>
+          </div>
+          <div style="margin-top: 16px;">
+            <span class="detail-label">Active Login Sessions:</span>
+            <div style="margin-top: 4px; font-size: 13px;">${sessionsHtml}</div>
+          </div>
+        `;
+      } catch (err) {
+        showError(banner, err);
+      }
+    };
+
+    async function loadDepartmentsAndDesignations() {
+      try {
+        const [deptRes, desigRes] = await Promise.all([
+          apiGet("/departments?page=1&page_size=100"),
+          apiGet("/designations?page=1&page_size=100")
+        ]);
+        const deptSelects = [document.getElementById("department_id"), document.getElementById("editDepartmentId")];
+        const desigSelects = [document.getElementById("designation_id"), document.getElementById("editDesignationId")];
+
+        (deptRes.data || []).forEach(d => {
+          deptSelects.forEach(s => {
+            if (!s) return;
+            const opt = document.createElement("option");
+            opt.value = d.id;
+            opt.textContent = d.name;
+            s.appendChild(opt.cloneNode(true));
+          });
+        });
+
+        (desigRes.data || []).forEach(d => {
+          desigSelects.forEach(s => {
+            if (!s) return;
+            const opt = document.createElement("option");
+            opt.value = d.id;
+            opt.textContent = d.title || d.name;
+            s.appendChild(opt.cloneNode(true));
+          });
+        });
+      } catch (e) {}
+    }
+
+    // Edit User Profile
+    window.openEditUserById = function(userId) {
+      const u = currentLoadedUsers.find(x => x.id === userId);
+      if (!u) return;
+      openEditUser(u);
+    };
+
+    window.openEditUser = function(userJson) {
+      const u = typeof userJson === 'string' ? JSON.parse(userJson) : userJson;
+      document.getElementById("editUserId").value = u.id;
+      document.getElementById("editFirstName").value = u.first_name || "";
+      document.getElementById("editLastName").value = u.last_name || "";
+      document.getElementById("editEmail").value = u.email || "";
+      document.getElementById("editEmployeeCode").value = u.employee_code || "";
+      document.getElementById("editPhone").value = u.phone || "";
+      document.getElementById("editDepartmentId").value = u.department_id || "";
+      document.getElementById("editDesignationId").value = u.designation_id || "";
+      editModalBackdrop.style.display = "flex";
+    };
+
+    editUserForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const userId = document.getElementById("editUserId").value;
+      const payload = {
+        first_name: document.getElementById("editFirstName").value.trim() || null,
+        last_name: document.getElementById("editLastName").value.trim() || null,
+        email: document.getElementById("editEmail").value.trim(),
+        employee_code: document.getElementById("editEmployeeCode").value.trim() || null,
+        phone: document.getElementById("editPhone").value.trim() || null,
+        department_id: document.getElementById("editDepartmentId").value || null,
+        designation_id: document.getElementById("editDesignationId").value || null,
+      };
+      try {
+        await apiPatch(`/users/${userId}`, payload);
+        editModalBackdrop.style.display = "none";
+        await loadUsers();
+      } catch (err) {
+        showError(banner, err);
+      }
+    });
+
+    // Assign Role
+    window.openAssignRole = function(userId) {
+      document.getElementById("assignRoleUserId").value = userId;
+      rolesModalBackdrop.style.display = "flex";
+    };
+
+    assignRoleForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const userId = document.getElementById("assignRoleUserId").value;
+      const roleId = document.getElementById("assignRoleId").value;
+      try {
+        await apiPost(`/users/${userId}/roles`, { role_id: roleId });
+        rolesModalBackdrop.style.display = "none";
+        await loadUsers();
+      } catch (err) {
+        showError(banner, err);
+      }
+    });
+
+    // Account Actions
+    window.activateUser = async function(userId, username) {
+      try {
+        await apiPost(`/users/${userId}/activate`);
+        await loadUsers();
+      } catch (err) { showError(banner, err); }
+    };
+
+    window.deactivateUser = async function(userId, username) {
+      if (!confirm(`Deactivate user '${username}'? This will block their login and revoke all active sessions.`)) return;
+      try {
+        await apiPost(`/users/${userId}/deactivate`);
+        await loadUsers();
+      } catch (err) { showError(banner, err); }
+    };
+
+    window.suspendUser = async function(userId, username) {
+      if (!confirm(`Suspend account for user '${username}'? This will block login and revoke all sessions.`)) return;
+      try {
+        await apiPost(`/users/${userId}/suspend`);
+        await loadUsers();
+      } catch (err) { showError(banner, err); }
+    };
+
+    window.unlockUser = async function(userId, username) {
+      try {
+        await apiPost(`/users/${userId}/unlock`);
+        await loadUsers();
+      } catch (err) { showError(banner, err); }
+    };
+
+    window.forceLogoutUser = async function(userId, username) {
+      if (!confirm(`Force logout user '${username}' from all devices?`)) return;
+      try {
+        const { data } = await apiPost(`/users/${userId}/force-logout`);
+        alert(`Successfully revoked ${data.revoked_sessions || 0} active session(s).`);
+        await loadUsers();
+      } catch (err) { showError(banner, err); }
+    };
 
     window.resetUserPassword = async function(userId, username) {
       if (!confirm(`Reset password for user '${username}'? This will generate a new temporary password.`)) return;
@@ -194,11 +611,20 @@
 
     const closeModal = () => { modalBackdrop.style.display = "none"; };
     const closePassModal = () => { passModalBackdrop.style.display = "none"; };
+    const closeEditModal = () => { editModalBackdrop.style.display = "none"; };
+    const closeViewModal = () => { viewModalBackdrop.style.display = "none"; };
+    const closeRolesModal = () => { rolesModalBackdrop.style.display = "none"; };
 
     document.getElementById("cancelBtn").addEventListener("click", closeModal);
     document.getElementById("modalCloseBtn").addEventListener("click", closeModal);
     document.getElementById("passModalCloseBtn").addEventListener("click", closePassModal);
     document.getElementById("closePassModalBtn").addEventListener("click", closePassModal);
+    document.getElementById("cancelEditBtn").addEventListener("click", closeEditModal);
+    document.getElementById("editModalCloseBtn").addEventListener("click", closeEditModal);
+    document.getElementById("closeViewModalBtn").addEventListener("click", closeViewModal);
+    document.getElementById("viewModalCloseBtn").addEventListener("click", closeViewModal);
+    document.getElementById("cancelRolesBtn").addEventListener("click", closeRolesModal);
+    document.getElementById("rolesModalCloseBtn").addEventListener("click", closeRolesModal);
 
     document.getElementById("copyPassBtn").addEventListener("click", () => {
       const pass = document.getElementById("passDisplay").textContent;
@@ -211,10 +637,14 @@
       banner.innerHTML = "";
       const roleId = document.getElementById("role_id").value;
       const payload = {
+        first_name: document.getElementById("first_name").value.trim(),
+        last_name: document.getElementById("last_name").value.trim(),
         username: document.getElementById("username").value.trim(),
         email: document.getElementById("email").value.trim(),
         employee_code: document.getElementById("employee_code").value.trim() || null,
         phone: document.getElementById("phone").value.trim() || null,
+        department_id: document.getElementById("department_id").value || null,
+        designation_id: document.getElementById("designation_id").value || null,
         role_ids: roleId ? [roleId] : [],
       };
 
@@ -230,6 +660,7 @@
     });
 
     loadRoles();
+    loadDepartmentsAndDesignations();
     loadUsers();
   </script>
 </body>

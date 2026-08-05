@@ -123,6 +123,14 @@ class AuthService:
             await self._record_rate_limit_attempt(identifier)
             raise UnauthorizedException("Invalid username/email or password.")
 
+        if user.locked_until is not None and not user.is_locked:
+            # Temporary lock duration has expired; clear lockout state
+            user.locked_until = None
+            user.failed_login_count = 0
+            if user.status == UserStatus.LOCKED:
+                user.status = UserStatus.PASSWORD_CHANGE_REQUIRED if user.must_change_password else UserStatus.ACTIVE
+            await self.user_repository.update(user)
+
         if user.is_locked or user.status == UserStatus.LOCKED:
             raise UnauthorizedException(
                 "This account is temporarily locked due to repeated failed login attempts. "
@@ -140,6 +148,8 @@ class AuthService:
         # Success: reset failed-attempt counter and record login.
         user.failed_login_count = 0
         user.locked_until = None
+        if user.status == UserStatus.LOCKED:
+            user.status = UserStatus.PASSWORD_CHANGE_REQUIRED if user.must_change_password else UserStatus.ACTIVE
         user.last_login_at = datetime.now(timezone.utc)
         await self.user_repository.update(user)
 

@@ -21,7 +21,7 @@ const SupplierPage = (() => {
   const MAX_CHIPS = 5; // document: "5 items to show in list, if more then that to view by eye button"
 
   let currentPage = 1;
-  const pageSize = 20;
+  let pageSize = 20;
   let currentSupplierId = null; // set once the supplier being edited/created has been saved
 
   // --- Bounded name-resolver for table columns (see dropdown-search.js) ---
@@ -310,9 +310,25 @@ const SupplierPage = (() => {
     const cityName = resolver.get("cities", s.city_id) || "…";
     const stateName = resolver.get("states", s.state_id) || "…";
     const countryName = resolver.get("countries", s.country_id) || "…";
-    // Sr. No. is a running number across the whole result set (page-aware),
-    // computed client-side the same way as every Master Data list.
     const srNo = (currentPage - 1) * pageSize + index + 1;
+    const canUpdate = Auth.hasPermission("supplier.update");
+    const canDelete = Auth.hasPermission("supplier.delete");
+
+    const gradeSelectHtml = canUpdate ? `
+      <select class="inline-select" data-grade-for="${s.id}">
+        <option value="" ${!s.supplier_grade ? "selected" : ""}>Select</option>
+        <option value="A" ${s.supplier_grade === "A" ? "selected" : ""}>A</option>
+        <option value="B" ${s.supplier_grade === "B" ? "selected" : ""}>B</option>
+        <option value="C" ${s.supplier_grade === "C" ? "selected" : ""}>C</option>
+      </select>` : `<span>${escapeHtml(s.supplier_grade || "—")}</span>`;
+
+    const potentialSelectHtml = canUpdate ? `
+      <select class="inline-select" data-potential-for="${s.id}">
+        <option value="" ${!s.potential ? "selected" : ""}>Select</option>
+        <option value="yes" ${s.potential === "yes" ? "selected" : ""}>Yes</option>
+        <option value="no" ${s.potential === "no" ? "selected" : ""}>No</option>
+      </select>` : `<span>${escapeHtml(s.potential ? s.potential.toUpperCase() : "—")}</span>`;
+
     return `
       <tr data-supplier-id="${s.id}">
         <td><input type="checkbox" class="row-select" /></td>
@@ -327,37 +343,28 @@ const SupplierPage = (() => {
         <td>${s.brand_description ? escapeHtml(s.brand_description) : '<span class="muted">—</span>'}</td>
         <td>${s.supplier_type ? escapeHtml(s.supplier_type) : '<span class="muted">—</span>'}</td>
         <td>${statusBadge(s.current_status)}</td>
-        <td>
-          <select class="inline-select" data-grade-for="${s.id}">
-            <option value="" ${!s.supplier_grade ? "selected" : ""}>Select</option>
-            <option value="A" ${s.supplier_grade === "A" ? "selected" : ""}>A</option>
-            <option value="B" ${s.supplier_grade === "B" ? "selected" : ""}>B</option>
-            <option value="C" ${s.supplier_grade === "C" ? "selected" : ""}>C</option>
-          </select>
+        <td>${gradeSelectHtml}</td>
+        <td>${potentialSelectHtml}</td>
+        <td class="actions">
+          ${canUpdate ? `<button class="btn btn-small" data-edit="${s.id}">Edit</button>` : ""}
+          ${canDelete ? `<button class="btn btn-small btn-danger" data-delete="${s.id}">Delete</button>` : ""}
         </td>
-        <td>
-          <select class="inline-select" data-potential-for="${s.id}">
-            <option value="" ${!s.potential ? "selected" : ""}>Select</option>
-            <option value="yes" ${s.potential === "yes" ? "selected" : ""}>Yes</option>
-            <option value="no" ${s.potential === "no" ? "selected" : ""}>No</option>
-          </select>
-        </td>
-        <td class="actions"><button class="btn btn-small" data-edit="${s.id}">Edit</button></td>
       </tr>`;
   }
 
   function renderPagination(p) {
-    const pagination = document.getElementById("pagination");
-    pagination.innerHTML = `
-      <span class="muted">Page ${p.current_page} of ${p.total_pages || 1} &middot; ${p.total_records} total</span>
-      <div>
-        <button class="btn btn-small" id="prevPage" ${!p.has_previous ? "disabled" : ""}>Previous</button>
-        <button class="btn btn-small" id="nextPage" ${!p.has_next ? "disabled" : ""}>Next</button>
-      </div>`;
-    const prev = document.getElementById("prevPage");
-    const next = document.getElementById("nextPage");
-    if (prev) prev.addEventListener("click", () => { currentPage--; loadTable(); });
-    if (next) next.addEventListener("click", () => { currentPage++; loadTable(); });
+    renderFlexiblePagination(document.getElementById("pagination"), p, {
+      pageSize: pageSize,
+      onPageChange: (newPage) => {
+        currentPage = newPage;
+        loadTable();
+      },
+      onPageSizeChange: (newSize) => {
+        pageSize = newSize;
+        currentPage = 1;
+        loadTable();
+      },
+    });
   }
 
   // ------------------------------------------------------------------

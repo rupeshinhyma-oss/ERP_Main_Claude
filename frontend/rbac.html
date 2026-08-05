@@ -45,6 +45,25 @@
     .chip { display: inline-block; background: #e2e8f0; border-radius: 20px; padding: 2px 9px; font-size: 11.5px; margin: 2px; color: #334155; }
     .chip-grant { background: #dcfce7; color: #166534; }
     .chip-deny { background: #fee2e2; color: #991b1b; }
+
+    /* Effective Permissions Inspector Styles */
+    .info-card { background: #ffffff; border: 1px solid var(--color-border); border-radius: var(--radius); padding: var(--space-3); margin-bottom: var(--space-3); }
+    .info-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin-top: 12px; }
+    .info-label { font-size: 11px; text-transform: uppercase; font-weight: 700; color: var(--color-muted); margin-bottom: 4px; }
+    .info-value { font-size: 14.5px; font-weight: 600; color: #1e293b; }
+
+    .source-badge { font-weight: 600; font-size: 11.5px; padding: 3px 10px; border-radius: 20px; display: inline-block; }
+    .source-user { background: #fef3c7; color: #92400e; border: 1px solid #fde68a; }
+    .source-role { background: #e2e8f0; color: #334155; border: 1px solid #cbd5e0; }
+    .source-admin { background: #dcfce7; color: #166534; border: 1px solid #bbf7d0; }
+
+    .data-table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 13.5px; }
+    .data-table th { text-align: left; padding: 10px 14px; background: #f8fafc; border-bottom: 2px solid #e2e8f0; color: #475569; font-weight: 600; }
+    .data-table td { padding: 10px 14px; border-bottom: 1px solid #e2e8f0; vertical-align: middle; }
+    .data-table tr:hover { background: #f8fafc; }
+
+    .filter-bar { display: flex; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+    .filter-bar input, .filter-bar select { padding: 8px 12px; border: 1px solid var(--color-border); border-radius: var(--radius); font-size: 13.5px; }
   </style>
 </head>
 <body>
@@ -72,6 +91,7 @@
         <div class="tabs-nav">
           <button class="tab-btn active" data-tab="tab-roles">Roles (Default Permissions)</button>
           <button class="tab-btn" data-tab="tab-users">Individual User Overrides</button>
+          <button class="tab-btn" data-tab="tab-effective">Effective Permissions</button>
         </div>
 
         <!-- Tab 1: System & Custom Roles -->
@@ -92,6 +112,20 @@
             </div>
           </div>
           <div id="userEffectiveContainer"><p class="muted">Select a user above to view effective permissions and manage direct overrides.</p></div>
+        </div>
+
+        <!-- Tab 3: Effective Permissions Inspector -->
+        <div class="tab-content" id="tab-effective">
+          <div class="info-card" style="border-left: 4px solid var(--color-primary, #3182ce);">
+            <label style="display:block; font-size:13px; font-weight:600; margin-bottom:6px; color:#334155;">Select User to Inspect Effective Access &amp; Permission Sources:</label>
+            <select id="effectiveUserSelect" style="width:100%; max-width:540px; padding:10px; border:1px solid #cbd5e0; border-radius:6px; font-size:14px;">
+              <option value="">Select User...</option>
+            </select>
+          </div>
+
+          <div id="inspectorMount">
+            <p class="muted">Select a user above to view their effective access report.</p>
+          </div>
         </div>
       </main>
     </div>
@@ -192,7 +226,7 @@
   </div>
 
   <script src="js/api.js"></script>
-  <script src="js/nav.js"></script>
+  <script src="js/nav.js?v=2"></script>
   <script>
     renderShell("rbac");
 
@@ -333,6 +367,11 @@
         ? moduleSummary.join("") 
         : '<span class="muted" style="font-size:12px;">No permissions assigned</span>';
 
+      const currentProf = Auth.getProfile();
+      const isCurrentSuperAdmin = currentProf && Array.isArray(currentProf.roles) && currentProf.roles.includes("super_admin");
+      const canEditThisRole = canManage && (!isSystem || isCurrentSuperAdmin) && (role.name !== 'super_admin' || isCurrentSuperAdmin);
+      const canDeleteThisRole = canManage && !isSystem && isCurrentSuperAdmin;
+
       return `
         <div class="role-card" data-role-id="${role.id}">
           <div class="role-card-header">
@@ -341,8 +380,8 @@
               ${isSystem ? '<span class="badge badge-neutral">System Role</span>' : '<span class="badge badge-active">Custom Role</span>'}
             </h3>
             <div style="display:flex; gap:6px;">
-              ${canManage ? `<button class="btn btn-small" data-edit-role="${role.id}">Edit</button>` : ""}
-              ${canManage && !isSystem ? `<button class="btn btn-small btn-danger" data-delete-role="${role.id}">Delete</button>` : ""}
+              ${canEditThisRole ? `<button class="btn btn-small" data-edit-role="${role.id}">Edit</button>` : ""}
+              ${canDeleteThisRole ? `<button class="btn btn-small btn-danger" data-delete-role="${role.id}">Delete</button>` : ""}
             </div>
           </div>
           <div class="role-description">${role.description ? escapeHtml(role.description) : "No description provided."}</div>
@@ -375,17 +414,164 @@
       }
     }
 
-    // --- Individual User Permissions Tab ---
+    // --- Individual User Permissions Tab & Effective Inspector Tab ---
+    let currentBreakdown = null;
+
     async function loadUsers() {
       const select = document.getElementById("userSelect");
+      const effectiveSelect = document.getElementById("effectiveUserSelect");
       try {
         const res = await apiGet("/users?limit=200");
         allUsers = res.data.items || [];
-        select.innerHTML = '<option value="">Select User to inspect & override permissions...</option>' +
-          allUsers.map((u) => `<option value="${u.id}">${escapeHtml(u.username)} (${escapeHtml(u.email)}) - Status: ${u.status}</option>`).join("");
+        const optionsHtml = allUsers.map((u) => `<option value="${u.id}">${escapeHtml(u.username)} (${escapeHtml(u.email)}) - Status: ${u.status}</option>`).join("");
+        if (select) {
+          select.innerHTML = '<option value="">Select User to inspect & override permissions...</option>' + optionsHtml;
+        }
+        if (effectiveSelect) {
+          effectiveSelect.innerHTML = '<option value="">Select User...</option>' + optionsHtml;
+        }
       } catch (err) {
         showError(banner, err);
       }
+    }
+
+    // --- Effective Permissions Inspector Logic ---
+    const effectiveSelectEl = document.getElementById("effectiveUserSelect");
+    if (effectiveSelectEl) {
+      effectiveSelectEl.addEventListener("change", async (e) => {
+        const userId = e.target.value;
+        const mount = document.getElementById("inspectorMount");
+        if (!userId) {
+          mount.innerHTML = '<p class="muted">Select a user above to view their effective access report.</p>';
+          return;
+        }
+        mount.innerHTML = '<p class="muted">Calculating effective permissions and tracing sources...</p>';
+        try {
+          const res = await apiGet(`/rbac/users/${userId}/effective-permissions`);
+          currentBreakdown = res.data;
+          renderInspectorView();
+        } catch (err) {
+          showError(banner, err);
+        }
+      });
+    }
+
+    function getSourceBadgeClass(source) {
+      if (source === "Individual User") return "source-user";
+      if (source === "Super Administrator") return "source-admin";
+      return "source-role";
+    }
+
+    function renderInspectorView() {
+      const mount = document.getElementById("inspectorMount");
+      if (!currentBreakdown || !currentBreakdown.user_info) {
+        mount.innerHTML = '<p class="muted">No access data available for selected user.</p>';
+        return;
+      }
+
+      const info = currentBreakdown.user_info;
+      const sources = currentBreakdown.permission_sources || [];
+      const rolesText = (info.system_roles || []).join(", ") || "User";
+
+      let html = `
+        <div class="info-card">
+          <div style="font-size:15px; font-weight:700; color:#1e293b; margin-bottom:8px;">User Information</div>
+          <div class="info-grid">
+            <div>
+              <div class="info-label">Employee Name</div>
+              <div class="info-value">${escapeHtml(info.employee_name)}</div>
+            </div>
+            <div>
+              <div class="info-label">Username</div>
+              <div class="info-value">${escapeHtml(info.username)}</div>
+            </div>
+            <div>
+              <div class="info-label">Department</div>
+              <div class="info-value">${escapeHtml(info.department)}</div>
+            </div>
+            <div>
+              <div class="info-label">Designation</div>
+              <div class="info-value">${escapeHtml(info.designation)}</div>
+            </div>
+            <div>
+              <div class="info-label">Assigned Roles</div>
+              <div class="info-value">${escapeHtml(rolesText)}</div>
+            </div>
+            <div>
+              <div class="info-label">Account Status</div>
+              <div class="info-value"><span class="badge ${info.status === "ACTIVE" ? "badge-success" : "badge-warning"}">${escapeHtml(info.status)}</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="info-card">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <div style="font-size:15px; font-weight:700; color:#1e293b;">Permission Sources (${sources.length})</div>
+          </div>
+
+          <div class="filter-bar">
+            <input type="text" id="tableSearch" placeholder="Search permissions or modules..." style="flex:1; max-width:320px;" />
+            <select id="sourceFilter" style="max-width:200px;">
+              <option value="">All Permission Sources</option>
+              <option value="System Role">System Role</option>
+              <option value="Individual User">Individual User</option>
+              <option value="Super Administrator">Super Administrator</option>
+            </select>
+          </div>
+
+          <table class="data-table" id="sourcesTable">
+            <thead>
+              <tr>
+                <th>Permission Code</th>
+                <th>Module</th>
+                <th>Calculated Source</th>
+              </tr>
+            </thead>
+            <tbody id="sourcesTbody">
+              ${renderTableRows(sources)}
+            </tbody>
+          </table>
+        </div>
+
+        <div class="info-card">
+          <div style="font-size:15px; font-weight:700; color:#1e293b; margin-bottom:12px;">Final Calculated Effective Permissions</div>
+          <div>
+            ${currentBreakdown.effective_permissions.map((c) => `<span class="chip" style="background:#f1f5f9;border:1px solid #cbd5e0;padding:4px 10px;font-size:12px;margin:3px;display:inline-block;">${escapeHtml(c)}</span>`).join("")}
+          </div>
+        </div>
+      `;
+
+      mount.innerHTML = html;
+
+      document.getElementById("tableSearch").addEventListener("input", filterTable);
+      document.getElementById("sourceFilter").addEventListener("change", filterTable);
+    }
+
+    function renderTableRows(sources) {
+      if (!sources || !sources.length) {
+        return '<tr><td colspan="3" class="muted" style="text-align:center;">No permissions granted.</td></tr>';
+      }
+      return sources.map((item) => `
+        <tr>
+          <td><strong style="font-family:monospace; color:#0f172a;">${escapeHtml(item.code)}</strong></td>
+          <td><span class="badge badge-neutral" style="text-transform:capitalize;">${escapeHtml(item.module)}</span></td>
+          <td><span class="source-badge ${getSourceBadgeClass(item.source)}">${escapeHtml(item.source)}</span></td>
+        </tr>`).join("");
+    }
+
+    function filterTable() {
+      if (!currentBreakdown) return;
+      const q = (document.getElementById("tableSearch").value || "").toLowerCase();
+      const sFilter = document.getElementById("sourceFilter").value;
+      const sources = currentBreakdown.permission_sources || [];
+
+      const filtered = sources.filter((item) => {
+        const matchesQ = item.code.toLowerCase().includes(q) || item.module.toLowerCase().includes(q);
+        const matchesSource = !sFilter || item.source === sFilter;
+        return matchesQ && matchesSource;
+      });
+
+      document.getElementById("sourcesTbody").innerHTML = renderTableRows(filtered);
     }
 
     document.getElementById("userSelect").addEventListener("change", async (e) => {
@@ -590,6 +776,34 @@
         const permsRes = await apiGet("/rbac/permissions");
         allPermissions = permsRes.data || [];
         await Promise.all([loadRoles(), loadUsers()]);
+
+        // Auto-select tab and user if provided in URL parameters
+        const params = new URLSearchParams(window.location.search);
+        const tabParam = params.get("tab");
+        if (tabParam === "tab-effective" || tabParam === "effective") {
+          const effectiveBtn = document.querySelector('[data-tab="tab-effective"]');
+          if (effectiveBtn) effectiveBtn.click();
+        } else if (tabParam === "tab-users" || tabParam === "users") {
+          const usersBtn = document.querySelector('[data-tab="tab-users"]');
+          if (usersBtn) usersBtn.click();
+        }
+
+        const userParam = params.get("user_id");
+        if (userParam) {
+          if (tabParam === "tab-effective" || tabParam === "effective") {
+            const effSel = document.getElementById("effectiveUserSelect");
+            if (effSel) {
+              effSel.value = userParam;
+              effSel.dispatchEvent(new Event("change"));
+            }
+          } else {
+            const uSel = document.getElementById("userSelect");
+            if (uSel) {
+              uSel.value = userParam;
+              uSel.dispatchEvent(new Event("change"));
+            }
+          }
+        }
       } catch (err) {
         showError(banner, err);
       }

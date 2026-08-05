@@ -48,10 +48,24 @@ class UserService:
         return user
 
     async def list_users(
-        self, *, offset: int, limit: int, query: str | None = None, status: str | None = None
+        self,
+        *,
+        offset: int,
+        limit: int,
+        query: str | None = None,
+        status: str | None = None,
+        department_id: uuid.UUID | None = None,
+        designation_id: uuid.UUID | None = None,
     ) -> tuple[list[User], int]:
         """Return a page of users and total count with optional filters."""
-        return await self.user_repository.search(query=query, status=status, offset=offset, limit=limit)
+        return await self.user_repository.search(
+            query=query,
+            status=status,
+            department_id=department_id,
+            designation_id=designation_id,
+            offset=offset,
+            limit=limit,
+        )
 
     async def is_super_admin(self, user_id: uuid.UUID) -> bool:
         """Return True if the user has the super_admin role."""
@@ -78,13 +92,33 @@ class UserService:
     async def create_user(
         self,
         *,
-        employee_code: str | None,
         username: str,
         email: str,
-        phone: str | None,
-        role_ids: list[uuid.UUID],
         created_by: uuid.UUID,
+        first_name: str | None = None,
+        middle_name: str | None = None,
+        last_name: str | None = None,
+        display_name: str | None = None,
+        employee_code: str | None = None,
+        phone: str | None = None,
+        department_id: uuid.UUID | None = None,
+        designation_id: uuid.UUID | None = None,
+        manager_id: uuid.UUID | None = None,
+        date_of_birth=None,
+        gender=None,
+        date_of_joining=None,
+        employment_type=None,
+        employment_status=None,
+        address: str | None = None,
+        city: str | None = None,
+        state: str | None = None,
+        country: str | None = None,
+        postal_code: str | None = None,
+        emergency_contact: str | None = None,
+        notes: str | None = None,
+        role_ids: list[uuid.UUID] | None = None,
         initial_password: str | None = None,
+        individual_permission_ids: list[uuid.UUID] | None = None,
     ) -> tuple[User, str]:
         """
         Create a new user account with a manual or generated temporary password.
@@ -92,8 +126,12 @@ class UserService:
         Returns ``(user, password_set)`` -- the plaintext password is returned
         once so the caller can relay it to the admin; only its hash is persisted.
         """
-        if await self.user_repository.username_or_email_exists(username=username, email=email):
-            raise ConflictException("A user with that username or email already exists.")
+        if await self.user_repository.username_exists(username):
+            raise ConflictException("A user with that username already exists.")
+        if await self.user_repository.email_exists(email):
+            raise ConflictException("A user with that email already exists.")
+        if employee_code and await self.user_repository.employee_code_exists(employee_code):
+            raise ConflictException("An account is already linked to that employee code.")
 
         if initial_password and initial_password.strip():
             password_to_set = initial_password.strip()
@@ -101,12 +139,31 @@ class UserService:
             password_to_set = generate_temporary_password()
 
         user = await self.user_repository.create(
+            first_name=first_name,
+            middle_name=middle_name,
+            last_name=last_name,
+            display_name=display_name or (f"{first_name} {last_name}".strip() if (first_name or last_name) else username),
             employee_code=employee_code,
             username=username,
             email=email,
             phone=phone,
+            department_id=department_id,
+            designation_id=designation_id,
+            manager_id=manager_id,
+            date_of_birth=date_of_birth,
+            gender=gender,
+            date_of_joining=date_of_joining,
+            employment_type=employment_type,
+            employment_status=employment_status,
+            address=address,
+            city=city,
+            state=state,
+            country=country,
+            postal_code=postal_code,
+            emergency_contact=emergency_contact,
+            notes=notes,
             password_hash=hash_password(password_to_set),
-            status=UserStatus.PENDING,
+            status=UserStatus.PASSWORD_CHANGE_REQUIRED,
             is_active=True,
             must_change_password=True,
             failed_login_count=0,
@@ -114,7 +171,7 @@ class UserService:
             updated_by=created_by,
         )
 
-        for role_id in role_ids:
+        for role_id in (role_ids or []):
             await self.assign_role(user.id, role_id, assigned_by=created_by)
 
         for perm_id in (individual_permission_ids or []):
@@ -128,6 +185,15 @@ class UserService:
         if await self.is_super_admin(user_id) and not await self.is_super_admin(updated_by):
             from app.core.exceptions import ForbiddenException
             raise ForbiddenException("Only Super Administrators can modify Super Administrator accounts.")
+
+        email = fields.get("email")
+        if email and isinstance(email, str) and await self.user_repository.email_exists(email, exclude_user_id=user_id):
+            raise ConflictException("A user with that email already exists.")
+
+        employee_code = fields.get("employee_code")
+        if employee_code and isinstance(employee_code, str) and await self.user_repository.employee_code_exists(employee_code, exclude_user_id=user_id):
+            raise ConflictException("An account is already linked to that employee code.")
+
         changes = {k: v for k, v in fields.items() if v is not None}
         if changes:
             changes["updated_by"] = updated_by
@@ -199,8 +265,9 @@ class UserService:
         if await self.is_super_admin(user_id) and not await self.is_super_admin(updated_by):
             from app.core.exceptions import ForbiddenException
             raise ForbiddenException("Only Super Administrators can modify Super Administrator accounts.")
+        new_status = UserStatus.ACTIVE if user.status == UserStatus.LOCKED else user.status
         await self.user_repository.update(
-            user, failed_login_count=0, locked_until=None, updated_by=updated_by
+            user, status=new_status, is_active=True, failed_login_count=0, locked_until=None, updated_by=updated_by
         )
         return user
 

@@ -62,18 +62,20 @@ const MasterPage = (() => {
     const canCreate = Auth.hasPermission(`${config.permissionPrefix}.create`);
     const canUpdate = Auth.hasPermission(`${config.permissionPrefix}.update`);
     const canDelete = Auth.hasPermission(`${config.permissionPrefix}.delete`);
+    const canExport = Auth.hasPermission(`${config.permissionPrefix}.export`);
+    const canImport = Auth.hasPermission(`${config.permissionPrefix}.import`);
 
     const newBtn = document.getElementById("newBtn");
     if (newBtn && !canCreate) newBtn.style.display = "none";
 
     const importBtn = document.getElementById("importInput");
-    if (importBtn && !canCreate) {
+    if (importBtn && !canImport) {
       const wrapper = document.getElementById("importBtnWrapper");
       if (wrapper) wrapper.style.display = "none";
     }
 
     let currentPage = 1;
-    const pageSize = 20;
+    let pageSize = 20;
 
     function openModal(item) {
       entityForm.reset();
@@ -100,8 +102,20 @@ const MasterPage = (() => {
       });
     }
 
+    document.addEventListener("change", (e) => {
+      if (e.target && (e.target.classList.contains("select-all-checkbox") || e.target.id === "selectAll")) {
+        const isChecked = e.target.checked;
+        const table = e.target.closest("table");
+        if (table) {
+          table.querySelectorAll(".row-checkbox").forEach((cb) => {
+            cb.checked = isChecked;
+          });
+        }
+      }
+    });
+
     async function loadTable() {
-      const colCount = config.columns.length + 2; // +1 for Sr. No., +1 for actions
+      const colCount = config.columns.length + 3; // +1 for checkbox, +1 for Sr. No., +1 for actions
       tableBody.innerHTML = `<tr><td colspan="${colCount}" class="muted">Loading...</td></tr>`;
       const params = {
         page: currentPage,
@@ -114,21 +128,12 @@ const MasterPage = (() => {
 
       try {
         const { data, meta } = await apiGet(config.apiBase + toQueryString(params));
-        // Batch-resolve any related-entity names (e.g. Category/Brand/UOM
-        // names for a page of Products) needed to render this page's
-        // columns -- bounded by page size, not by the size of the related
-        // tables, so this stays cheap regardless of how large Products/
-        // Categories/etc. grow.
         if (config.resolveNames && data.length) {
           await config.resolveNames(data);
         }
         if (!data.length) {
           tableBody.innerHTML = `<tr><td colspan="${colCount}" class="muted">No records found.</td></tr>`;
         } else {
-          // Sr. No. is a running number across the whole result set, not just
-          // this page -- so page 2 continues at 21, 22, 23... rather than
-          // restarting at 1. Computed client-side from the current page and
-          // page size; nothing to store or keep in sync server-side.
           const startingSrNo = (currentPage - 1) * pageSize + 1;
           tableBody.innerHTML = data
             .map((item, index) => {
@@ -136,6 +141,7 @@ const MasterPage = (() => {
               const cells = config.columns.map((col) => `<td>${col.render(item)}</td>`).join("");
               return `
               <tr>
+                <td class="cell-checkbox"><input type="checkbox" class="row-checkbox" value="${item.id}" /></td>
                 <td class="cell-srno">${srNo}</td>
                 ${cells}
                 <td class="actions">
@@ -161,17 +167,18 @@ const MasterPage = (() => {
     }
 
     function renderPagination(p) {
-      pagination.innerHTML = `
-        <span class="muted">Page ${p.current_page} of ${p.total_pages || 1} &middot; ${p.total_records} total</span>
-        <div>
-          <button class="btn btn-small" id="prevPage" ${!p.has_previous ? "disabled" : ""}>Previous</button>
-          <button class="btn btn-small" id="nextPage" ${!p.has_next ? "disabled" : ""}>Next</button>
-        </div>
-      `;
-      const prev = document.getElementById("prevPage");
-      const next = document.getElementById("nextPage");
-      if (prev) prev.addEventListener("click", () => { currentPage--; loadTable(); });
-      if (next) next.addEventListener("click", () => { currentPage++; loadTable(); });
+      renderFlexiblePagination(pagination, p, {
+        pageSize: pageSize,
+        onPageChange: (newPage) => {
+          currentPage = newPage;
+          loadTable();
+        },
+        onPageSizeChange: (newSize) => {
+          pageSize = newSize;
+          currentPage = 1;
+          loadTable();
+        },
+      });
     }
 
     entityForm.addEventListener("submit", async (e) => {
@@ -278,6 +285,10 @@ const MasterPage = (() => {
     // --- Export ---
     const exportCsvBtn = document.getElementById("exportCsvBtn");
     const exportXlsxBtn = document.getElementById("exportXlsxBtn");
+    const exportDropdownWrapper = document.getElementById("exportDropdownWrapper") || document.getElementById("exportBtnWrapper") || (exportCsvBtn ? exportCsvBtn.closest(".dropdown") : null);
+    if (exportDropdownWrapper && !canExport) {
+      exportDropdownWrapper.style.display = "none";
+    }
     async function doExport(format) {
       try {
         const token = Auth.getAccessToken();

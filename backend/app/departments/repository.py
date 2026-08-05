@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.base_repository import BaseRepository
 from app.departments.models import Department
+from app.users.models import User
 
 
 class DepartmentRepository(BaseRepository[Department]):
@@ -28,11 +29,41 @@ class DepartmentRepository(BaseRepository[Department]):
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
-    async def code_exists(self, code: str, *, exclude_id: uuid.UUID | None = None) -> bool:
-        """Return True if another (non-deleted) department already uses this code."""
-        stmt = self._base_select().with_only_columns(Department.id).where(Department.code == code)
+    async def code_owner(self, code: str, *, exclude_id: uuid.UUID | None = None) -> Department | None:
+        """
+        Return the department holding ``code``, INCLUDING soft-deleted rows.
+
+        ``ix_departments_code`` is a UNIQUE index over the entire table -- it
+        knows nothing about ``deleted_at``. Checking uniqueness through the
+        usual soft-delete-filtered :meth:`_base_select` therefore reports
+        "code is free" for a code still physically held by an archived row,
+        and the INSERT then blows up at the database level with an
+        :class:`IntegrityError` that the caller has no way to attribute.
+
+        This deliberately bypasses :meth:`_base_select` so the
+        application-level check matches what the index actually enforces.
+        Callers can inspect ``.is_deleted`` on the result to tell an active
+        conflict from an archived one and phrase the error accordingly.
+        """
+        stmt = select(Department).where(Department.code == code)
         if exclude_id is not None:
             stmt = stmt.where(Department.id != exclude_id)
+        result = await self.session.execute(stmt)
+        return result.scalars().first()
+
+    async def code_exists(self, code: str, *, exclude_id: uuid.UUID | None = None) -> bool:
+        """Return True if any department row (archived or not) already uses this code."""
+        return await self.code_owner(code, exclude_id=exclude_id) is not None
+
+    async def manager_exists(self, user_id: uuid.UUID) -> bool:
+        """
+        Return True if ``user_id`` is an active user eligible to manage a department.
+        """
+        stmt = (
+            select(User.id)
+            .where(User.id == user_id)
+            .where(User.is_active.is_(True))
+        )
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none() is not None
 

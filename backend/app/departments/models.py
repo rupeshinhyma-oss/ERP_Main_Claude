@@ -36,7 +36,7 @@ class Department(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
     )
     manager_id: Mapped[uuid.UUID | None] = mapped_column(
         GUID(),
-        ForeignKey("employees.id", ondelete="SET NULL", use_alter=True, name="fk_departments_manager_id"),
+        ForeignKey("users.id", ondelete="SET NULL", use_alter=True, name="fk_departments_manager_id"),
         nullable=True,
         index=True,
     )

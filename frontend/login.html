@@ -78,6 +78,29 @@
 
   <script src="js/api.js"></script>
   <script>
+    function initials(name) {
+      if (!name) return "ERP";
+      return name.trim().slice(0, 2).toUpperCase();
+    }
+
+    async function loadOrgInfo() {
+      try {
+        const { data } = await apiGet("/organizations");
+        if (data && data.company_name) {
+          const name = data.company_name;
+          sessionStorage.setItem("erp_org_company_name", name);
+          document.title = `Log in — ${name}`;
+          const brandTitle = document.querySelector(".login-brand .brand-title");
+          const logoMark = document.querySelector(".login-brand .logo-mark");
+          if (brandTitle) brandTitle.textContent = name;
+          if (logoMark) logoMark.textContent = initials(name);
+        }
+      } catch (e) {
+        /* fallback to default */
+      }
+    }
+    loadOrgInfo();
+
     if (Auth.isLoggedIn()) {
       window.location.href = "./index.html";
     }

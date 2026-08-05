@@ -78,18 +78,18 @@
         <div class="page-header">
           <div>
             <h1>Teams</h1>
-            <div class="page-subtitle">Employees, departments, and designations for your organization.</div>
+            <div class="page-subtitle">User profiles, departments, and designations for your organization.</div>
           </div>
           <div class="page-header-actions">
-            <button class="btn btn-primary" id="addMemberBtn" data-permission="employee.create">+ Add Member</button>
+            <button class="btn btn-primary" id="addMemberBtn" data-permission="user.create">+ Add Member</button>
           </div>
         </div>
         <div id="banner"></div>
 
         <div class="subtab-bar">
-          <button type="button" class="subtab-btn active" data-tab="employees">Employees</button>
-          <button type="button" class="subtab-btn" data-tab="departments">Departments</button>
-          <button type="button" class="subtab-btn" data-tab="designations">Designations</button>
+          <button type="button" class="subtab-btn active" data-tab="employees" data-permission="user.read">Users</button>
+          <button type="button" class="subtab-btn" data-tab="departments" data-permission="department.read">Departments</button>
+          <button type="button" class="subtab-btn" data-tab="designations" data-permission="designation.read">Designations</button>
         </div>
 
         <!-- ============================= EMPLOYEES TAB ============================= -->
@@ -112,6 +112,7 @@
               <table>
                 <thead>
                   <tr>
+                    <th style="width: 40px;"><input type="checkbox" class="select-all-checkbox" /></th>
                     <th>Sr. No.</th>
                     <th>Code</th>
                     <th>Name</th>
@@ -123,7 +124,7 @@
                   </tr>
                 </thead>
                 <tbody id="empTableBody">
-                  <tr><td colspan="8" class="muted">Loading...</td></tr>
+                  <tr><td colspan="9" class="muted">Loading...</td></tr>
                 </tbody>
               </table>
             </div>
@@ -188,6 +189,7 @@
               <table>
                 <thead>
                   <tr>
+                    <th style="width: 40px;"><input type="checkbox" class="select-all-checkbox" /></th>
                     <th>Sr. No.</th>
                     <th>Code</th>
                     <th>Name</th>
@@ -198,7 +200,7 @@
                   </tr>
                 </thead>
                 <tbody id="deptTableBody">
-                  <tr><td colspan="7" class="muted">Loading...</td></tr>
+                  <tr><td colspan="8" class="muted">Loading...</td></tr>
                 </tbody>
               </table>
             </div>
@@ -259,6 +261,7 @@
               <table>
                 <thead>
                   <tr>
+                    <th style="width: 40px;"><input type="checkbox" class="select-all-checkbox" /></th>
                     <th>Sr. No.</th>
                     <th>Code</th>
                     <th>Title</th>
@@ -268,7 +271,7 @@
                   </tr>
                 </thead>
                 <tbody id="desigTableBody">
-                  <tr><td colspan="6" class="muted">Loading...</td></tr>
+                  <tr><td colspan="7" class="muted">Loading...</td></tr>
                 </tbody>
               </table>
             </div>
@@ -370,7 +373,7 @@
   </div>
 
   <script src="js/api.js"></script>
-  <script src="js/nav.js"></script>
+  <script src="js/nav.js?v=2"></script>
   <script src="js/teams.js"></script>
   <script>
     renderShell("teams");

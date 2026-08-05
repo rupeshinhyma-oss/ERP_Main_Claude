@@ -184,7 +184,7 @@ async def grant_permission(
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     """Grant a permission to a role, if not already granted."""
-    await rbac_service.grant_permission(role_id, payload.permission_id)
+    await rbac_service.grant_permission(role_id, payload.permission_id, actor_user_id=current_user.id)
     await audit_service.record(
         action=AuditAction.PERMISSION_ASSIGNED,
         module="rbac",
@@ -215,7 +215,7 @@ async def revoke_permission(
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     """Revoke a permission from a role."""
-    await rbac_service.revoke_permission(role_id, permission_id)
+    await rbac_service.revoke_permission(role_id, permission_id, actor_user_id=current_user.id)
     await audit_service.record(
         action=AuditAction.PERMISSION_REMOVED,
         module="rbac",
@@ -414,7 +414,7 @@ async def assign_user_permission(
         user_id, payload.permission_id, is_granted=payload.is_granted, granted_by=current_user.id
     )
     await audit_service.record(
-        action=AuditAction.USER_PERMISSION_CHANGED,
+        action=AuditAction.USER_OVERRIDE_ADDED,
         module="rbac",
         user_id=current_user.id,
         username_snapshot=current_user.username,
@@ -427,7 +427,7 @@ async def assign_user_permission(
         http_method=request.method,
         endpoint=request.url.path,
         response_status=status.HTTP_200_OK,
-        description=f"Assigned permission override (is_granted={payload.is_granted}) to user {user_id}.",
+        description=f"Assigned user permission override (is_granted={payload.is_granted}) to user {user_id}.",
     )
     request.state.audit_logged = True
     return build_success_response(data={"assigned": True}, request_id=request.state.request_id)
@@ -444,7 +444,7 @@ async def remove_user_permission(
 ) -> dict:
     await rbac_service.remove_user_permission(user_id, permission_id)
     await audit_service.record(
-        action=AuditAction.USER_PERMISSION_CHANGED,
+        action=AuditAction.USER_OVERRIDE_REMOVED,
         module="rbac",
         user_id=current_user.id,
         username_snapshot=current_user.username,
@@ -457,7 +457,7 @@ async def remove_user_permission(
         http_method=request.method,
         endpoint=request.url.path,
         response_status=status.HTTP_200_OK,
-        description=f"Removed permission override from user {user_id}.",
+        description=f"Removed user permission override from user {user_id}.",
     )
     request.state.audit_logged = True
     return build_success_response(data={"removed": True}, request_id=request.state.request_id)

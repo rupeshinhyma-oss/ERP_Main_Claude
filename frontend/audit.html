@@ -100,7 +100,7 @@
   </div>
 
   <script src="js/api.js"></script>
-  <script src="js/nav.js"></script>
+  <script src="js/nav.js?v=2"></script>
   <script>
     renderShell("audit");
 
@@ -108,7 +108,7 @@
     const tableBody = document.getElementById("tableBody");
     const pagination = document.getElementById("pagination");
     let currentPage = 1;
-    const pageSize = 20;
+    let pageSize = 20;
 
     function badgeForStatus(code) {
       if (!code) return '<span class="badge badge-neutral">—</span>';
@@ -152,16 +152,18 @@
     }
 
     function renderPagination(p) {
-      pagination.innerHTML = `
-        <span class="muted">Page ${p.current_page} of ${p.total_pages || 1} &middot; ${p.total_records} total</span>
-        <div>
-          <button class="btn btn-small" id="prevPage" ${!p.has_previous ? "disabled" : ""}>Previous</button>
-          <button class="btn btn-small" id="nextPage" ${!p.has_next ? "disabled" : ""}>Next</button>
-        </div>`;
-      const prev = document.getElementById("prevPage");
-      const next = document.getElementById("nextPage");
-      if (prev) prev.addEventListener("click", () => { currentPage--; loadTable(); });
-      if (next) next.addEventListener("click", () => { currentPage++; loadTable(); });
+      renderFlexiblePagination(pagination, p, {
+        pageSize: pageSize,
+        onPageChange: (newPage) => {
+          currentPage = newPage;
+          loadTable();
+        },
+        onPageSizeChange: (newSize) => {
+          pageSize = newSize;
+          currentPage = 1;
+          loadTable();
+        },
+      });
     }
 
     async function openDetail(id) {

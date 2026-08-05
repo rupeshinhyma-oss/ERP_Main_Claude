@@ -124,3 +124,11 @@ async def test_effective_permissions_source_tracing():
     assert sources_dict["supplier.view"] == "System Role"
     assert sources_dict["user.read"] == "System Role"
     assert "user.delete" not in sources_dict
+
+
+def test_user_override_audit_actions():
+    """Verify AuditAction enum contains USER_OVERRIDE_ADDED and USER_OVERRIDE_REMOVED."""
+    from app.audit.constants import AuditAction
+    assert AuditAction.USER_OVERRIDE_ADDED == "USER_OVERRIDE_ADDED"
+    assert AuditAction.USER_OVERRIDE_REMOVED == "USER_OVERRIDE_REMOVED"
+

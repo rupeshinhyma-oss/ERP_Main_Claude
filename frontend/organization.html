@@ -141,7 +141,7 @@
   </div>
 
   <script src="js/api.js"></script>
-  <script src="js/nav.js"></script>
+  <script src="js/nav.js?v=2"></script>
   <script>
     renderNav("organization");
 
@@ -264,6 +264,14 @@
         // so a renamed company shows up immediately, on this page and
         // every other open tab's next navigation.
         invalidateBrandNameCache();
+        if (data && data.company_name) {
+          sessionStorage.setItem("erp_org_company_name", data.company_name);
+          const brandTextEl = document.getElementById("sidebarBrandText");
+          const logoMarkEl = document.getElementById("sidebarLogoMark");
+          if (brandTextEl) brandTextEl.textContent = data.company_name;
+          if (logoMarkEl) logoMarkEl.textContent = initials(data.company_name);
+          document.title = `Organization Settings — ${data.company_name}`;
+        }
         banner.innerHTML = '<div class="success-banner">Saved.</div>';
         showViewMode();
       } catch (err) {

@@ -55,10 +55,44 @@ def get_user_service(
     )
 
 
-async def _user_with_roles(user, rbac_service: RBACService) -> UserWithRoles:  # type: ignore[no-untyped-def]
-    """Shape a ``User`` ORM instance into the response schema, with role names expanded."""
+async def _user_with_roles(
+    user: User, rbac_service: RBACService, db: AsyncSession | None = None
+) -> UserWithRoles:
+    """Shape a ``User`` ORM instance into the response schema, with role names, department, designation, and manager expanded."""
     roles = await rbac_service.list_roles_for_user(user.id)
-    return UserWithRoles(**UserRead.model_validate(user).model_dump(), roles=[r.name for r in roles])
+    dept_name = None
+    desig_name = None
+    mgr_name = None
+
+    if db is not None:
+        from sqlalchemy import select
+        from app.departments.models import Department
+        from app.designations.models import Designation
+        if user.department_id:
+            dept_res = await db.execute(select(Department).where(Department.id == user.department_id))
+            dept = dept_res.scalar_one_or_none()
+            if dept:
+                dept_name = dept.name
+        if user.designation_id:
+            desig_res = await db.execute(select(Designation).where(Designation.id == user.designation_id))
+            desig = desig_res.scalar_one_or_none()
+            if desig:
+                desig_name = getattr(desig, "name", getattr(desig, "title", None))
+        if user.manager_id:
+            mgr_res = await db.execute(select(User).where(User.id == user.manager_id))
+            mgr = mgr_res.scalar_one_or_none()
+            if mgr:
+                mgr_name = mgr.full_name
+
+    return UserWithRoles(
+        **UserRead.model_validate(user).model_dump(),
+        roles=[r.name for r in roles],
+        employee_name=user.full_name,
+        department_name=dept_name,
+        designation_name=desig_name,
+        designation_title=desig_name,
+        manager_name=mgr_name,
+    )
 
 
 async def _record_user_action(
@@ -97,20 +131,41 @@ async def create_user(
     request: Request,
     user_service: UserService = Depends(get_user_service),
     rbac_service: RBACService = Depends(get_rbac_service),
+    db: AsyncSession = Depends(get_db_session),
     current_user: CurrentUser = Depends(require_permission("user.create")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
-    """Create a new user account with a generated temporary password and optional initial roles."""
+    """Create a new user account with profile information and initial credentials/roles."""
     user, temporary_password = await user_service.create_user(
+        first_name=payload.first_name,
+        middle_name=payload.middle_name,
+        last_name=payload.last_name,
+        display_name=payload.display_name,
         employee_code=payload.employee_code,
         username=payload.username,
         email=payload.email,
         phone=payload.phone,
+        department_id=payload.department_id,
+        designation_id=payload.designation_id,
+        manager_id=payload.manager_id,
+        date_of_birth=payload.date_of_birth,
+        gender=payload.gender,
+        date_of_joining=payload.date_of_joining,
+        employment_type=payload.employment_type,
+        employment_status=payload.employment_status,
+        address=payload.address,
+        city=payload.city,
+        state=payload.state,
+        country=payload.country,
+        postal_code=payload.postal_code,
+        emergency_contact=payload.emergency_contact,
+        notes=payload.notes,
         role_ids=payload.role_ids,
+        initial_password=payload.initial_password,
         individual_permission_ids=payload.individual_permission_ids,
         created_by=current_user.id,
     )
-    user_data = await _user_with_roles(user, rbac_service)
+    user_data = await _user_with_roles(user, rbac_service, db=db)
     await _record_user_action(
         audit_service=audit_service,
         request=request,
@@ -134,13 +189,30 @@ async def create_user(
 async def list_users(
     request: Request,
     page_params: PageParams = Depends(),
+    query: str | None = Query(default=None),
+    status: str | None = Query(default=None),
+    department_id: uuid.UUID | None = Query(default=None),
+    designation_id: uuid.UUID | None = Query(default=None),
     user_service: UserService = Depends(get_user_service),
+    rbac_service: RBACService = Depends(get_rbac_service),
+    db: AsyncSession = Depends(get_db_session),
     _current_user: CurrentUser = Depends(require_permission("user.read")),
 ) -> dict:
-    """List users, paginated."""
-    users, total = await user_service.list_users(offset=page_params.offset, limit=page_params.limit)
+    """List users, paginated, with optional query, status, department, and designation search filters."""
+    users, total = await user_service.list_users(
+        offset=page_params.offset,
+        limit=page_params.limit,
+        query=query,
+        status=status,
+        department_id=department_id,
+        designation_id=designation_id,
+    )
+    items = []
+    for u in users:
+        u_with_roles = await _user_with_roles(u, rbac_service, db=db)
+        items.append(u_with_roles.model_dump(mode="json"))
     data = {
-        "items": [UserRead.model_validate(u).model_dump(mode="json") for u in users],
+        "items": items,
         "total": total,
         "offset": page_params.offset,
         "limit": page_params.limit,
@@ -154,11 +226,12 @@ async def get_user(
     request: Request,
     user_service: UserService = Depends(get_user_service),
     rbac_service: RBACService = Depends(get_rbac_service),
+    db: AsyncSession = Depends(get_db_session),
     _current_user: CurrentUser = Depends(require_permission("user.read")),
 ) -> dict:
     """Fetch a single user, with assigned role names expanded."""
     user = await user_service.get_by_id_or_raise(user_id)
-    data = (await _user_with_roles(user, rbac_service)).model_dump(mode="json")
+    data = (await _user_with_roles(user, rbac_service, db=db)).model_dump(mode="json")
     return build_success_response(data=data, request_id=request.state.request_id)
 
 

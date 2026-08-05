@@ -47,14 +47,14 @@ const TeamsPage = (() => {
 
   async function loadSharedLookups() {
     try {
-      const [deptRes, desigRes, empRes] = await Promise.all([
+      const [deptRes, desigRes, userRes] = await Promise.all([
         apiGet("/departments" + toQueryString({ page: 1, page_size: 100, sort_order: "asc" })),
         apiGet("/designations" + toQueryString({ page: 1, page_size: 100, sort_order: "asc" })),
-        apiGet("/employees" + toQueryString({ page: 1, page_size: 100, sort_order: "asc" })),
+        apiGet("/users" + toQueryString({ page: 1, page_size: 100 })),
       ]);
-      departmentsCache = deptRes.data;
-      designationsCache = desigRes.data;
-      employeesCache = empRes.data;
+      departmentsCache = deptRes.data || [];
+      designationsCache = desigRes.data || [];
+      employeesCache = (userRes.data && userRes.data.items) || [];
     } catch (e) {
       /* filters/dropdowns degrade gracefully without lookups */
     }
@@ -66,11 +66,11 @@ const TeamsPage = (() => {
   }
   function designationTitle(id) {
     const d = designationsCache.find((x) => x.id === id);
-    return d ? d.title : "—";
+    return d ? (d.title || d.name) : "—";
   }
   function employeeName(id) {
     const e = employeesCache.find((x) => x.id === id);
-    return e ? e.display_name : "—";
+    return e ? (e.full_name || e.display_name || e.username) : "—";
   }
 
   function populateDropdown(selectEl, items, valueKey, labelFn) {
@@ -83,36 +83,25 @@ const TeamsPage = (() => {
   }
 
   // ==================================================================
-  // EMPLOYEES TAB
+  // EMPLOYEES / USERS TAB
   // ==================================================================
 
   const emp = { page: 1, pageSize: 20 };
 
   function empStatusBadgeClass(status) {
     if (status === "ACTIVE") return "badge-active";
-    if (status === "INACTIVE" || status === "TERMINATED" || status === "RESIGNED") return "badge-inactive";
+    if (status === "INACTIVE" || status === "SUSPENDED" || status === "TERMINATED" || status === "RESIGNED") return "badge-inactive";
     return "badge-neutral";
   }
 
-  /**
-   * Password reveal/reset cell for one Employees-tab row.
-   *
-   * Only shown for employees with a linked user_id (accounts created
-   * outside the Teams "Add Member" flow, e.g. via the separate Users
-   * admin API, may have no stored vault entry to reveal) and only when
-   * the current admin has settings.manage -- the same permission the
-   * backend's reveal/reset endpoints require, so the UI never offers an
-   * action that would just 403.
-   */
-  function passwordCellHtml(employee, canManagePasswords) {
-    if (!canManagePasswords || !employee.user_id) {
+  function passwordCellHtml(userItem, canManagePasswords) {
+    if (!canManagePasswords || !userItem.id) {
       return '<span class="muted">—</span>';
     }
     return `
-      <div class="password-cell" data-user-id="${employee.user_id}">
+      <div class="password-cell" data-user-id="${userItem.id}">
         <span class="password-dots" data-role="display">••••••••</span>
-        <button type="button" class="eye-toggle-btn" data-action="reveal" data-user-id="${employee.user_id}" title="Show password">👁</button>
-        <button type="button" class="btn btn-small" data-action="reset-password" data-user-id="${employee.user_id}">Reset</button>
+        <button type="button" class="btn btn-small" data-action="reset-password" data-user-id="${userItem.id}">Reset</button>
       </div>`;
   }
 
@@ -124,33 +113,34 @@ const TeamsPage = (() => {
     const params = {
       page: emp.page,
       page_size: emp.pageSize,
-      sort_order: "asc",
-      search: document.getElementById("empSearchInput").value.trim(),
+      query: document.getElementById("empSearchInput").value.trim(),
       department_id: document.getElementById("empDepartmentFilter").value,
       designation_id: document.getElementById("empDesignationFilter").value,
-      employment_status: document.getElementById("empStatusFilter").value,
+      status: document.getElementById("empStatusFilter").value,
     };
     try {
-      const { data, meta } = await apiGet("/employees" + toQueryString(params));
-      if (!data.length) {
-        tableBody.innerHTML = '<tr><td colspan="8" class="muted">No employees found.</td></tr>';
+      const { data, meta } = await apiGet("/users" + toQueryString(params));
+      const items = (data && data.items) ? data.items : [];
+      if (!items.length) {
+        tableBody.innerHTML = '<tr><td colspan="8" class="muted">No user accounts found.</td></tr>';
       } else {
-        // Sr. No. is a running number across the whole result set (page-aware),
-        // same convention as every Master Data list and Suppliers.
         const startingSrNo = (emp.page - 1) * emp.pageSize + 1;
-        tableBody.innerHTML = data.map((e, index) => `
+        tableBody.innerHTML = items.map((u, index) => `
           <tr>
+            <td class="cell-checkbox"><input type="checkbox" class="row-checkbox" value="${u.id}" /></td>
             <td class="cell-srno">${startingSrNo + index}</td>
-            <td>${escapeHtml(e.employee_code)}</td>
-            <td><a href="./employee-detail.html?id=${e.id}">${escapeHtml(e.display_name)}</a></td>
-            <td>${e.department_id ? escapeHtml(departmentName(e.department_id)) : "—"}</td>
-            <td>${e.designation_id ? escapeHtml(designationTitle(e.designation_id)) : "—"}</td>
-            <td><span class="badge ${empStatusBadgeClass(e.employment_status)}">${escapeHtml(e.employment_status)}</span></td>
-            <td>${passwordCellHtml(e, canManagePasswords)}</td>
-            <td class="actions"><a class="btn btn-small" href="./employee-detail.html?id=${e.id}">View</a></td>
+            <td>${escapeHtml(u.employee_code || "—")}</td>
+            <td><a href="./users.html">${escapeHtml(u.full_name || u.display_name || u.username)}</a></td>
+            <td>${u.department_id ? escapeHtml(departmentName(u.department_id)) : escapeHtml(u.department_name || "—")}</td>
+            <td>${u.designation_id ? escapeHtml(designationTitle(u.designation_id)) : escapeHtml(u.designation_name || "—")}</td>
+            <td><span class="badge ${empStatusBadgeClass(u.status)}">${escapeHtml(u.status)}</span></td>
+            <td>${passwordCellHtml(u, canManagePasswords)}</td>
+            <td class="actions"><a class="btn btn-small" href="./users.html">Manage</a></td>
           </tr>`).join("");
       }
-      renderEmpPagination(meta.pagination);
+      if (meta && meta.pagination) {
+        renderEmpPagination(meta.pagination);
+      }
     } catch (err) {
       tableBody.innerHTML = "";
       showError(banner, err);
@@ -158,17 +148,18 @@ const TeamsPage = (() => {
   }
 
   function renderEmpPagination(p) {
-    const pagination = document.getElementById("empPagination");
-    pagination.innerHTML = `
-      <span class="muted">Page ${p.current_page} of ${p.total_pages || 1} &middot; ${p.total_records} total</span>
-      <div>
-        <button class="btn btn-small" id="empPrevPage" ${!p.has_previous ? "disabled" : ""}>Previous</button>
-        <button class="btn btn-small" id="empNextPage" ${!p.has_next ? "disabled" : ""}>Next</button>
-      </div>`;
-    const prev = document.getElementById("empPrevPage");
-    const next = document.getElementById("empNextPage");
-    if (prev) prev.addEventListener("click", () => { emp.page--; loadEmployeesTable(); });
-    if (next) next.addEventListener("click", () => { emp.page++; loadEmployeesTable(); });
+    renderFlexiblePagination(document.getElementById("empPagination"), p, {
+      pageSize: emp.pageSize,
+      onPageChange: (newPage) => {
+        emp.page = newPage;
+        loadEmployeesTable();
+      },
+      onPageSizeChange: (newSize) => {
+        emp.pageSize = newSize;
+        emp.page = 1;
+        loadEmployeesTable();
+      },
+    });
   }
 
   function initEmployeesTab() {
@@ -332,11 +323,12 @@ const TeamsPage = (() => {
       const canUpdate = Auth.hasPermission("department.update");
       const canDelete = Auth.hasPermission("department.delete");
       if (!data.length) {
-        tableBody.innerHTML = '<tr><td colspan="7" class="muted">No departments found.</td></tr>';
+        tableBody.innerHTML = '<tr><td colspan="8" class="muted">No departments found.</td></tr>';
       } else {
         const startingSrNo = (dept.page - 1) * dept.pageSize + 1;
         tableBody.innerHTML = data.map((d, index) => `
           <tr>
+            <td class="cell-checkbox"><input type="checkbox" class="row-checkbox" value="${d.id}" /></td>
             <td class="cell-srno">${startingSrNo + index}</td>
             <td>${escapeHtml(d.code)}</td>
             <td>${escapeHtml(d.name)}</td>
@@ -357,17 +349,18 @@ const TeamsPage = (() => {
   }
 
   function renderDeptPagination(p) {
-    const pagination = document.getElementById("deptPagination");
-    pagination.innerHTML = `
-      <span class="muted">Page ${p.current_page} of ${p.total_pages || 1} &middot; ${p.total_records} total</span>
-      <div>
-        <button class="btn btn-small" id="deptPrevPage" ${!p.has_previous ? "disabled" : ""}>Previous</button>
-        <button class="btn btn-small" id="deptNextPage" ${!p.has_next ? "disabled" : ""}>Next</button>
-      </div>`;
-    const prev = document.getElementById("deptPrevPage");
-    const next = document.getElementById("deptNextPage");
-    if (prev) prev.addEventListener("click", () => { dept.page--; loadDepartmentsTable(); });
-    if (next) next.addEventListener("click", () => { dept.page++; loadDepartmentsTable(); });
+    renderFlexiblePagination(document.getElementById("deptPagination"), p, {
+      pageSize: dept.pageSize,
+      onPageChange: (newPage) => {
+        dept.page = newPage;
+        loadDepartmentsTable();
+      },
+      onPageSizeChange: (newSize) => {
+        dept.pageSize = newSize;
+        dept.page = 1;
+        loadDepartmentsTable();
+      },
+    });
   }
 
   function openDeptForm(d) {
@@ -501,7 +494,7 @@ const TeamsPage = (() => {
   async function loadDesignationsTable() {
     const banner = document.getElementById("banner");
     const tableBody = document.getElementById("desigTableBody");
-    tableBody.innerHTML = '<tr><td colspan="6" class="muted">Loading...</td></tr>';
+    tableBody.innerHTML = '<tr><td colspan="7" class="muted">Loading...</td></tr>';
     const params = {
       page: desig.page,
       page_size: desig.pageSize,
@@ -514,11 +507,12 @@ const TeamsPage = (() => {
       const canUpdate = Auth.hasPermission("designation.update");
       const canDelete = Auth.hasPermission("designation.delete");
       if (!data.length) {
-        tableBody.innerHTML = '<tr><td colspan="6" class="muted">No designations found.</td></tr>';
+        tableBody.innerHTML = '<tr><td colspan="7" class="muted">No designations found.</td></tr>';
       } else {
         const startingSrNo = (desig.page - 1) * desig.pageSize + 1;
         tableBody.innerHTML = data.map((d, index) => `
           <tr>
+            <td class="cell-checkbox"><input type="checkbox" class="row-checkbox" value="${d.id}" /></td>
             <td class="cell-srno">${startingSrNo + index}</td>
             <td>${escapeHtml(d.code)}</td>
             <td>${escapeHtml(d.title)}</td>
@@ -538,17 +532,18 @@ const TeamsPage = (() => {
   }
 
   function renderDesigPagination(p) {
-    const pagination = document.getElementById("desigPagination");
-    pagination.innerHTML = `
-      <span class="muted">Page ${p.current_page} of ${p.total_pages || 1} &middot; ${p.total_records} total</span>
-      <div>
-        <button class="btn btn-small" id="desigPrevPage" ${!p.has_previous ? "disabled" : ""}>Previous</button>
-        <button class="btn btn-small" id="desigNextPage" ${!p.has_next ? "disabled" : ""}>Next</button>
-      </div>`;
-    const prev = document.getElementById("desigPrevPage");
-    const next = document.getElementById("desigNextPage");
-    if (prev) prev.addEventListener("click", () => { desig.page--; loadDesignationsTable(); });
-    if (next) next.addEventListener("click", () => { desig.page++; loadDesignationsTable(); });
+    renderFlexiblePagination(document.getElementById("desigPagination"), p, {
+      pageSize: desig.pageSize,
+      onPageChange: (newPage) => {
+        desig.page = newPage;
+        loadDesignationsTable();
+      },
+      onPageSizeChange: (newSize) => {
+        desig.pageSize = newSize;
+        desig.page = 1;
+        loadDesignationsTable();
+      },
+    });
   }
 
   function openDesigForm(d) {
@@ -760,6 +755,18 @@ const TeamsPage = (() => {
     // performance fix; re-applied here since this file was re-uploaded
     // from a version that predates it.
     const lookupsPromise = loadSharedLookups();
+
+    document.addEventListener("change", (e) => {
+      if (e.target && (e.target.classList.contains("select-all-checkbox") || e.target.id === "selectAll")) {
+        const isChecked = e.target.checked;
+        const table = e.target.closest("table");
+        if (table) {
+          table.querySelectorAll(".row-checkbox").forEach((cb) => {
+            cb.checked = isChecked;
+          });
+        }
+      }
+    });
 
     initEmployeesTab();
     initDepartmentsTab();

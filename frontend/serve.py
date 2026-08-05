@@ -24,6 +24,14 @@ from pathlib import Path
 FRONTEND_DIR = Path(__file__).resolve().parent
 
 
+class NoCacheHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
+    def end_headers(self) -> None:
+        self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+        self.send_header("Pragma", "no-cache")
+        self.send_header("Expires", "0")
+        super().end_headers()
+
+
 def main() -> None:
     """Parse CLI flags and start the static file server."""
     parser = argparse.ArgumentParser(description="Serve the frontend as static files.")
@@ -36,7 +44,7 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(FRONTEND_DIR))
+    handler = functools.partial(NoCacheHTTPRequestHandler, directory=str(FRONTEND_DIR))
     server = http.server.ThreadingHTTPServer(("0.0.0.0", args.port), handler)
 
     url = f"http://localhost:{args.port}/{args.page}"

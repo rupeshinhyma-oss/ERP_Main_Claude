@@ -48,3 +48,20 @@ def require_permission(permission_code: str) -> Callable[..., Coroutine[Any, Any
         return current_user
 
     return _checker
+
+
+def require_super_admin() -> Callable[..., Coroutine[Any, Any, CurrentUser]]:
+    """
+    Build a FastAPI dependency that verifies the current user has the super_admin role.
+    """
+
+    async def _checker(
+        current_user: CurrentUser = Depends(get_current_user),
+        rbac_service: RBACService = Depends(get_rbac_service),
+    ) -> CurrentUser:
+        roles = await rbac_service.list_roles_for_user(current_user.id)
+        if not any(r.name == "super_admin" for r in roles):
+            raise ForbiddenException("Only Super Administrators can perform this action.")
+        return current_user
+
+    return _checker

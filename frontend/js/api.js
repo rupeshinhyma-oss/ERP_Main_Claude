@@ -49,11 +49,15 @@ const Auth = {
     localStorage.setItem("erp_access_token", access_token);
     localStorage.setItem("erp_refresh_token", refresh_token);
     if (profile) {
-      localStorage.setItem("erp_profile", JSON.stringify(profile));
+      this.updateProfile(profile);
     }
   },
   updateProfile(profile) {
+    const oldRaw = localStorage.getItem("erp_profile");
     localStorage.setItem("erp_profile", JSON.stringify(profile));
+    if (oldRaw !== JSON.stringify(profile)) {
+      window.dispatchEvent(new CustomEvent("auth:permissions-updated", { detail: profile }));
+    }
   },
   clear() {
     localStorage.removeItem("erp_access_token");
@@ -66,7 +70,9 @@ const Auth = {
   hasPermission(code) {
     if (!code) return true;
     const profile = this.getProfile();
-    if (!profile || !Array.isArray(profile.permissions)) return false;
+    if (!profile) return false;
+    if (Array.isArray(profile.roles) && profile.roles.includes("super_admin")) return true;
+    if (!Array.isArray(profile.permissions)) return false;
     const perms = profile.permissions;
     if (perms.includes(code)) return true;
 
@@ -77,6 +83,26 @@ const Auth = {
     } else if (code.endsWith(".read")) {
       const viewAlias = code.replace(/\.read$/, ".view");
       if (perms.includes(viewAlias)) return true;
+    }
+
+    // Check export & import alias fallbacks
+    if (code.endsWith(".export")) {
+      const readAlias = code.replace(/\.export$/, ".read");
+      const viewAlias = code.replace(/\.export$/, ".view");
+      if (perms.includes(readAlias) || perms.includes(viewAlias)) return true;
+    }
+    if (code.endsWith(".import")) {
+      const createAlias = code.replace(/\.import$/, ".create");
+      if (perms.includes(createAlias)) return true;
+    }
+
+    // Check employee <-> user module alias fallback
+    if (code.startsWith("employee.")) {
+      const userAlias = code.replace(/^employee\./, "user.");
+      if (perms.includes(userAlias)) return true;
+    } else if (code.startsWith("user.")) {
+      const empAlias = code.replace(/^user\./, "employee.");
+      if (perms.includes(empAlias)) return true;
     }
 
     // Hierarchical or module fallback (e.g. masters.brand.create -> brand.create)
@@ -93,13 +119,13 @@ const Auth = {
   },
   applyPermissionVisibility(container = document) {
     if (!container) return;
-    const elements = container.querySelectorAll("[data-permission]");
+    const elements = container.querySelectorAll("[data-permission], [data-action-permission]");
     elements.forEach((el) => {
-      const perm = el.getAttribute("data-permission");
+      const perm = el.getAttribute("data-permission") || el.getAttribute("data-action-permission");
       if (perm && !this.hasPermission(perm)) {
         el.style.display = "none";
         el.setAttribute("aria-hidden", "true");
-        if (el.tagName === "BUTTON" || el.tagName === "A") {
+        if (el.tagName === "BUTTON" || el.tagName === "A" || el.classList.contains("btn")) {
           el.remove ? el.remove() : (el.style.display = "none");
         }
       }
@@ -268,6 +294,48 @@ function showError(container, err) {
   container.appendChild(div);
 }
 
+/** Global toast notification helper for success, error, warning, or info messages. */
+function showToast(message, type = "info", duration = 3500) {
+  let toastContainer = document.getElementById("toastContainer");
+  if (!toastContainer) {
+    toastContainer = document.createElement("div");
+    toastContainer.id = "toastContainer";
+    toastContainer.style.cssText =
+      "position:fixed; top:20px; right:20px; z-index:999999; display:flex; flex-direction:column; gap:10px; pointer-events:none;";
+    document.body.appendChild(toastContainer);
+  }
+
+  const toast = document.createElement("div");
+  toast.style.cssText =
+    "pointer-events:auto; padding:12px 18px; border-radius:8px; font-size:13.5px; font-weight:600; color:#ffffff; box-shadow:0 10px 25px -5px rgba(0,0,0,0.15); display:flex; align-items:center; gap:8px; transition:all 0.25s ease; opacity:0; transform:translateY(-10px);";
+
+  if (type === "success") {
+    toast.style.background = "#059669";
+  } else if (type === "error") {
+    toast.style.background = "#dc2626";
+  } else if (type === "warning") {
+    toast.style.background = "#d97706";
+  } else {
+    toast.style.background = "#2563eb";
+  }
+
+  const icon = type === "success" ? "✓ " : type === "error" ? "✕ " : "ℹ ";
+  toast.textContent = icon + message;
+
+  toastContainer.appendChild(toast);
+
+  requestAnimationFrame(() => {
+    toast.style.opacity = "1";
+    toast.style.transform = "translateY(0)";
+  });
+
+  setTimeout(() => {
+    toast.style.opacity = "0";
+    toast.style.transform = "translateY(-10px)";
+    setTimeout(() => toast.remove(), 300);
+  }, duration);
+}
+
 function escapeHtml(value) {
   if (value === null || value === undefined) return "";
   return String(value)
@@ -359,4 +427,119 @@ function createSearchController() {
       });
     },
   };
+}
+
+/**
+ * Flexible, responsive pagination renderer supporting limit selections (20, 25, 50, 100)
+ * and interactive page numbers + Previous/Next buttons.
+ *
+ * @param {HTMLElement|string} mountEl - Container element or element ID
+ * @param {Object} p - Pagination meta from server { current_page, total_pages, total_records, has_next, has_previous, page_size }
+ * @param {Object} options - { pageSize, onPageChange(page), onPageSizeChange(size) }
+ */
+function renderFlexiblePagination(mountEl, p, options = {}) {
+  const container = typeof mountEl === "string" ? document.getElementById(mountEl) : mountEl;
+  if (!container) return;
+
+  const currentPage = p.current_page || 1;
+  const totalPages = p.total_pages || 1;
+  const totalRecords = p.total_records || 0;
+  const pageSize = options.pageSize || p.page_size || 20;
+
+  const startItem = totalRecords > 0 ? (currentPage - 1) * pageSize + 1 : 0;
+  const endItem = Math.min(currentPage * pageSize, totalRecords);
+
+  // Generate page numbers to display
+  function getPageNumbers(current, total) {
+    if (total <= 7) {
+      return Array.from({ length: total }, (_, i) => i + 1);
+    }
+    const pages = [1];
+    if (current > 3) pages.push("...");
+
+    const start = Math.max(2, current - 1);
+    const end = Math.min(total - 1, current + 1);
+
+    for (let i = start; i <= end; i++) {
+      if (i > 1 && i < total) pages.push(i);
+    }
+
+    if (current < total - 2) pages.push("...");
+    pages.push(total);
+    return pages;
+  }
+
+  const pageNumbers = getPageNumbers(currentPage, totalPages);
+
+  const pageBtnsHtml = pageNumbers
+    .map((item) => {
+      if (item === "...") {
+        return `<span style="padding: 4px 6px; color: var(--color-muted, #64748b); font-size: 13px;">...</span>`;
+      }
+      const isActive = item === currentPage;
+      return `
+        <button type="button" 
+                class="btn btn-small page-num-btn ${isActive ? "btn-primary" : ""}" 
+                data-page="${item}" 
+                style="${isActive ? "font-weight:700; min-width:32px;" : "min-width:32px;"}" 
+                ${isActive ? "disabled" : ""}>
+          ${item}
+        </button>`;
+    })
+    .join("");
+
+  const allowedSizes = [20, 25, 50, 100];
+  const sizeOptionsHtml = allowedSizes
+    .map((s) => `<option value="${s}" ${s === pageSize ? "selected" : ""}>${s}</option>`)
+    .join("");
+
+  container.innerHTML = `
+    <div style="display:flex; align-items:center; justify-space-between; justify-content:space-between; flex-wrap:wrap; gap:12px; width:100%; margin-top:12px; padding-top:12px; border-top:1px solid var(--color-border, #e2e8f0);">
+      <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
+        <div style="display:flex; align-items:center; gap:6px; font-size:13px; color:var(--color-muted, #64748b);">
+          <span>Show</span>
+          <select class="page-size-select" style="padding:4px 8px; border:1px solid var(--color-border, #cbd5e0); border-radius:var(--radius, 6px); font-size:13px; background:#fff; cursor:pointer;">
+            ${sizeOptionsHtml}
+          </select>
+          <span>per page</span>
+        </div>
+        <span class="muted" style="font-size:13px; color:var(--color-muted, #64748b);">
+          Showing <strong>${startItem}–${endItem}</strong> of <strong>${totalRecords}</strong> total (Page ${currentPage} of ${totalPages})
+        </span>
+      </div>
+
+      <div style="display:flex; align-items:center; gap:4px; flex-wrap:wrap;">
+        <button type="button" class="btn btn-small prev-page-btn" ${!p.has_previous ? "disabled" : ""}>Previous</button>
+        ${pageBtnsHtml}
+        <button type="button" class="btn btn-small next-page-btn" ${!p.has_next ? "disabled" : ""}>Next</button>
+      </div>
+    </div>
+  `;
+
+  // Attach Listeners
+  const selectEl = container.querySelector(".page-size-select");
+  if (selectEl && options.onPageSizeChange) {
+    selectEl.addEventListener("change", (e) => {
+      options.onPageSizeChange(parseInt(e.target.value, 10));
+    });
+  }
+
+  const prevBtn = container.querySelector(".prev-page-btn");
+  if (prevBtn && p.has_previous && options.onPageChange) {
+    prevBtn.addEventListener("click", () => options.onPageChange(currentPage - 1));
+  }
+
+  const nextBtn = container.querySelector(".next-page-btn");
+  if (nextBtn && p.has_next && options.onPageChange) {
+    nextBtn.addEventListener("click", () => options.onPageChange(currentPage + 1));
+  }
+
+  container.querySelectorAll(".page-num-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const page = parseInt(btn.getAttribute("data-page"), 10);
+      if (page && page !== currentPage && options.onPageChange) {
+        options.onPageChange(page);
+      }
+    });
+  });
 }

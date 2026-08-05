@@ -138,16 +138,24 @@ class RBACService:
         await self.invalidate_user_permissions_cache()
 
     # --- Role Permission grants ------------------------------------------------------
-    async def grant_permission(self, role_id: uuid.UUID, permission_id: uuid.UUID) -> None:
+    async def grant_permission(self, role_id: uuid.UUID, permission_id: uuid.UUID, *, actor_user_id: uuid.UUID | None = None) -> None:
         """Grant a permission to a role, if not already granted."""
         role = await self.get_role_or_raise(role_id)
+        if role.name == "super_admin" and actor_user_id:
+            roles = await self.list_roles_for_user(actor_user_id)
+            if not any(r.name == "super_admin" for r in roles):
+                raise ForbiddenException("Only Super Administrators can modify Super Administrator permissions.")
         permission = await self.get_permission_or_raise(permission_id)
         await self.role_repository.add_permission(role, permission)
         await self.invalidate_user_permissions_cache()
 
-    async def revoke_permission(self, role_id: uuid.UUID, permission_id: uuid.UUID) -> None:
+    async def revoke_permission(self, role_id: uuid.UUID, permission_id: uuid.UUID, *, actor_user_id: uuid.UUID | None = None) -> None:
         """Revoke a permission from a role."""
         role = await self.get_role_or_raise(role_id)
+        if role.name == "super_admin" and actor_user_id:
+            roles = await self.list_roles_for_user(actor_user_id)
+            if not any(r.name == "super_admin" for r in roles):
+                raise ForbiddenException("Only Super Administrators can modify Super Administrator permissions.")
         removed = await self.role_repository.remove_permission(role, permission_id)
         if not removed:
             raise NotFoundException("The role does not have that permission.")

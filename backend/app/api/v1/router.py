@@ -17,7 +17,6 @@ from app.auth.routes import router as auth_router
 from app.cache.routes import router as cache_router
 from app.departments.routes import router as departments_router
 from app.designations.routes import router as designations_router
-from app.employees.routes import router as employees_router
 from app.masters.brands.routes import router as brands_router
 from app.masters.cities.routes import router as cities_router
 from app.masters.countries.routes import router as countries_router
@@ -28,11 +27,11 @@ from app.masters.product_sub_categories.routes import router as product_sub_cate
 from app.masters.products.routes import router as products_router
 from app.masters.states.routes import router as states_router
 from app.masters.uom.routes import router as uom_router
-from app.members.routes import router as members_router
 from app.organizations.routes import router as organizations_router
 from app.queue.routes import router as queue_router
 from app.rbac.routes import router as rbac_router
 from app.suppliers.routes import router as suppliers_router
+from app.tasks.routes import router as tasks_router
 from app.users.routes import router as users_router
 
 api_router = APIRouter()
@@ -49,7 +48,6 @@ api_router.include_router(audit_router)
 api_router.include_router(organizations_router)
 api_router.include_router(departments_router)
 api_router.include_router(designations_router)
-api_router.include_router(employees_router)
 
 # Phase 7: Master Data Management.
 api_router.include_router(countries_router)
@@ -66,5 +64,5 @@ api_router.include_router(products_router)
 # Phase 8: Supplier Management.
 api_router.include_router(suppliers_router)
 
-# Teams: composed Add-Member flow.
-api_router.include_router(members_router)
+# Tasks: Task management flow.
+api_router.include_router(tasks_router)

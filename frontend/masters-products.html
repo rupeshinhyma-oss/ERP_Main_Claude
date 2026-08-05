@@ -36,8 +36,12 @@
         <div class="card">
           <div class="toolbar">
             <input type="text" id="searchInput" placeholder="Search code, name, or barcode or Sr. No..." />
-            <div id="categoryFilterMount" style="min-width: 220px;"></div>
-            <div id="brandFilterMount" style="min-width: 220px;"></div>
+            <select id="categoryFilter">
+              <option value="">All categories</option>
+            </select>
+            <select id="brandFilter">
+              <option value="">All brands</option>
+            </select>
             <select id="statusFilter">
               <option value="">All statuses</option>
               <option value="active">Active</option>
@@ -49,6 +53,7 @@
             <table>
               <thead>
                 <tr>
+                  <th style="width: 40px;"><input type="checkbox" class="select-all-checkbox" /></th>
                   <th>Sr. No.</th>
                   <th>Product</th>
                   <th>Code</th>
@@ -262,7 +267,7 @@
   </div>
 
   <script src="js/api.js"></script>
-  <script src="js/nav.js"></script>
+  <script src="js/nav.js?v=2"></script>
   <script src="js/dropdown-search.js"></script>
   <script src="js/import-wizard.js"></script>
   <script src="js/masters-common.js"></script>
@@ -355,8 +360,8 @@
       ],
       extraFilters() {
         const filters = {};
-        const catVal = document.getElementById("categoryFilter").value;
-        const brandVal = document.getElementById("brandFilter").value;
+        const catVal = document.getElementById("categoryFilter")?.value;
+        const brandVal = document.getElementById("brandFilter")?.value;
         if (catVal) filters.category_id = catVal;
         if (brandVal) filters.brand_id = brandVal;
         return filters;
@@ -380,61 +385,78 @@
           // Populate Category Selects
           const catSelect = document.getElementById("category_id");
           const catFilter = document.getElementById("categoryFilter");
-          catSelect.innerHTML = '<option value="">-- Select Category --</option>';
-          catFilter.innerHTML = '<option value="">All categories</option>';
+          if (catSelect) catSelect.innerHTML = '<option value="">-- Select Category --</option>';
+          if (catFilter) catFilter.innerHTML = '<option value="">All categories</option>';
           for (const c of categoriesCache) {
-            const opt1 = document.createElement("option"); opt1.value = c.id; opt1.textContent = c.name; catSelect.appendChild(opt1);
-            const opt2 = document.createElement("option"); opt2.value = c.id; opt2.textContent = c.name; catFilter.appendChild(opt2);
+            if (catSelect) {
+              const opt1 = document.createElement("option"); opt1.value = c.id; opt1.textContent = c.name; catSelect.appendChild(opt1);
+            }
+            if (catFilter) {
+              const opt2 = document.createElement("option"); opt2.value = c.id; opt2.textContent = c.name; catFilter.appendChild(opt2);
+            }
           }
 
           // Category change filters Sub-Categories
-          catSelect.addEventListener("change", () => {
-            populateSubCategoryOptions(catSelect.value);
-          });
+          if (catSelect) {
+            catSelect.addEventListener("change", () => {
+              populateSubCategoryOptions(catSelect.value);
+            });
+          }
           populateSubCategoryOptions("");
 
           // Populate Brand Selects
           const brandSelect = document.getElementById("brand_id");
           const brandFilter = document.getElementById("brandFilter");
-          brandSelect.innerHTML = '<option value="">-- Select Brand --</option>';
-          brandFilter.innerHTML = '<option value="">All brands</option>';
+          if (brandSelect) brandSelect.innerHTML = '<option value="">-- Select Brand --</option>';
+          if (brandFilter) brandFilter.innerHTML = '<option value="">All brands</option>';
           for (const b of brandsCache) {
-            const opt1 = document.createElement("option"); opt1.value = b.id; opt1.textContent = b.name; brandSelect.appendChild(opt1);
-            const opt2 = document.createElement("option"); opt2.value = b.id; opt2.textContent = b.name; brandFilter.appendChild(opt2);
+            if (brandSelect) {
+              const opt1 = document.createElement("option"); opt1.value = b.id; opt1.textContent = b.name; brandSelect.appendChild(opt1);
+            }
+            if (brandFilter) {
+              const opt2 = document.createElement("option"); opt2.value = b.id; opt2.textContent = b.name; brandFilter.appendChild(opt2);
+            }
           }
 
           // Populate HSN Select
           const hsnSelect = document.getElementById("hsn_id");
-          hsnSelect.innerHTML = '<option value="">-- Select HSN Code --</option>';
-          for (const h of hsnCache) {
-            const opt = document.createElement("option");
-            opt.value = h.id;
-            opt.textContent = `${h.code} - ${h.description || ''} (Refund VAT: ${h.refund_vat_percent || 0}%)`;
-            opt.dataset.vat = h.refund_vat_percent != null ? h.refund_vat_percent : 0;
-            hsnSelect.appendChild(opt);
-          }
-
-          // HSN selection auto-fills Refund VAT %
-          hsnSelect.addEventListener("change", () => {
-            const selectedOpt = hsnSelect.options[hsnSelect.selectedIndex];
-            if (selectedOpt && selectedOpt.dataset.vat !== undefined) {
-              document.getElementById("refund_vat_percent").value = selectedOpt.dataset.vat;
+          if (hsnSelect) {
+            hsnSelect.innerHTML = '<option value="">-- Select HSN Code --</option>';
+            for (const h of hsnCache) {
+              const opt = document.createElement("option");
+              opt.value = h.id;
+              opt.textContent = `${h.code} - ${h.description || ''} (Refund VAT: ${h.refund_vat_percent || 0}%)`;
+              opt.dataset.vat = h.refund_vat_percent != null ? h.refund_vat_percent : 0;
+              hsnSelect.appendChild(opt);
             }
-          });
+
+            // HSN selection auto-fills Refund VAT %
+            hsnSelect.addEventListener("change", () => {
+              const selectedOpt = hsnSelect.options[hsnSelect.selectedIndex];
+              if (selectedOpt && selectedOpt.dataset.vat !== undefined) {
+                const vatElem = document.getElementById("refund_vat_percent");
+                if (vatElem) vatElem.value = selectedOpt.dataset.vat;
+              }
+            });
+          }
 
           // Populate UOM Selects
           const uomSelect = document.getElementById("uom_id");
           const secUomSelect = document.getElementById("secondary_uom_id");
-          uomSelect.innerHTML = '<option value="">-- Select Primary UOM --</option>';
-          secUomSelect.innerHTML = '<option value="">-- Select Secondary UOM --</option>';
+          if (uomSelect) uomSelect.innerHTML = '<option value="">-- Select Primary UOM --</option>';
+          if (secUomSelect) secUomSelect.innerHTML = '<option value="">-- Select Secondary UOM --</option>';
           for (const u of uomCache) {
-            const opt1 = document.createElement("option"); opt1.value = u.id; opt1.textContent = `${u.name} (${u.code})`; uomSelect.appendChild(opt1);
-            const opt2 = document.createElement("option"); opt2.value = u.id; opt2.textContent = `${u.name} (${u.code})`; secUomSelect.appendChild(opt2);
+            if (uomSelect) {
+              const opt1 = document.createElement("option"); opt1.value = u.id; opt1.textContent = `${u.name} (${u.code})`; uomSelect.appendChild(opt1);
+            }
+            if (secUomSelect) {
+              const opt2 = document.createElement("option"); opt2.value = u.id; opt2.textContent = `${u.name} (${u.code})`; secUomSelect.appendChild(opt2);
+            }
           }
 
           // Filter listeners for toolbar
-          catFilter.addEventListener("change", () => document.getElementById("searchInput").dispatchEvent(new Event("input")));
-          brandFilter.addEventListener("change", () => document.getElementById("searchInput").dispatchEvent(new Event("input")));
+          catFilter?.addEventListener("change", () => document.getElementById("searchInput")?.dispatchEvent(new Event("input")));
+          brandFilter?.addEventListener("change", () => document.getElementById("searchInput")?.dispatchEvent(new Event("input")));
 
         } catch (e) {
           console.error("Failed loading lookup dropdowns:", e);

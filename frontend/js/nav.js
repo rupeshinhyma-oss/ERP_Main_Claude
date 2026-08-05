@@ -27,23 +27,27 @@ const ICONS = {
   shield: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="nav-icon"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/></svg>',
   clock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="nav-icon"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>',
   truck: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="nav-icon"><path d="M1 3h15v13H1z"/><path d="M16 8h4l3 3v5h-7V8z"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>',
+  task: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="nav-icon"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>',
 };
 
 const NAV_SECTIONS = [
   {
     label: "Overview",
-    items: [{ key: "dashboard", label: "Dashboard", href: "./index.html", icon: "dashboard" }],
-  },
-  {
-    label: "Organization",
     items: [
-      { key: "teams", label: "Teams", href: "./teams.html", icon: "users", permission: "employee.view" },
+      { key: "dashboard", label: "Dashboard", href: "./index.html", icon: "dashboard" },
+      { key: "tasks", label: "Tasks", href: "./tasks.html", icon: "task", permission: "task.view" },
     ],
   },
   {
-    label: "Suppliers",
+    label: "Business & Partners",
     items: [
       { key: "suppliers", label: "Supplier Profiles", href: "./suppliers.html", icon: "truck", permission: "supplier.view" },
+    ],
+  },
+  {
+    label: "Organization & HR",
+    items: [
+      { key: "teams", label: "Teams", href: "./teams.html", icon: "users", permission: "employee.view" },
     ],
   },
   {
@@ -64,17 +68,31 @@ const NAV_SECTIONS = [
   {
     label: "Settings",
     items: [
-      { key: "organization", label: "Organization Settings", href: "./organization.html", icon: "building", permission: "organization.manage" },
-      { key: "users", label: "User Accounts & Passwords", href: "./users.html", icon: "users" },
+      { key: "organization", label: "Organization Settings", href: "./organization.html", icon: "building", permission: "organization.manage", superAdminOnly: true },
+      { key: "users", label: "User Accounts & Passwords", href: "./users.html", icon: "users", permission: "user.view" },
       { key: "audit", label: "Audit Log", href: "./audit.html", icon: "clock", permission: "audit.view" },
       { key: "rbac", label: "Roles & Permissions", href: "./rbac.html", icon: "shield", permission: "settings.manage" },
-      { key: "effective-permissions", label: "Effective Permissions", href: "./effective-permissions.html", icon: "shield", permission: "settings.manage" },
     ],
   },
 ];
 
+function getDynamicNavSections() {
+  return NAV_SECTIONS;
+}
+
 const PAGE_TITLES = {
   dashboard: "Dashboard",
+  tasks: "Tasks & Work Management",
+  reports: "Reports & Analytics",
+  buyer: "Buyer Profiles",
+  inquiry: "Inquiries",
+  crm: "Customer Relationship Management",
+  sales: "Sales Orders",
+  purchase: "Purchasing",
+  inventory: "Inventory Management",
+  manufacturing: "Manufacturing",
+  finance: "Finance & Accounts",
+  hrms: "Human Resource Management",
   organization: "Organization Settings",
   teams: "Teams",
   users: "User Accounts & Passwords",
@@ -91,7 +109,10 @@ const PAGE_TITLES = {
   suppliers: "Supplier Profiles",
   audit: "Audit Log",
   rbac: "Roles & Permissions",
-  "effective-permissions": "Effective Permissions",
+  "effective-permissions": "Effective Permissions Inspector",
+  "employee-form": "Employee Form",
+  "employee-detail": "Employee Detail",
+  "403": "Access Restricted",
 };
 
 function initials(name) {
@@ -100,6 +121,56 @@ function initials(name) {
 }
 
 const DEFAULT_BRAND_NAME = "ERP Admin";
+
+const NAV_SCROLL_KEY = "erp_sidebar_nav_scroll";
+
+/**
+ * Put `.sidebar-nav` where the user left it, before the first paint.
+ */
+function positionNavScroll(navEl) {
+  const maxScroll = Math.max(0, navEl.scrollHeight - navEl.clientHeight);
+  if (maxScroll === 0) return;
+
+  const saved = parseInt(sessionStorage.getItem(NAV_SCROLL_KEY) || "", 10);
+  if (Number.isFinite(saved) && saved > 0) {
+    navEl.scrollTop = Math.min(saved, maxScroll);
+  }
+
+  const active = navEl.querySelector(".nav-item.active");
+  if (!active) return;
+
+  const navBox = navEl.getBoundingClientRect();
+  const itemBox = active.getBoundingClientRect();
+  if (itemBox.top >= navBox.top && itemBox.bottom <= navBox.bottom) return;
+
+  const centreOffset = (navEl.clientHeight - itemBox.height) / 2;
+  navEl.scrollTop = Math.min(
+    maxScroll,
+    Math.max(0, navEl.scrollTop + (itemBox.top - navBox.top) - centreOffset)
+  );
+}
+
+function persistNavScroll(navEl) {
+  const save = () => {
+    try {
+      sessionStorage.setItem(NAV_SCROLL_KEY, String(Math.round(navEl.scrollTop)));
+    } catch (e) { }
+  };
+  let queued = false;
+  navEl.addEventListener(
+    "scroll",
+    () => {
+      if (queued) return;
+      queued = true;
+      requestAnimationFrame(() => {
+        queued = false;
+        save();
+      });
+    },
+    { passive: true }
+  );
+  window.addEventListener("beforeunload", save);
+}
 
 async function resolveBrandName() {
   const cached = sessionStorage.getItem("erp_org_company_name");
@@ -183,33 +254,56 @@ function renderForcePasswordChangeModal() {
 function renderShell(activeKey) {
   Auth.requireLogin();
 
+  const sections = getDynamicNavSections();
+
+  // Background sync latest profile & permissions from backend
+  if (Auth.getAccessToken()) {
+    apiGet("/auth/profile").then((res) => {
+      if (res && res.data) {
+        Auth.updateProfile(res.data);
+      }
+    }).catch(() => {});
+  }
+
   const profile = Auth.getProfile();
+  const isSuperAdmin = profile && Array.isArray(profile.roles) && profile.roles.includes("super_admin");
 
   if (profile && profile.must_change_password) {
     renderForcePasswordChangeModal();
   }
 
   // Check page level access permission
-  const currentNavItem = NAV_SECTIONS.flatMap((s) => s.items).find((i) => i.key === activeKey);
+  const currentNavItem = sections.flatMap((s) => s.items).find((i) => i.key === activeKey);
   let accessDenied = false;
-  if (currentNavItem && currentNavItem.permission && !Auth.hasPermission(currentNavItem.permission)) {
-    accessDenied = true;
+  if (currentNavItem) {
+    if (currentNavItem.superAdminOnly && !isSuperAdmin) {
+      accessDenied = true;
+    } else if (currentNavItem.permission && !Auth.hasPermission(currentNavItem.permission)) {
+      accessDenied = true;
+    }
+  }
+
+  if (accessDenied && activeKey !== "403" && !window.location.pathname.endsWith("403.html")) {
+    window.location.href = `./403.html?module=${encodeURIComponent(PAGE_TITLES[activeKey] || activeKey)}`;
+    return;
   }
 
   const sidebarMount = document.getElementById("sidebarMount");
   const topbarMount = document.getElementById("topbarMount");
 
-  if (sidebarMount) {
-    const groups = NAV_SECTIONS.map((section) => {
-      const visibleItems = section.items.filter(
-        (item) => !item.permission || Auth.hasPermission(item.permission)
-      );
+  function buildSidebarNavHtml() {
+    const activeSections = getDynamicNavSections();
+    return activeSections.map((section) => {
+      const visibleItems = section.items.filter((item) => {
+        if (item.superAdminOnly && !isSuperAdmin) return false;
+        return !item.permission || Auth.hasPermission(item.permission);
+      });
       if (visibleItems.length === 0) return "";
       const items = visibleItems
         .map(
           (item) => `
         <a href="${item.href}" class="nav-item ${item.key === activeKey ? "active" : ""}">
-          ${ICONS[item.icon] || ""}
+          ${ICONS[item.icon] || ICONS.box}
           <span class="nav-label">${item.label}</span>
         </a>`
         )
@@ -220,13 +314,16 @@ function renderShell(activeKey) {
           ${items}
         </div>`;
     }).join("");
+  }
 
+  if (sidebarMount) {
+    const groups = buildSidebarNavHtml();
     const displayName = profile ? escapeHtml(profile.username) : "User";
     const displayRole = profile && Array.isArray(profile.roles) && profile.roles.includes("super_admin")
       ? "Super Administrator"
       : profile && Array.isArray(profile.roles) && profile.roles.includes("admin")
-      ? "Administrator"
-      : "User";
+        ? "Administrator"
+        : "User";
 
     sidebarMount.outerHTML = `
       <aside class="sidebar" id="sidebarMount">
@@ -246,11 +343,20 @@ function renderShell(activeKey) {
         </div>
       </aside>`;
 
+    const navEl = document.querySelector(".sidebar-nav");
+    if (navEl) {
+      positionNavScroll(navEl);
+      persistNavScroll(navEl);
+    }
+
     resolveBrandName().then((name) => {
       const brandTextEl = document.getElementById("sidebarBrandText");
       const logoMarkEl = document.getElementById("sidebarLogoMark");
       if (brandTextEl) brandTextEl.textContent = name;
       if (logoMarkEl) logoMarkEl.textContent = initials(name);
+
+      const titlePrefix = PAGE_TITLES[activeKey] || (document.title ? document.title.split(" — ")[0] : "ERP");
+      document.title = `${titlePrefix} — ${name}`;
     });
 
     const userBtn = document.getElementById("sidebarUser");
@@ -259,7 +365,7 @@ function renderShell(activeKey) {
         if (!confirm("Log out?")) return;
         try {
           await apiPost("/auth/logout", { refresh_token: Auth.getRefreshToken() });
-        } catch (e) {}
+        } catch (e) { }
         Auth.clear();
         window.location.href = "./login.html";
       });
@@ -276,7 +382,21 @@ function renderShell(activeKey) {
         </div>
         <div class="topbar-spacer"></div>
         <div class="topbar-actions">
-          <button class="icon-btn" title="Notifications">${ICONS.bell}<span class="dot"></span></button>
+          <div style="position:relative;" id="notificationWrapper">
+            <button class="icon-btn" id="topbarBellBtn" title="Notifications" style="position:relative; cursor:pointer;">
+              ${ICONS.bell}
+              <span id="topbarBellBadge" style="display:none; position:absolute; top:-2px; right:-2px; background:#dc2626; color:#ffffff; font-size:10px; font-weight:800; padding:1px 5px; border-radius:10px; min-width:16px; text-align:center; border:2px solid #ffffff;">0</span>
+            </button>
+            <div id="notificationDropdown" style="display:none; position:absolute; right:0; top:42px; width:340px; background:#ffffff; border:1px solid #cbd5e1; border-radius:10px; box-shadow:0 12px 28px rgba(0,0,0,0.15); z-index:99999; overflow:hidden;">
+              <div style="padding:12px 16px; border-bottom:1px solid #e2e8f0; font-weight:700; font-size:13.5px; display:flex; justify-content:space-between; align-items:center; background:#f8fafc;">
+                <span style="color:#1e293b;">Notifications</span>
+                <span id="notificationHeaderBadge" style="font-size:11px; background:#e0e7ff; color:#2563eb; padding:2px 8px; font-weight:700; border-radius:10px;">0 new</span>
+              </div>
+              <div id="notificationItemsList" style="max-height:320px; overflow-y:auto; padding:4px 0;">
+                <div style="padding:24px; text-align:center; color:#64748b; font-size:13px;">No unhandled notifications</div>
+              </div>
+            </div>
+          </div>
           <button class="icon-btn" id="topbarLogout" title="Log out">${ICONS.logout}</button>
         </div>
       </header>`;
@@ -286,30 +406,42 @@ function renderShell(activeKey) {
       logoutBtn.addEventListener("click", async () => {
         try {
           await apiPost("/auth/logout", { refresh_token: Auth.getRefreshToken() });
-        } catch (e) {}
+        } catch (e) { }
         Auth.clear();
         window.location.href = "./login.html";
       });
     }
+
+    const bellBtn = document.getElementById("topbarBellBtn");
+    const dropdown = document.getElementById("notificationDropdown");
+    if (bellBtn && dropdown) {
+      bellBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const isOpen = dropdown.style.display === "block";
+        dropdown.style.display = isOpen ? "none" : "block";
+      });
+      document.addEventListener("click", (e) => {
+        if (!dropdown.contains(e.target) && e.target !== bellBtn) {
+          dropdown.style.display = "none";
+        }
+      });
+    }
+
+    setTimeout(() => {
+      if (typeof window.loadNotifications === "function") {
+        window.loadNotifications();
+      }
+    }, 100);
   }
 
-  if (accessDenied) {
-    setTimeout(() => {
-      const mainEl = document.querySelector(".app-main") || document.querySelector("main") || document.body;
-      if (mainEl) {
-        mainEl.innerHTML = `
-          <div style="max-width: 560px; margin: 80px auto; padding: 40px; text-align: center; background: #ffffff; border-radius: 12px; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.1); border: 1px solid #e2e8f0;">
-            <div style="font-size: 56px; margin-bottom: 16px;">🚫</div>
-            <h2 style="font-size: 22px; font-weight: 700; color: #1a202c; margin-bottom: 8px;">Access Restricted</h2>
-            <p style="color: #4a5568; font-size: 15px; line-height: 1.5; margin-bottom: 24px;">
-              You do not have permission to access the <strong>${PAGE_TITLES[activeKey] || activeKey}</strong> module.
-            </p>
-            <a href="./index.html" class="btn btn-primary" style="display: inline-block; padding: 10px 24px; text-decoration: none; border-radius: 6px; font-weight: 600; background-color: #3182ce; color: #ffffff;">Return to Dashboard</a>
-          </div>
-        `;
-      }
-    }, 0);
-  }
+  // Live Permission Update listener
+  window.addEventListener("auth:permissions-updated", () => {
+    const navEl = document.querySelector(".sidebar-nav");
+    if (navEl) {
+      navEl.innerHTML = buildSidebarNavHtml();
+    }
+    Auth.applyPermissionVisibility();
+  });
 
   // Apply button-level permission hiding across all action buttons in the DOM
   setTimeout(() => {
@@ -320,3 +452,76 @@ function renderShell(activeKey) {
 function renderNav(activeKey) {
   renderShell(activeKey);
 }
+
+window.loadNotifications = async function () {
+  const badgeEl = document.getElementById("topbarBellBadge");
+  const headerBadgeEl = document.getElementById("notificationHeaderBadge");
+  const listEl = document.getElementById("notificationItemsList");
+
+  if (!Auth.hasPermission("task.view")) return;
+
+  try {
+    const res = await apiGet("/tasks?limit=100");
+    if (!res || !res.data || !Array.isArray(res.data.items)) return;
+    const tasks = res.data.items;
+    const now = new Date();
+
+    const notifications = [];
+
+    tasks.forEach((t) => {
+      if (t.status === "COMPLETED" || t.status === "CANCELLED") return;
+      const isOverdue = t.due_date && new Date(t.due_date) < now;
+      if (isOverdue) {
+        notifications.push({
+          id: t.id,
+          type: "overdue",
+          title: `Overdue Task: "${t.title}"`,
+          message: `Due was ${new Date(t.due_date).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}`,
+          href: "./tasks.html",
+        });
+      } else if (t.priority === "URGENT" || t.priority === "HIGH") {
+        notifications.push({
+          id: t.id,
+          type: "urgent",
+          title: `Urgent Task: "${t.title}"`,
+          message: `Priority: ${t.priority} — Status: ${t.status}`,
+          href: "./tasks.html",
+        });
+      }
+    });
+
+    const count = notifications.length;
+    if (badgeEl) {
+      if (count > 0) {
+        badgeEl.textContent = count > 99 ? "99+" : String(count);
+        badgeEl.style.display = "inline-block";
+      } else {
+        badgeEl.style.display = "none";
+      }
+    }
+
+    if (headerBadgeEl) {
+      headerBadgeEl.textContent = `${count} active`;
+    }
+
+    if (listEl) {
+      if (count === 0) {
+        listEl.innerHTML = `<div style="padding:24px; text-align:center; color:#64748b; font-size:13px;">No pending or overdue notifications</div>`;
+      } else {
+        listEl.innerHTML = notifications
+          .map(
+            (n) => `
+          <div style="padding:12px 16px; border-bottom:1px solid #f1f5f9; cursor:pointer; transition:background 0.15s ease;" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='transparent'" onclick="location.href='${n.href}'">
+            <div style="font-size:13px; font-weight:700; color:${n.type === "overdue" ? "#dc2626" : "#d97706"}; display:flex; align-items:center; gap:6px;">
+              ${n.type === "overdue" ? "⚠️" : "⚡"} ${escapeHtml(n.title)}
+            </div>
+            <div style="font-size:12px; color:#475569; margin-top:2px;">${escapeHtml(n.message)}</div>
+          </div>`
+          )
+          .join("");
+      }
+    }
+  } catch (err) {
+    console.warn("Failed to load notifications:", err);
+  }
+};

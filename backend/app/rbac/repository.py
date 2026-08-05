@@ -124,7 +124,6 @@ class RoleRepository(BaseRepository[Role]):
 
     async def get_effective_permissions_breakdown_for_user(self, user_id: uuid.UUID) -> dict:
         """Fetch full user metadata and permission source breakdown (Read-Only inspector)."""
-        from app.employees.models import Employee
         from app.users.models import User
         from app.departments.models import Department
         from app.designations.models import Designation
@@ -144,35 +143,39 @@ class RoleRepository(BaseRepository[Role]):
         system_roles = list((await self.session.execute(stmt_user_roles)).scalars().all())
         is_super_admin = "super_admin" in system_roles
 
-        # System Role permissions set
-        stmt_roles_perms = (
-            select(Permission.code)
+        # System Role permissions mapping (code -> list of role names)
+        stmt_roles_with_names = (
+            select(Permission.code, Role.name)
             .join(RolePermission, RolePermission.permission_id == Permission.id)
             .join(UserRole, UserRole.role_id == RolePermission.role_id)
+            .join(Role, Role.id == UserRole.role_id)
             .where(UserRole.user_id == user_id)
-            .distinct()
         )
-        role_perms_set = set((await self.session.execute(stmt_roles_perms)).scalars().all())
+        role_name_map: dict[str, list[str]] = {}
+        for code, rname in (await self.session.execute(stmt_roles_with_names)).all():
+            if code not in role_name_map:
+                role_name_map[code] = []
+            if rname not in role_name_map[code]:
+                role_name_map[code].append(rname)
 
-        # Employee details (Department + Designation for display only)
-        stmt_emp = select(Employee).where(Employee.user_id == user_id)
-        emp = (await self.session.execute(stmt_emp)).scalar_one_or_none()
+        role_perms_set = set(role_name_map.keys())
 
-        employee_name = emp.display_name if emp else user.username
+        # User details (Department + Designation for display only)
+        employee_name = user.full_name or user.display_name or user.username
         department_name = "N/A"
         designation_name = "N/A"
 
-        if emp and emp.department_id:
-            stmt_dept_obj = select(Department).where(Department.id == emp.department_id)
+        if user.department_id:
+            stmt_dept_obj = select(Department).where(Department.id == user.department_id)
             dept_obj = (await self.session.execute(stmt_dept_obj)).scalar_one_or_none()
             if dept_obj:
                 department_name = dept_obj.name
 
-        if emp and emp.designation_id:
-            stmt_desig_obj = select(Designation).where(Designation.id == emp.designation_id)
+        if user.designation_id:
+            stmt_desig_obj = select(Designation).where(Designation.id == user.designation_id)
             desig_obj = (await self.session.execute(stmt_desig_obj)).scalar_one_or_none()
             if desig_obj:
-                designation_name = desig_obj.title
+                designation_name = desig_obj.title or desig_obj.name
 
         # Individual User Overrides
         stmt_user_perms = (
@@ -187,21 +190,28 @@ class RoleRepository(BaseRepository[Role]):
 
         effective_set = await self.get_permission_codes_for_user(user_id)
 
-        # Build permission sources list (for each effective permission code)
+        # Build detailed permission sources list
         permission_sources = []
         for code in sorted(list(effective_set)):
             source = "System Role"
+            override_type = "None"
+            roles_granting = role_name_map.get(code, [])
+
             if is_super_admin:
                 source = "Super Administrator"
+                roles_granting = ["super_admin"]
             elif code in user_grants_set:
                 source = "Individual User"
+                override_type = "Granted"
             elif code in role_perms_set:
                 source = "System Role"
 
             permission_sources.append({
                 "code": code,
                 "module": code.split(".")[0] if "." in code else "system",
-                "source": source
+                "source": source,
+                "role_names": roles_granting,
+                "override_type": override_type,
             })
 
         return {

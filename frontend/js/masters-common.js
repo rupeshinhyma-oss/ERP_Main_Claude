@@ -426,7 +426,13 @@ const MasterPage = (() => {
       });
     }
 
-    if (config.loadLookups) await config.loadLookups();
+    if (config.loadLookups) {
+      try {
+        await config.loadLookups();
+      } catch (err) {
+        console.warn("Lookup loading warning:", err);
+      }
+    }
     await loadTable();
 
     return { loadTable, openModal, closeModal };

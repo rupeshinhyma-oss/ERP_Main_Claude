@@ -50,7 +50,6 @@ const NAV_SECTIONS = [
     label: "Operations",
     items: [
       { key: "inquiries", label: "Inquiries & Consignments", href: "./inquiries.html", icon: "fileText" },
-      { key: "teams", label: "Teams", href: "./teams.html", icon: "briefcase", permission: "employee.view" },
     ],
   },
   {

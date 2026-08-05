@@ -340,6 +340,7 @@
     }
 
     async function loadOrgInfo() {
+      if (!Auth.isLoggedIn()) return;
       try {
         const { data } = await apiGet("/organizations");
         if (data && data.company_name) {
@@ -355,11 +356,13 @@
         /* fallback to default */
       }
     }
-    loadOrgInfo();
 
     if (Auth.isLoggedIn()) {
       window.location.href = "./index.html";
+    } else {
+      Auth.clear();
     }
+    loadOrgInfo();
 
     const form = document.getElementById("loginForm");
     const banner = document.getElementById("banner");

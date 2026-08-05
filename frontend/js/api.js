@@ -245,7 +245,10 @@ async function apiCall(path, options = {}) {
 
   if (response.status === 401) {
     Auth.clear();
-    window.location.href = "./login.html";
+    const isLoginFlow = path.includes("/auth/login") || window.location.pathname.endsWith("login.html");
+    if (!isLoginFlow) {
+      window.location.href = "./login.html";
+    }
     throw new ApiError("Session expired. Please log in again.", 401, []);
   }
 

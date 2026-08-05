@@ -283,9 +283,8 @@ async def seed() -> None:
                 session.add(RolePermission(role_id=admin_role.id, permission_id=permission.id))
             await session.flush()
         else:
-            org_perm = await permission_repo.get_by_code("organization.manage")
-            if org_perm:
-                await role_repo.add_permission(admin_role, org_perm)
+            for permission in created_permissions:
+                await role_repo.add_permission(admin_role, permission)
 
         for r_name, r_desc, r_perms in DEFAULT_BUSINESS_ROLES:
             b_role = await role_repo.get_by_name(r_name)

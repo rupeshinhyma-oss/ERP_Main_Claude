@@ -130,10 +130,10 @@ class RBACService:
         return role
 
     async def delete_role(self, role_id: uuid.UUID) -> None:
-        """Delete a role. Rejects deleting a system role."""
+        """Delete a role. Rejects deleting the root super_admin role."""
         role = await self.get_role_or_raise(role_id)
-        if role.is_system:
-            raise ForbiddenException("System roles cannot be deleted.")
+        if role.name == "super_admin":
+            raise ForbiddenException("The primary super_admin system role cannot be deleted.")
         await self.role_repository.delete(role)
         await self.invalidate_user_permissions_cache()
 

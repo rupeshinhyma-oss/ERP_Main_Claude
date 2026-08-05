@@ -86,11 +86,11 @@ class RoleRepository(BaseRepository[Role]):
 
         If the user has the super_admin role, returns all system permissions.
         """
-        # 1. Check if user has super_admin role
+        # 1. Check if user has super_admin or admin role (both have full system access)
         stmt_super_admin = (
             select(Role.name)
             .join(UserRole, UserRole.role_id == Role.id)
-            .where(UserRole.user_id == user_id, Role.name == "super_admin")
+            .where(UserRole.user_id == user_id, Role.name.in_(["super_admin", "admin"]))
         )
         if (await self.session.execute(stmt_super_admin)).scalar_one_or_none() is not None:
             all_perms_stmt = select(Permission.code)
@@ -141,7 +141,7 @@ class RoleRepository(BaseRepository[Role]):
             .where(UserRole.user_id == user_id)
         )
         system_roles = list((await self.session.execute(stmt_user_roles)).scalars().all())
-        is_super_admin = "super_admin" in system_roles
+        is_super_admin = any(r in ["super_admin", "admin"] for r in system_roles)
 
         # System Role permissions mapping (code -> list of role names)
         stmt_roles_with_names = (

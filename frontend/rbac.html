@@ -368,9 +368,8 @@
         : '<span class="muted" style="font-size:12px;">No permissions assigned</span>';
 
       const currentProf = Auth.getProfile();
-      const isCurrentSuperAdmin = currentProf && Array.isArray(currentProf.roles) && currentProf.roles.includes("super_admin");
-      const canEditThisRole = canManage && (!isSystem || isCurrentSuperAdmin) && (role.name !== 'super_admin' || isCurrentSuperAdmin);
-      const canDeleteThisRole = canManage && !isSystem && isCurrentSuperAdmin;
+      const canEditThisRole = canManage && role.name !== 'super_admin';
+      const canDeleteThisRole = canManage && role.name !== 'super_admin';
 
       return `
         <div class="role-card" data-role-id="${role.id}">

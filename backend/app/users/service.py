@@ -72,6 +72,11 @@ class UserService:
         roles = await self.rbac_service.list_roles_for_user(user_id)
         return any(r.name == "super_admin" for r in roles)
 
+    async def is_admin_or_super_admin(self, user_id: uuid.UUID) -> bool:
+        """Return True if the user has the super_admin or admin role."""
+        roles = await self.rbac_service.list_roles_for_user(user_id)
+        return any(r.name in ["super_admin", "admin"] for r in roles)
+
     async def _ensure_not_last_super_admin(
         self, user_id: uuid.UUID, role_id_to_remove: uuid.UUID | None = None
     ) -> None:
@@ -280,6 +285,10 @@ class UserService:
         if role.name == "super_admin" and not await self.is_super_admin(assigned_by):
             from app.core.exceptions import ForbiddenException
             raise ForbiddenException("Only Super Administrators can promote a user to Super Administrator.")
+
+        if role.name == "admin" and not await self.is_admin_or_super_admin(assigned_by):
+            from app.core.exceptions import ForbiddenException
+            raise ForbiddenException("Only Administrators can assign Administrator roles.")
 
         existing = await self.user_role_repository.get(user_id, role_id)
         if existing is not None:

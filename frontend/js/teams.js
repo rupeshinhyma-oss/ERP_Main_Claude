@@ -41,20 +41,24 @@ const TeamsPage = (() => {
     });
   }
 
+  let rolesCache = [];
+
   // ------------------------------------------------------------------
-  // Shared lookups (departments + designations, used across all 3 tabs)
+  // Shared lookups (departments + designations + roles, used across all 3 tabs)
   // ------------------------------------------------------------------
 
   async function loadSharedLookups() {
     try {
-      const [deptRes, desigRes, userRes] = await Promise.all([
+      const [deptRes, desigRes, userRes, rolesRes] = await Promise.all([
         apiGet("/departments" + toQueryString({ page: 1, page_size: 100, sort_order: "asc" })),
         apiGet("/designations" + toQueryString({ page: 1, page_size: 100, sort_order: "asc" })),
         apiGet("/users" + toQueryString({ page: 1, page_size: 100 })),
+        apiGet("/rbac/roles"),
       ]);
       departmentsCache = deptRes.data || [];
       designationsCache = desigRes.data || [];
       employeesCache = (userRes.data && userRes.data.items) || [];
+      rolesCache = rolesRes.data || [];
     } catch (e) {
       /* filters/dropdowns degrade gracefully without lookups */
     }
@@ -730,6 +734,7 @@ const TeamsPage = (() => {
         password,
         department_id: document.getElementById("member_department_id").value || null,
         designation_id: document.getElementById("member_designation_id").value || null,
+        role_id: document.getElementById("member_role_id").value || null,
       };
       try {
         const { data } = await apiPost("/members", payload);
@@ -781,6 +786,9 @@ const TeamsPage = (() => {
     populateDropdown(document.getElementById("manager_id"), employeesCache, "id", (e) => `${e.display_name} (${e.employee_code})`);
     populateDropdown(document.getElementById("member_department_id"), departmentsCache, "id", (d) => d.name);
     populateDropdown(document.getElementById("member_designation_id"), designationsCache, "id", (d) => d.title);
+    if (rolesCache && rolesCache.length) {
+      populateDropdown(document.getElementById("member_role_id"), rolesCache, "id", (r) => r.name + (r.is_system ? " (System)" : ""));
+    }
 
     await Promise.all([loadEmployeesTable(), loadDepartmentsTable(), loadDesignationsTable()]);
   }

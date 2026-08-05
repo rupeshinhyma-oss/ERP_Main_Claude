@@ -97,30 +97,32 @@ class TeamMemberService:
         full_name: str,
         email: str,
         password: str,
-        department_id: uuid.UUID | None,
-        designation_id: uuid.UUID | None,
+        department_id: uuid.UUID | None = None,
+        designation_id: uuid.UUID | None = None,
+        role_id: uuid.UUID | None = None,
+        role_name: str | None = None,
         created_by: uuid.UUID,
     ) -> dict:
         """
         Create a new team member: a User (login, with the ADMIN-SUPPLIED
-        password) + Employee (HR profile), linked, with the default
-        'employee' role assigned. The password is also stored
-        reversible-encrypted in the vault so the admin can view/reset it
-        later (see module docstring).
-
-        Raises :class:`ConflictException` if the email is already in use,
-        and :class:`BadRequestException` if a given department/designation
-        ID doesn't exist, or if the default 'employee' role hasn't been
-        seeded yet. Password strength is validated at the schema layer
-        (app.members.schemas.TeamMemberCreate), before this is ever called.
+        password) + Employee (HR profile), linked, with the specified role assigned
+        (defaulting to 'employee' if none provided).
         """
         if department_id is not None and await self.department_repository.get_by_id(department_id) is None:
             raise BadRequestException("The specified department does not exist.")
         if designation_id is not None and await self.designation_repository.get_by_id(designation_id) is None:
             raise BadRequestException("The specified designation does not exist.")
 
-        default_role = await self.rbac_service.role_repository.get_by_name(DEFAULT_MEMBER_ROLE_NAME)
-        if default_role is None:
+        assigned_role = None
+        if role_id is not None:
+            assigned_role = await self.rbac_service.role_repository.get_by_id(role_id)
+        elif role_name is not None:
+            assigned_role = await self.rbac_service.role_repository.get_by_name(role_name)
+
+        if assigned_role is None:
+            assigned_role = await self.rbac_service.role_repository.get_by_name(DEFAULT_MEMBER_ROLE_NAME)
+
+        if assigned_role is None:
             raise BadRequestException(
                 f"The default {DEFAULT_MEMBER_ROLE_NAME!r} role has not been seeded. "
                 "Run the bootstrap seed script before adding team members."
@@ -131,19 +133,13 @@ class TeamMemberService:
 
         username = await self._generate_unique_username(email)
 
-        # Deliberately NOT using UserService.create_user() here: that
-        # method always GENERATES a temporary password server-side, which
-        # is the opposite of this feature's explicit requirement (the
-        # admin sets the password directly). Everything else it would
-        # have done (role assignment) is still done via the existing
-        # UserService.assign_role() below, so this only diverges from the
-        # existing flow at the one point it must.
         first_name, last_name = _split_full_name(full_name)
+        employee_code = f"EMP{uuid.uuid4().hex[:6].upper()}"
         user = await self.user_service.user_repository.create(
             first_name=first_name,
             last_name=last_name,
             display_name=full_name.strip(),
-            employee_code=None,
+            employee_code=employee_code,
             username=username,
             email=email,
             phone=None,
@@ -153,12 +149,12 @@ class TeamMemberService:
             date_of_joining=date.today(),
             status=UserStatus.PENDING,
             is_active=True,
-            must_change_password=False,  # the admin set this password deliberately; don't force an immediate change
+            must_change_password=False,
             failed_login_count=0,
             created_by=created_by,
             updated_by=created_by,
         )
-        await self.user_service.assign_role(user.id, default_role.id, assigned_by=created_by)
+        await self.user_service.assign_role(user.id, assigned_role.id, assigned_by=created_by)
         await self.password_vault_repository.upsert(user.id, encrypt_password(password))
 
         return {
@@ -170,7 +166,7 @@ class TeamMemberService:
             "email": email,
             "department_id": department_id,
             "designation_id": designation_id,
-            "role": DEFAULT_MEMBER_ROLE_NAME,
+            "role": assigned_role.name,
             "must_change_password": False,
             "created_at": user.created_at,
         }

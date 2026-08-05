@@ -96,6 +96,8 @@ async def create_member(
         password=payload.password,
         department_id=payload.department_id,
         designation_id=payload.designation_id,
+        role_id=payload.role_id,
+        role_name=payload.role_name,
         created_by=current_user.id,
     )
     data = TeamMemberRead(**result).model_dump(mode="json")

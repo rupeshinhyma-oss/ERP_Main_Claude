@@ -815,7 +815,6 @@ const SupplierPage = (() => {
       }
     }
 
-<<<<<<< HEAD
     // Auto-inject "Download Sample" button for Suppliers
     const wrapper = document.getElementById("importBtnWrapper");
     if (wrapper && !document.getElementById("downloadSampleBtn")) {

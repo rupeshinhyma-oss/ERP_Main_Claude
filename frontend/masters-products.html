@@ -5,6 +5,29 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Products — Inhyma ERP</title>
   <link rel="stylesheet" href="css/style.css" />
+  <style>
+    /* Squeeze table to fit on 1 screen without scrolling (doc line 65) */
+    .table-scroll {
+      overflow-x: auto;
+    }
+    .table-scroll table {
+      font-size: 12.5px;
+      width: 100%;
+    }
+    .table-scroll th, .table-scroll td {
+      padding: 6px 8px !important;
+      white-space: nowrap;
+    }
+    .table-scroll td.cell-name {
+      white-space: normal;
+      max-width: 180px;
+      word-break: break-word;
+    }
+    .btn-small {
+      padding: 3px 7px !important;
+      font-size: 11.5px !important;
+    }
+  </style>
 </head>
 <body>
   <div class="app-shell">
@@ -21,6 +44,7 @@
             <div class="page-subtitle">Manage items, packaging weights, CBM, refund VAT, and license warnings.</div>
           </div>
           <div class="page-header-actions">
+            <button class="btn" id="sampleTemplateBtn">📌 Sample Template</button>
             <div class="btn file-btn" id="importBtnWrapper">
               Import
               <input type="file" id="importInput" accept=".csv,.xlsx" />
@@ -35,11 +59,18 @@
 
         <div class="card">
           <div class="toolbar">
-            <input type="text" id="searchInput" placeholder="Search code, name, or barcode or Sr. No..." />
-            <div id="categoryFilterMount" style="min-width: 220px;"></div>
-            <div id="brandFilterMount" style="min-width: 220px;"></div>
+            <input type="text" id="searchInput" placeholder="Search code, name, or barcode..." />
+            <select id="categoryFilter">
+              <option value="">All Categories</option>
+            </select>
+            <select id="subCategoryFilter">
+              <option value="">All Sub-Categories</option>
+            </select>
+            <select id="brandFilter">
+              <option value="">All Brands</option>
+            </select>
             <select id="statusFilter">
-              <option value="">All statuses</option>
+              <option value="">All Statuses</option>
               <option value="active">Active</option>
               <option value="inactive">Inactive</option>
             </select>
@@ -49,10 +80,10 @@
             <table>
               <thead>
                 <tr>
+                  <th style="width:28px;"><input type="checkbox" id="selectAllProducts" /></th>
                   <th>Sr. No.</th>
-                  <th>Product</th>
-                  <th>Code</th>
-                  <th>Category / Sub-Cat.</th>
+                  <th>Product Name (Tally)</th>
+                  <th>Product Code</th>
                   <th>Brand</th>
                   <th>Sub-Category</th>
                   <th>HSN Code</th>
@@ -61,11 +92,11 @@
                   <th>Gross Wt (kg)</th>
                   <th>Unit CBM</th>
                   <th>Status</th>
-                  <th>Action</th>
+                  <th>ACTION</th>
                 </tr>
               </thead>
               <tbody id="tableBody">
-                <tr><td colspan="11" class="muted">Loading...</td></tr>
+                <tr><td colspan="13" class="muted">Loading...</td></tr>
               </tbody>
             </table>
           </div>
@@ -83,7 +114,7 @@
       </div>
       <form id="entityForm">
         <input type="hidden" id="entityId" />
-
+        <div id="modalBanner"></div>
         <div class="section-title">Identity</div>
         <div class="form-grid">
           <div class="field">
@@ -265,7 +296,7 @@
   <script src="js/nav.js"></script>
   <script src="js/dropdown-search.js"></script>
   <script src="js/import-wizard.js"></script>
-  <script src="js/masters-common.js"></script>
+  <script src="js/masters-common.js?v=200"></script>
   <script>
     renderShell("masters-products");
 
@@ -324,6 +355,10 @@
       ],
       columns: [
         {
+          header: '<input type="checkbox" id="selectAllProducts" />',
+          render: (p) => `<input type="checkbox" class="select-row-cb" data-id="${p.id}" />`,
+        },
+        {
           header: "Product Name (Tally)",
           render: (p) => `<a href="#" onclick="event.preventDefault(); alert('Item: ' + escapeHtml(p.product_name_tally || p.product_name) + '\\nInvoice Name: ' + escapeHtml(p.product_name_invoice || '-') + '\\nRefund VAT: ' + (p.refund_vat_percent || 0) + '%\\nLicense Requirement: ' + escapeHtml(p.license_certificate_required || 'None'));" class="cell-primary" style="color:var(--color-primary); font-weight:600;">${escapeHtml(p.product_name_tally || p.product_name)}</a>${p.license_certificate_required ? `<br><span style="color:#ef4444; font-size:11px; font-weight:bold;">⚠️ License Required</span>` : ""}`,
         },
@@ -355,9 +390,14 @@
       ],
       extraFilters() {
         const filters = {};
-        const catVal = document.getElementById("categoryFilter").value;
-        const brandVal = document.getElementById("brandFilter").value;
+        const catEl = document.getElementById("categoryFilter");
+        const subCatEl = document.getElementById("subCategoryFilter");
+        const brandEl = document.getElementById("brandFilter");
+        const catVal = catEl ? catEl.value : "";
+        const subCatVal = subCatEl ? subCatEl.value : "";
+        const brandVal = brandEl ? brandEl.value : "";
         if (catVal) filters.category_id = catVal;
+        if (subCatVal) filters.sub_category_id = subCatVal;
         if (brandVal) filters.brand_id = brandVal;
         return filters;
       },
@@ -380,12 +420,31 @@
           // Populate Category Selects
           const catSelect = document.getElementById("category_id");
           const catFilter = document.getElementById("categoryFilter");
+          const subCatFilter = document.getElementById("subCategoryFilter");
+
           catSelect.innerHTML = '<option value="">-- Select Category --</option>';
-          catFilter.innerHTML = '<option value="">All categories</option>';
+          catFilter.innerHTML = '<option value="">All Categories</option>';
           for (const c of categoriesCache) {
             const opt1 = document.createElement("option"); opt1.value = c.id; opt1.textContent = c.name; catSelect.appendChild(opt1);
             const opt2 = document.createElement("option"); opt2.value = c.id; opt2.textContent = c.name; catFilter.appendChild(opt2);
           }
+
+          const populateSubCatFilter = (catId) => {
+            subCatFilter.innerHTML = '<option value="">All Sub-Categories</option>';
+            const list = catId ? subCategoriesCache.filter(s => s.category_id === catId) : subCategoriesCache;
+            for (const s of list) {
+              const opt = document.createElement("option"); opt.value = s.id; opt.textContent = s.name; subCatFilter.appendChild(opt);
+            }
+          };
+          populateSubCatFilter("");
+
+          catFilter.addEventListener("change", () => {
+            populateSubCatFilter(catFilter.value);
+            document.getElementById("searchInput").dispatchEvent(new Event("input"));
+          });
+          subCatFilter.addEventListener("change", () => {
+            document.getElementById("searchInput").dispatchEvent(new Event("input"));
+          });
 
           // Category change filters Sub-Categories
           catSelect.addEventListener("change", () => {
@@ -490,8 +549,12 @@
 
         const catId = MasterPage.fieldValue("category_id");
         const uomId = MasterPage.fieldValue("uom_id");
-        if (!catId) throw new Error("Please select a Category.");
-        if (!uomId) throw new Error("Please select a Primary UOM.");
+        if (!catId) {
+          throw new Error("Please select a Category.");
+        }
+        if (!uomId) {
+          throw new Error("Please select a Primary UOM.");
+        }
 
         let secUomId = MasterPage.fieldValue("secondary_uom_id") || null;
         if (secUomId === uomId) {

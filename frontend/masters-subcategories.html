@@ -21,6 +21,7 @@
             <div class="page-subtitle">Belongs to a category; names are unique within their category.</div>
           </div>
           <div class="page-header-actions">
+            <button class="btn" id="sampleTemplateBtn">📌 Sample Template</button>
             <div class="btn file-btn" id="importBtnWrapper">
               Import
               <input type="file" id="importInput" accept=".csv,.xlsx" />
@@ -56,11 +57,11 @@
                   <th>Category</th>
                   <th>Description</th>
                   <th>Status</th>
-                  <th></th>
+                  <th>ACTION</th>
                 </tr>
               </thead>
               <tbody id="tableBody">
-                <tr><td colspan="6" class="muted">Loading...</td></tr>
+                <tr><td colspan="7" class="muted">Loading...</td></tr>
               </tbody>
             </table>
           </div>
@@ -78,6 +79,7 @@
       </div>
       <form id="entityForm">
         <input type="hidden" id="entityId" />
+        <div id="modalBanner"></div>
         <div class="form-grid">
           <div class="field">
             <label for="category_id">Category *</label>
@@ -116,7 +118,7 @@
   <script src="js/api.js"></script>
   <script src="js/nav.js"></script>
   <script src="js/import-wizard.js"></script>
-  <script src="js/masters-common.js"></script>
+  <script src="js/masters-common.js?v=200"></script>
   <script>
     renderShell("masters-subcategories");
 

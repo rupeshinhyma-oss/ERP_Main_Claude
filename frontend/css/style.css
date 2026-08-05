@@ -1512,3 +1512,10 @@ tbody tr {
     background-position: 0 0;
   }
 }
+
+/* Center-align all table column headers */
+.table-scroll th,
+table th {
+  text-align: center !important;
+  vertical-align: middle !important;
+}

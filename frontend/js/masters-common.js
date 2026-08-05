@@ -75,8 +75,25 @@ const MasterPage = (() => {
     let currentPage = 1;
     const pageSize = 20;
 
+    function getModalBanner() {
+      let mb = document.getElementById("modalBanner");
+      if (!mb && entityForm) {
+        mb = entityForm.querySelector(".modal-banner");
+        if (!mb) {
+          mb = document.createElement("div");
+          mb.id = "modalBanner";
+          mb.className = "modal-banner";
+          mb.style.marginBottom = "16px";
+          entityForm.prepend(mb);
+        }
+      }
+      return mb;
+    }
+
     function openModal(item) {
       entityForm.reset();
+      const mb = getModalBanner();
+      if (mb) mb.innerHTML = "";
       document.getElementById("entityId").value = item ? item.id : "";
       document.getElementById("modalTitle").textContent = item
         ? `Edit ${config.entityName}`
@@ -86,6 +103,8 @@ const MasterPage = (() => {
     }
 
     function closeModal() {
+      const mb = getModalBanner();
+      if (mb) mb.innerHTML = "";
       closeModalShell(modalBackdrop);
     }
 
@@ -101,7 +120,7 @@ const MasterPage = (() => {
     }
 
     async function loadTable() {
-      const colCount = config.columns.length + 2; // +1 for Sr. No., +1 for actions
+      const colCount = config.columns.length + 2;
       tableBody.innerHTML = `<tr><td colspan="${colCount}" class="muted">Loading...</td></tr>`;
       const params = {
         page: currentPage,
@@ -114,29 +133,19 @@ const MasterPage = (() => {
 
       try {
         const { data, meta } = await apiGet(config.apiBase + toQueryString(params));
-        // Batch-resolve any related-entity names (e.g. Category/Brand/UOM
-        // names for a page of Products) needed to render this page's
-        // columns -- bounded by page size, not by the size of the related
-        // tables, so this stays cheap regardless of how large Products/
-        // Categories/etc. grow.
         if (config.resolveNames && data.length) {
           await config.resolveNames(data);
         }
         if (!data.length) {
           tableBody.innerHTML = `<tr><td colspan="${colCount}" class="muted">No records found.</td></tr>`;
         } else {
-          // Sr. No. is a running number across the whole result set, not just
-          // this page -- so page 2 continues at 21, 22, 23... rather than
-          // restarting at 1. Computed client-side from the current page and
-          // page size; nothing to store or keep in sync server-side.
-          const startingSrNo = (currentPage - 1) * pageSize + 1;
           tableBody.innerHTML = data
             .map((item, index) => {
-              const srNo = startingSrNo + index;
-              const cells = config.columns.map((col) => `<td>${col.render(item)}</td>`).join("");
+              const srNo = (currentPage - 1) * pageSize + index + 1;
+              const cells = config.columns.map((col) => `<td>${col.render(item, srNo)}</td>`).join("");
               return `
               <tr>
-                <td class="cell-srno">${srNo}</td>
+                <td style="color:var(--color-muted); font-weight:500;">${srNo}</td>
                 ${cells}
                 <td class="actions">
                   ${canUpdate ? `<button class="btn btn-small" data-edit="${item.id}">Edit</button>` : ""}
@@ -162,50 +171,41 @@ const MasterPage = (() => {
 
     function renderPagination(p) {
       const totalPages = p.total_pages || 1;
-      const current = p.current_page;
+      const curPage = p.current_page || 1;
       
-      const range = [];
-      const delta = 2;
-      for (let i = 1; i <= totalPages; i++) {
-        if (i === 1 || i === totalPages || (i >= current - delta && i <= current + delta)) {
-          range.push(i);
-        }
+      let pageBtnsHtml = "";
+      const maxPagesToShow = 5;
+      let startPage = Math.max(1, curPage - 2);
+      let endPage = Math.min(totalPages, startPage + maxPagesToShow - 1);
+      if (endPage - startPage < maxPagesToShow - 1) {
+        startPage = Math.max(1, endPage - maxPagesToShow + 1);
       }
 
-      let pageNumButtons = "";
-      let last = 0;
-      for (let i of range) {
-        if (last) {
-          if (i - last === 2) {
-            pageNumButtons += `<button class="btn btn-small" data-page="${last + 1}">${last + 1}</button>`;
-          } else if (i - last > 2) {
-            pageNumButtons += `<span class="muted" style="padding: 0 4px; font-weight: bold; align-self: center;">...</span>`;
-          }
-        }
-        const isCurrent = i === current;
-        const btnClass = isCurrent ? "btn btn-small btn-primary" : "btn btn-small";
-        pageNumButtons += `<button class="${btnClass}" data-page="${i}">${i}</button>`;
-        last = i;
+      for (let i = startPage; i <= endPage; i++) {
+        pageBtnsHtml += `
+          <button class="btn btn-small ${i === curPage ? "btn-primary" : ""}" data-page="${i}" style="min-width:32px;">${i}</button>
+        `;
       }
 
       pagination.innerHTML = `
-        <span class="pagination-info">Page <b>${current}</b> of <b>${totalPages}</b> &middot; <b>${p.total_records}</b> total</span>
-        <div class="pagination-controls">
+        <span class="muted">Page ${curPage} of ${totalPages} &middot; ${p.total_records} total</span>
+        <div style="display:flex; gap:4px; align-items:center;">
           <button class="btn btn-small" id="prevPage" ${!p.has_previous ? "disabled" : ""}>Previous</button>
-          ${pageNumButtons}
+          ${pageBtnsHtml}
           <button class="btn btn-small" id="nextPage" ${!p.has_next ? "disabled" : ""}>Next</button>
         </div>
       `;
+
       const prev = document.getElementById("prevPage");
       const next = document.getElementById("nextPage");
       if (prev) prev.addEventListener("click", () => { currentPage--; loadTable(); });
       if (next) next.addEventListener("click", () => { currentPage++; loadTable(); });
 
-      pagination.querySelectorAll("button[data-page]").forEach((btn) => {
+      pagination.querySelectorAll("[data-page]").forEach((btn) => {
         btn.addEventListener("click", (e) => {
-          const targetPage = parseInt(e.target.getAttribute("data-page"), 10);
-          if (targetPage && targetPage !== currentPage) {
-            currentPage = targetPage;
+          const pg = parseInt(e.target.getAttribute("data-page"), 10);
+          if (pg && pg !== currentPage) {
+            currentPage = pg;
             loadTable();
           }
         });
@@ -226,7 +226,8 @@ const MasterPage = (() => {
         closeModal();
         await loadTable();
       } catch (err) {
-        showError(banner, err);
+        const mb = getModalBanner();
+        showError(mb || banner, err);
       }
     });
 
@@ -256,61 +257,38 @@ const MasterPage = (() => {
     });
 
     let searchDebounce;
-    let pendingSrNoJump = null; // Sr. No. to scroll-to-and-highlight once the target page loads
-
-    // If the person types a bare number into search, treat it as "take me to
-    // Sr. No. N" instead of a text search: jump straight to the page that
-    // row lives on (computed from page size), then highlight it once loaded.
-    // Falls back to a normal text search for anything that isn't a plain integer.
-    function isSrNoQuery(value) {
-      return /^\d+$/.test(value.trim());
-    }
-
     if (searchInput) {
       searchInput.addEventListener("input", () => {
         clearTimeout(searchDebounce);
-        searchDebounce = setTimeout(() => {
-          const raw = searchInput.value.trim();
-          if (raw && isSrNoQuery(raw)) {
-            const srNo = parseInt(raw, 10);
-            if (srNo >= 1) {
-              currentPage = Math.ceil(srNo / pageSize);
-              pendingSrNoJump = srNo;
-              loadTableForSrNoJump();
-              return;
-            }
-          }
-          pendingSrNoJump = null;
-          currentPage = 1;
-          loadTable();
-        }, 300);
+        searchDebounce = setTimeout(() => { currentPage = 1; loadTable(); }, 300);
       });
     }
-
-    // Loads the table without sending the numeric value as a "search" query
-    // param (the backend's search is text-based; a bare Sr. No. isn't a
-    // field it knows about) -- it's a pure client-side pagination jump.
-    async function loadTableForSrNoJump() {
-      const savedValue = searchInput.value;
-      searchInput.value = "";
-      await loadTable();
-      searchInput.value = savedValue;
-      if (pendingSrNoJump !== null) {
-        const rows = tableBody.querySelectorAll("tr");
-        for (const row of rows) {
-          const srNoCell = row.querySelector(".cell-srno");
-          if (srNoCell && parseInt(srNoCell.textContent, 10) === pendingSrNoJump) {
-            row.classList.add("row-highlight");
-            row.scrollIntoView({ behavior: "smooth", block: "center" });
-            break;
-          }
-        }
-        pendingSrNoJump = null;
-      }
-    }
-
     if (statusFilter) {
       statusFilter.addEventListener("change", () => { currentPage = 1; loadTable(); });
+    }
+
+    // --- Sample Template Download ---
+    const sampleTemplateBtn = document.getElementById("sampleTemplateBtn");
+    if (sampleTemplateBtn) {
+      sampleTemplateBtn.addEventListener("click", () => {
+        const headers = config.importHeaders ? config.importHeaders.map(h => typeof h === "string" ? h : h.key || h.label).join(",") : "code,name,status";
+        const sampleVals = config.importHeaders ? config.importHeaders.map(h => {
+          const k = (typeof h === "string" ? h : h.key || h.label).toLowerCase();
+          if (k.includes("code")) return "SAMPLE-001";
+          if (k.includes("name")) return "Sample Name";
+          if (k.includes("status")) return "active";
+          if (k.includes("quantity") || k.includes("weight") || k.includes("price") || k.includes("cost")) return "10";
+          return "Sample Data";
+        }).join(",") : "SMP-01,Sample Entity,active";
+
+        const csvContent = "data:text/csv;charset=utf-8," + encodeURIComponent(headers + "\n" + sampleVals);
+        const link = document.createElement("a");
+        link.setAttribute("href", csvContent);
+        link.setAttribute("download", `Sample_${(config.entityName || "import").replace(/\s+/g, "_")}_Template.csv`);
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+      });
     }
 
     // --- Export ---
@@ -339,99 +317,50 @@ const MasterPage = (() => {
     if (exportCsvBtn) exportCsvBtn.addEventListener("click", () => doExport("csv"));
     if (exportXlsxBtn) exportXlsxBtn.addEventListener("click", () => doExport("xlsx"));
 
-    // --- Sample CSV Templates ---
-    const SAMPLE_TEMPLATES = {
-      "product": {
-        filename: "sample_products_import.csv",
-        content: "product_code,product_name,category_code,sub_category_code,brand_code,hsn_code,uom_code,length,width,height,weight,status,specification\nPROD-001,FR900 Continuous Band Sealer,MAC,SUB-BAND,BR-INH,84223000,PCS,50,30,40,25.5,active,Continuous band sealer for foil and plastic bags\nPROD-002,Citric Acid Anhydrous,ING,SUB-CITRIC,BR-FBQ,29181400,KG,0,0,0,25.0,active,Food grade citric acid 99.5%\n"
-      },
-      "state": {
-        filename: "sample_states_import.csv",
-        content: "name,code,country_code,status\nMaharashtra,MH,IND,active\nGujarat,GJ,IND,active\nKampala District,KAMP,UG,active\n"
-      },
-      "city": {
-        filename: "sample_cities_import.csv",
-        content: "name,code,state_name,country_code,status\nMumbai,MUM,Maharashtra,IND,active\nPanaji,PAN,Goa,IND,active\n"
-      },
-      "country": {
-        filename: "sample_countries_import.csv",
-        content: "name,code,phone_code,currency,status\nIndia,IND,91,INR,active\nUganda,UG,256,UGX,active\n"
-      },
-      "HSN code": {
-        filename: "sample_hsn_codes_import.csv",
-        content: "code,description,gst_percent,refund_vat_percent,status\n84223000,Packaging & Sealing Machinery,18.0,13.0,active\n29181400,Citric Acid Anhydrous,18.0,9.0,active\n"
-      },
-      "brand": {
-        filename: "sample_brands_import.csv",
-        content: "name,code,description,status\nInhyma,BR-INH,Official Inhyma Brand,active\nYinglima,BR-YLM,Yinglima Machinery Brand,active\n"
-      },
-      "product category": {
-        filename: "sample_categories_import.csv",
-        content: "name,code,description,status\nMachines & Spares,MAC,Packaging machines & spare parts,active\nFood Ingredients,ING,Raw food grade ingredients,active\n"
-      },
-      "sub-category": {
-        filename: "sample_subcategories_import.csv",
-        content: "name,code,category_code,description,status\nBand Sealer,SUB-BAND,MAC,Continuous band sealing machines,active\nCitric Acid,SUB-CITRIC,ING,Acidifiers and preservatives,active\n"
-      },
-      "unit of measurement": {
-        filename: "sample_uom_import.csv",
-        content: "code,name,status\nPCS,Pieces,active\nKG,Kilogram,active\nSET,Set,active\n"
-      }
-    };
-
-    // Auto-inject "Download Sample" button right next to Import button!
-    const wrapper = document.getElementById("importBtnWrapper");
-    if (wrapper) {
-      let sampleBtn = document.getElementById("downloadSampleBtn");
-      if (!sampleBtn) {
-        sampleBtn = document.createElement("button");
-        sampleBtn.id = "downloadSampleBtn";
-        sampleBtn.className = "btn";
-        sampleBtn.type = "button";
-        sampleBtn.innerHTML = "📥 Sample Template";
-        sampleBtn.title = "Download a pre-formatted CSV template with example data";
-        wrapper.parentNode.insertBefore(sampleBtn, wrapper);
-      }
-      sampleBtn.addEventListener("click", () => {
-        const key = (config.entityName || "").toLowerCase();
-        const tpl = SAMPLE_TEMPLATES[key] || {
-          filename: `sample_${key.replace(/\s+/g, "_")}_import.csv`,
-          content: "code,name,status\nEXAMPLE-01,Sample Item 1,active\n"
-        };
-        const blob = new Blob([tpl.content], { type: "text/csv;charset=utf-8;" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = tpl.filename;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        URL.revokeObjectURL(url);
-      });
-    }
-
-    // --- Import (column-mapping wizard: pick file -> map columns -> import) ---
+    // --- Import ---
     const importInput = document.getElementById("importInput");
-    if (importInput && config.importHeaders) {
-      ImportWizard.attach({
-        triggerInputEl: importInput,
-        apiBase: config.apiBase,
-        entityName: config.entityName,
-        importHeaders: config.importHeaders,
-        summaryEl: importSummaryEl,
-        onComplete: async () => {
+    if (importInput) {
+      importInput.addEventListener("change", async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const formData = new FormData();
+        formData.append("file", file);
+        try {
+          const token = Auth.getAccessToken();
+          const res = await fetch(`${API_ORIGIN}/api/v1${config.apiBase}/import`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${token}` },
+            body: formData,
+          });
+          const body = await res.json();
+          if (!res.ok || body.success === false) {
+            throw new Error(body.message || "Import failed.");
+          }
+          const s = body.data;
+          if (importSummaryEl) {
+            const errorLines = (s.errors || [])
+              .map((er) => `Row ${er.row}: ${escapeHtml(er.error)}`)
+              .join("<br>");
+            importSummaryEl.innerHTML = `
+              <div class="import-summary">
+                <div class="import-stats">
+                  <div class="import-stat"><b>${s.total_rows}</b><span class="muted">Total rows</span></div>
+                  <div class="import-stat"><b style="color:var(--color-success)">${s.created}</b><span class="muted">Created</span></div>
+                  <div class="import-stat"><b style="color:var(--color-danger)">${s.failed}</b><span class="muted">Failed</span></div>
+                </div>
+                ${errorLines ? `<div class="import-errors">${errorLines}</div>` : ""}
+              </div>`;
+          }
           await loadTable();
-        },
+        } catch (err) {
+          showError(banner, err);
+        } finally {
+          importInput.value = "";
+        }
       });
     }
 
-    if (config.loadLookups) {
-      try {
-        await config.loadLookups();
-      } catch (err) {
-        console.warn("Lookup loading warning:", err);
-      }
-    }
+    if (config.loadLookups) await config.loadLookups();
     await loadTable();
 
     return { loadTable, openModal, closeModal };
@@ -439,3 +368,4 @@ const MasterPage = (() => {
 
   return { init, badge, fieldValue, setFieldValue };
 })();
+

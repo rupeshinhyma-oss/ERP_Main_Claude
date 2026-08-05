@@ -77,8 +77,25 @@ const MasterPage = (() => {
     let currentPage = 1;
     let pageSize = 20;
 
+    function getModalBanner() {
+      let mb = document.getElementById("modalBanner");
+      if (!mb && entityForm) {
+        mb = entityForm.querySelector(".modal-banner");
+        if (!mb) {
+          mb = document.createElement("div");
+          mb.id = "modalBanner";
+          mb.className = "modal-banner";
+          mb.style.marginBottom = "16px";
+          entityForm.prepend(mb);
+        }
+      }
+      return mb;
+    }
+
     function openModal(item) {
       entityForm.reset();
+      const mb = getModalBanner();
+      if (mb) mb.innerHTML = "";
       document.getElementById("entityId").value = item ? item.id : "";
       document.getElementById("modalTitle").textContent = item
         ? `Edit ${config.entityName}`
@@ -88,6 +105,8 @@ const MasterPage = (() => {
     }
 
     function closeModal() {
+      const mb = getModalBanner();
+      if (mb) mb.innerHTML = "";
       closeModalShell(modalBackdrop);
     }
 
@@ -134,11 +153,10 @@ const MasterPage = (() => {
         if (!data.length) {
           tableBody.innerHTML = `<tr><td colspan="${colCount}" class="muted">No records found.</td></tr>`;
         } else {
-          const startingSrNo = (currentPage - 1) * pageSize + 1;
           tableBody.innerHTML = data
             .map((item, index) => {
-              const srNo = startingSrNo + index;
-              const cells = config.columns.map((col) => `<td>${col.render(item)}</td>`).join("");
+              const srNo = (currentPage - 1) * pageSize + index + 1;
+              const cells = config.columns.map((col) => `<td>${col.render(item, srNo)}</td>`).join("");
               return `
               <tr>
                 <td class="cell-checkbox"><input type="checkbox" class="row-checkbox" value="${item.id}" /></td>
@@ -195,7 +213,8 @@ const MasterPage = (() => {
         closeModal();
         await loadTable();
       } catch (err) {
-        showError(banner, err);
+        const mb = getModalBanner();
+        showError(mb || banner, err);
       }
     });
 
@@ -225,61 +244,38 @@ const MasterPage = (() => {
     });
 
     let searchDebounce;
-    let pendingSrNoJump = null; // Sr. No. to scroll-to-and-highlight once the target page loads
-
-    // If the person types a bare number into search, treat it as "take me to
-    // Sr. No. N" instead of a text search: jump straight to the page that
-    // row lives on (computed from page size), then highlight it once loaded.
-    // Falls back to a normal text search for anything that isn't a plain integer.
-    function isSrNoQuery(value) {
-      return /^\d+$/.test(value.trim());
-    }
-
     if (searchInput) {
       searchInput.addEventListener("input", () => {
         clearTimeout(searchDebounce);
-        searchDebounce = setTimeout(() => {
-          const raw = searchInput.value.trim();
-          if (raw && isSrNoQuery(raw)) {
-            const srNo = parseInt(raw, 10);
-            if (srNo >= 1) {
-              currentPage = Math.ceil(srNo / pageSize);
-              pendingSrNoJump = srNo;
-              loadTableForSrNoJump();
-              return;
-            }
-          }
-          pendingSrNoJump = null;
-          currentPage = 1;
-          loadTable();
-        }, 300);
+        searchDebounce = setTimeout(() => { currentPage = 1; loadTable(); }, 300);
       });
     }
-
-    // Loads the table without sending the numeric value as a "search" query
-    // param (the backend's search is text-based; a bare Sr. No. isn't a
-    // field it knows about) -- it's a pure client-side pagination jump.
-    async function loadTableForSrNoJump() {
-      const savedValue = searchInput.value;
-      searchInput.value = "";
-      await loadTable();
-      searchInput.value = savedValue;
-      if (pendingSrNoJump !== null) {
-        const rows = tableBody.querySelectorAll("tr");
-        for (const row of rows) {
-          const srNoCell = row.querySelector(".cell-srno");
-          if (srNoCell && parseInt(srNoCell.textContent, 10) === pendingSrNoJump) {
-            row.classList.add("row-highlight");
-            row.scrollIntoView({ behavior: "smooth", block: "center" });
-            break;
-          }
-        }
-        pendingSrNoJump = null;
-      }
-    }
-
     if (statusFilter) {
       statusFilter.addEventListener("change", () => { currentPage = 1; loadTable(); });
+    }
+
+    // --- Sample Template Download ---
+    const sampleTemplateBtn = document.getElementById("sampleTemplateBtn");
+    if (sampleTemplateBtn) {
+      sampleTemplateBtn.addEventListener("click", () => {
+        const headers = config.importHeaders ? config.importHeaders.map(h => typeof h === "string" ? h : h.key || h.label).join(",") : "code,name,status";
+        const sampleVals = config.importHeaders ? config.importHeaders.map(h => {
+          const k = (typeof h === "string" ? h : h.key || h.label).toLowerCase();
+          if (k.includes("code")) return "SAMPLE-001";
+          if (k.includes("name")) return "Sample Name";
+          if (k.includes("status")) return "active";
+          if (k.includes("quantity") || k.includes("weight") || k.includes("price") || k.includes("cost")) return "10";
+          return "Sample Data";
+        }).join(",") : "SMP-01,Sample Entity,active";
+
+        const csvContent = "data:text/csv;charset=utf-8," + encodeURIComponent(headers + "\n" + sampleVals);
+        const link = document.createElement("a");
+        link.setAttribute("href", csvContent);
+        link.setAttribute("download", `Sample_${(config.entityName || "import").replace(/\s+/g, "_")}_Template.csv`);
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+      });
     }
 
     // --- Export ---
@@ -312,18 +308,46 @@ const MasterPage = (() => {
     if (exportCsvBtn) exportCsvBtn.addEventListener("click", () => doExport("csv"));
     if (exportXlsxBtn) exportXlsxBtn.addEventListener("click", () => doExport("xlsx"));
 
-    // --- Import (column-mapping wizard: pick file -> map columns -> import) ---
+    // --- Import ---
     const importInput = document.getElementById("importInput");
-    if (importInput && config.importHeaders) {
-      ImportWizard.attach({
-        triggerInputEl: importInput,
-        apiBase: config.apiBase,
-        entityName: config.entityName,
-        importHeaders: config.importHeaders,
-        summaryEl: importSummaryEl,
-        onComplete: async () => {
+    if (importInput) {
+      importInput.addEventListener("change", async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const formData = new FormData();
+        formData.append("file", file);
+        try {
+          const token = Auth.getAccessToken();
+          const res = await fetch(`${API_ORIGIN}/api/v1${config.apiBase}/import`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${token}` },
+            body: formData,
+          });
+          const body = await res.json();
+          if (!res.ok || body.success === false) {
+            throw new Error(body.message || "Import failed.");
+          }
+          const s = body.data;
+          if (importSummaryEl) {
+            const errorLines = (s.errors || [])
+              .map((er) => `Row ${er.row}: ${escapeHtml(er.error)}`)
+              .join("<br>");
+            importSummaryEl.innerHTML = `
+              <div class="import-summary">
+                <div class="import-stats">
+                  <div class="import-stat"><b>${s.total_rows}</b><span class="muted">Total rows</span></div>
+                  <div class="import-stat"><b style="color:var(--color-success)">${s.created}</b><span class="muted">Created</span></div>
+                  <div class="import-stat"><b style="color:var(--color-danger)">${s.failed}</b><span class="muted">Failed</span></div>
+                </div>
+                ${errorLines ? `<div class="import-errors">${errorLines}</div>` : ""}
+              </div>`;
+          }
           await loadTable();
-        },
+        } catch (err) {
+          showError(banner, err);
+        } finally {
+          importInput.value = "";
+        }
       });
     }
 
@@ -335,3 +359,4 @@ const MasterPage = (() => {
 
   return { init, badge, fieldValue, setFieldValue };
 })();
+

@@ -28,6 +28,7 @@ const ICONS = {
   clock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="nav-icon"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>',
   truck: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="nav-icon"><path d="M1 3h15v13H1z"/><path d="M16 8h4l3 3v5h-7V8z"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>',
   task: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="nav-icon"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>',
+  fileText: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="nav-icon"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>',
 };
 
 const NAV_SECTIONS = [
@@ -39,9 +40,17 @@ const NAV_SECTIONS = [
     ],
   },
   {
-    label: "Business & Partners",
+    label: "Commercial",
     items: [
+      { key: "buyers", label: "Buyer Profiles", href: "./buyers.html", icon: "users" },
       { key: "suppliers", label: "Supplier Profiles", href: "./suppliers.html", icon: "truck", permission: "supplier.view" },
+    ],
+  },
+  {
+    label: "Operations",
+    items: [
+      { key: "inquiries", label: "Inquiries & Consignments", href: "./inquiries.html", icon: "fileText" },
+      { key: "teams", label: "Teams", href: "./teams.html", icon: "briefcase", permission: "employee.view" },
     ],
   },
   {
@@ -53,16 +62,16 @@ const NAV_SECTIONS = [
   {
     label: "Configurations",
     items: [
+      { key: "masters-products", label: "Products Master", href: "./masters-products.html", icon: "box", permission: "product.view" },
+      { key: "masters-categories", label: "Categories", href: "./masters-categories.html", icon: "layers", permission: "category.view" },
+      { key: "masters-subcategories", label: "Sub-Categories", href: "./masters-subcategories.html", icon: "layersplus", permission: "subcategory.view" },
+      { key: "masters-brands", label: "Brands", href: "./masters-brands.html", icon: "award", permission: "brand.view" },
+      { key: "masters-hsn", label: "HSN Codes", href: "./masters-hsn.html", icon: "tag", permission: "hsn.view" },
       { key: "masters-countries", label: "Countries", href: "./masters-countries.html", icon: "globe", permission: "country.view" },
       { key: "masters-states", label: "States", href: "./masters-states.html", icon: "map", permission: "state.view" },
       { key: "masters-cities", label: "Cities", href: "./masters-cities.html", icon: "pin", permission: "city.view" },
       { key: "masters-currencies", label: "Currencies", href: "./masters-currencies.html", icon: "coins", permission: "currency.view" },
       { key: "masters-uom", label: "Units of Measurement", href: "./masters-uom.html", icon: "ruler", permission: "uom.view" },
-      { key: "masters-hsn", label: "HSN Codes", href: "./masters-hsn.html", icon: "tag", permission: "hsn.view" },
-      { key: "masters-brands", label: "Brands", href: "./masters-brands.html", icon: "award", permission: "brand.view" },
-      { key: "masters-categories", label: "Categories", href: "./masters-categories.html", icon: "layers", permission: "category.view" },
-      { key: "masters-subcategories", label: "Sub-Categories", href: "./masters-subcategories.html", icon: "layersplus", permission: "subcategory.view" },
-      { key: "masters-products", label: "Products", href: "./masters-products.html", icon: "box", permission: "product.view" },
     ],
   },
   {
@@ -82,6 +91,7 @@ function getDynamicNavSections() {
 
 const PAGE_TITLES = {
   dashboard: "Dashboard",
+<<<<<<< HEAD
   tasks: "Tasks & Work Management",
   reports: "Reports & Analytics",
   buyer: "Buyer Profiles",
@@ -94,19 +104,24 @@ const PAGE_TITLES = {
   finance: "Finance & Accounts",
   hrms: "Human Resource Management",
   organization: "Organization Settings",
+=======
+  buyers: "Buyer Profiles",
+  suppliers: "Supplier Profiles",
+  inquiries: "Inquiries & Consignments",
+>>>>>>> origin/main
   teams: "Teams",
+  organization: "Organization Settings",
   users: "User Accounts & Passwords",
+  "masters-products": "Products Master",
+  "masters-categories": "Product Categories",
+  "masters-subcategories": "Product Sub-Categories",
+  "masters-brands": "Brands",
+  "masters-hsn": "HSN Codes",
   "masters-countries": "Countries",
   "masters-states": "States",
   "masters-cities": "Cities",
   "masters-currencies": "Currencies",
   "masters-uom": "Units of Measurement",
-  "masters-hsn": "HSN Codes",
-  "masters-brands": "Brands",
-  "masters-categories": "Product Categories",
-  "masters-subcategories": "Product Sub-Categories",
-  "masters-products": "Products",
-  suppliers: "Supplier Profiles",
   audit: "Audit Log",
   rbac: "Roles & Permissions",
   "effective-permissions": "Effective Permissions Inspector",
@@ -343,10 +358,22 @@ function renderShell(activeKey) {
         </div>
       </aside>`;
 
+<<<<<<< HEAD
     const navEl = document.querySelector(".sidebar-nav");
     if (navEl) {
       positionNavScroll(navEl);
       persistNavScroll(navEl);
+=======
+    const newSidebar = document.getElementById("sidebarMount");
+    if (newSidebar) {
+      const activeItem = newSidebar.querySelector(".nav-item.active");
+      if (activeItem) {
+        activeItem.scrollIntoView({ block: "nearest" });
+      }
+      newSidebar.addEventListener("scroll", () => {
+        sessionStorage.setItem("erp_sidebar_scroll", newSidebar.scrollTop);
+      });
+>>>>>>> origin/main
     }
 
     resolveBrandName().then((name) => {

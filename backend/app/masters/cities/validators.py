@@ -21,10 +21,8 @@ def validate_city_row(raw_row: dict[str, str], row_number: int) -> dict[str, Any
 
     if not name:
         raise BadRequestException(f"Row {row_number}: 'name' is required.")
-    if not country_code:
-        raise BadRequestException(f"Row {row_number}: 'country_code' is required.")
-    if not state_name:
-        raise BadRequestException(f"Row {row_number}: 'state_name' is required.")
+    if not state_name and not country_code:
+        raise BadRequestException(f"Row {row_number}: 'state_name' or 'country_code' is required.")
 
     status_raw = (raw_row.get("status") or "active").strip().lower()
     try:

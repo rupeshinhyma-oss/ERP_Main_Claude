@@ -784,6 +784,30 @@ const SupplierPage = (() => {
       }
     }
 
+    // Auto-inject "Download Sample" button for Suppliers
+    const wrapper = document.getElementById("importBtnWrapper");
+    if (wrapper && !document.getElementById("downloadSampleBtn")) {
+      const sampleBtn = document.createElement("button");
+      sampleBtn.id = "downloadSampleBtn";
+      sampleBtn.className = "btn";
+      sampleBtn.type = "button";
+      sampleBtn.innerHTML = "📥 Sample Template";
+      sampleBtn.title = "Download a pre-formatted CSV template with example supplier data";
+      wrapper.parentNode.insertBefore(sampleBtn, wrapper);
+      sampleBtn.addEventListener("click", () => {
+        const content = "company_name,legal_name,contact_person,email,phone,city,country_code,status\nAcme Machinery Ltd,Acme Global Corp,John Doe,john@acme.com,+91 9876543210,Mumbai,IND,active\nZhejiang Machinery Co,Zhejiang Industrial Ltd,Li Wei,sales@zhejiang.cn,+86 571 8888888,Hangzhou,CHN,active\n";
+        const blob = new Blob([content], { type: "text/csv;charset=utf-8;" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "sample_suppliers_import.csv";
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      });
+    }
+
     // Import (column-mapping wizard: pick file -> map columns -> import)
     ImportWizard.attach({
       triggerInputEl: document.getElementById("importInput"),

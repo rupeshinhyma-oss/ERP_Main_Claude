@@ -308,16 +308,54 @@ const SupplierPage = (() => {
 
   function renderPagination(p) {
     const pagination = document.getElementById("pagination");
+    const totalPages = p.total_pages || 1;
+    const current = p.current_page;
+    
+    const range = [];
+    const delta = 2;
+    for (let i = 1; i <= totalPages; i++) {
+      if (i === 1 || i === totalPages || (i >= current - delta && i <= current + delta)) {
+        range.push(i);
+      }
+    }
+
+    let pageNumButtons = "";
+    let last = 0;
+    for (let i of range) {
+      if (last) {
+        if (i - last === 2) {
+          pageNumButtons += `<button class="btn btn-small" data-page="${last + 1}">${last + 1}</button>`;
+        } else if (i - last > 2) {
+          pageNumButtons += `<span class="muted" style="padding: 0 4px; font-weight: bold; align-self: center;">...</span>`;
+        }
+      }
+      const isCurrent = i === current;
+      const btnClass = isCurrent ? "btn btn-small btn-primary" : "btn btn-small";
+      pageNumButtons += `<button class="${btnClass}" data-page="${i}">${i}</button>`;
+      last = i;
+    }
+
     pagination.innerHTML = `
-      <span class="muted">Page ${p.current_page} of ${p.total_pages || 1} &middot; ${p.total_records} total</span>
-      <div>
+      <span class="pagination-info">Page <b>${current}</b> of <b>${totalPages}</b> &middot; <b>${p.total_records}</b> total</span>
+      <div class="pagination-controls">
         <button class="btn btn-small" id="prevPage" ${!p.has_previous ? "disabled" : ""}>Previous</button>
+        ${pageNumButtons}
         <button class="btn btn-small" id="nextPage" ${!p.has_next ? "disabled" : ""}>Next</button>
       </div>`;
     const prev = document.getElementById("prevPage");
     const next = document.getElementById("nextPage");
     if (prev) prev.addEventListener("click", () => { currentPage--; loadTable(); });
     if (next) next.addEventListener("click", () => { currentPage++; loadTable(); });
+
+    pagination.querySelectorAll("button[data-page]").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        const targetPage = parseInt(e.target.getAttribute("data-page"), 10);
+        if (targetPage && targetPage !== currentPage) {
+          currentPage = targetPage;
+          loadTable();
+        }
+      });
+    });
   }
 
   // ------------------------------------------------------------------
@@ -690,6 +728,30 @@ const SupplierPage = (() => {
       } catch (err) {
         showError(banner, err);
       }
+    }
+
+    // Auto-inject "Download Sample" button for Suppliers
+    const wrapper = document.getElementById("importBtnWrapper");
+    if (wrapper && !document.getElementById("downloadSampleBtn")) {
+      const sampleBtn = document.createElement("button");
+      sampleBtn.id = "downloadSampleBtn";
+      sampleBtn.className = "btn";
+      sampleBtn.type = "button";
+      sampleBtn.innerHTML = "📥 Sample Template";
+      sampleBtn.title = "Download a pre-formatted CSV template with example supplier data";
+      wrapper.parentNode.insertBefore(sampleBtn, wrapper);
+      sampleBtn.addEventListener("click", () => {
+        const content = "company_name,legal_name,contact_person,email,phone,city,country_code,status\nAcme Machinery Ltd,Acme Global Corp,John Doe,john@acme.com,+91 9876543210,Mumbai,IND,active\nZhejiang Machinery Co,Zhejiang Industrial Ltd,Li Wei,sales@zhejiang.cn,+86 571 8888888,Hangzhou,CHN,active\n";
+        const blob = new Blob([content], { type: "text/csv;charset=utf-8;" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "sample_suppliers_import.csv";
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      });
     }
 
     // Import

@@ -668,10 +668,13 @@ svg {
 
 .table-scroll {
   overflow-x: auto;
+  max-height: calc(100vh - 280px);
+  overflow-y: auto;
 }
 table {
   width: 100%;
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
   background: var(--color-surface);
 }
 th, td {
@@ -682,14 +685,18 @@ th, td {
   font-size: 13.5px;
 }
 th {
-  color: var(--color-muted);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  color: #475569;
   font-size: 11.5px;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
-  border-bottom: 1px solid var(--color-border);
-  background: #fafbfc;
+  letter-spacing: 0.05em;
+  border-bottom: 1.5px solid var(--color-border-strong);
+  background: #f8fafc;
   white-space: nowrap;
+  box-shadow: 0 1px 3px rgba(16, 24, 40, 0.06);
 }
 tbody tr:hover td {
   background: #fafbfc;
@@ -802,12 +809,24 @@ td .cell-secondary {
 }
 .pagination {
   display: flex;
-  gap: var(--space-2);
+  gap: var(--space-3);
   align-items: center;
   justify-content: space-between;
   margin-top: var(--space-3);
   padding-top: var(--space-3);
   border-top: 1px solid var(--color-border);
+  flex-wrap: wrap;
+}
+.pagination-info {
+  white-space: nowrap;
+  font-size: 13px;
+  color: var(--color-muted);
+}
+.pagination-controls {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  flex-wrap: wrap;
 }
 .detail-grid {
   display: grid;

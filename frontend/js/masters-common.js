@@ -154,10 +154,38 @@ const MasterPage = (() => {
     }
 
     function renderPagination(p) {
+      const totalPages = p.total_pages || 1;
+      const current = p.current_page;
+      
+      const range = [];
+      const delta = 2;
+      for (let i = 1; i <= totalPages; i++) {
+        if (i === 1 || i === totalPages || (i >= current - delta && i <= current + delta)) {
+          range.push(i);
+        }
+      }
+
+      let pageNumButtons = "";
+      let last = 0;
+      for (let i of range) {
+        if (last) {
+          if (i - last === 2) {
+            pageNumButtons += `<button class="btn btn-small" data-page="${last + 1}">${last + 1}</button>`;
+          } else if (i - last > 2) {
+            pageNumButtons += `<span class="muted" style="padding: 0 4px; font-weight: bold; align-self: center;">...</span>`;
+          }
+        }
+        const isCurrent = i === current;
+        const btnClass = isCurrent ? "btn btn-small btn-primary" : "btn btn-small";
+        pageNumButtons += `<button class="${btnClass}" data-page="${i}">${i}</button>`;
+        last = i;
+      }
+
       pagination.innerHTML = `
-        <span class="muted">Page ${p.current_page} of ${p.total_pages || 1} &middot; ${p.total_records} total</span>
-        <div>
+        <span class="pagination-info">Page <b>${current}</b> of <b>${totalPages}</b> &middot; <b>${p.total_records}</b> total</span>
+        <div class="pagination-controls">
           <button class="btn btn-small" id="prevPage" ${!p.has_previous ? "disabled" : ""}>Previous</button>
+          ${pageNumButtons}
           <button class="btn btn-small" id="nextPage" ${!p.has_next ? "disabled" : ""}>Next</button>
         </div>
       `;
@@ -165,6 +193,16 @@ const MasterPage = (() => {
       const next = document.getElementById("nextPage");
       if (prev) prev.addEventListener("click", () => { currentPage--; loadTable(); });
       if (next) next.addEventListener("click", () => { currentPage++; loadTable(); });
+
+      pagination.querySelectorAll("button[data-page]").forEach((btn) => {
+        btn.addEventListener("click", (e) => {
+          const targetPage = parseInt(e.target.getAttribute("data-page"), 10);
+          if (targetPage && targetPage !== currentPage) {
+            currentPage = targetPage;
+            loadTable();
+          }
+        });
+      });
     }
 
     entityForm.addEventListener("submit", async (e) => {
@@ -246,6 +284,77 @@ const MasterPage = (() => {
     }
     if (exportCsvBtn) exportCsvBtn.addEventListener("click", () => doExport("csv"));
     if (exportXlsxBtn) exportXlsxBtn.addEventListener("click", () => doExport("xlsx"));
+
+    // --- Sample CSV Templates ---
+    const SAMPLE_TEMPLATES = {
+      "product": {
+        filename: "sample_products_import.csv",
+        content: "product_code,product_name,category_code,sub_category_code,brand_code,hsn_code,uom_code,length,width,height,weight,status,specification\nPROD-001,FR900 Continuous Band Sealer,MAC,SUB-BAND,BR-INH,84223000,PCS,50,30,40,25.5,active,Continuous band sealer for foil and plastic bags\nPROD-002,Citric Acid Anhydrous,ING,SUB-CITRIC,BR-FBQ,29181400,KG,0,0,0,25.0,active,Food grade citric acid 99.5%\n"
+      },
+      "state": {
+        filename: "sample_states_import.csv",
+        content: "name,code,country_code,status\nMaharashtra,MH,IND,active\nGujarat,GJ,IND,active\nKampala District,KAMP,UG,active\n"
+      },
+      "city": {
+        filename: "sample_cities_import.csv",
+        content: "name,code,state_name,country_code,status\nMumbai,MUM,Maharashtra,IND,active\nPanaji,PAN,Goa,IND,active\n"
+      },
+      "country": {
+        filename: "sample_countries_import.csv",
+        content: "name,code,phone_code,currency,status\nIndia,IND,91,INR,active\nUganda,UG,256,UGX,active\n"
+      },
+      "HSN code": {
+        filename: "sample_hsn_codes_import.csv",
+        content: "code,description,gst_percent,refund_vat_percent,status\n84223000,Packaging & Sealing Machinery,18.0,13.0,active\n29181400,Citric Acid Anhydrous,18.0,9.0,active\n"
+      },
+      "brand": {
+        filename: "sample_brands_import.csv",
+        content: "name,code,description,status\nInhyma,BR-INH,Official Inhyma Brand,active\nYinglima,BR-YLM,Yinglima Machinery Brand,active\n"
+      },
+      "product category": {
+        filename: "sample_categories_import.csv",
+        content: "name,code,description,status\nMachines & Spares,MAC,Packaging machines & spare parts,active\nFood Ingredients,ING,Raw food grade ingredients,active\n"
+      },
+      "sub-category": {
+        filename: "sample_subcategories_import.csv",
+        content: "name,code,category_code,description,status\nBand Sealer,SUB-BAND,MAC,Continuous band sealing machines,active\nCitric Acid,SUB-CITRIC,ING,Acidifiers and preservatives,active\n"
+      },
+      "unit of measurement": {
+        filename: "sample_uom_import.csv",
+        content: "code,name,status\nPCS,Pieces,active\nKG,Kilogram,active\nSET,Set,active\n"
+      }
+    };
+
+    // Auto-inject "Download Sample" button right next to Import button!
+    const wrapper = document.getElementById("importBtnWrapper");
+    if (wrapper) {
+      let sampleBtn = document.getElementById("downloadSampleBtn");
+      if (!sampleBtn) {
+        sampleBtn = document.createElement("button");
+        sampleBtn.id = "downloadSampleBtn";
+        sampleBtn.className = "btn";
+        sampleBtn.type = "button";
+        sampleBtn.innerHTML = "📥 Sample Template";
+        sampleBtn.title = "Download a pre-formatted CSV template with example data";
+        wrapper.parentNode.insertBefore(sampleBtn, wrapper);
+      }
+      sampleBtn.addEventListener("click", () => {
+        const key = (config.entityName || "").toLowerCase();
+        const tpl = SAMPLE_TEMPLATES[key] || {
+          filename: `sample_${key.replace(/\s+/g, "_")}_import.csv`,
+          content: "code,name,status\nEXAMPLE-01,Sample Item 1,active\n"
+        };
+        const blob = new Blob([tpl.content], { type: "text/csv;charset=utf-8;" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = tpl.filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      });
+    }
 
     // --- Import ---
     const importInput = document.getElementById("importInput");

@@ -151,7 +151,10 @@ class ProductSubCategoryService:
             category_code = field_values.pop("category_code")
             category = await self.category_repository.get_by_code(category_code)
             if category is None:
-                raise ValueError(f"Category code {category_code!r} does not exist.")
+                categories = await self.category_repository.list(limit=250)
+                category = next((c for c in categories if c.code.lower() == category_code.lower() or c.name.lower() == category_code.lower()), None)
+            if category is None:
+                raise ValueError(f"Category '{category_code}' does not exist.")
             field_values["category_id"] = category.id
             code = field_values["code"]
             name = field_values["name"]

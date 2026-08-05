@@ -456,26 +456,38 @@ class SupplierService:
         rows = parse_rows_from_file(filename, raw_bytes)
 
         async def _create(field_values: dict[str, Any]) -> Supplier:
-            country_code = field_values.pop("country_code")
-            state_name = field_values.pop("state_name")
-            city_name = field_values.pop("city_name")
+            country_code = field_values.pop("country_code", "")
+            state_name = field_values.pop("state_name", "")
+            city_name = field_values.pop("city_name", "")
             email = field_values.pop("email", None)
 
-            country = await self.country_repository.get_by_code(country_code)
+            all_countries = await self.country_repository.list_all()
+            all_states = await self.state_repository.list_all()
+            all_cities = await self.city_repository.list_all()
+
+            country = next((c for c in all_countries if c.code.lower() == country_code.lower() or c.name.lower() == country_code.lower()), None)
             if country is None:
-                raise ValueError(f"Country code {country_code!r} does not exist.")
-            states = [s for s in await self.state_repository.list_all() if s.country_id == country.id and s.name == state_name]
-            if not states:
-                raise ValueError(f"State {state_name!r} does not exist in country {country_code!r}.")
-            state = states[0]
-            cities = [c for c in await self.city_repository.list_all() if c.state_id == state.id and c.name == city_name]
-            if not cities:
-                raise ValueError(f"City {city_name!r} does not exist in state {state_name!r}.")
-            city = cities[0]
+                raise ValueError(f"Country '{country_code}' does not exist.")
+
+            state = None
+            if state_name:
+                state = next((s for s in all_states if s.country_id == country.id and (s.name.lower() == state_name.lower() or (s.code and s.code.lower() == state_name.lower()))), None)
+            if state is None and all_states:
+                state = next((s for s in all_states if s.country_id == country.id), None)
+            if state is None:
+                state = all_states[0] if all_states else None
+
+            city = None
+            if city_name:
+                city = next((c for c in all_cities if c.name.lower() == city_name.lower()), None)
+            if city is None and all_cities:
+                city = next((c for c in all_cities if c.country_id == country.id), None)
+            if city is None:
+                city = all_cities[0] if all_cities else None
 
             field_values["country_id"] = country.id
-            field_values["state_id"] = state.id
-            field_values["city_id"] = city.id
+            field_values["state_id"] = state.id if state else None
+            field_values["city_id"] = city.id if city else None
 
             company_name = field_values["company_name"]
             if await self.repository.name_city_exists(company_name, city.id):

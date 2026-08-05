@@ -13,10 +13,11 @@ def validate_product_category_row(raw_row: dict[str, str], row_number: int) -> d
     code = (raw_row.get("code") or "").strip()
     name = (raw_row.get("name") or "").strip()
 
-    if not code:
-        raise BadRequestException(f"Row {row_number}: 'code' is required.")
     if not name:
         raise BadRequestException(f"Row {row_number}: 'name' is required.")
+    if not code:
+        import re
+        code = re.sub(r"[^A-Z0-9]", "", name.upper())[:10]
 
     status_raw = (raw_row.get("status") or "active").strip().lower()
     try:

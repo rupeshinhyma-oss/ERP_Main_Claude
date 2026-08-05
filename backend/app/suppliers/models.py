@@ -168,6 +168,9 @@ class Supplier(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
     sub_category_links: Mapped[list["SupplierSubCategoryLink"]] = relationship(
         back_populates="supplier", cascade="all, delete-orphan", lazy="selectin"
     )
+    product_links: Mapped[list["SupplierProductLink"]] = relationship(
+        back_populates="supplier", cascade="all, delete-orphan", lazy="selectin"
+    )
 
     def __repr__(self) -> str:
         """Return a debug-friendly representation."""
@@ -291,3 +294,34 @@ class SupplierSubCategoryLink(Base, UUIDPrimaryKeyMixin):
             f"<SupplierSubCategoryLink supplier_id={self.supplier_id} "
             f"sub_category_id={self.sub_category_id}>"
         )
+
+
+class SupplierProductLink(Base, UUIDPrimaryKeyMixin):
+    """
+    Many-to-many link: a supplier to one specific Product (the Phase 7/9
+    item master, ``app.masters.products.models.Product``).
+
+    Distinct from SupplierCategoryLink/SupplierSubCategoryLink above (which
+    only say "this supplier operates somewhere in this broad category"):
+    this table records that a supplier is a confirmed source for one exact
+    SKU, since Products is the central item master every other module
+    (Suppliers now, Purchase/Inventory/Sales later) is meant to key off of
+    rather than duplicate.
+    """
+
+    __tablename__ = "supplier_product_links"
+    __table_args__ = (UniqueConstraint("supplier_id", "product_id", name="uq_supplier_product"),)
+
+    supplier_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(), ForeignKey("suppliers.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    product_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(), ForeignKey("products.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(default=_utcnow, nullable=False)
+
+    supplier: Mapped[Supplier] = relationship(back_populates="product_links")
+
+    def __repr__(self) -> str:
+        """Return a debug-friendly representation."""
+        return f"<SupplierProductLink supplier_id={self.supplier_id} product_id={self.product_id}>"

@@ -43,6 +43,14 @@ class UomRepository(BaseRepository[UnitOfMeasurement]):
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none() is not None
 
+    async def get_by_name(self, name: str, *, exclude_id: uuid.UUID | None = None) -> UnitOfMeasurement | None:
+        """Fetch the record with this name, if one exists (for duplicate-compare)."""
+        stmt = self._base_select().where(UnitOfMeasurement.name == name)
+        if exclude_id is not None:
+            stmt = stmt.where(UnitOfMeasurement.id != exclude_id)
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+
     async def list_all(self) -> list[UnitOfMeasurement]:
         """Return every non-deleted UOM, ordered by name."""
         stmt = self._base_select().order_by(UnitOfMeasurement.name)

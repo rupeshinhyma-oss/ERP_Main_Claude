@@ -101,7 +101,7 @@ const MasterPage = (() => {
     }
 
     async function loadTable() {
-      const colCount = config.columns.length + 1;
+      const colCount = config.columns.length + 2; // +1 for Sr. No., +1 for actions
       tableBody.innerHTML = `<tr><td colspan="${colCount}" class="muted">Loading...</td></tr>`;
       const params = {
         page: currentPage,
@@ -125,11 +125,18 @@ const MasterPage = (() => {
         if (!data.length) {
           tableBody.innerHTML = `<tr><td colspan="${colCount}" class="muted">No records found.</td></tr>`;
         } else {
+          // Sr. No. is a running number across the whole result set, not just
+          // this page -- so page 2 continues at 21, 22, 23... rather than
+          // restarting at 1. Computed client-side from the current page and
+          // page size; nothing to store or keep in sync server-side.
+          const startingSrNo = (currentPage - 1) * pageSize + 1;
           tableBody.innerHTML = data
-            .map((item) => {
+            .map((item, index) => {
+              const srNo = startingSrNo + index;
               const cells = config.columns.map((col) => `<td>${col.render(item)}</td>`).join("");
               return `
               <tr>
+                <td class="cell-srno">${srNo}</td>
                 ${cells}
                 <td class="actions">
                   ${canUpdate ? `<button class="btn btn-small" data-edit="${item.id}">Edit</button>` : ""}
@@ -249,12 +256,59 @@ const MasterPage = (() => {
     });
 
     let searchDebounce;
+    let pendingSrNoJump = null; // Sr. No. to scroll-to-and-highlight once the target page loads
+
+    // If the person types a bare number into search, treat it as "take me to
+    // Sr. No. N" instead of a text search: jump straight to the page that
+    // row lives on (computed from page size), then highlight it once loaded.
+    // Falls back to a normal text search for anything that isn't a plain integer.
+    function isSrNoQuery(value) {
+      return /^\d+$/.test(value.trim());
+    }
+
     if (searchInput) {
       searchInput.addEventListener("input", () => {
         clearTimeout(searchDebounce);
-        searchDebounce = setTimeout(() => { currentPage = 1; loadTable(); }, 300);
+        searchDebounce = setTimeout(() => {
+          const raw = searchInput.value.trim();
+          if (raw && isSrNoQuery(raw)) {
+            const srNo = parseInt(raw, 10);
+            if (srNo >= 1) {
+              currentPage = Math.ceil(srNo / pageSize);
+              pendingSrNoJump = srNo;
+              loadTableForSrNoJump();
+              return;
+            }
+          }
+          pendingSrNoJump = null;
+          currentPage = 1;
+          loadTable();
+        }, 300);
       });
     }
+
+    // Loads the table without sending the numeric value as a "search" query
+    // param (the backend's search is text-based; a bare Sr. No. isn't a
+    // field it knows about) -- it's a pure client-side pagination jump.
+    async function loadTableForSrNoJump() {
+      const savedValue = searchInput.value;
+      searchInput.value = "";
+      await loadTable();
+      searchInput.value = savedValue;
+      if (pendingSrNoJump !== null) {
+        const rows = tableBody.querySelectorAll("tr");
+        for (const row of rows) {
+          const srNoCell = row.querySelector(".cell-srno");
+          if (srNoCell && parseInt(srNoCell.textContent, 10) === pendingSrNoJump) {
+            row.classList.add("row-highlight");
+            row.scrollIntoView({ behavior: "smooth", block: "center" });
+            break;
+          }
+        }
+        pendingSrNoJump = null;
+      }
+    }
+
     if (statusFilter) {
       statusFilter.addEventListener("change", () => { currentPage = 1; loadTable(); });
     }
@@ -285,6 +339,7 @@ const MasterPage = (() => {
     if (exportCsvBtn) exportCsvBtn.addEventListener("click", () => doExport("csv"));
     if (exportXlsxBtn) exportXlsxBtn.addEventListener("click", () => doExport("xlsx"));
 
+<<<<<<< HEAD
     // --- Sample CSV Templates ---
     const SAMPLE_TEMPLATES = {
       "product": {
@@ -357,45 +412,20 @@ const MasterPage = (() => {
     }
 
     // --- Import ---
+=======
+    // --- Import (column-mapping wizard: pick file -> map columns -> import) ---
+>>>>>>> origin/main
     const importInput = document.getElementById("importInput");
-    if (importInput) {
-      importInput.addEventListener("change", async (e) => {
-        const file = e.target.files[0];
-        if (!file) return;
-        const formData = new FormData();
-        formData.append("file", file);
-        try {
-          const token = Auth.getAccessToken();
-          const res = await fetch(`${API_ORIGIN}/api/v1${config.apiBase}/import`, {
-            method: "POST",
-            headers: { Authorization: `Bearer ${token}` },
-            body: formData,
-          });
-          const body = await res.json();
-          if (!res.ok || body.success === false) {
-            throw new Error(body.message || "Import failed.");
-          }
-          const s = body.data;
-          if (importSummaryEl) {
-            const errorLines = (s.errors || [])
-              .map((er) => `Row ${er.row}: ${escapeHtml(er.error)}`)
-              .join("<br>");
-            importSummaryEl.innerHTML = `
-              <div class="import-summary">
-                <div class="import-stats">
-                  <div class="import-stat"><b>${s.total_rows}</b><span class="muted">Total rows</span></div>
-                  <div class="import-stat"><b style="color:var(--color-success)">${s.created}</b><span class="muted">Created</span></div>
-                  <div class="import-stat"><b style="color:var(--color-danger)">${s.failed}</b><span class="muted">Failed</span></div>
-                </div>
-                ${errorLines ? `<div class="import-errors">${errorLines}</div>` : ""}
-              </div>`;
-          }
+    if (importInput && config.importHeaders) {
+      ImportWizard.attach({
+        triggerInputEl: importInput,
+        apiBase: config.apiBase,
+        entityName: config.entityName,
+        importHeaders: config.importHeaders,
+        summaryEl: importSummaryEl,
+        onComplete: async () => {
           await loadTable();
-        } catch (err) {
-          showError(banner, err);
-        } finally {
-          importInput.value = "";
-        }
+        },
       });
     }
 

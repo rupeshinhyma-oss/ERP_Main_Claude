@@ -35,7 +35,7 @@
 
         <div class="card">
           <div class="toolbar">
-            <input type="text" id="searchInput" placeholder="Search name or code..." />
+            <input type="text" id="searchInput" placeholder="Search name or code or Sr. No..." />
             <select id="statusFilter">
               <option value="">All statuses</option>
               <option value="active">Active</option>
@@ -47,6 +47,7 @@
             <table>
               <thead>
                 <tr>
+                  <th>Sr. No.</th>
                   <th>Name</th>
                   <th>Code</th>
                   <th>Description</th>
@@ -108,6 +109,7 @@
 
   <script src="js/api.js"></script>
   <script src="js/nav.js"></script>
+  <script src="js/import-wizard.js"></script>
   <script src="js/masters-common.js"></script>
   <script>
     renderShell("masters-brands");
@@ -116,6 +118,13 @@
       apiBase: "/masters/brands",
       permissionPrefix: "brand",
       entityName: "brand",
+      importHeaders: [
+        { key: "name", label: "Brand Name", required: true },
+        { key: "code", label: "Brand Code", required: true },
+        { key: "description", label: "Description" },
+        { key: "logo_url", label: "Logo URL" },
+        { key: "status", label: "Status (active/inactive)" },
+      ],
       columns: [
         { header: "Name", render: (b) => `<span class="cell-primary">${escapeHtml(b.name)}</span>` },
         { header: "Code", render: (b) => escapeHtml(b.code) },

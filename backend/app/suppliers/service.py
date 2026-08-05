@@ -26,6 +26,7 @@ from app.masters.cities.repository import CityRepository
 from app.masters.countries.repository import CountryRepository
 from app.masters.product_categories.repository import ProductCategoryRepository
 from app.masters.product_sub_categories.repository import ProductSubCategoryRepository
+from app.masters.products.repository import ProductRepository
 from app.masters.states.repository import StateRepository
 from app.suppliers.constants import EXPORT_HEADERS
 from app.suppliers.models import Supplier, SupplierContact, SupplierCurrentStatus
@@ -35,6 +36,7 @@ from app.masters.import_export import (
     ImportSummary,
     build_csv_export,
     build_excel_export,
+    model_to_dict,
     parse_rows_from_file,
     run_import,
 )
@@ -57,6 +59,7 @@ class SupplierService:
         category_repository: ProductCategoryRepository,
         sub_category_repository: ProductSubCategoryRepository,
         cache_manager: CacheManager,
+        product_repository: ProductRepository | None = None,
     ) -> None:
         """Bind this service to its repository, every referenced master's repository, and the cache manager."""
         self.repository = repository
@@ -67,6 +70,7 @@ class SupplierService:
         self.category_repository = category_repository
         self.sub_category_repository = sub_category_repository
         self.cache_manager = cache_manager
+        self.product_repository = product_repository
 
     # ------------------------------------------------------------------
     # Reads
@@ -85,20 +89,22 @@ class SupplierService:
         *,
         category_id: uuid.UUID | None = None,
         sub_category_id: uuid.UUID | None = None,
+        product_id: uuid.UUID | None = None,
     ) -> tuple[list[Supplier], int]:
         """
         Return a page of suppliers matching search/sort/filter, plus the
         document's Top Filter Fields for Product Category and Key Strength
-        Product Sub Category (both many-to-many, so handled outside the
-        generic single-value filter framework).
+        Product Sub Category, plus a Product filter ("which suppliers
+        supply this exact SKU") -- all three are many-to-many, so handled
+        outside the generic single-value filter framework.
         """
-        if category_id is None and sub_category_id is None:
+        if category_id is None and sub_category_id is None and product_id is None:
             return await self.repository.paginated_list(query)
 
-        # Category/sub-category filters require a custom EXISTS-based
-        # WHERE clause the generic BaseRepository.paginated_list doesn't
-        # support, so we replicate its search/sort/paginate steps here with
-        # the additional predicate applied.
+        # Category/sub-category/product filters require a custom
+        # EXISTS-based WHERE clause the generic BaseRepository.paginated_list
+        # doesn't support, so we replicate its search/sort/paginate steps
+        # here with the additional predicate(s) applied.
         base_stmt = self.repository._base_select()
         base_stmt = self.repository._apply_search(base_stmt, query.search.normalized)
         base_stmt = self.repository._apply_dynamic_filters(base_stmt, query.filters)
@@ -106,6 +112,8 @@ class SupplierService:
             base_stmt = self.repository.apply_category_filter(base_stmt, category_id)
         if sub_category_id is not None:
             base_stmt = self.repository.apply_sub_category_filter(base_stmt, sub_category_id)
+        if product_id is not None:
+            base_stmt = self.repository.apply_product_filter(base_stmt, product_id)
 
         from sqlalchemy import func, select
 
@@ -125,6 +133,10 @@ class SupplierService:
     async def get_sub_category_ids(self, supplier_id: uuid.UUID) -> list[uuid.UUID]:
         """Return every product-sub-category ID linked to a supplier."""
         return await self.repository.list_all_sub_category_ids(supplier_id)
+
+    async def get_product_ids(self, supplier_id: uuid.UUID) -> list[uuid.UUID]:
+        """Return every Product ID linked to a supplier (the specific SKUs this supplier supplies)."""
+        return await self.repository.list_all_product_ids(supplier_id)
 
     async def list_contacts(self, supplier_id: uuid.UUID) -> list[SupplierContact]:
         """Return every contact person for a supplier."""
@@ -160,6 +172,16 @@ class SupplierService:
         for sub_category_id in sub_category_ids:
             if await self.sub_category_repository.get_by_id(sub_category_id) is None:
                 raise BadRequestException(f"Product sub-category {sub_category_id} does not exist.")
+
+    async def _validate_products(self, product_ids: list[uuid.UUID]) -> None:
+        """Ensure every given product exists (Products is the central item master; see its module docstring)."""
+        if not product_ids:
+            return
+        if self.product_repository is None:
+            raise BadRequestException("Product linking is not available in this context.")
+        for product_id in product_ids:
+            if await self.product_repository.get_by_id(product_id) is None:
+                raise BadRequestException(f"Product {product_id} does not exist.")
 
     def _validate_visit_remarks(self, visited: bool, visit_remarks: str | None) -> None:
         """
@@ -221,25 +243,30 @@ class SupplierService:
         city_id = field_values["city_id"]
         category_ids = field_values.pop("category_ids", []) or []
         sub_category_ids = field_values.pop("sub_category_ids", []) or []
+        product_ids = field_values.pop("product_ids", []) or []
         emails = field_values.pop("emails", []) or []
 
         await self._validate_geography(country_id, state_id, city_id)
         await self._validate_categories(category_ids)
         await self._validate_sub_categories(sub_category_ids)
+        await self._validate_products(product_ids)
         self._validate_visit_remarks(
             field_values.get("visited_factory_office", False), field_values.get("visit_remarks")
         )
 
         if await self.repository.name_city_exists(company_name, city_id):
+            existing = await self.repository.get_by_name_city(company_name, city_id)
             raise ConflictException(
                 f"A supplier named {company_name!r} already exists in this city (duplicate check: "
-                "Company Name + City)."
+                "Company Name + City).",
+                details={"existing": model_to_dict(existing) if existing else None},
             )
 
         supplier = await self.repository.create(**field_values)
 
         await self.repository.replace_category_links(supplier.id, category_ids)
         await self.repository.replace_sub_category_links(supplier.id, sub_category_ids)
+        await self.repository.replace_product_links(supplier.id, product_ids)
         await self.repository.replace_emails(supplier.id, emails)
 
         # Mirror the First Data Form's contact into the contacts list, per
@@ -269,6 +296,7 @@ class SupplierService:
 
         category_ids = field_values.pop("category_ids", None)
         sub_category_ids = field_values.pop("sub_category_ids", None)
+        product_ids = field_values.pop("product_ids", None)
         emails = field_values.pop("emails", None)
 
         country_id = field_values.get("country_id") or supplier.country_id
@@ -281,14 +309,20 @@ class SupplierService:
             await self._validate_categories(category_ids)
         if sub_category_ids is not None:
             await self._validate_sub_categories(sub_category_ids)
+        if product_ids is not None:
+            await self._validate_products(product_ids)
 
         new_company_name = field_values.get("company_name") or supplier.company_name
         new_city_id = field_values.get("city_id") or supplier.city_id
         if field_values.get("company_name") is not None or field_values.get("city_id") is not None:
             if await self.repository.name_city_exists(new_company_name, new_city_id, exclude_id=supplier_id):
+                existing = await self.repository.get_by_name_city(
+                    new_company_name, new_city_id, exclude_id=supplier_id
+                )
                 raise ConflictException(
                     f"A supplier named {new_company_name!r} already exists in this city "
-                    "(duplicate check: Company Name + City)."
+                    "(duplicate check: Company Name + City).",
+                    details={"existing": model_to_dict(existing) if existing else None},
                 )
 
         visited = field_values.get("visited_factory_office")
@@ -308,6 +342,8 @@ class SupplierService:
             await self.repository.replace_category_links(supplier_id, category_ids)
         if sub_category_ids is not None:
             await self.repository.replace_sub_category_links(supplier_id, sub_category_ids)
+        if product_ids is not None:
+            await self.repository.replace_product_links(supplier_id, product_ids)
         if emails is not None:
             await self.repository.replace_emails(supplier_id, emails)
 
@@ -490,9 +526,11 @@ class SupplierService:
             field_values["city_id"] = city.id if city else None
 
             company_name = field_values["company_name"]
-            if await self.repository.name_city_exists(company_name, city.id):
-                raise ValueError(
-                    f"Supplier {company_name!r} already exists in {city_name!r} (duplicate: Company Name + City)."
+            existing = await self.repository.get_by_name_city(company_name, city.id)
+            if existing is not None:
+                raise ConflictException(
+                    f"Supplier {company_name!r} already exists in {city_name!r} (duplicate: Company Name + City).",
+                    details={"existing": model_to_dict(existing)},
                 )
 
             self._validate_visit_remarks(

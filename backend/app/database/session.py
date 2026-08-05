@@ -47,9 +47,20 @@ async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
         try:
             yield session
             await session.commit()
-        except Exception:
+        except BaseException:
+            # BaseException, not Exception: a client disconnecting mid-request
+            # (e.g. the browser aborting an in-flight chunked import upload)
+            # surfaces here as asyncio.CancelledError, which is a
+            # BaseException subclass, not an Exception subclass -- an
+            # `except Exception` clause would silently miss it, skipping the
+            # explicit rollback below and relying only on close()'s implicit
+            # rollback-of-pending-work. That implicit behavior happens to be
+            # safe today, but this handler is the one place responsible for
+            # guaranteeing "no half-applied write ever survives a broken
+            # request", so it rolls back explicitly for every kind of
+            # interruption, not just the ones that happen to be Exceptions.
             await session.rollback()
-            logger.exception("Session rolled back due to an unhandled exception.")
+            logger.exception("Session rolled back due to an unhandled exception or cancellation.")
             raise
         finally:
             await session.close()

@@ -120,6 +120,9 @@ class SupplierCreate(BaseModel):
     sub_category_ids: list[uuid.UUID] = Field(
         default_factory=list, description="Key Strength Product Sub Category (multiple)."
     )
+    product_ids: list[uuid.UUID] = Field(
+        default_factory=list, description="Specific Products (Item Master) this supplier supplies (multiple)."
+    )
     supplier_grade: SupplierGrade | None = None
     current_status: SupplierCurrentStatus | None = None
     potential: SupplierPotential | None = None
@@ -161,6 +164,7 @@ class SupplierUpdate(BaseModel):
     primary_website: str | None = Field(default=None, max_length=500)
     secondary_website: str | None = Field(default=None, max_length=500)
     sub_category_ids: list[uuid.UUID] | None = None
+    product_ids: list[uuid.UUID] | None = None
     supplier_grade: SupplierGrade | None = None
     current_status: SupplierCurrentStatus | None = None
     potential: SupplierPotential | None = None
@@ -232,6 +236,7 @@ class SupplierRead(BaseModel):
     emails: list[str] = Field(default_factory=list)
     category_ids: list[uuid.UUID] = Field(default_factory=list)
     sub_category_ids: list[uuid.UUID] = Field(default_factory=list)
+    product_ids: list[uuid.UUID] = Field(default_factory=list)
     contacts: list[SupplierContactRead] = Field(default_factory=list)
 
 
@@ -256,13 +261,22 @@ class SupplierListItemRead(BaseModel):
 
     category_ids: list[uuid.UUID] = Field(default_factory=list)
     sub_category_ids: list[uuid.UUID] = Field(default_factory=list)
+    product_ids: list[uuid.UUID] = Field(default_factory=list)
     secondary_products_description: str | None = None
 
 
 class ImportSummaryRead(BaseModel):
-    """Result summary returned after a CSV/Excel import."""
+    """Result summary returned after a CSV/Excel import.
+
+    ``duplicates`` holds every row that collided with an existing record
+    (a subset of ``failed``), each with its full original row data and --
+    when available -- the existing record it collided with, so the client
+    can render a side-by-side comparison instead of just an error string.
+    """
 
     total_rows: int
     created: int
     failed: int
+    duplicate_count: int = 0
     errors: list[dict]
+    duplicates: list[dict] = []

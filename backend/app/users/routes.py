@@ -29,6 +29,7 @@ from app.rbac.service import RBACService
 from app.users.repository import UserRepository
 from app.users.schemas import (
     AssignRoleRequest,
+    ResetPasswordRequest,
     ResetPasswordResponse,
     UserCreate,
     UserRead,
@@ -106,6 +107,7 @@ async def create_user(
         email=payload.email,
         phone=payload.phone,
         role_ids=payload.role_ids,
+        individual_permission_ids=payload.individual_permission_ids,
         created_by=current_user.id,
     )
     user_data = await _user_with_roles(user, rbac_service)
@@ -190,25 +192,30 @@ async def update_user(
     return build_success_response(data=data, request_id=request.state.request_id)
 
 
-@router.post("/{user_id}/reset-password", summary="Admin-generated password reset")
+@router.post("/{user_id}/reset-password", summary="Admin-generated password reset or custom password set")
 async def reset_password(
     user_id: uuid.UUID,
     request: Request,
+    payload: ResetPasswordRequest | None = None,
     user_service: UserService = Depends(get_user_service),
     current_user: CurrentUser = Depends(require_permission("user.update")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
-    """Generate a new temporary password for a user, forcing a change on next login."""
-    temporary_password = await user_service.admin_reset_password(user_id)
+    """Set a custom password or generate a new temporary password for a user."""
+    custom_pwd = payload.new_password if payload else None
+    must_change = payload.must_change_password if payload else True
+    password_set = await user_service.admin_reset_password(
+        user_id, custom_password=custom_pwd, must_change_password=must_change, reset_by=current_user.id
+    )
     await _record_user_action(
         audit_service=audit_service,
         request=request,
         action=AuditAction.PASSWORD_RESET,
         actor=current_user,
         target_user_id=user_id,
-        description="Administrator generated a temporary password for this user.",
+        description=f"Administrator reset/set password for user (custom={bool(custom_pwd)}).",
     )
-    data = ResetPasswordResponse(temporary_password=temporary_password).model_dump(mode="json")
+    data = ResetPasswordResponse(temporary_password=password_set).model_dump(mode="json")
     return build_success_response(data=data, request_id=request.state.request_id)
 
 
@@ -225,7 +232,7 @@ async def activate_user(
     await _record_user_action(
         audit_service=audit_service,
         request=request,
-        action=AuditAction.UPDATE,
+        action=AuditAction.USER_ACTIVATED,
         actor=current_user,
         target_user_id=user_id,
         description=f"Activated user {user.username!r}.",
@@ -248,10 +255,33 @@ async def deactivate_user(
     await _record_user_action(
         audit_service=audit_service,
         request=request,
-        action=AuditAction.UPDATE,
+        action=AuditAction.USER_DEACTIVATED,
         actor=current_user,
         target_user_id=user_id,
         description=f"Deactivated user {user.username!r}; all sessions revoked.",
+        new_values={"status": user.status.value, "is_active": False},
+    )
+    data = UserRead.model_validate(user).model_dump(mode="json")
+    return build_success_response(data=data, request_id=request.state.request_id)
+
+
+@router.post("/{user_id}/suspend", summary="Suspend a user")
+async def suspend_user(
+    user_id: uuid.UUID,
+    request: Request,
+    user_service: UserService = Depends(get_user_service),
+    current_user: CurrentUser = Depends(require_permission("user.update")),
+    audit_service: AuditService = Depends(get_audit_service),
+) -> dict:
+    """Suspend a user account and force-logout all of their active sessions."""
+    user = await user_service.suspend_user(user_id, updated_by=current_user.id)
+    await _record_user_action(
+        audit_service=audit_service,
+        request=request,
+        action=AuditAction.STATUS_CHANGED,
+        actor=current_user,
+        target_user_id=user_id,
+        description=f"Suspended user {user.username!r}; all sessions revoked.",
         new_values={"status": user.status.value, "is_active": False},
     )
     data = UserRead.model_validate(user).model_dump(mode="json")
@@ -271,7 +301,7 @@ async def unlock_user(
     await _record_user_action(
         audit_service=audit_service,
         request=request,
-        action=AuditAction.UPDATE,
+        action=AuditAction.USER_UNLOCKED,
         actor=current_user,
         target_user_id=user_id,
         description=f"Cleared lockout for user {user.username!r}.",
@@ -286,19 +316,22 @@ async def assign_role(
     payload: AssignRoleRequest,
     request: Request,
     user_service: UserService = Depends(get_user_service),
+    rbac_service: RBACService = Depends(get_rbac_service),
     current_user: CurrentUser = Depends(require_permission("user.update")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     """Assign a role to a user."""
+    role = await rbac_service.get_role_or_raise(payload.role_id)
     await user_service.assign_role(user_id, payload.role_id, assigned_by=current_user.id)
+    action = AuditAction.ADMIN_PROMOTION if role.name in ("super_admin", "admin") else AuditAction.ROLE_ASSIGNED
     await _record_user_action(
         audit_service=audit_service,
         request=request,
-        action=AuditAction.ROLE_ASSIGNED,
+        action=action,
         actor=current_user,
         target_user_id=user_id,
-        description=f"Assigned role {payload.role_id} to user.",
-        new_values={"role_id": str(payload.role_id)},
+        description=f"Assigned role {role.name!r} to user.",
+        new_values={"role_id": str(payload.role_id), "role_name": role.name},
     )
     return build_success_response(data={"assigned": True}, request_id=request.state.request_id)
 
@@ -309,19 +342,22 @@ async def remove_role(
     role_id: uuid.UUID,
     request: Request,
     user_service: UserService = Depends(get_user_service),
+    rbac_service: RBACService = Depends(get_rbac_service),
     current_user: CurrentUser = Depends(require_permission("user.update")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     """Remove a role assignment from a user."""
-    await user_service.remove_role(user_id, role_id)
+    role = await rbac_service.get_role_or_raise(role_id)
+    await user_service.remove_role(user_id, role_id, removed_by=current_user.id)
+    action = AuditAction.ADMIN_REMOVAL if role.name in ("super_admin", "admin") else AuditAction.ROLE_REMOVED
     await _record_user_action(
         audit_service=audit_service,
         request=request,
-        action=AuditAction.ROLE_REMOVED,
+        action=action,
         actor=current_user,
         target_user_id=user_id,
-        description=f"Removed role {role_id} from user.",
-        new_values={"role_id": str(role_id)},
+        description=f"Removed role {role.name!r} from user.",
+        new_values={"role_id": str(role_id), "role_name": role.name},
     )
     return build_success_response(data={"removed": True}, request_id=request.state.request_id)
 

@@ -15,7 +15,14 @@ class UserCreate(BaseModel):
     username: str = Field(..., min_length=3, max_length=100)
     email: EmailStr
     phone: str | None = Field(default=None, max_length=30)
+    initial_password: str | None = Field(
+        default=None,
+        description="Optional custom initial password. If omitted, a temporary password is generated."
+    )
     role_ids: list[uuid.UUID] = Field(default_factory=list)
+    individual_permission_ids: list[uuid.UUID] = Field(
+        default_factory=list, description="Optional direct individual permission override IDs to assign to the new user."
+    )
 
 
 class UserRead(BaseModel):
@@ -34,14 +41,16 @@ class UserRead(BaseModel):
     last_login_at: datetime | None
     failed_login_count: int
     locked_until: datetime | None
+    created_by: uuid.UUID | None = None
     created_at: datetime
     updated_at: datetime
 
 
 class UserWithRoles(UserRead):
-    """A user account with its assigned role names expanded."""
+    """A user account with its assigned role names expanded and creator username."""
 
     roles: list[str] = Field(default_factory=list)
+    created_by_username: str | None = None
 
 
 class UserUpdate(BaseModel):
@@ -58,6 +67,19 @@ class AssignRoleRequest(BaseModel):
     role_id: uuid.UUID
 
 
+class ResetPasswordRequest(BaseModel):
+    """Payload for an admin resetting a user's password."""
+
+    new_password: str | None = Field(
+        default=None,
+        description="Optional custom password to set for the user. If omitted, a temporary password is generated."
+    )
+    must_change_password: bool = Field(
+        default=True,
+        description="Whether the user must change password on next login."
+    )
+
+
 class ResetPasswordResponse(BaseModel):
     """
     Response for an admin-generated password reset.
@@ -69,4 +91,5 @@ class ResetPasswordResponse(BaseModel):
     """
 
     temporary_password: str
-    message: str = "Password has been reset. The user must change it on next login."
+    message: str = "Password has been updated."
+

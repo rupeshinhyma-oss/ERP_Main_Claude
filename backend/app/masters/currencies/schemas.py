@@ -46,9 +46,17 @@ class CurrencyRead(BaseModel):
 
 
 class ImportSummaryRead(BaseModel):
-    """Result summary returned after a CSV/Excel import."""
+    """Result summary returned after a CSV/Excel import.
+
+    ``duplicates`` holds every row that collided with an existing record
+    (a subset of ``failed``), each with its full original row data and --
+    when available -- the existing record it collided with, so the client
+    can render a side-by-side comparison instead of just an error string.
+    """
 
     total_rows: int
     created: int
     failed: int
+    duplicate_count: int = 0
     errors: list[dict]
+    duplicates: list[dict] = []

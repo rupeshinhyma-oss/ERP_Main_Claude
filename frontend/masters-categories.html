@@ -35,7 +35,7 @@
 
         <div class="card">
           <div class="toolbar">
-            <input type="text" id="searchInput" placeholder="Search name or code..." />
+            <input type="text" id="searchInput" placeholder="Search name or code or Sr. No..." />
             <select id="statusFilter">
               <option value="">All statuses</option>
               <option value="active">Active</option>
@@ -47,6 +47,7 @@
             <table>
               <thead>
                 <tr>
+                  <th>Sr. No.</th>
                   <th>Name</th>
                   <th>Code</th>
                   <th>Description</th>
@@ -104,6 +105,7 @@
 
   <script src="js/api.js"></script>
   <script src="js/nav.js"></script>
+  <script src="js/import-wizard.js"></script>
   <script src="js/masters-common.js"></script>
   <script>
     renderShell("masters-categories");
@@ -112,6 +114,12 @@
       apiBase: "/masters/product-categories",
       permissionPrefix: "category",
       entityName: "category",
+      importHeaders: [
+        { key: "code", label: "Category Code", required: true },
+        { key: "name", label: "Category Name", required: true },
+        { key: "description", label: "Description" },
+        { key: "status", label: "Status (active/inactive)" },
+      ],
       columns: [
         { header: "Name", render: (c) => `<span class="cell-primary">${escapeHtml(c.name)}</span>` },
         { header: "Code", render: (c) => escapeHtml(c.code) },

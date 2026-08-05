@@ -2,10 +2,9 @@
 RBAC Management Routes.
 
 Implements the admin-facing role & permission management API: list
-permissions, and create/list/get/update/delete roles plus grant/revoke
-permission assignments on a role. Every route is gated by the
-``settings.manage`` permission, since managing roles and permissions is
-itself a highly privileged action.
+permissions, system roles CRUD, department permission CRUD, designation permission
+CRUD, individual user permission CRUD, user effective permission breakdown, and
+clone permission sets. Every route is gated by the ``settings.manage`` permission.
 """
 
 from __future__ import annotations
@@ -14,10 +13,16 @@ import uuid
 
 from fastapi import APIRouter, Depends, Request, status
 
+from app.audit.constants import AuditAction
+from app.audit.dependencies import get_audit_service
+from app.audit.service import AuditService
 from app.auth.service import CurrentUser
 from app.core.responses import build_success_response
 from app.rbac.dependencies import get_rbac_service, require_permission
 from app.rbac.schemas import (
+    AssignUserPermissionRequest,
+    ClonePermissionSetRequest,
+    EffectivePermissionsBreakdown,
     GrantPermissionRequest,
     PermissionRead,
     RoleCreate,
@@ -42,24 +47,43 @@ async def list_permissions(
     rbac_service: RBACService = Depends(get_rbac_service),
     _current_user: CurrentUser = Depends(require_permission("settings.manage")),
 ) -> dict:
-    """List every permission in the system. Permissions are seeded, not creatable via the API."""
+    """List every permission in the system."""
     permissions = await rbac_service.list_permissions()
     data = [PermissionRead.model_validate(p).model_dump(mode="json") for p in permissions]
     return build_success_response(data=data, request_id=request.state.request_id)
 
 
+# --- System Roles -----------------------------------------------------------
 @router.post("/roles", status_code=status.HTTP_201_CREATED, summary="Create a role (admin)")
 async def create_role(
     payload: RoleCreate,
     request: Request,
     rbac_service: RBACService = Depends(get_rbac_service),
-    _current_user: CurrentUser = Depends(require_permission("settings.manage")),
+    current_user: CurrentUser = Depends(require_permission("settings.manage")),
+    audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     """Create a new role, optionally granting it an initial set of permission codes."""
     role = await rbac_service.create_role(
         name=payload.name, description=payload.description, permission_codes=payload.permission_codes
     )
     data = (await _role_with_permissions(role, rbac_service)).model_dump(mode="json")
+    await audit_service.record(
+        action=AuditAction.CREATE,
+        module="rbac",
+        user_id=current_user.id,
+        username_snapshot=current_user.username,
+        entity_type="Role",
+        entity_id=str(role.id),
+        new_values={"name": role.name, "description": role.description, "permissions": payload.permission_codes},
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+        request_id=request.state.request_id,
+        http_method=request.method,
+        endpoint=request.url.path,
+        response_status=status.HTTP_201_CREATED,
+        description=f"Created role {role.name!r}.",
+    )
+    request.state.audit_logged = True
     return build_success_response(data=data, request_id=request.state.request_id)
 
 
@@ -94,11 +118,29 @@ async def update_role(
     payload: RoleUpdate,
     request: Request,
     rbac_service: RBACService = Depends(get_rbac_service),
-    _current_user: CurrentUser = Depends(require_permission("settings.manage")),
+    current_user: CurrentUser = Depends(require_permission("settings.manage")),
+    audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     """Update a role's name/description. System roles cannot be renamed."""
     role = await rbac_service.update_role(role_id, name=payload.name, description=payload.description)
     data = (await _role_with_permissions(role, rbac_service)).model_dump(mode="json")
+    await audit_service.record(
+        action=AuditAction.UPDATE,
+        module="rbac",
+        user_id=current_user.id,
+        username_snapshot=current_user.username,
+        entity_type="Role",
+        entity_id=str(role_id),
+        new_values={"name": payload.name, "description": payload.description},
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+        request_id=request.state.request_id,
+        http_method=request.method,
+        endpoint=request.url.path,
+        response_status=status.HTTP_200_OK,
+        description=f"Updated role {role.name!r}.",
+    )
+    request.state.audit_logged = True
     return build_success_response(data=data, request_id=request.state.request_id)
 
 
@@ -107,10 +149,28 @@ async def delete_role(
     role_id: uuid.UUID,
     request: Request,
     rbac_service: RBACService = Depends(get_rbac_service),
-    _current_user: CurrentUser = Depends(require_permission("settings.manage")),
+    current_user: CurrentUser = Depends(require_permission("settings.manage")),
+    audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     """Delete a role. System roles cannot be deleted."""
+    role = await rbac_service.get_role_or_raise(role_id)
     await rbac_service.delete_role(role_id)
+    await audit_service.record(
+        action=AuditAction.DELETE,
+        module="rbac",
+        user_id=current_user.id,
+        username_snapshot=current_user.username,
+        entity_type="Role",
+        entity_id=str(role_id),
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+        request_id=request.state.request_id,
+        http_method=request.method,
+        endpoint=request.url.path,
+        response_status=status.HTTP_200_OK,
+        description=f"Deleted role {role.name!r}.",
+    )
+    request.state.audit_logged = True
     return build_success_response(data={"deleted": True}, request_id=request.state.request_id)
 
 
@@ -120,10 +180,28 @@ async def grant_permission(
     payload: GrantPermissionRequest,
     request: Request,
     rbac_service: RBACService = Depends(get_rbac_service),
-    _current_user: CurrentUser = Depends(require_permission("settings.manage")),
+    current_user: CurrentUser = Depends(require_permission("settings.manage")),
+    audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     """Grant a permission to a role, if not already granted."""
     await rbac_service.grant_permission(role_id, payload.permission_id)
+    await audit_service.record(
+        action=AuditAction.PERMISSION_ASSIGNED,
+        module="rbac",
+        user_id=current_user.id,
+        username_snapshot=current_user.username,
+        entity_type="Role",
+        entity_id=str(role_id),
+        new_values={"granted_permission_id": str(payload.permission_id)},
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+        request_id=request.state.request_id,
+        http_method=request.method,
+        endpoint=request.url.path,
+        response_status=status.HTTP_200_OK,
+        description=f"Granted permission {payload.permission_id} to role.",
+    )
+    request.state.audit_logged = True
     return build_success_response(data={"granted": True}, request_id=request.state.request_id)
 
 
@@ -133,8 +211,305 @@ async def revoke_permission(
     permission_id: uuid.UUID,
     request: Request,
     rbac_service: RBACService = Depends(get_rbac_service),
-    _current_user: CurrentUser = Depends(require_permission("settings.manage")),
+    current_user: CurrentUser = Depends(require_permission("settings.manage")),
+    audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     """Revoke a permission from a role."""
     await rbac_service.revoke_permission(role_id, permission_id)
+    await audit_service.record(
+        action=AuditAction.PERMISSION_REMOVED,
+        module="rbac",
+        user_id=current_user.id,
+        username_snapshot=current_user.username,
+        entity_type="Role",
+        entity_id=str(role_id),
+        new_values={"revoked_permission_id": str(permission_id)},
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+        request_id=request.state.request_id,
+        http_method=request.method,
+        endpoint=request.url.path,
+        response_status=status.HTTP_200_OK,
+        description=f"Revoked permission {permission_id} from role.",
+    )
+    request.state.audit_logged = True
     return build_success_response(data={"revoked": True}, request_id=request.state.request_id)
+
+
+# --- Department Permissions --------------------------------------------------
+@router.get("/departments/{department_id}/permissions", summary="List department permissions (admin)")
+async def list_department_permissions(
+    department_id: uuid.UUID,
+    request: Request,
+    rbac_service: RBACService = Depends(get_rbac_service),
+    _current_user: CurrentUser = Depends(require_permission("settings.manage")),
+) -> dict:
+    links = await rbac_service.list_department_permissions(department_id)
+    data = [PermissionRead.model_validate(link.permission).model_dump(mode="json") for link in links]
+    return build_success_response(data=data, request_id=request.state.request_id)
+
+
+@router.post("/departments/{department_id}/permissions", summary="Grant permission to department (admin)")
+async def grant_department_permission(
+    department_id: uuid.UUID,
+    payload: GrantPermissionRequest,
+    request: Request,
+    rbac_service: RBACService = Depends(get_rbac_service),
+    current_user: CurrentUser = Depends(require_permission("settings.manage")),
+    audit_service: AuditService = Depends(get_audit_service),
+) -> dict:
+    await rbac_service.grant_department_permission(department_id, payload.permission_id, granted_by=current_user.id)
+    await audit_service.record(
+        action=AuditAction.DEPARTMENT_PERMISSION_CHANGED,
+        module="rbac",
+        user_id=current_user.id,
+        username_snapshot=current_user.username,
+        entity_type="Department",
+        entity_id=str(department_id),
+        new_values={"permission_id": str(payload.permission_id), "granted": True},
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+        request_id=request.state.request_id,
+        http_method=request.method,
+        endpoint=request.url.path,
+        response_status=status.HTTP_200_OK,
+        description=f"Granted permission {payload.permission_id} to department {department_id}.",
+    )
+    request.state.audit_logged = True
+    return build_success_response(data={"granted": True}, request_id=request.state.request_id)
+
+
+@router.delete("/departments/{department_id}/permissions/{permission_id}", summary="Revoke permission from department (admin)")
+async def revoke_department_permission(
+    department_id: uuid.UUID,
+    permission_id: uuid.UUID,
+    request: Request,
+    rbac_service: RBACService = Depends(get_rbac_service),
+    current_user: CurrentUser = Depends(require_permission("settings.manage")),
+    audit_service: AuditService = Depends(get_audit_service),
+) -> dict:
+    await rbac_service.revoke_department_permission(department_id, permission_id)
+    await audit_service.record(
+        action=AuditAction.DEPARTMENT_PERMISSION_CHANGED,
+        module="rbac",
+        user_id=current_user.id,
+        username_snapshot=current_user.username,
+        entity_type="Department",
+        entity_id=str(department_id),
+        new_values={"permission_id": str(permission_id), "granted": False},
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+        request_id=request.state.request_id,
+        http_method=request.method,
+        endpoint=request.url.path,
+        response_status=status.HTTP_200_OK,
+        description=f"Revoked permission {permission_id} from department {department_id}.",
+    )
+    request.state.audit_logged = True
+    return build_success_response(data={"revoked": True}, request_id=request.state.request_id)
+
+
+# --- Designation Permissions -------------------------------------------------
+@router.get("/designations/{designation_id}/permissions", summary="List designation permissions (admin)")
+async def list_designation_permissions(
+    designation_id: uuid.UUID,
+    request: Request,
+    rbac_service: RBACService = Depends(get_rbac_service),
+    _current_user: CurrentUser = Depends(require_permission("settings.manage")),
+) -> dict:
+    links = await rbac_service.list_designation_permissions(designation_id)
+    data = [PermissionRead.model_validate(link.permission).model_dump(mode="json") for link in links]
+    return build_success_response(data=data, request_id=request.state.request_id)
+
+
+@router.post("/designations/{designation_id}/permissions", summary="Grant permission to designation (admin)")
+async def grant_designation_permission(
+    designation_id: uuid.UUID,
+    payload: GrantPermissionRequest,
+    request: Request,
+    rbac_service: RBACService = Depends(get_rbac_service),
+    current_user: CurrentUser = Depends(require_permission("settings.manage")),
+    audit_service: AuditService = Depends(get_audit_service),
+) -> dict:
+    await rbac_service.grant_designation_permission(designation_id, payload.permission_id, granted_by=current_user.id)
+    await audit_service.record(
+        action=AuditAction.DESIGNATION_PERMISSION_CHANGED,
+        module="rbac",
+        user_id=current_user.id,
+        username_snapshot=current_user.username,
+        entity_type="Designation",
+        entity_id=str(designation_id),
+        new_values={"permission_id": str(payload.permission_id), "granted": True},
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+        request_id=request.state.request_id,
+        http_method=request.method,
+        endpoint=request.url.path,
+        response_status=status.HTTP_200_OK,
+        description=f"Granted permission {payload.permission_id} to designation {designation_id}.",
+    )
+    request.state.audit_logged = True
+    return build_success_response(data={"granted": True}, request_id=request.state.request_id)
+
+
+@router.delete("/designations/{designation_id}/permissions/{permission_id}", summary="Revoke permission from designation (admin)")
+async def revoke_designation_permission(
+    designation_id: uuid.UUID,
+    permission_id: uuid.UUID,
+    request: Request,
+    rbac_service: RBACService = Depends(get_rbac_service),
+    current_user: CurrentUser = Depends(require_permission("settings.manage")),
+    audit_service: AuditService = Depends(get_audit_service),
+) -> dict:
+    await rbac_service.revoke_designation_permission(designation_id, permission_id)
+    await audit_service.record(
+        action=AuditAction.DESIGNATION_PERMISSION_CHANGED,
+        module="rbac",
+        user_id=current_user.id,
+        username_snapshot=current_user.username,
+        entity_type="Designation",
+        entity_id=str(designation_id),
+        new_values={"permission_id": str(permission_id), "granted": False},
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+        request_id=request.state.request_id,
+        http_method=request.method,
+        endpoint=request.url.path,
+        response_status=status.HTTP_200_OK,
+        description=f"Revoked permission {permission_id} from designation {designation_id}.",
+    )
+    request.state.audit_logged = True
+    return build_success_response(data={"revoked": True}, request_id=request.state.request_id)
+
+
+# --- Individual User Permissions ---------------------------------------------
+@router.get("/users/{user_id}/permissions", summary="List user permission overrides (admin)")
+async def list_user_permissions(
+    user_id: uuid.UUID,
+    request: Request,
+    rbac_service: RBACService = Depends(get_rbac_service),
+    _current_user: CurrentUser = Depends(require_permission("settings.manage")),
+) -> dict:
+    links = await rbac_service.list_user_permissions(user_id)
+    data = [
+        {
+            **PermissionRead.model_validate(link.permission).model_dump(mode="json"),
+            "is_granted": link.is_granted,
+        }
+        for link in links
+    ]
+    return build_success_response(data=data, request_id=request.state.request_id)
+
+
+@router.post("/users/{user_id}/permissions", summary="Assign user permission override (admin)")
+async def assign_user_permission(
+    user_id: uuid.UUID,
+    payload: AssignUserPermissionRequest,
+    request: Request,
+    rbac_service: RBACService = Depends(get_rbac_service),
+    current_user: CurrentUser = Depends(require_permission("settings.manage")),
+    audit_service: AuditService = Depends(get_audit_service),
+) -> dict:
+    await rbac_service.assign_user_permission(
+        user_id, payload.permission_id, is_granted=payload.is_granted, granted_by=current_user.id
+    )
+    await audit_service.record(
+        action=AuditAction.USER_PERMISSION_CHANGED,
+        module="rbac",
+        user_id=current_user.id,
+        username_snapshot=current_user.username,
+        entity_type="User",
+        entity_id=str(user_id),
+        new_values={"permission_id": str(payload.permission_id), "is_granted": payload.is_granted},
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+        request_id=request.state.request_id,
+        http_method=request.method,
+        endpoint=request.url.path,
+        response_status=status.HTTP_200_OK,
+        description=f"Assigned permission override (is_granted={payload.is_granted}) to user {user_id}.",
+    )
+    request.state.audit_logged = True
+    return build_success_response(data={"assigned": True}, request_id=request.state.request_id)
+
+
+@router.delete("/users/{user_id}/permissions/{permission_id}", summary="Remove user permission override (admin)")
+async def remove_user_permission(
+    user_id: uuid.UUID,
+    permission_id: uuid.UUID,
+    request: Request,
+    rbac_service: RBACService = Depends(get_rbac_service),
+    current_user: CurrentUser = Depends(require_permission("settings.manage")),
+    audit_service: AuditService = Depends(get_audit_service),
+) -> dict:
+    await rbac_service.remove_user_permission(user_id, permission_id)
+    await audit_service.record(
+        action=AuditAction.USER_PERMISSION_CHANGED,
+        module="rbac",
+        user_id=current_user.id,
+        username_snapshot=current_user.username,
+        entity_type="User",
+        entity_id=str(user_id),
+        new_values={"permission_id": str(permission_id), "removed": True},
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+        request_id=request.state.request_id,
+        http_method=request.method,
+        endpoint=request.url.path,
+        response_status=status.HTTP_200_OK,
+        description=f"Removed permission override from user {user_id}.",
+    )
+    request.state.audit_logged = True
+    return build_success_response(data={"removed": True}, request_id=request.state.request_id)
+
+
+# --- Effective Permissions Breakdown ----------------------------------------
+@router.get("/users/{user_id}/effective-permissions", response_model=None, summary="Get user effective permissions breakdown (admin)")
+async def get_user_effective_permissions(
+    user_id: uuid.UUID,
+    request: Request,
+    rbac_service: RBACService = Depends(get_rbac_service),
+    _current_user: CurrentUser = Depends(require_permission("settings.manage")),
+) -> dict:
+    data = await rbac_service.get_user_effective_permissions(user_id)
+    return build_success_response(data=data, request_id=request.state.request_id)
+
+
+# --- Clone Permission Set ----------------------------------------------------
+@router.post("/clone-permissions", summary="Clone permission set between entities (admin)")
+async def clone_permission_set(
+    payload: ClonePermissionSetRequest,
+    request: Request,
+    rbac_service: RBACService = Depends(get_rbac_service),
+    current_user: CurrentUser = Depends(require_permission("settings.manage")),
+    audit_service: AuditService = Depends(get_audit_service),
+) -> dict:
+    cloned_count = await rbac_service.clone_permission_set(
+        source_type=payload.source_type,
+        source_id=payload.source_id,
+        target_type=payload.target_type,
+        target_id=payload.target_id,
+        cloned_by=current_user.id,
+    )
+    await audit_service.record(
+        action=AuditAction.PERMISSION_CHANGED,
+        module="rbac",
+        user_id=current_user.id,
+        username_snapshot=current_user.username,
+        entity_type=payload.target_type.capitalize(),
+        entity_id=str(payload.target_id),
+        new_values={
+            "source_type": payload.source_type,
+            "source_id": str(payload.source_id),
+            "cloned_permissions_count": cloned_count,
+        },
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+        request_id=request.state.request_id,
+        http_method=request.method,
+        endpoint=request.url.path,
+        response_status=status.HTTP_200_OK,
+        description=f"Cloned {cloned_count} permission(s) from {payload.source_type} ({payload.source_id}) to {payload.target_type} ({payload.target_id}).",
+    )
+    request.state.audit_logged = True
+    return build_success_response(data={"cloned_count": cloned_count}, request_id=request.state.request_id)

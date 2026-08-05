@@ -35,7 +35,7 @@
 
         <div class="card">
           <div class="toolbar">
-            <input type="text" id="searchInput" placeholder="Search code or name..." />
+            <input type="text" id="searchInput" placeholder="Search code or name or Sr. No..." />
             <select id="statusFilter">
               <option value="">All statuses</option>
               <option value="active">Active</option>
@@ -47,6 +47,7 @@
             <table>
               <thead>
                 <tr>
+                  <th>Sr. No.</th>
                   <th>Code</th>
                   <th>Name</th>
                   <th>Short Name</th>
@@ -109,6 +110,7 @@
 
   <script src="js/api.js"></script>
   <script src="js/nav.js"></script>
+  <script src="js/import-wizard.js"></script>
   <script src="js/masters-common.js"></script>
   <script>
     renderShell("masters-uom");
@@ -117,6 +119,13 @@
       apiBase: "/masters/uom",
       permissionPrefix: "uom",
       entityName: "unit of measurement",
+      importHeaders: [
+        { key: "code", label: "UOM Code", required: true },
+        { key: "name", label: "UOM Name", required: true },
+        { key: "short_name", label: "Short Name" },
+        { key: "description", label: "Description" },
+        { key: "status", label: "Status (active/inactive)" },
+      ],
       columns: [
         { header: "Code", render: (u) => `<span class="cell-primary">${escapeHtml(u.code)}</span>` },
         { header: "Name", render: (u) => escapeHtml(u.name) },

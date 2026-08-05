@@ -35,7 +35,7 @@
 
         <div class="card">
           <div class="toolbar">
-            <input type="text" id="searchInput" placeholder="Search name or code..." />
+            <input type="text" id="searchInput" placeholder="Search name or code or Sr. No..." />
             <select id="statusFilter">
               <option value="">All statuses</option>
               <option value="active">Active</option>
@@ -47,6 +47,7 @@
             <table>
               <thead>
                 <tr>
+                  <th>Sr. No.</th>
                   <th>Name</th>
                   <th>Code</th>
                   <th>Symbol</th>
@@ -109,6 +110,7 @@
 
   <script src="js/api.js"></script>
   <script src="js/nav.js"></script>
+  <script src="js/import-wizard.js"></script>
   <script src="js/masters-common.js"></script>
   <script>
     renderShell("masters-currencies");
@@ -117,6 +119,13 @@
       apiBase: "/masters/currencies",
       permissionPrefix: "currency",
       entityName: "currency",
+      importHeaders: [
+        { key: "name", label: "Currency Name", required: true },
+        { key: "code", label: "Currency Code (ISO 4217)", required: true },
+        { key: "symbol", label: "Symbol" },
+        { key: "decimal_places", label: "Decimal Places" },
+        { key: "status", label: "Status (active/inactive)" },
+      ],
       columns: [
         { header: "Name", render: (c) => `<span class="cell-primary">${escapeHtml(c.name)}</span>` },
         { header: "Code", render: (c) => escapeHtml(c.code) },

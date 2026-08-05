@@ -12,6 +12,7 @@ from app.masters.cities.repository import CityRepository
 from app.masters.countries.repository import CountryRepository
 from app.masters.product_categories.repository import ProductCategoryRepository
 from app.masters.product_sub_categories.repository import ProductSubCategoryRepository
+from app.masters.products.repository import ProductRepository
 from app.masters.states.repository import StateRepository
 from app.suppliers.repository import SupplierContactRepository, SupplierRepository
 from app.suppliers.service import SupplierService
@@ -31,4 +32,5 @@ def get_supplier_service(
         ProductCategoryRepository(db),
         ProductSubCategoryRepository(db),
         cache_manager,
+        product_repository=ProductRepository(db),
     )

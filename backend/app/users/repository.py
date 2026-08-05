@@ -51,3 +51,50 @@ class UserRepository(BaseRepository[User]):
         stmt = select(User.id).where(or_(User.username == username, User.email == email))
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none() is not None
+
+    async def search(
+        self,
+        *,
+        query: str | None = None,
+        status: str | None = None,
+        offset: int = 0,
+        limit: int = 50,
+    ) -> tuple[list[User], int]:
+        """Search users with optional keyword and status filters."""
+        from sqlalchemy import func
+        from app.users.models import UserStatus
+
+        stmt = select(User)
+        count_stmt = select(func.count(User.id))
+
+        filters = []
+        if query and query.strip():
+            pattern = f"%{query.strip()}%"
+            filters.append(
+                or_(
+                    User.username.ilike(pattern),
+                    User.email.ilike(pattern),
+                    User.employee_code.ilike(pattern),
+                    User.phone.ilike(pattern),
+                )
+            )
+        if status and status.strip():
+            try:
+                st_enum = UserStatus(status.strip())
+                filters.append(User.status == st_enum)
+            except ValueError:
+                pass
+
+        if filters:
+            stmt = stmt.where(*filters)
+            count_stmt = count_stmt.where(*filters)
+
+        stmt = stmt.order_by(User.created_at.desc()).offset(offset).limit(limit)
+
+        users_res = await self.session.execute(stmt)
+        count_res = await self.session.execute(count_stmt)
+
+        users = list(users_res.scalars().all())
+        total = count_res.scalar_one() or 0
+        return users, total
+

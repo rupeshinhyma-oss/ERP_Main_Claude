@@ -45,6 +45,7 @@ const SupplierPage = (() => {
     cities: (ids) => fetchNamesByIds("/masters/cities", ids),
     categories: (ids) => fetchNamesByIds("/masters/product-categories", ids),
     subCategories: (ids) => fetchNamesByIds("/masters/product-sub-categories", ids),
+    products: (ids) => fetchNamesByIds("/masters/products", ids, (d) => d.product_name),
   });
 
   function chipListHtml(ids, tableKey, fieldLabel) {
@@ -83,9 +84,9 @@ const SupplierPage = (() => {
   }
 
   // Form fields
-  let countryField, stateField, cityField, categoryMultiField, subCategoryMultiField, contactCountryField;
+  let countryField, stateField, cityField, categoryMultiField, subCategoryMultiField, productMultiField, contactCountryField;
   // Filter fields
-  let countryFilterField, stateFilterField, cityFilterField, categoryFilterField, subCategoryFilterField;
+  let countryFilterField, stateFilterField, cityFilterField, categoryFilterField, subCategoryFilterField, productFilterField;
 
   let selectedCountryId = null; // drives state field's scoping
   let selectedStateId = null; // drives city field's scoping
@@ -150,6 +151,25 @@ const SupplierPage = (() => {
       fetchLabelForValue: async (id) => (await apiGet(`/masters/product-sub-categories/${id}`)).data.name,
     });
 
+    // --- Main Profile Form: Products Supplied (multiple) -- the specific
+    // SKUs (Product master, the central item master) this supplier sources,
+    // as opposed to the broader Category/Sub-Category links above. ---
+    productMultiField = SearchableDropdown.createMulti({
+      mountEl: document.getElementById("productMultiMount"),
+      placeholder: "Search and add a product...",
+      fetchOptions: async (term, signal) => {
+        const { data } = await apiGet(
+          "/masters/products" + toQueryString({ search: term, page: 1, page_size: 20, sort_order: "asc", status: "active" }),
+          { signal }
+        );
+        return data.map((d) => ({ value: d.id, label: `${d.product_code} — ${d.product_name}` }));
+      },
+      fetchLabelForValue: async (id) => {
+        const { data } = await apiGet(`/masters/products/${id}`);
+        return `${data.product_code} — ${data.product_name}`;
+      },
+    });
+
     // --- Contact sub-form: Country ---
     contactCountryField = SearchableDropdown.create({
       mountEl: document.getElementById("cContactCountryMount"),
@@ -170,6 +190,19 @@ const SupplierPage = (() => {
       mountEl: document.getElementById("subCategoryFilterMount"),
       placeholder: "Filter: Key Strength Sub-Category",
       fetchOptions: searchFetcher("/masters/product-sub-categories"),
+      onChange: () => { currentPage = 1; loadTable(); },
+    });
+
+    productFilterField = SearchableDropdown.create({
+      mountEl: document.getElementById("productFilterMount"),
+      placeholder: "Filter: Product Supplied",
+      fetchOptions: async (term, signal) => {
+        const { data } = await apiGet(
+          "/masters/products" + toQueryString({ search: term, page: 1, page_size: 20, sort_order: "asc", status: "active" }),
+          { signal }
+        );
+        return data.map((d) => ({ value: d.id, label: `${d.product_code} — ${d.product_name}` }));
+      },
       onChange: () => { currentPage = 1; loadTable(); },
     });
 
@@ -228,7 +261,7 @@ const SupplierPage = (() => {
   async function loadTable() {
     const banner = document.getElementById("banner");
     const tableBody = document.getElementById("tableBody");
-    tableBody.innerHTML = '<tr><td colspan="13" class="muted">Loading...</td></tr>';
+    tableBody.innerHTML = '<tr><td colspan="15" class="muted">Loading...</td></tr>';
 
     const params = {
       page: currentPage,
@@ -245,12 +278,13 @@ const SupplierPage = (() => {
       visited_factory_office: document.getElementById("visitedFilter").value,
       category_id: categoryFilterField.getValue() || "",
       sub_category_id: subCategoryFilterField.getValue() || "",
+      product_id: productFilterField.getValue() || "",
     };
 
     try {
       const { data, meta } = await apiGet("/suppliers" + toQueryString(params));
       if (!data.length) {
-        tableBody.innerHTML = '<tr><td colspan="13" class="muted">No suppliers found.</td></tr>';
+        tableBody.innerHTML = '<tr><td colspan="15" class="muted">No suppliers found.</td></tr>';
       } else {
         // Resolve every related name needed for this page's rows only
         // (bounded by page size, not by how large Countries/Cities/etc.
@@ -261,6 +295,7 @@ const SupplierPage = (() => {
           resolver.resolve("cities", data.map((s) => s.city_id)),
           resolver.resolve("categories", data.flatMap((s) => s.category_ids || [])),
           resolver.resolve("subCategories", data.flatMap((s) => s.sub_category_ids || [])),
+          resolver.resolve("products", data.flatMap((s) => s.product_ids || [])),
         ]);
         tableBody.innerHTML = data.map(rowHtml).join("");
       }
@@ -271,16 +306,21 @@ const SupplierPage = (() => {
     }
   }
 
-  function rowHtml(s) {
+  function rowHtml(s, index) {
     const cityName = resolver.get("cities", s.city_id) || "…";
     const stateName = resolver.get("states", s.state_id) || "…";
     const countryName = resolver.get("countries", s.country_id) || "…";
+    // Sr. No. is a running number across the whole result set (page-aware),
+    // computed client-side the same way as every Master Data list.
+    const srNo = (currentPage - 1) * pageSize + index + 1;
     return `
       <tr data-supplier-id="${s.id}">
         <td><input type="checkbox" class="row-select" /></td>
+        <td class="cell-srno">${srNo}</td>
         <td><a href="#" data-view="${s.id}">${escapeHtml(s.company_name)}</a></td>
         <td>${chipListHtml(s.category_ids, "categories", "category:" + s.id)}</td>
         <td>${chipListHtml(s.sub_category_ids, "subCategories", "subcategory:" + s.id)}</td>
+        <td>${chipListHtml(s.product_ids, "products", "product:" + s.id)}</td>
         <td>${s.secondary_products_description ? escapeHtml(s.secondary_products_description).slice(0, 60) : '<span class="muted">—</span>'}</td>
         <td>${escapeHtml(countryName)}</td>
         <td>${escapeHtml(cityName)}, ${escapeHtml(stateName)}</td>
@@ -388,6 +428,7 @@ const SupplierPage = (() => {
       await cityField.setValueById(supplier.city_id);
       await categoryMultiField.setValuesByIds(supplier.category_ids || []);
       await subCategoryMultiField.setValuesByIds(supplier.sub_category_ids || []);
+      await productMultiField.setValuesByIds(supplier.product_ids || []);
     } else {
       selectedCountryId = null;
       selectedStateId = null;
@@ -396,6 +437,7 @@ const SupplierPage = (() => {
       cityField.clear();
       categoryMultiField.clear();
       subCategoryMultiField.clear();
+      productMultiField.clear();
     }
 
     document.getElementById("supplier_type").value = supplier && supplier.supplier_type ? supplier.supplier_type : "";
@@ -485,6 +527,7 @@ const SupplierPage = (() => {
       primary_website: document.getElementById("primary_website").value.trim() || null,
       secondary_website: document.getElementById("secondary_website").value.trim() || null,
       sub_category_ids: subCategoryMultiField.getValues(),
+      product_ids: productMultiField.getValues(),
       supplier_grade: document.getElementById("supplier_grade").value || null,
       current_status: document.getElementById("current_status").value || null,
       potential: document.getElementById("potential").value || null,
@@ -700,9 +743,51 @@ const SupplierPage = (() => {
     });
 
     let searchDebounce;
+    let pendingSrNoJump = null; // Sr. No. to scroll-to-and-highlight once the target page loads
+
+    // Same convention as Master Data pages: a bare integer in search means
+    // "take me to Sr. No. N" (jump to its page + highlight), not a text search.
+    function isSrNoQuery(value) {
+      return /^\d+$/.test(value.trim());
+    }
+
+    async function loadTableForSrNoJump() {
+      const searchInputEl = document.getElementById("searchInput");
+      const savedValue = searchInputEl.value;
+      searchInputEl.value = "";
+      await loadTable();
+      searchInputEl.value = savedValue;
+      if (pendingSrNoJump !== null) {
+        const rows = document.getElementById("tableBody").querySelectorAll("tr");
+        for (const row of rows) {
+          const srNoCell = row.querySelector(".cell-srno");
+          if (srNoCell && parseInt(srNoCell.textContent, 10) === pendingSrNoJump) {
+            row.classList.add("row-highlight");
+            row.scrollIntoView({ behavior: "smooth", block: "center" });
+            break;
+          }
+        }
+        pendingSrNoJump = null;
+      }
+    }
+
     document.getElementById("searchInput").addEventListener("input", () => {
       clearTimeout(searchDebounce);
-      searchDebounce = setTimeout(() => { currentPage = 1; loadTable(); }, 300);
+      searchDebounce = setTimeout(() => {
+        const raw = document.getElementById("searchInput").value.trim();
+        if (raw && isSrNoQuery(raw)) {
+          const srNo = parseInt(raw, 10);
+          if (srNo >= 1) {
+            currentPage = Math.ceil(srNo / pageSize);
+            pendingSrNoJump = srNo;
+            loadTableForSrNoJump();
+            return;
+          }
+        }
+        pendingSrNoJump = null;
+        currentPage = 1;
+        loadTable();
+      }, 300);
     });
 
     // Export
@@ -730,6 +815,7 @@ const SupplierPage = (() => {
       }
     }
 
+<<<<<<< HEAD
     // Auto-inject "Download Sample" button for Suppliers
     const wrapper = document.getElementById("importBtnWrapper");
     if (wrapper && !document.getElementById("downloadSampleBtn")) {
@@ -780,12 +866,46 @@ const SupplierPage = (() => {
             </div>
             ${errorLines ? `<div class="import-errors">${errorLines}</div>` : ""}
           </div>`;
+=======
+    // Import (column-mapping wizard: pick file -> map columns -> import)
+    ImportWizard.attach({
+      triggerInputEl: document.getElementById("importInput"),
+      apiBase: "/suppliers",
+      entityName: "supplier",
+      importHeaders: [
+        { key: "company_name", label: "Company Name", required: true },
+        { key: "supplier_type", label: "Supplier Type (manufacturer/trader)" },
+        { key: "brand_description", label: "Brand Description" },
+        { key: "country_code", label: "Country Code", required: true },
+        { key: "state_name", label: "State/Province Name", required: true },
+        { key: "city_name", label: "City Name", required: true },
+        { key: "contact_salutation", label: "Contact Salutation" },
+        { key: "contact_full_name", label: "Contact Full Name" },
+        { key: "contact_designation", label: "Contact Designation" },
+        { key: "contact_calling_number", label: "Contact Calling Number" },
+        { key: "contact_whatsapp_number", label: "Contact WhatsApp Number" },
+        { key: "contact_wechat_number", label: "Contact WeChat Number" },
+        { key: "email", label: "Email" },
+        { key: "tax_id_number", label: "Tax ID Number" },
+        { key: "address", label: "Address" },
+        { key: "town", label: "Town" },
+        { key: "primary_website", label: "Primary Website" },
+        { key: "secondary_website", label: "Secondary Website" },
+        { key: "supplier_grade", label: "Supplier Grade (A/B/C)" },
+        { key: "current_status", label: "Current Status (new/existing)" },
+        { key: "potential", label: "Potential (yes/no)" },
+        { key: "potential_reason", label: "Potential Reason" },
+        { key: "secondary_products_description", label: "Secondary Products Description" },
+        { key: "visited_factory_office", label: "Visited Factory/Office (true/false)" },
+        { key: "visit_remarks", label: "Visit Remarks" },
+        { key: "overall_remarks", label: "Overall Remarks" },
+        { key: "is_active", label: "Is Active (true/false)" },
+      ],
+      summaryEl: document.getElementById("importSummary"),
+      onComplete: async () => {
+>>>>>>> origin/main
         await loadTable();
-      } catch (err) {
-        showError(banner, err);
-      } finally {
-        e.target.value = "";
-      }
+      },
     });
 
     loadTable();

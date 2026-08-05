@@ -51,9 +51,6 @@ const Auth = {
     if (profile) {
       localStorage.setItem("erp_profile", JSON.stringify(profile));
     }
-    // Broadcast to other tabs (see the storage-event listener below) so a
-    // refresh in one tab updates every other open tab's in-memory token
-    // use immediately, instead of each tab racing its own refresh later.
   },
   updateProfile(profile) {
     localStorage.setItem("erp_profile", JSON.stringify(profile));
@@ -67,8 +64,46 @@ const Auth = {
     return Boolean(this.getAccessToken());
   },
   hasPermission(code) {
+    if (!code) return true;
     const profile = this.getProfile();
-    return Boolean(profile && Array.isArray(profile.permissions) && profile.permissions.includes(code));
+    if (!profile || !Array.isArray(profile.permissions)) return false;
+    const perms = profile.permissions;
+    if (perms.includes(code)) return true;
+
+    // Check alias mapping (view <-> read)
+    if (code.endsWith(".view")) {
+      const readAlias = code.replace(/\.view$/, ".read");
+      if (perms.includes(readAlias)) return true;
+    } else if (code.endsWith(".read")) {
+      const viewAlias = code.replace(/\.read$/, ".view");
+      if (perms.includes(viewAlias)) return true;
+    }
+
+    // Hierarchical or module fallback (e.g. masters.brand.create -> brand.create)
+    const parts = code.split(".");
+    if (parts.length > 2) {
+      const shortCode = parts.slice(1).join(".");
+      if (perms.includes(shortCode)) return true;
+    }
+    return false;
+  },
+  can(action, page) {
+    if (!page) return false;
+    return this.hasPermission(`${page}.${action}`);
+  },
+  applyPermissionVisibility(container = document) {
+    if (!container) return;
+    const elements = container.querySelectorAll("[data-permission]");
+    elements.forEach((el) => {
+      const perm = el.getAttribute("data-permission");
+      if (perm && !this.hasPermission(perm)) {
+        el.style.display = "none";
+        el.setAttribute("aria-hidden", "true");
+        if (el.tagName === "BUTTON" || el.tagName === "A") {
+          el.remove ? el.remove() : (el.style.display = "none");
+        }
+      }
+    });
   },
   requireLogin() {
     if (!this.isLoggedIn()) {

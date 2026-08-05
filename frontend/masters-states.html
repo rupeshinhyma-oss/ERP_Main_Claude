@@ -35,7 +35,7 @@
 
         <div class="card">
           <div class="toolbar">
-            <input type="text" id="searchInput" placeholder="Search name or code..." />
+            <input type="text" id="searchInput" placeholder="Search name or code or Sr. No..." />
             <select id="countryFilter">
               <option value="">All countries</option>
             </select>
@@ -50,6 +50,7 @@
             <table>
               <thead>
                 <tr>
+                  <th>Sr. No.</th>
                   <th>Name</th>
                   <th>Code</th>
                   <th>Country</th>
@@ -109,6 +110,7 @@
 
   <script src="js/api.js"></script>
   <script src="js/nav.js"></script>
+  <script src="js/import-wizard.js"></script>
   <script src="js/masters-common.js"></script>
   <script>
     renderShell("masters-states");
@@ -124,6 +126,12 @@
       apiBase: "/masters/states",
       permissionPrefix: "state",
       entityName: "state",
+      importHeaders: [
+        { key: "country_code", label: "Country Code", required: true },
+        { key: "name", label: "State/Province Name", required: true },
+        { key: "code", label: "State Code" },
+        { key: "status", label: "Status (active/inactive)" },
+      ],
       columns: [
         { header: "Name", render: (s) => `<span class="cell-primary">${escapeHtml(s.name)}</span>` },
         { header: "Code", render: (s) => escapeHtml(s.code || "—") },

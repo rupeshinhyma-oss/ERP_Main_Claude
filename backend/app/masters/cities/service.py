@@ -24,6 +24,7 @@ from app.masters.import_export import (
     ImportSummary,
     build_csv_export,
     build_excel_export,
+    model_to_dict,
     parse_rows_from_file,
     run_import,
 )
@@ -86,8 +87,13 @@ class CityService:
         country_id = field_values["country_id"]
         name = field_values.get("name")
         await self._validate_state_and_country(state_id, country_id)
-        if name and await self.repository.name_exists_in_state(state_id, name):
-            raise ConflictException(f"City name {name!r} already exists in this state.")
+        if name:
+            existing = await self.repository.get_by_name_in_state(state_id, name)
+            if existing is not None:
+                raise ConflictException(
+                    f"City name {name!r} already exists in this state.",
+                    details={"existing": model_to_dict(existing)},
+                )
 
         city = await self.repository.create(**field_values)
         await self._invalidate_cache()
@@ -101,8 +107,13 @@ class CityService:
         name = field_values.get("name")
         if field_values.get("state_id") is not None or field_values.get("country_id") is not None:
             await self._validate_state_and_country(state_id, country_id)
-        if name and await self.repository.name_exists_in_state(state_id, name, exclude_id=city_id):
-            raise ConflictException(f"City name {name!r} already exists in this state.")
+        if name:
+            existing = await self.repository.get_by_name_in_state(state_id, name, exclude_id=city_id)
+            if existing is not None:
+                raise ConflictException(
+                    f"City name {name!r} already exists in this state.",
+                    details={"existing": model_to_dict(existing)},
+                )
 
         changes = {k: v for k, v in field_values.items() if v is not None}
         if changes:

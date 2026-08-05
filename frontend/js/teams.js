@@ -119,7 +119,7 @@ const TeamsPage = (() => {
   async function loadEmployeesTable() {
     const banner = document.getElementById("banner");
     const tableBody = document.getElementById("empTableBody");
-    tableBody.innerHTML = '<tr><td colspan="7" class="muted">Loading...</td></tr>';
+    tableBody.innerHTML = '<tr><td colspan="8" class="muted">Loading...</td></tr>';
     const canManagePasswords = Auth.hasPermission("settings.manage");
     const params = {
       page: emp.page,
@@ -133,10 +133,14 @@ const TeamsPage = (() => {
     try {
       const { data, meta } = await apiGet("/employees" + toQueryString(params));
       if (!data.length) {
-        tableBody.innerHTML = '<tr><td colspan="7" class="muted">No employees found.</td></tr>';
+        tableBody.innerHTML = '<tr><td colspan="8" class="muted">No employees found.</td></tr>';
       } else {
-        tableBody.innerHTML = data.map((e) => `
+        // Sr. No. is a running number across the whole result set (page-aware),
+        // same convention as every Master Data list and Suppliers.
+        const startingSrNo = (emp.page - 1) * emp.pageSize + 1;
+        tableBody.innerHTML = data.map((e, index) => `
           <tr>
+            <td class="cell-srno">${startingSrNo + index}</td>
             <td>${escapeHtml(e.employee_code)}</td>
             <td><a href="./employee-detail.html?id=${e.id}">${escapeHtml(e.display_name)}</a></td>
             <td>${e.department_id ? escapeHtml(departmentName(e.department_id)) : "—"}</td>
@@ -172,9 +176,49 @@ const TeamsPage = (() => {
     // once loadSharedLookups() resolves (they'd be empty if populated here).
 
     let searchDebounce;
+    let empPendingSrNoJump = null;
+
+    function isSrNoQuery(value) {
+      return /^\d+$/.test(value.trim());
+    }
+
+    async function loadEmployeesTableForSrNoJump() {
+      const searchInputEl = document.getElementById("empSearchInput");
+      const savedValue = searchInputEl.value;
+      searchInputEl.value = "";
+      await loadEmployeesTable();
+      searchInputEl.value = savedValue;
+      if (empPendingSrNoJump !== null) {
+        const rows = document.getElementById("empTableBody").querySelectorAll("tr");
+        for (const row of rows) {
+          const srNoCell = row.querySelector(".cell-srno");
+          if (srNoCell && parseInt(srNoCell.textContent, 10) === empPendingSrNoJump) {
+            row.classList.add("row-highlight");
+            row.scrollIntoView({ behavior: "smooth", block: "center" });
+            break;
+          }
+        }
+        empPendingSrNoJump = null;
+      }
+    }
+
     document.getElementById("empSearchInput").addEventListener("input", () => {
       clearTimeout(searchDebounce);
-      searchDebounce = setTimeout(() => { emp.page = 1; loadEmployeesTable(); }, 300);
+      searchDebounce = setTimeout(() => {
+        const raw = document.getElementById("empSearchInput").value.trim();
+        if (raw && isSrNoQuery(raw)) {
+          const srNo = parseInt(raw, 10);
+          if (srNo >= 1) {
+            emp.page = Math.ceil(srNo / emp.pageSize);
+            empPendingSrNoJump = srNo;
+            loadEmployeesTableForSrNoJump();
+            return;
+          }
+        }
+        empPendingSrNoJump = null;
+        emp.page = 1;
+        loadEmployeesTable();
+      }, 300);
     });
     ["empDepartmentFilter", "empDesignationFilter", "empStatusFilter"].forEach((id) => {
       document.getElementById(id).addEventListener("change", () => { emp.page = 1; loadEmployeesTable(); });
@@ -275,7 +319,7 @@ const TeamsPage = (() => {
   async function loadDepartmentsTable() {
     const banner = document.getElementById("banner");
     const tableBody = document.getElementById("deptTableBody");
-    tableBody.innerHTML = '<tr><td colspan="6" class="muted">Loading...</td></tr>';
+    tableBody.innerHTML = '<tr><td colspan="7" class="muted">Loading...</td></tr>';
     const params = {
       page: dept.page,
       page_size: dept.pageSize,
@@ -288,10 +332,12 @@ const TeamsPage = (() => {
       const canUpdate = Auth.hasPermission("department.update");
       const canDelete = Auth.hasPermission("department.delete");
       if (!data.length) {
-        tableBody.innerHTML = '<tr><td colspan="6" class="muted">No departments found.</td></tr>';
+        tableBody.innerHTML = '<tr><td colspan="7" class="muted">No departments found.</td></tr>';
       } else {
-        tableBody.innerHTML = data.map((d) => `
+        const startingSrNo = (dept.page - 1) * dept.pageSize + 1;
+        tableBody.innerHTML = data.map((d, index) => `
           <tr>
+            <td class="cell-srno">${startingSrNo + index}</td>
             <td>${escapeHtml(d.code)}</td>
             <td>${escapeHtml(d.name)}</td>
             <td>${d.parent_department_id ? escapeHtml(departmentName(d.parent_department_id)) : "—"}</td>
@@ -399,9 +445,49 @@ const TeamsPage = (() => {
     });
 
     let searchDebounce;
+    let deptPendingSrNoJump = null;
+
+    function isDeptSrNoQuery(value) {
+      return /^\d+$/.test(value.trim());
+    }
+
+    async function loadDepartmentsTableForSrNoJump() {
+      const searchInputEl = document.getElementById("deptSearchInput");
+      const savedValue = searchInputEl.value;
+      searchInputEl.value = "";
+      await loadDepartmentsTable();
+      searchInputEl.value = savedValue;
+      if (deptPendingSrNoJump !== null) {
+        const rows = document.getElementById("deptTableBody").querySelectorAll("tr");
+        for (const row of rows) {
+          const srNoCell = row.querySelector(".cell-srno");
+          if (srNoCell && parseInt(srNoCell.textContent, 10) === deptPendingSrNoJump) {
+            row.classList.add("row-highlight");
+            row.scrollIntoView({ behavior: "smooth", block: "center" });
+            break;
+          }
+        }
+        deptPendingSrNoJump = null;
+      }
+    }
+
     document.getElementById("deptSearchInput").addEventListener("input", () => {
       clearTimeout(searchDebounce);
-      searchDebounce = setTimeout(() => { dept.page = 1; loadDepartmentsTable(); }, 300);
+      searchDebounce = setTimeout(() => {
+        const raw = document.getElementById("deptSearchInput").value.trim();
+        if (raw && isDeptSrNoQuery(raw)) {
+          const srNo = parseInt(raw, 10);
+          if (srNo >= 1) {
+            dept.page = Math.ceil(srNo / dept.pageSize);
+            deptPendingSrNoJump = srNo;
+            loadDepartmentsTableForSrNoJump();
+            return;
+          }
+        }
+        deptPendingSrNoJump = null;
+        dept.page = 1;
+        loadDepartmentsTable();
+      }, 300);
     });
     document.getElementById("deptStatusFilter").addEventListener("change", () => { dept.page = 1; loadDepartmentsTable(); });
   }
@@ -415,7 +501,7 @@ const TeamsPage = (() => {
   async function loadDesignationsTable() {
     const banner = document.getElementById("banner");
     const tableBody = document.getElementById("desigTableBody");
-    tableBody.innerHTML = '<tr><td colspan="5" class="muted">Loading...</td></tr>';
+    tableBody.innerHTML = '<tr><td colspan="6" class="muted">Loading...</td></tr>';
     const params = {
       page: desig.page,
       page_size: desig.pageSize,
@@ -428,10 +514,12 @@ const TeamsPage = (() => {
       const canUpdate = Auth.hasPermission("designation.update");
       const canDelete = Auth.hasPermission("designation.delete");
       if (!data.length) {
-        tableBody.innerHTML = '<tr><td colspan="5" class="muted">No designations found.</td></tr>';
+        tableBody.innerHTML = '<tr><td colspan="6" class="muted">No designations found.</td></tr>';
       } else {
-        tableBody.innerHTML = data.map((d) => `
+        const startingSrNo = (desig.page - 1) * desig.pageSize + 1;
+        tableBody.innerHTML = data.map((d, index) => `
           <tr>
+            <td class="cell-srno">${startingSrNo + index}</td>
             <td>${escapeHtml(d.code)}</td>
             <td>${escapeHtml(d.title)}</td>
             <td>${d.level ?? "—"}</td>
@@ -534,9 +622,49 @@ const TeamsPage = (() => {
     });
 
     let searchDebounce;
+    let desigPendingSrNoJump = null;
+
+    function isDesigSrNoQuery(value) {
+      return /^\d+$/.test(value.trim());
+    }
+
+    async function loadDesignationsTableForSrNoJump() {
+      const searchInputEl = document.getElementById("desigSearchInput");
+      const savedValue = searchInputEl.value;
+      searchInputEl.value = "";
+      await loadDesignationsTable();
+      searchInputEl.value = savedValue;
+      if (desigPendingSrNoJump !== null) {
+        const rows = document.getElementById("desigTableBody").querySelectorAll("tr");
+        for (const row of rows) {
+          const srNoCell = row.querySelector(".cell-srno");
+          if (srNoCell && parseInt(srNoCell.textContent, 10) === desigPendingSrNoJump) {
+            row.classList.add("row-highlight");
+            row.scrollIntoView({ behavior: "smooth", block: "center" });
+            break;
+          }
+        }
+        desigPendingSrNoJump = null;
+      }
+    }
+
     document.getElementById("desigSearchInput").addEventListener("input", () => {
       clearTimeout(searchDebounce);
-      searchDebounce = setTimeout(() => { desig.page = 1; loadDesignationsTable(); }, 300);
+      searchDebounce = setTimeout(() => {
+        const raw = document.getElementById("desigSearchInput").value.trim();
+        if (raw && isDesigSrNoQuery(raw)) {
+          const srNo = parseInt(raw, 10);
+          if (srNo >= 1) {
+            desig.page = Math.ceil(srNo / desig.pageSize);
+            desigPendingSrNoJump = srNo;
+            loadDesignationsTableForSrNoJump();
+            return;
+          }
+        }
+        desigPendingSrNoJump = null;
+        desig.page = 1;
+        loadDesignationsTable();
+      }, 300);
     });
     document.getElementById("desigStatusFilter").addEventListener("change", () => { desig.page = 1; loadDesignationsTable(); });
   }

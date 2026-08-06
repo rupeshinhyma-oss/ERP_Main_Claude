@@ -7,12 +7,23 @@
   <link rel="stylesheet" href="css/style.css" />
   <style>
     .pass-display { background: #eff6ff; border: 1px solid #bfdbfe; color: #1e40af; padding: 10px 14px; border-radius: 6px; font-family: monospace; font-size: 14px; font-weight: 700; display: inline-block; margin-top: 6px; user-select: all; }
-    .action-btn-group { display: flex; gap: 4px; flex-wrap: wrap; }
     .badge-suspended { background: #fef3c7; color: #92400e; }
     .badge-locked { background: #fee2e2; color: #991b1b; }
     .badge-pwd-req { background: #f3e8ff; color: #6b21a8; }
     .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; font-size: 14px; text-align: left; }
     .detail-label { font-weight: 600; color: #4b5563; }
+    
+    /* Sleek 3-Dots Action Dropdown Menu */
+    .action-dropdown { position: relative; display: inline-block; text-align: left; }
+    .action-dropdown-btn { background: #f1f5f9; border: 1px solid #cbd5e1; color: #334155; padding: 5px 12px; border-radius: 6px; font-size: 12.5px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; transition: all 0.15s ease; white-space: nowrap; }
+    .action-dropdown-btn:hover { background: #e2e8f0; color: #0f172a; border-color: #94a3b8; }
+    .action-dropdown-menu { position: absolute; right: 0; top: calc(100% + 4px); background: #ffffff; border: 1px solid #cbd5e1; border-radius: 8px; box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.15), 0 8px 10px -6px rgba(0, 0, 0, 0.1); min-width: 175px; z-index: 1000; display: none; flex-direction: column; padding: 5px; }
+    .action-dropdown-menu.show { display: flex; }
+    .action-dropdown-item { display: flex; align-items: center; gap: 8px; padding: 7px 12px; font-size: 12.5px; color: #334155; background: none; border: none; width: 100%; text-align: left; border-radius: 5px; cursor: pointer; font-weight: 500; transition: background 0.12s ease, color 0.12s ease; white-space: nowrap; }
+    .action-dropdown-item:hover { background: #f1f5f9; color: #0f172a; }
+    .action-dropdown-item.danger { color: #dc2626; }
+    .action-dropdown-item.danger:hover { background: #fef2f2; color: #991b1b; }
+    .action-dropdown-divider { height: 1px; background: #e2e8f0; margin: 4px 0; }
   </style>
 </head>
 <body>
@@ -331,30 +342,42 @@
 
             const actions = [];
             if (canViewUser) {
-              actions.push(`<button class="btn btn-small" onclick="viewUser('${u.id}')" title="View details">👁️ View</button>`);
+              actions.push(`<button class="action-dropdown-item" onclick="viewUser('${u.id}')">👁️ View Details</button>`);
             }
             if (canModifyTarget) {
-              actions.push(`<button class="btn btn-small" onclick="openEditUserById('${u.id}')" title="Edit profile">✏️ Edit</button>`);
+              actions.push(`<button class="action-dropdown-item" onclick="openEditUserById('${u.id}')">✏️ Edit Profile</button>`);
               if (canManage) {
-                actions.push(`<button class="btn btn-small" onclick="resetUserPassword('${u.id}', '${safeUsername}')" title="Reset Password">🔑 Reset Pass</button>`);
-                actions.push(`<button class="btn btn-small" onclick="openAssignRole('${u.id}')" title="Assign Role">🛡️ Role</button>`);
+                actions.push(`<button class="action-dropdown-item" onclick="resetUserPassword('${u.id}', '${safeUsername}')">🔑 Reset Password</button>`);
+                actions.push(`<button class="action-dropdown-item" onclick="openAssignRole('${u.id}')">🛡️ Assign Role</button>`);
               }
+              actions.push(`<div class="action-dropdown-divider"></div>`);
               if (statusUpper === 'ACTIVE') {
-                actions.push(`<button class="btn btn-small" onclick="deactivateUser('${u.id}', '${safeUsername}')">Deactivate</button>`);
+                actions.push(`<button class="action-dropdown-item" onclick="deactivateUser('${u.id}', '${safeUsername}')">⏸️ Deactivate</button>`);
               }
               if (statusUpper === 'INACTIVE' || statusUpper === 'PENDING') {
-                actions.push(`<button class="btn btn-small" onclick="activateUser('${u.id}', '${safeUsername}')">Activate</button>`);
+                actions.push(`<button class="action-dropdown-item" onclick="activateUser('${u.id}', '${safeUsername}')">▶️ Activate</button>`);
               }
               if (statusUpper !== 'SUSPENDED') {
-                actions.push(`<button class="btn btn-small" onclick="suspendUser('${u.id}', '${safeUsername}')">Suspend</button>`);
+                actions.push(`<button class="action-dropdown-item" onclick="suspendUser('${u.id}', '${safeUsername}')">⚡ Suspend Account</button>`);
               }
               if (statusUpper === 'LOCKED') {
-                actions.push(`<button class="btn btn-small" onclick="unlockUser('${u.id}', '${safeUsername}')">Unlock</button>`);
+                actions.push(`<button class="action-dropdown-item" onclick="unlockUser('${u.id}', '${safeUsername}')">🔓 Unlock Account</button>`);
               }
               if (canManage) {
-                actions.push(`<button class="btn btn-small btn-danger" onclick="forceLogoutUser('${u.id}', '${safeUsername}')" title="Force Logout">Logout All</button>`);
+                actions.push(`<button class="action-dropdown-item danger" onclick="forceLogoutUser('${u.id}', '${safeUsername}')">🚪 Force Logout All</button>`);
               }
             }
+
+            const menuHtml = actions.length ? `
+              <div class="action-dropdown">
+                <button class="action-dropdown-btn" onclick="toggleUserMenu(event, '${u.id}')">
+                  ⋮ Actions ▾
+                </button>
+                <div class="action-dropdown-menu" id="userMenu-${u.id}">
+                  ${actions.join("")}
+                </div>
+              </div>
+            ` : "—";
 
             return `
             <tr>
@@ -367,32 +390,56 @@
               <td>${escapeHtml(u.department_name || "—")}</td>
               <td>${escapeHtml(u.designation_name || "—")}</td>
               <td>${u.last_login_at ? new Date(u.last_login_at).toLocaleString() : "Never"}</td>
-              <td>
-                <div class="action-btn-group">
-                  ${actions.join(" ")}
-                </div>
+              <td class="actions" style="text-align: right;">
+                ${menuHtml}
               </td>
             </tr>`;
           }).join("");
         }
-        if (meta && meta.pagination) {
-          renderFlexiblePagination("pagination", meta.pagination, {
-            pageSize: pageSize,
-            onPageChange: (newPage) => {
-              currentPage = newPage;
-              loadUsers();
-            },
-            onPageSizeChange: (newSize) => {
-              pageSize = newSize;
-              currentPage = 1;
-              loadUsers();
-            },
-          });
-        }
+        const totalRecords = typeof data.total === "number" ? data.total : items.length;
+        const totalPages = Math.max(1, Math.ceil(totalRecords / pageSize));
+        const paginationMeta = {
+          current_page: currentPage,
+          total_pages: totalPages,
+          total_records: totalRecords,
+          page_size: pageSize,
+        };
+
+        renderFlexiblePagination("pagination", paginationMeta, {
+          pageSize: pageSize,
+          onPageChange: (newPage) => {
+            currentPage = newPage;
+            loadUsers();
+          },
+          onPageSizeChange: (newSize) => {
+            pageSize = newSize;
+            currentPage = 1;
+            loadUsers();
+          },
+        });
       } catch (err) {
         showError(banner, err);
       }
     }
+
+    // Toggle 3-Dots Action Dropdown Menu
+    window.toggleUserMenu = function(e, userId) {
+      e.stopPropagation();
+      const currentMenu = document.getElementById(`userMenu-${userId}`);
+      const isShowing = currentMenu.classList.contains("show");
+      
+      document.querySelectorAll(".action-dropdown-menu.show").forEach(m => m.classList.remove("show"));
+      
+      if (!isShowing) {
+        currentMenu.classList.add("show");
+      }
+    };
+
+    document.addEventListener("click", (e) => {
+      if (!e.target.closest(".action-dropdown")) {
+        document.querySelectorAll(".action-dropdown-menu.show").forEach(m => m.classList.remove("show"));
+      }
+    });
 
     // Search and Filter Handlers
     document.addEventListener("change", (e) => {

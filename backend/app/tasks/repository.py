@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.common.base_repository import BaseRepository
-from app.tasks.models import Task, TaskPriority, TaskStatus
+from app.tasks.models import Task, TaskPriority, TaskStatus, TaskVisibility
 
 
 class TaskRepository(BaseRepository[Task]):
@@ -32,14 +32,27 @@ class TaskRepository(BaseRepository[Task]):
         assigned_to_id: uuid.UUID | None = None,
         created_by_id: uuid.UUID | None = None,
         search_query: str | None = None,
+        current_user_id: uuid.UUID | None = None,
+        is_admin: bool = False,
     ) -> tuple[list[Task], int]:
-        """Fetch tasks with filtering, search query, and pagination."""
+        """Fetch tasks with filtering, search query, visibility scoping, and pagination."""
         stmt = select(Task).options(
             selectinload(Task.assigned_to),
             selectinload(Task.created_by),
         )
 
         filters = []
+
+        # Private vs Public Visibility Scoping
+        if current_user_id and not is_admin:
+            filters.append(
+                or_(
+                    Task.visibility == TaskVisibility.PUBLIC,
+                    Task.created_by_id == current_user_id,
+                    Task.assigned_to_id == current_user_id,
+                )
+            )
+
         if status is not None:
             filters.append(Task.status == status)
         if priority is not None:

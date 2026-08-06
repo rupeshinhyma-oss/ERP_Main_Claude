@@ -124,17 +124,20 @@ async function loadTasks() {
   updateStats();
   filterAndRender();
 
-  // Check for overdue tasks and show warning toast
+  // Check for overdue tasks assigned to current user and show warning toast
   const now = new Date();
+  const currentProf = Auth.getProfile();
+  const currentUserId = currentProf ? currentProf.id : null;
   const overdueTasks = allTasks.filter((t) => {
     if (!t.due_date) return false;
     if (t.status === "COMPLETED" || t.status === "CANCELLED") return false;
-    return new Date(t.due_date) < now;
+    const isMyTask = (t.assigned_to_id && t.assigned_to_id === currentUserId) || (t.created_by_id && t.created_by_id === currentUserId);
+    return isMyTask && new Date(t.due_date) < now;
   });
 
   if (overdueTasks.length > 0) {
     const titles = overdueTasks.map((t) => `"${t.title}"`).join(", ");
-    showToast(`⚠️ Attention: ${overdueTasks.length} task(s) are OVERDUE! (${titles})`, "warning", 6000);
+    showToast(`⚠️ Attention: ${overdueTasks.length} task(s) assigned to you are OVERDUE! (${titles})`, "warning", 6000);
   }
 
   if (typeof window.loadNotifications === "function") {
@@ -163,51 +166,54 @@ function updateStats() {
 }
 
 function filterAndRender() {
-  const q = (document.getElementById("taskSearchInput")?.value || "").toLowerCase().trim();
-  const statusFilter = document.getElementById("statusFilterSelect")?.value || "";
-  const priorityFilter = document.getElementById("priorityFilterSelect")?.value || "";
-  const profile = Auth.getProfile();
+  let filtered = [...allTasks];
+  const currentProf = Auth.getProfile();
+  const currentUserId = currentProf ? currentProf.id : null;
 
-  let filtered = allTasks.filter((t) => {
-    // Search Query
-    if (q) {
-      const matchTitle = (t.title || "").toLowerCase().includes(q);
-      const matchDesc = (t.description || "").toLowerCase().includes(q);
-      const matchAssignee = (t.assigned_to?.username || "").toLowerCase().includes(q);
-      if (!matchTitle && !matchDesc && !matchAssignee) return false;
-    }
+  // Preset Filters
+  if (activePreset === "my_assigned" && currentUserId) {
+    filtered = filtered.filter((t) => t.assigned_to_id === currentUserId);
+  } else if (activePreset === "my_created" && currentUserId) {
+    filtered = filtered.filter((t) => t.created_by_id === currentUserId);
+  } else if (activePreset === "urgent") {
+    filtered = filtered.filter((t) => t.priority === "URGENT" || t.priority === "HIGH");
+  }
 
-    // Status Filter
-    if (statusFilter && t.status !== statusFilter) return false;
+  // Search Filter
+  const query = document.getElementById("taskSearchInput")?.value.trim().toLowerCase();
+  if (query) {
+    filtered = filtered.filter(
+      (t) =>
+        t.title.toLowerCase().includes(query) ||
+        (t.description && t.description.toLowerCase().includes(query)) ||
+        (t.assigned_to && t.assigned_to.username.toLowerCase().includes(query))
+    );
+  }
 
-    // Priority Filter
-    if (priorityFilter && t.priority !== priorityFilter) return false;
+  // Select Filters
+  const statusVal = document.getElementById("statusFilterSelect")?.value;
+  if (statusVal) {
+    filtered = filtered.filter((t) => t.status === statusVal);
+  }
 
-    // Preset Pills Filter
-    if (activePreset === "my_assigned") {
-      if (!profile || t.assigned_to_id !== profile.id) return false;
-    } else if (activePreset === "my_created") {
-      if (!profile || t.created_by_id !== profile.id) return false;
-    } else if (activePreset === "urgent") {
-      if (t.priority !== "URGENT" && t.priority !== "HIGH") return false;
-    }
-
-    return true;
-  });
+  const priorityVal = document.getElementById("priorityFilterSelect")?.value;
+  if (priorityVal) {
+    filtered = filtered.filter((t) => t.priority === priorityVal);
+  }
 
   if (activeView === "kanban") {
     renderKanbanView(filtered);
   } else {
-    renderListView(filtered);
+    renderTaskListView(filtered);
   }
 }
 
-function renderListView(tasks) {
+function renderTaskListView(tasks) {
   const tbody = document.getElementById("tasksTbody");
   if (!tbody) return;
 
   if (tasks.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; padding: 40px; color: var(--color-muted);">No tasks match your criteria.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding: 40px; color: var(--color-muted);">No tasks match the selected criteria.</td></tr>`;
     return;
   }
 
@@ -216,15 +222,16 @@ function renderListView(tasks) {
       const assigneeName = t.assigned_to ? escapeHtml(t.assigned_to.username) : "Unassigned";
       const creatorName = t.created_by ? escapeHtml(t.created_by.username) : "System";
       const dueDateFormatted = formatDate(t.due_date);
+      const visBadge = t.visibility === "PUBLIC"
+        ? `<span style="font-size:11px; padding:2px 6px; background:#eff6ff; color:#1d4ed8; border-radius:4px; margin-left:6px; font-weight:600;">🌐 Public</span>`
+        : `<span style="font-size:11px; padding:2px 6px; background:#f3f4f6; color:#4b5563; border-radius:4px; margin-left:6px; font-weight:600;">🔒 Private</span>`;
 
       return `
-      <tr>
-        <td class="cell-checkbox"><input type="checkbox" class="row-checkbox" value="${t.id}" /></td>
+      <tr style="cursor: pointer;" onclick="openTaskDetail('${t.id}')">
+        <td class="cell-checkbox" onclick="event.stopPropagation();"><input type="checkbox" class="row-checkbox" value="${t.id}" /></td>
         <td>
-          <div style="font-weight: 600; color: var(--color-text); font-size: 14px; cursor: pointer;" onclick="openTaskDetail('${t.id}')">
-            ${escapeHtml(t.title)}
-          </div>
-          ${t.description ? `<div style="font-size: 12px; color: var(--color-muted); max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(t.description)}</div>` : ""}
+          <div style="font-weight:600; color: var(--color-text);">${escapeHtml(t.title)} ${visBadge}</div>
+          ${t.description ? `<div style="font-size:12px; color:var(--color-muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:280px;">${escapeHtml(t.description)}</div>` : ""}
         </td>
         <td>${getStatusBadge(t.status)}</td>
         <td>${getPriorityBadge(t.priority)}</td>
@@ -382,6 +389,7 @@ function openCreateModal() {
   document.getElementById("taskDescription").value = "";
   document.getElementById("taskPriority").value = "MEDIUM";
   document.getElementById("taskStatus").value = "PENDING";
+  if (document.getElementById("taskVisibility")) document.getElementById("taskVisibility").value = "PRIVATE";
   document.getElementById("taskAssignee").value = "";
   document.getElementById("taskDueDate").value = "";
   document.getElementById("taskRelatedType").value = "";
@@ -403,6 +411,7 @@ function openEditModal(task) {
   document.getElementById("taskDescription").value = task.description || "";
   document.getElementById("taskPriority").value = task.priority || "MEDIUM";
   document.getElementById("taskStatus").value = task.status || "PENDING";
+  if (document.getElementById("taskVisibility")) document.getElementById("taskVisibility").value = task.visibility || "PRIVATE";
   document.getElementById("taskAssignee").value = task.assigned_to_id || "";
 
   if (task.due_date) {
@@ -429,6 +438,7 @@ async function handleSaveTask(e) {
   const description = document.getElementById("taskDescription").value.trim() || null;
   const priority = document.getElementById("taskPriority").value;
   const status = document.getElementById("taskStatus").value;
+  const visibility = document.getElementById("taskVisibility") ? document.getElementById("taskVisibility").value : "PRIVATE";
   const assigneeVal = document.getElementById("taskAssignee").value;
   const assigned_to_id = assigneeVal ? assigneeVal : null;
   const dueDateVal = document.getElementById("taskDueDate").value;
@@ -451,6 +461,7 @@ async function handleSaveTask(e) {
         description,
         priority,
         status,
+        visibility,
         assigned_to_id,
         due_date,
         related_entity_type,
@@ -464,6 +475,7 @@ async function handleSaveTask(e) {
         title,
         description,
         priority,
+        visibility,
         due_date,
         assigned_to_id,
         related_entity_type,
@@ -493,6 +505,12 @@ function openTaskDetail(taskId) {
   document.getElementById("detailDescription").textContent = task.description || "No description provided.";
   document.getElementById("detailStatusBadge").innerHTML = getStatusBadge(task.status);
   document.getElementById("detailPriorityBadge").innerHTML = getPriorityBadge(task.priority);
+  const visEl = document.getElementById("detailVisibilityBadge");
+  if (visEl) {
+    visEl.innerHTML = task.visibility === "PUBLIC"
+      ? `<span style="font-size:11.5px; padding:3px 8px; background:#eff6ff; color:#1d4ed8; border-radius:4px; font-weight:600;">🌐 Public</span>`
+      : `<span style="font-size:11.5px; padding:3px 8px; background:#f3f4f6; color:#4b5563; border-radius:4px; font-weight:600;">🔒 Private</span>`;
+  }
   document.getElementById("detailAssignee").textContent = task.assigned_to ? `${task.assigned_to.username} (${task.assigned_to.email})` : "Unassigned";
   document.getElementById("detailDueDate").textContent = formatDate(task.due_date);
   document.getElementById("detailCreatedBy").textContent = task.created_by ? `${task.created_by.username}` : "System";

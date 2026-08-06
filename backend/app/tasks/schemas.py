@@ -10,7 +10,7 @@ import uuid
 from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.tasks.models import TaskPriority, TaskStatus
+from app.tasks.models import TaskPriority, TaskStatus, TaskVisibility
 
 
 class UserSimpleRead(BaseModel):
@@ -29,6 +29,7 @@ class TaskCreate(BaseModel):
     title: str = Field(..., min_length=1, max_length=200, description="Task title")
     description: str | None = Field(default=None, description="Detailed task description")
     priority: TaskPriority = Field(default=TaskPriority.MEDIUM, description="Task priority level")
+    visibility: TaskVisibility = Field(default=TaskVisibility.PRIVATE, description="Task visibility level (PUBLIC or PRIVATE)")
     due_date: datetime | None = Field(default=None, description="Target completion timestamp")
     assigned_to_id: uuid.UUID | None = Field(default=None, description="User ID of assignee")
     related_entity_type: str | None = Field(default=None, max_length=50, description="Optional entity category (e.g. supplier)")
@@ -42,6 +43,7 @@ class TaskUpdate(BaseModel):
     description: str | None = Field(default=None)
     status: TaskStatus | None = Field(default=None)
     priority: TaskPriority | None = Field(default=None)
+    visibility: TaskVisibility | None = Field(default=None)
     due_date: datetime | None = Field(default=None)
     assigned_to_id: uuid.UUID | None = Field(default=None)
     related_entity_type: str | None = Field(default=None, max_length=50)
@@ -58,6 +60,7 @@ class TaskRead(BaseModel):
     description: str | None = None
     status: TaskStatus
     priority: TaskPriority
+    visibility: TaskVisibility = TaskVisibility.PRIVATE
     due_date: datetime | None = None
     assigned_to_id: uuid.UUID | None = None
     created_by_id: uuid.UUID | None = None

@@ -40,6 +40,7 @@ async def create_task(
         title=payload.title,
         description=payload.description,
         priority=payload.priority,
+        visibility=payload.visibility,
         due_date=payload.due_date,
         assigned_to_id=payload.assigned_to_id,
         created_by_id=current_user.id,
@@ -58,6 +59,7 @@ async def create_task(
             "title": task.title,
             "status": task.status.value,
             "priority": task.priority.value,
+            "visibility": task.visibility.value,
             "assigned_to_id": str(task.assigned_to_id) if task.assigned_to_id else None,
         },
         ip_address=request.client.host if request.client else None,
@@ -82,9 +84,10 @@ async def list_tasks(
     created_by_id: uuid.UUID | None = Query(default=None),
     q: str | None = Query(default=None, description="Search query across task title and description"),
     task_service: TaskService = Depends(get_task_service),
-    _current_user: CurrentUser = Depends(require_permission("task.view")),
+    current_user: CurrentUser = Depends(require_permission("task.view")),
 ) -> dict:
-    """List tasks, filtered and paginated."""
+    """List tasks, filtered and paginated with privacy scoping."""
+    is_admin = bool(current_user and current_user.permissions and ("settings.manage" in current_user.permissions or "user.manage" in current_user.permissions))
     tasks, total = await task_service.list_tasks(
         offset=page_params.offset,
         limit=page_params.limit,
@@ -93,6 +96,8 @@ async def list_tasks(
         assigned_to_id=assigned_to_id,
         created_by_id=created_by_id,
         search_query=q,
+        current_user_id=current_user.id,
+        is_admin=is_admin,
     )
     data = {
         "items": [TaskRead.model_validate(t).model_dump(mode="json") for t in tasks],
@@ -132,6 +137,7 @@ async def update_task(
         description=payload.description,
         status=payload.status,
         priority=payload.priority,
+        visibility=payload.visibility,
         due_date=payload.due_date,
         assigned_to_id=payload.assigned_to_id,
         related_entity_type=payload.related_entity_type,

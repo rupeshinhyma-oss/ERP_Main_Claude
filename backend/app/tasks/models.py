@@ -44,6 +44,13 @@ class TaskPriority(str, Enum):
     URGENT = "URGENT"
 
 
+class TaskVisibility(str, Enum):
+    """Visibility scope for tasks (PUBLIC or PRIVATE)."""
+
+    PUBLIC = "PUBLIC"
+    PRIVATE = "PRIVATE"
+
+
 class Task(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     """
     A single task row within the ERP task management module.
@@ -58,6 +65,9 @@ class Task(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     )
     priority: Mapped[TaskPriority] = mapped_column(
         SQLEnum(TaskPriority, native_enum=False), default=TaskPriority.MEDIUM, nullable=False, index=True
+    )
+    visibility: Mapped[TaskVisibility] = mapped_column(
+        SQLEnum(TaskVisibility, native_enum=False), default=TaskVisibility.PRIVATE, nullable=False, index=True
     )
     due_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
 

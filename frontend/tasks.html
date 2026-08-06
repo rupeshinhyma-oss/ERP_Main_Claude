@@ -576,15 +576,23 @@
 
           <div class="form-row-2">
             <div>
+              <label style="display:block; font-size:13px; font-weight:600; margin-bottom:6px;">Task Visibility</label>
+              <select id="taskVisibility" style="width:100%; padding:9px 12px; border:1px solid var(--color-border); border-radius:var(--radius-sm); font-size:13.5px;">
+                <option value="PRIVATE" selected>🔒 Private (Creator & Assignee Only)</option>
+                <option value="PUBLIC">🌐 Public (Visible to Everyone)</option>
+              </select>
+            </div>
+            <div>
               <label style="display:block; font-size:13px; font-weight:600; margin-bottom:6px;">Assign To User</label>
               <select id="taskAssignee" style="width:100%; padding:9px 12px; border:1px solid var(--color-border); border-radius:var(--radius-sm); font-size:13.5px;">
                 <option value="">-- Select Assignee --</option>
               </select>
             </div>
-            <div>
-              <label style="display:block; font-size:13px; font-weight:600; margin-bottom:6px;">Due Date & Time</label>
-              <input type="datetime-local" id="taskDueDate" style="width:100%; padding:8.5px 12px; border:1px solid var(--color-border); border-radius:var(--radius-sm); font-size:13.5px;" />
-            </div>
+          </div>
+
+          <div>
+            <label style="display:block; font-size:13px; font-weight:600; margin-bottom:6px;">Due Date & Time</label>
+            <input type="datetime-local" id="taskDueDate" style="width:100%; padding:8.5px 12px; border:1px solid var(--color-border); border-radius:var(--radius-sm); font-size:13.5px;" />
           </div>
 
           <div class="form-row-2">
@@ -620,6 +628,7 @@
         <div style="display:flex; align-items:center; gap:10px;">
           <span id="detailStatusBadge"></span>
           <span id="detailPriorityBadge"></span>
+          <span id="detailVisibilityBadge"></span>
         </div>
         <button type="button" class="btn-close" id="closeDetailModalBtn" style="border:none; background:none; font-size:20px; cursor:pointer; color:var(--color-muted);">&times;</button>
       </div>

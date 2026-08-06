@@ -471,11 +471,18 @@ window.loadNotifications = async function () {
     if (!res || !res.data || !Array.isArray(res.data.items)) return;
     const tasks = res.data.items;
     const now = new Date();
+    const currentProf = Auth.getProfile();
+    const currentUserId = currentProf ? currentProf.id : null;
 
     const notifications = [];
 
     tasks.forEach((t) => {
       if (t.status === "COMPLETED" || t.status === "CANCELLED") return;
+
+      // Only notify if task is assigned to or created by current user
+      const isMyTask = (t.assigned_to_id && t.assigned_to_id === currentUserId) || (t.created_by_id && t.created_by_id === currentUserId);
+      if (!isMyTask) return;
+
       const isOverdue = t.due_date && new Date(t.due_date) < now;
       if (isOverdue) {
         notifications.push({

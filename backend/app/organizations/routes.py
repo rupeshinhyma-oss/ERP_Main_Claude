@@ -47,18 +47,39 @@ async def _record_org_action(
     request.state.audit_logged = True
 
 
+from app.auth.dependencies import get_current_user
 from app.rbac.dependencies import require_super_admin
+
+
+@router.get("/public", summary="Get public organization profile details")
+async def get_public_organization(
+    request: Request,
+    organization_service: OrganizationService = Depends(get_organization_service),
+) -> dict:
+    """Fetch public organization profile data unauthenticated for login/signup UI."""
+    try:
+        organization = await organization_service.get_or_raise()
+        data = {
+            "company_name": organization.company_name,
+            "legal_name": organization.legal_name,
+            "logo_url": organization.logo_url,
+        }
+    except Exception:
+        data = {"company_name": "ERP Admin", "legal_name": None, "logo_url": None}
+    request_id = getattr(request.state, "request_id", "-")
+    return build_success_response(data=data, request_id=request_id)
+
 
 @router.get("", summary="Get the organization profile")
 async def get_organization(
     request: Request,
     organization_service: OrganizationService = Depends(get_organization_service),
-    _current_user: CurrentUser = Depends(require_super_admin()),
+    _current_user: CurrentUser = Depends(get_current_user),
 ) -> dict:
-    """Fetch the single company profile. Only accessible by Super Administrators."""
+    """Fetch the single company profile. Accessible by all authenticated users."""
     organization = await organization_service.get_or_raise()
     data = OrganizationRead.model_validate(organization).model_dump(mode="json")
-    return build_success_response(data=data, request_id=request.state.request_id)
+    return build_success_response(data=data, request_id=getattr(request.state, "request_id", "-"))
 
 
 @router.post("", status_code=status.HTTP_201_CREATED, summary="Create the organization profile")

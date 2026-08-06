@@ -76,7 +76,7 @@ const NAV_SECTIONS = [
   {
     label: "Settings",
     items: [
-      { key: "organization", label: "Organization Settings", href: "./organization.html", icon: "building", permission: "organization.manage", superAdminOnly: true },
+      { key: "organization", label: "Organization Settings", href: "./organization.html", icon: "building" },
       { key: "users", label: "User Accounts & Passwords", href: "./users.html", icon: "users", permission: "user.view" },
       { key: "audit", label: "Audit Log", href: "./audit.html", icon: "clock", permission: "audit.view" },
       { key: "rbac", label: "Roles & Permissions", href: "./rbac.html", icon: "shield", permission: "settings.manage" },
@@ -376,9 +376,12 @@ function renderShell(activeKey) {
     const title = PAGE_TITLES[activeKey] || "";
     topbarMount.outerHTML = `
       <header class="topbar" id="topbarMount">
-        <div class="topbar-search">
-          ${ICONS.search}
-          <input type="text" placeholder="Search ${title.toLowerCase()}..." disabled />
+        <div class="topbar-search-wrapper" style="position:relative;">
+          <div class="topbar-search">
+            ${ICONS.search}
+            <input type="text" id="universalSearchInput" placeholder="Search entire ERP (e.g. company, users, products, suppliers)..." autocomplete="off" />
+          </div>
+          <div id="universalSearchDropdown" class="universal-search-dropdown"></div>
         </div>
         <div class="topbar-spacer"></div>
         <div class="topbar-actions">
@@ -400,6 +403,9 @@ function renderShell(activeKey) {
           <button class="icon-btn" id="topbarLogout" title="Log out">${ICONS.logout}</button>
         </div>
       </header>`;
+
+    // Initialize Universal Search Behavior
+    initUniversalSearch();
 
     const logoutBtn = document.getElementById("topbarLogout");
     if (logoutBtn) {
@@ -521,7 +527,136 @@ window.loadNotifications = async function () {
           .join("");
       }
     }
-  } catch (err) {
-    console.warn("Failed to load notifications:", err);
-  }
+  } catch (e) { }
 };
+
+function initUniversalSearch() {
+  const input = document.getElementById("universalSearchInput");
+  const dropdown = document.getElementById("universalSearchDropdown");
+  if (!input || !dropdown) return;
+
+  let debounceTimer = null;
+  let currentItems = [];
+  let highlightedIndex = -1;
+
+  input.addEventListener("input", (e) => {
+    const val = e.target.value.trim();
+    if (debounceTimer) clearTimeout(debounceTimer);
+
+    if (!val) {
+      dropdown.classList.remove("active");
+      dropdown.innerHTML = "";
+      currentItems = [];
+      highlightedIndex = -1;
+      return;
+    }
+
+    debounceTimer = setTimeout(async () => {
+      try {
+        const res = await apiGet(`/search?q=${encodeURIComponent(val)}`);
+        if (!res || !res.data || !Array.isArray(res.data.results)) {
+          renderNoResults(val);
+          return;
+        }
+
+        const results = res.data.results;
+        if (results.length === 0) {
+          renderNoResults(val);
+          return;
+        }
+
+        renderSearchResults(results);
+      } catch (err) {
+        renderNoResults(val, "Error executing search");
+      }
+    }, 250);
+  });
+
+  function renderNoResults(query, customMsg) {
+    dropdown.innerHTML = `<div class="search-no-results">${customMsg || `No results matching "<strong>${escapeHtml(query)}</strong>"`}</div>`;
+    dropdown.classList.add("active");
+    currentItems = [];
+    highlightedIndex = -1;
+  }
+
+  function renderSearchResults(results) {
+    currentItems = results;
+    highlightedIndex = -1;
+
+    // Group items by category
+    const grouped = {};
+    results.forEach((item) => {
+      if (!grouped[item.category]) grouped[item.category] = [];
+      grouped[item.category].push(item);
+    });
+
+    let html = "";
+    Object.keys(grouped).forEach((cat) => {
+      const items = grouped[cat];
+      html += `
+        <div class="search-group-header">
+          <span>${escapeHtml(cat)}</span>
+          <span style="font-size:10px; font-weight:600; background:#cbd5e1; color:#1e293b; padding:1px 6px; border-radius:10px;">${items.length}</span>
+        </div>`;
+
+      items.forEach((item) => {
+        const iconSvg = ICONS[item.icon] || ICONS.box;
+        html += `
+          <a class="search-item" data-url="${escapeHtml(item.target_url)}" onclick="window.location.href='${escapeHtml(item.target_url)}';">
+            <div class="search-item-icon">${iconSvg}</div>
+            <div class="search-item-content">
+              <div class="search-item-title">${escapeHtml(item.title)}</div>
+              <div class="search-item-subtitle">${escapeHtml(item.subtitle || "")}</div>
+            </div>
+            <div class="search-item-badge">${escapeHtml(item.category)}</div>
+          </a>`;
+      });
+    });
+
+    dropdown.innerHTML = html;
+    dropdown.classList.add("active");
+  }
+
+  // Keyboard navigation & Esc key
+  input.addEventListener("keydown", (e) => {
+    if (!dropdown.classList.contains("active")) return;
+    const itemEls = dropdown.querySelectorAll(".search-item");
+
+    if (e.key === "Escape") {
+      dropdown.classList.remove("active");
+    } else if (e.key === "ArrowDown") {
+      e.preventDefault();
+      if (itemEls.length === 0) return;
+      highlightedIndex = (highlightedIndex + 1) % itemEls.length;
+      updateHighlight(itemEls);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      if (itemEls.length === 0) return;
+      highlightedIndex = (highlightedIndex - 1 + itemEls.length) % itemEls.length;
+      updateHighlight(itemEls);
+    } else if (e.key === "Enter") {
+      if (highlightedIndex >= 0 && highlightedIndex < itemEls.length) {
+        e.preventDefault();
+        itemEls[highlightedIndex].click();
+      }
+    }
+  });
+
+  function updateHighlight(itemEls) {
+    itemEls.forEach((el, idx) => {
+      if (idx === highlightedIndex) {
+        el.classList.add("highlighted");
+        el.scrollIntoView({ block: "nearest" });
+      } else {
+        el.classList.remove("highlighted");
+      }
+    });
+  }
+
+  // Close dropdown on click outside
+  document.addEventListener("click", (e) => {
+    if (!dropdown.contains(e.target) && e.target !== input) {
+      dropdown.classList.remove("active");
+    }
+  });
+}

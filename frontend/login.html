@@ -233,10 +233,10 @@
     <!-- Left Pane: Branding & Illustration -->
     <div class="left-pane">
       <div class="brand-header">
-        <div class="brand-logo">Y</div>
+        <div class="brand-logo" id="loginLogoMark">--</div>
         <div>
-          <div class="brand-name">YINGLIMA</div>
-          <div class="brand-sub">PROCUREMENT &amp; ERP</div>
+          <div class="brand-name" id="loginBrandName">ERP ADMIN</div>
+          <div class="brand-sub">ENTERPRISE SYSTEM</div>
         </div>
       </div>
 
@@ -272,8 +272,8 @@
       </div>
 
       <div class="left-footer">
-        <div class="left-footer-title">Yinglima Procurement &amp; Enterprise ERP System</div>
-        <div class="left-footer-desc">Secure multi-tenant inventory, supplier &amp; consignment management</div>
+        <div class="left-footer-title" id="loginFooterTitle">Enterprise ERP System</div>
+        <div class="left-footer-desc">Secure inventory, supplier &amp; consignment management</div>
       </div>
     </div>
 
@@ -340,17 +340,18 @@
     }
 
     async function loadOrgInfo() {
-      if (!Auth.isLoggedIn()) return;
       try {
-        const { data } = await apiGet("/organizations");
+        const { data } = await apiGet("/organizations/public");
         if (data && data.company_name) {
           const name = data.company_name;
           sessionStorage.setItem("erp_org_company_name", name);
-          document.title = `Log in — ${name}`;
-          const brandTitle = document.querySelector(".login-brand .brand-title");
-          const logoMark = document.querySelector(".login-brand .logo-mark");
-          if (brandTitle) brandTitle.textContent = name;
-          if (logoMark) logoMark.textContent = initials(name);
+          document.title = `Sign In — ${name}`;
+          const brandNameEl = document.getElementById("loginBrandName");
+          const logoMarkEl = document.getElementById("loginLogoMark");
+          const footerTitleEl = document.getElementById("loginFooterTitle");
+          if (brandNameEl) brandNameEl.textContent = name;
+          if (logoMarkEl) logoMarkEl.textContent = initials(name);
+          if (footerTitleEl) footerTitleEl.textContent = `${name} Enterprise ERP System`;
         }
       } catch (e) {
         /* fallback to default */

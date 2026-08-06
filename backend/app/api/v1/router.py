@@ -31,6 +31,7 @@ from app.members.routes import router as members_router
 from app.organizations.routes import router as organizations_router
 from app.queue.routes import router as queue_router
 from app.rbac.routes import router as rbac_router
+from app.search.routes import router as search_router
 from app.suppliers.routes import router as suppliers_router
 from app.tasks.routes import router as tasks_router
 from app.users.routes import router as users_router
@@ -45,6 +46,7 @@ api_router.include_router(rbac_router)
 api_router.include_router(queue_router)
 api_router.include_router(cache_router)
 api_router.include_router(audit_router)
+api_router.include_router(search_router)
 
 # Phase 6: Core Organization & User Management.
 api_router.include_router(organizations_router)

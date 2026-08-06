@@ -171,23 +171,13 @@ BOOTSTRAP_PERMISSIONS: list[tuple[str, str, str, str, str, str]] = [
 SUPER_ADMIN_ROLE_NAME = "super_admin"
 USER_ROLE_NAME = "user"
 
-DEFAULT_BUSINESS_ROLES = [
-    ("sales", "Sales Department Role for Managing Clients, Inquiries, and Suppliers.", [
-        "supplier.view", "supplier.create", "product.view", "brand.view", "category.view", "subcategory.view"
-    ]),
-    ("purchase", "Purchase Department Role for Supplier Management and Procurement.", [
-        "supplier.view", "supplier.create", "supplier.update", "supplier.export", "supplier.import", "product.view", "uom.view", "hsn.view"
-    ]),
-    ("hr", "Human Resources Department Role for User and Team Management.", [
-        "employee.view", "employee.create", "employee.update", "employee.export", "employee.import", "employee.approve", "department.view", "department.create", "department.update", "designation.view", "designation.create", "designation.update", "user.view"
-    ]),
-    ("accounts", "Accounts & Finance Role for Tax, Currencies, and Financial Reports.", [
-        "currency.view", "currency.create", "currency.update", "hsn.view", "hsn.create", "hsn.update", "supplier.view", "reports.view", "reports.export"
-    ]),
-    ("inventory", "Inventory & Warehouse Management Role.", [
-        "inventory.view", "inventory.create", "inventory.update", "inventory.approve", "inventory.export", "inventory.import", "product.view", "product.create", "product.update", "uom.view", "category.view", "subcategory.view"
-    ]),
-]
+# NOTE: There are intentionally only 3 seeded system roles: super_admin, admin,
+# and user. Anything beyond this (department-style roles like "sales",
+# "purchase", "hr", "accounts", "inventory", etc.) is NOT hardcoded here --
+# admins/super admins create, edit, and delete custom roles entirely through
+# the Roles & Permissions UI ("+ New Role"), which is backed by the fully
+# dynamic /rbac/roles CRUD API. This keeps the role model flexible instead of
+# baking a fixed set of business-department roles into every fresh install.
 
 USER_ROLE_PERMISSION_CODES: list[str] = [
     "employee.read",
@@ -314,21 +304,6 @@ async def seed() -> None:
             await session.delete(legacy_employee_role)
             await session.flush()
             logger.info("Purged legacy employee role.")
-
-        for r_name, r_desc, r_perms in DEFAULT_BUSINESS_ROLES:
-            b_role = await role_repo.get_by_name(r_name)
-            if b_role is None:
-                b_role = await role_repo.create(
-                    name=r_name,
-                    description=r_desc,
-                    is_system=False,
-                )
-                logger.info("Seeded business role.", extra={"role_name": r_name})
-                for code in r_perms:
-                    permission = await permission_repo.get_by_code(code)
-                    if permission:
-                        session.add(RolePermission(role_id=b_role.id, permission_id=permission.id))
-                await session.flush()
 
         # --- 3. Bootstrap admin user ----------------------------------------------------
         admin = await user_repo.get_by_username(settings.BOOTSTRAP_ADMIN_USERNAME)

@@ -32,8 +32,10 @@
     .permission-group-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; border-bottom: 1px solid var(--color-border); padding-bottom: 6px; }
     .permission-group-title { font-weight: 700; font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--color-primary, #3182ce); }
     .permission-checks { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 8px; }
-    .permission-checks label { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 500; cursor: pointer; user-select: none; }
-    .permission-checks input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--color-primary); }
+    #userPermGrid .permission-checks { grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); }
+    .permission-checks label, .user-perm-label { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 500; cursor: pointer; user-select: none; }
+    .permission-checks input[type="checkbox"], .user-perm-label input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--color-primary); flex-shrink: 0; }
+    .user-perm-label input[type="checkbox"]:disabled { cursor: not-allowed; opacity: 0.6; }
 
     .toggle-btn { background: none; border: none; font-size: 12px; font-weight: 600; color: var(--color-primary, #3182ce); cursor: pointer; padding: 2px 6px; border-radius: 4px; }
     .toggle-btn:hover { background: var(--color-border); }
@@ -164,36 +166,6 @@
         <div class="form-actions">
           <button type="submit" class="btn btn-primary">Save Role</button>
           <button type="button" class="btn" id="cancelBtn">Cancel</button>
-        </div>
-      </form>
-    </div>
-  </div>
-
-  <!-- Add User Override Modal -->
-  <div class="modal-backdrop" id="userOverrideModal" style="display:none;">
-    <div class="modal-card" style="max-width: 600px;">
-      <div class="modal-header">
-        <h2>Add Individual Permission Override</h2>
-        <button class="modal-close" id="overrideCloseBtn">&times;</button>
-      </div>
-      <form id="overrideForm">
-        <input type="hidden" id="overrideUserId" />
-        <div class="form-grid" style="grid-template-columns: 1fr;">
-          <div class="field">
-            <label>Permission *</label>
-            <select id="overridePermissionId" required><option value="">Select Permission...</option></select>
-          </div>
-          <div class="field">
-            <label>Override Action *</label>
-            <select id="overrideGrantType" required>
-              <option value="true">GRANT (Explicit Grant)</option>
-              <option value="false">DENY (Explicit Revoke)</option>
-            </select>
-          </div>
-        </div>
-        <div class="form-actions">
-          <button type="submit" class="btn btn-primary">Save Override</button>
-          <button type="button" class="btn" id="overrideCancelBtn">Cancel</button>
         </div>
       </form>
     </div>
@@ -573,10 +545,62 @@
       document.getElementById("sourcesTbody").innerHTML = renderTableRows(filtered);
     }
 
-    document.getElementById("userSelect").addEventListener("change", async (e) => {
-      const userId = e.target.value;
+    // Track pending (unsaved) checkbox changes for the currently-loaded user,
+    // and the baseline override state fetched from the server, so we can
+    // compute a minimal diff to send to the bulk endpoint on Save.
+    let currentOverrideUserId = null;
+    let baselineOverrideMap = {}; // permission code -> true/false (only entries that exist as explicit overrides)
+    let roleGrantedSet = new Set(); // permission codes granted via roles (informational, shown as "inherited")
+
+    function userPermissionCheckboxGridHtml(userId) {
+      const groups = groupPermissionsByModule(allPermissions);
+      return Object.keys(groups).sort().map((modKey) => {
+        const modTitle = MODULE_NAMES[modKey] || modKey.toUpperCase();
+        const items = groups[modKey];
+
+        const checks = items.map((p) => {
+          const override = baselineOverrideMap.hasOwnProperty(p.code) ? baselineOverrideMap[p.code] : null;
+          const inheritedFromRole = roleGrantedSet.has(p.code);
+          // Checkbox reflects the CURRENT effective state: explicit grant, or
+          // inherited-from-role (and not explicitly denied), or unchecked.
+          const checked = override === true || (override === null && inheritedFromRole);
+          let tag = "";
+          if (override === true) tag = '<span class="chip chip-grant" style="margin-left:6px;font-size:10px;padding:1px 6px;">DIRECT GRANT</span>';
+          else if (override === false) tag = '<span class="chip chip-deny" style="margin-left:6px;font-size:10px;padding:1px 6px;">DIRECT DENY</span>';
+          else if (inheritedFromRole) tag = '<span class="chip" style="margin-left:6px;font-size:10px;padding:1px 6px;background:#e2e8f0;color:#334155;">FROM ROLE</span>';
+
+          return `
+            <label class="user-perm-label">
+              <input type="checkbox" class="user-perm-check user-perm-mod-${modKey}" value="${p.code}" ${checked ? "checked" : ""} ${!canManage ? "disabled" : ""} />
+              <span>${escapeHtml(getFriendlyPermissionLabel(p.code))}${tag}</span>
+            </label>`;
+        }).join("");
+
+        const allCheckedInMod = items.every(p => {
+          const override = baselineOverrideMap.hasOwnProperty(p.code) ? baselineOverrideMap[p.code] : null;
+          const inheritedFromRole = roleGrantedSet.has(p.code);
+          return override === true || (override === null && inheritedFromRole);
+        });
+
+        return `
+          <div class="permission-group">
+            <div class="permission-group-header">
+              <div class="permission-group-title">${escapeHtml(modTitle)}</div>
+              ${canManage ? `<button type="button" class="toggle-btn" data-toggle-user-mod="${modKey}">${allCheckedInMod ? "Deselect Group" : "Select Group"}</button>` : ""}
+            </div>
+            <div class="permission-checks">${checks}</div>
+          </div>`;
+      }).join("");
+    }
+
+    function selectedUserPermissionCodes() {
+      return Array.from(document.querySelectorAll(".user-perm-check:checked")).map((el) => el.value);
+    }
+
+    async function loadUserOverridesTab(userId) {
       const container = document.getElementById("userEffectiveContainer");
       if (!userId) {
+        currentOverrideUserId = null;
         container.innerHTML = '<p class="muted">Select a user above to view effective permissions and manage direct overrides.</p>';
         return;
       }
@@ -589,26 +613,35 @@
         const breakdown = effRes.data;
         const userOverrides = userPermsRes.data || [];
 
-        let overrideHtml = `
+        currentOverrideUserId = userId;
+        baselineOverrideMap = {};
+        for (const o of userOverrides) baselineOverrideMap[o.code] = o.is_granted;
+        roleGrantedSet = new Set(breakdown.role_permissions || []);
+
+        const isSuperAdminUser = breakdown.is_super_admin;
+
+        let headerHtml = `
           <div class="item-card" style="border-left:4px solid #3182ce;">
             <div class="item-card-header">
-              <h3>Individual User Overrides</h3>
-              ${canManage ? `<button class="btn btn-small btn-primary" id="addUserOverrideBtn" data-user-id="${userId}">+ Add Direct Permission Override</button>` : ""}
+              <h3>Individual Permission Overrides</h3>
+              ${canManage && !isSuperAdminUser ? `<button type="button" class="btn btn-small btn-primary" id="saveUserPermsBtn">Save Changes</button>` : ""}
             </div>
-            <div>
-              ${userOverrides.length ? userOverrides.map((o) => `
-                <span class="chip ${o.is_granted ? "chip-grant" : "chip-deny"}">
-                  ${o.is_granted ? "GRANT" : "DENY"}: ${escapeHtml(o.code)}
-                  ${canManage ? `<a href="#" style="margin-left:6px;color:inherit;" data-delete-user-perm="${o.id}" data-user-id="${userId}">&times;</a>` : ""}
-                </span>`).join("") : '<span class="muted">No direct user overrides. User inherits default permissions from assigned System Roles.</span>'}
+            <div class="muted" style="font-size:13px; margin-bottom:0;">
+              ${isSuperAdminUser
+                ? "This user is a Super Administrator and always has every permission — individual overrides do not apply."
+                : "Tick or untick permissions below to grant or revoke direct access for this user. Checked-but-greyed items are inherited from the user's assigned roles. Click Save Changes to apply immediately."}
             </div>
           </div>`;
 
-        let breakdownHtml = `
-          <div class="item-card">
+        let gridHtml = isSuperAdminUser
+          ? ""
+          : `<div class="item-card"><div id="userPermGrid">${userPermissionCheckboxGridHtml(userId)}</div></div>`;
+
+        let effectiveHtml = `
+          <div class="item-card" style="margin-top:16px;">
             <h3>Calculated Effective Permissions (${breakdown.effective_permissions ? breakdown.effective_permissions.length : 0})</h3>
             <div class="muted" style="margin-bottom:12px;font-size:13px;">Final effective permission set applied immediately on new requests:</div>
-            <div>
+            <div id="effectivePermsPreview">
               ${(breakdown.effective_permissions || []).map((c) => `<span class="chip" style="background:#f1f5f9;border:1px solid #cbd5e0;">${escapeHtml(c)}</span>`).join("")}
             </div>
           </div>
@@ -617,56 +650,65 @@
             <div>${(breakdown.role_permissions || []).map((c) => `<span class="chip">${escapeHtml(c)}</span>`).join("")}</div>
           </div>`;
 
-        container.innerHTML = overrideHtml + breakdownHtml;
-
-        const addOverrideBtn = document.getElementById("addUserOverrideBtn");
-        if (addOverrideBtn) {
-          addOverrideBtn.addEventListener("click", () => openUserOverrideModal(userId));
-        }
+        container.innerHTML = headerHtml + gridHtml + effectiveHtml;
       } catch (err) {
         showError(banner, err);
       }
-    });
-
-    // Handle user override deletes
-    document.getElementById("userEffectiveContainer").addEventListener("click", async (e) => {
-      const deletePermId = e.target.getAttribute("data-delete-user-perm");
-      const userId = e.target.getAttribute("data-user-id");
-      if (deletePermId && userId) {
-        e.preventDefault();
-        try {
-          await apiDelete(`/rbac/users/${userId}/permissions/${deletePermId}`);
-          document.getElementById("userSelect").dispatchEvent(new Event("change"));
-        } catch (err) {
-          showError(banner, err);
-        }
-      }
-    });
-
-    // --- Add User Override Modal ---
-    const userOverrideModal = document.getElementById("userOverrideModal");
-    function openUserOverrideModal(userId) {
-      document.getElementById("overrideUserId").value = userId;
-      const permSelect = document.getElementById("overridePermissionId");
-      permSelect.innerHTML = '<option value="">Select Permission...</option>' +
-        allPermissions.map((p) => `<option value="${p.id}">${escapeHtml(p.code)} (${escapeHtml(p.module)})</option>`).join("");
-      openModalShell(userOverrideModal);
     }
 
-    document.getElementById("overrideCloseBtn").addEventListener("click", () => closeModalShell(userOverrideModal));
-    document.getElementById("overrideCancelBtn").addEventListener("click", () => closeModalShell(userOverrideModal));
+    document.getElementById("userSelect").addEventListener("change", (e) => {
+      loadUserOverridesTab(e.target.value);
+    });
 
-    document.getElementById("overrideForm").addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const userId = document.getElementById("overrideUserId").value;
-      const permission_id = document.getElementById("overridePermissionId").value;
-      const is_granted = document.getElementById("overrideGrantType").value === "true";
+    // Module "Select/Deselect Group" toggle within the user override grid
+    document.getElementById("userEffectiveContainer").addEventListener("click", (e) => {
+      const modKey = e.target.getAttribute("data-toggle-user-mod");
+      if (modKey) {
+        const checkboxes = document.querySelectorAll(`.user-perm-mod-${modKey}`);
+        const anyUnchecked = Array.from(checkboxes).some(cb => !cb.checked);
+        checkboxes.forEach(cb => cb.checked = anyUnchecked);
+        e.target.textContent = anyUnchecked ? "Deselect Group" : "Select Group";
+      }
+    });
+
+    // Save Changes: diff current checkbox state against the baseline overrides
+    // and send only what's needed via the bulk endpoint. Applies immediately —
+    // no popup, no per-permission round trips.
+    document.getElementById("userEffectiveContainer").addEventListener("click", async (e) => {
+      if (e.target.id !== "saveUserPermsBtn") return;
+      if (!currentOverrideUserId) return;
+      const btn = e.target;
+      btn.disabled = true;
+      btn.textContent = "Saving...";
       try {
-        await apiPost(`/rbac/users/${userId}/permissions`, { permission_id, is_granted });
-        closeModalShell(userOverrideModal);
-        document.getElementById("userSelect").dispatchEvent(new Event("change"));
+        const checkedCodes = new Set(selectedUserPermissionCodes());
+        const codeToId = {};
+        for (const p of allPermissions) codeToId[p.code] = p.id;
+
+        // Build the full desired override set:
+        //  - checked + not inherited from role  => explicit GRANT
+        //  - unchecked + inherited from role     => explicit DENY (to override the role grant)
+        //  - checked + inherited from role       => no override needed (role already grants it)
+        //  - unchecked + not inherited from role => no override needed (already absent)
+        const overrides = [];
+        for (const p of allPermissions) {
+          const checked = checkedCodes.has(p.code);
+          const inherited = roleGrantedSet.has(p.code);
+          if (checked && !inherited) {
+            overrides.push({ permission_id: p.id, is_granted: true });
+          } else if (!checked && inherited) {
+            overrides.push({ permission_id: p.id, is_granted: false });
+          }
+        }
+
+        await apiPut(`/rbac/users/${currentOverrideUserId}/permissions/bulk`, { overrides });
+        showToast("Permissions updated for user.", "success");
+        await loadUserOverridesTab(currentOverrideUserId);
       } catch (err) {
         showError(banner, err);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "Save Changes";
       }
     });
 

@@ -273,6 +273,9 @@ function apiPost(path, payload, options = {}) {
 function apiPatch(path, payload, options = {}) {
   return apiCall(path, { method: "PATCH", body: JSON.stringify(payload || {}), ...options });
 }
+function apiPut(path, payload, options = {}) {
+  return apiCall(path, { method: "PUT", body: JSON.stringify(payload || {}), ...options });
+}
 function apiDelete(path, options = {}) {
   return apiCall(path, { method: "DELETE", ...options });
 }

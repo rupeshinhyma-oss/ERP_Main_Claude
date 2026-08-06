@@ -395,7 +395,7 @@
     function renderRolesList() {
       const container = document.getElementById("rolesContainer");
       const q = (document.getElementById("roleSearch").value || "").toLowerCase();
-      const filtered = allRoles.filter((r) => r.name.toLowerCase().includes(q) || (r.description || "").toLowerCase().includes(q));
+      const filtered = allRoles.filter((r) => r.name !== "employee" && (r.name.toLowerCase().includes(q) || (r.description || "").toLowerCase().includes(q)));
       container.innerHTML = filtered.length ? filtered.map(roleCardHtml).join("") : '<p class="muted">No roles found.</p>';
     }
 

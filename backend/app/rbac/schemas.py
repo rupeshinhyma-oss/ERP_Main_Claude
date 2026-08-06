@@ -72,6 +72,20 @@ class AssignUserPermissionRequest(BaseModel):
     is_granted: bool = Field(default=True, description="True to grant permission override, False to explicitly deny/revoke.")
 
 
+class BulkUserPermissionOverrideItem(BaseModel):
+    """Single permission override item for bulk updates."""
+
+    permission_id: uuid.UUID
+    is_granted: bool
+
+
+class BulkUserPermissionsRequest(BaseModel):
+    """Payload to bulk update individual user permission overrides."""
+
+    overrides: list[BulkUserPermissionOverrideItem] = Field(default_factory=list)
+
+
+
 class ClonePermissionSetRequest(BaseModel):
     """Payload to clone permission set between entities (role, department, designation, user)."""
 

@@ -21,6 +21,7 @@ from app.core.responses import build_success_response
 from app.rbac.dependencies import get_rbac_service, require_permission
 from app.rbac.schemas import (
     AssignUserPermissionRequest,
+    BulkUserPermissionsRequest,
     ClonePermissionSetRequest,
     EffectivePermissionsBreakdown,
     GrantPermissionRequest,
@@ -461,6 +462,39 @@ async def remove_user_permission(
     )
     request.state.audit_logged = True
     return build_success_response(data={"removed": True}, request_id=request.state.request_id)
+
+
+@router.put("/users/{user_id}/permissions/bulk", summary="Bulk update user permission overrides (admin)")
+async def bulk_update_user_permissions(
+    user_id: uuid.UUID,
+    payload: BulkUserPermissionsRequest,
+    request: Request,
+    rbac_service: RBACService = Depends(get_rbac_service),
+    current_user: CurrentUser = Depends(require_permission("settings.manage")),
+    audit_service: AuditService = Depends(get_audit_service),
+) -> dict:
+    overrides_list = [(item.permission_id, item.is_granted) for item in payload.overrides]
+    updated_count = await rbac_service.bulk_update_user_permissions(
+        user_id, overrides_list, granted_by=current_user.id
+    )
+    await audit_service.record(
+        action=AuditAction.PERMISSION_CHANGED,
+        module="rbac",
+        user_id=current_user.id,
+        username_snapshot=current_user.username,
+        entity_type="User",
+        entity_id=str(user_id),
+        new_values={"updated_overrides_count": updated_count},
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+        request_id=request.state.request_id,
+        http_method=request.method,
+        endpoint=request.url.path,
+        response_status=status.HTTP_200_OK,
+        description=f"Bulk updated {updated_count} user permission overrides for user {user_id}.",
+    )
+    request.state.audit_logged = True
+    return build_success_response(data={"updated_count": updated_count}, request_id=request.state.request_id)
 
 
 # --- Effective Permissions Breakdown ----------------------------------------

@@ -279,12 +279,13 @@ class UserService:
     # --- Admin: Role assignment ------------------------------------------------------
     async def assign_role(self, user_id: uuid.UUID, role_id: uuid.UUID, *, assigned_by: uuid.UUID) -> None:
         """Assign a role to a user, if not already assigned."""
-        await self.get_by_id_or_raise(user_id)  # 404s cleanly if the user doesn't exist
+        target_user = await self.get_by_id_or_raise(user_id)  # 404s cleanly if the user doesn't exist
         role = await self.rbac_service.get_role_or_raise(role_id)  # 404s cleanly if the role doesn't exist
 
-        if role.name == "super_admin" and not await self.is_super_admin(assigned_by):
-            from app.core.exceptions import ForbiddenException
-            raise ForbiddenException("Only Super Administrators can promote a user to Super Administrator.")
+        if role.name == "super_admin":
+            if target_user.username != settings.BOOTSTRAP_ADMIN_USERNAME:
+                from app.core.exceptions import ForbiddenException
+                raise ForbiddenException("The super_admin role is exclusively reserved for the primary system administrator account.")
 
         if role.name == "admin" and not await self.is_admin_or_super_admin(assigned_by):
             from app.core.exceptions import ForbiddenException
@@ -303,13 +304,14 @@ class UserService:
 
     async def remove_role(self, user_id: uuid.UUID, role_id: uuid.UUID, *, removed_by: uuid.UUID | None = None) -> None:
         """Remove a role assignment from a user."""
+        target_user = await self.get_by_id_or_raise(user_id)
         link = await self.user_role_repository.get(user_id, role_id)
         if link is None:
             raise NotFoundException("The user does not have that role.")
         role = await self.rbac_service.get_role_or_raise(role_id)
-        if role.name == "super_admin" and removed_by and not await self.is_super_admin(removed_by):
+        if role.name == "super_admin" and target_user.username == settings.BOOTSTRAP_ADMIN_USERNAME:
             from app.core.exceptions import ForbiddenException
-            raise ForbiddenException("Only Super Administrators can remove Super Administrator rights.")
+            raise ForbiddenException("The super_admin role cannot be removed from the primary system administrator account.")
         await self._ensure_not_last_super_admin(user_id, role_id)
         await self.user_role_repository.delete(link)
 

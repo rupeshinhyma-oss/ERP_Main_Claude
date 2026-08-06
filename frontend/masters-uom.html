@@ -130,7 +130,10 @@
       ],
       columns: [
         { header: "Code", render: (u) => `<span class="cell-primary">${escapeHtml(u.code)}</span>` },
-        { header: "Name", render: (u) => escapeHtml(u.name) },
+        { 
+          header: "Name", 
+          render: (u) => `<a href="#" onclick="event.preventDefault(); MasterPage.openDetailDrawer('/masters/uom', '${u.id}', 'name', [{ label: 'UOM Name', key: 'name', fullWidth: true }, { label: 'UOM Code', key: 'code' }, { label: 'Short Name', key: 'short_name' }, { label: 'Current Status', render: (x) => MasterPage.badge(x.status) }, { label: 'Description', key: 'description', fullWidth: true }]);" class="cell-primary" style="color:var(--color-primary); font-weight:600;">${escapeHtml(u.name)}</a>` 
+        },
         { header: "Short Name", render: (u) => escapeHtml(u.short_name || "—") },
         { header: "Description", render: (u) => escapeHtml(u.description || "—") },
         { header: "Status", render: (u) => MasterPage.badge(u.status) },

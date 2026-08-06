@@ -357,6 +357,85 @@ const MasterPage = (() => {
     return { loadTable, openModal, closeModal };
   }
 
-  return { init, badge, fieldValue, setFieldValue };
+  // --- Shared Right-Side Offcanvas Detail Drawer ---
+  let activeDrawerItem = null;
+
+  function ensureDrawerMarkup() {
+    let backdrop = document.getElementById("masterDetailDrawerBackdrop");
+    if (!backdrop) {
+      backdrop = document.createElement("div");
+      backdrop.className = "side-drawer-backdrop";
+      backdrop.id = "masterDetailDrawerBackdrop";
+      backdrop.innerHTML = `
+        <div class="side-drawer-card">
+          <div style="padding: 18px 24px; border-bottom: 1px solid var(--color-border); display: flex; align-items: center; justify-content: space-between; background: #fff;">
+            <div>
+              <h3 id="masterDrawerTitle" style="font-size: 17.5px; font-weight: 700; color: var(--color-heading); margin: 0;">Detail</h3>
+              <div id="masterDrawerSubtitle" style="font-size: 12.5px; color: var(--color-muted); margin-top: 2px;"></div>
+            </div>
+            <div style="display: flex; align-items: center; gap: 12px;">
+              <button class="btn btn-primary" id="masterDrawerEditBtn" style="padding: 7px 14px; font-size: 13px; font-weight: 600;">✏️ Edit</button>
+              <button class="modal-close" id="masterDrawerCloseBtn" style="width: 32px; height: 32px; font-size: 20px;">&times;</button>
+            </div>
+          </div>
+          <div id="masterDrawerBody" style="padding: 24px; flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 16px;"></div>
+        </div>
+      `;
+      document.body.appendChild(backdrop);
+
+      const closeDrawer = () => backdrop.classList.remove("open");
+      document.getElementById("masterDrawerCloseBtn").addEventListener("click", closeDrawer);
+      backdrop.addEventListener("click", (e) => {
+        if (e.target === backdrop) closeDrawer();
+      });
+
+      document.getElementById("masterDrawerEditBtn").addEventListener("click", () => {
+        closeDrawer();
+        if (activeDrawerItem) {
+          const editBtn = document.querySelector(`[data-edit="${activeDrawerItem.id}"]`);
+          if (editBtn) editBtn.click();
+        }
+      });
+    }
+    return backdrop;
+  }
+
+  async function openDetailDrawer(apiBase, itemId, titleKey, fields) {
+    ensureDrawerMarkup();
+    try {
+      const res = await apiGet(`${apiBase}/${itemId}`);
+      const item = res.data;
+      if (!item) return;
+      activeDrawerItem = item;
+
+      document.getElementById("masterDrawerTitle").textContent = `${item[titleKey] || item.name || item.code || "Detail"}`;
+      document.getElementById("masterDrawerSubtitle").textContent = item.code ? `Code: ${item.code}` : "";
+
+      const fieldsHtml = fields.map(f => {
+        const val = f.render ? f.render(item) : escapeHtml(item[f.key] != null && item[f.key] !== "" ? item[f.key] : "—");
+        return `
+          <div style="${f.fullWidth ? 'grid-column: span 2;' : ''}">
+            <span style="font-size: 12px; font-weight: 600; color: #64748b; display: block; margin-bottom: 3px;">${escapeHtml(f.label)}</span>
+            <strong style="font-size: 14px; color: #0f172a; word-break: break-word;">${val}</strong>
+          </div>
+        `;
+      }).join("");
+
+      const bodyHtml = `
+        <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px;">
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px 20px;">
+            ${fieldsHtml}
+          </div>
+        </div>
+      `;
+
+      document.getElementById("masterDrawerBody").innerHTML = bodyHtml;
+      document.getElementById("masterDetailDrawerBackdrop").classList.add("open");
+    } catch (err) {
+      alert("Failed to load details: " + err.message);
+    }
+  }
+
+  return { init, badge, fieldValue, setFieldValue, openDetailDrawer };
 })();
 

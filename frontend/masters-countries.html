@@ -145,11 +145,14 @@
         { key: "status", label: "Status (active/inactive)" },
       ],
       columns: [
-        { header: "Name", render: (c) => `<span class="cell-primary">${escapeHtml(c.name)}</span>` },
+        { 
+          header: "Name", 
+          render: (c) => `<a href="#" onclick="event.preventDefault(); MasterPage.openDetailDrawer('/masters/countries', '${c.id}', 'name', [{ label: 'Country Name', key: 'name', fullWidth: true }, { label: 'Country Code', key: 'code' }, { label: 'ISO Codes', render: (x) => `${escapeHtml(x.iso2 || "—")} / ${escapeHtml(x.iso3 || "—")}` }, { label: 'Phone Code', key: 'phone_code' }, { label: 'Nationality', key: 'nationality' }, { label: 'Primary Currency', key: 'currency' }, { label: 'Current Status', render: (x) => MasterPage.badge(x.status) }]);" class="cell-primary" style="color:var(--color-primary); font-weight:600;">${escapeHtml(c.name)}</a>` 
+        },
         { header: "Code", render: (c) => escapeHtml(c.code) },
         { header: "ISO", render: (c) => `${escapeHtml(c.iso2 || "—")} / ${escapeHtml(c.iso3 || "—")}` },
         { header: "Phone Code", render: (c) => escapeHtml(c.phone_code || "—") },
-        { header: "Currency", render: (c) => escapeHtml(c.currency || "—") },
+        { header: "Nationality", render: (c) => escapeHtml(c.nationality || "—") },
         { header: "Status", render: (c) => MasterPage.badge(c.status) },
       ],
       fillForm(item) {

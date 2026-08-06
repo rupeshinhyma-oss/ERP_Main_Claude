@@ -153,7 +153,10 @@
         { key: "status", label: "Status (active/inactive)" },
       ],
       columns: [
-        { header: "City", render: (c) => `<span class="cell-primary">${escapeHtml(c.name)}</span>` },
+        { 
+          header: "City", 
+          render: (c) => `<a href="#" onclick="event.preventDefault(); MasterPage.openDetailDrawer('/masters/cities', '${c.id}', 'name', [{ label: 'City Name', key: 'name', fullWidth: true }, { label: 'State / Province', render: (x) => escapeHtml(stateName(x.state_id)) }, { label: 'Country', render: (x) => escapeHtml(countryName(x.country_id)) }, { label: 'Current Status', render: (x) => MasterPage.badge(x.status) }]);" class="cell-primary" style="color:var(--color-primary); font-weight:600;">${escapeHtml(c.name)}</a>` 
+        },
         { header: "State", render: (c) => escapeHtml(stateName(c.state_id)) },
         { header: "Country", render: (c) => escapeHtml(countryName(c.country_id)) },
         { header: "Status", render: (c) => MasterPage.badge(c.status) },

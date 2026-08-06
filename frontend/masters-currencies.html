@@ -129,7 +129,10 @@
         { key: "status", label: "Status (active/inactive)" },
       ],
       columns: [
-        { header: "Name", render: (c) => `<span class="cell-primary">${escapeHtml(c.name)}</span>` },
+        { 
+          header: "Name", 
+          render: (c) => `<a href="#" onclick="event.preventDefault(); MasterPage.openDetailDrawer('/masters/currencies', '${c.id}', 'name', [{ label: 'Currency Name', key: 'name', fullWidth: true }, { label: 'ISO Code', key: 'code' }, { label: 'Symbol', key: 'symbol' }, { label: 'Decimal Places', key: 'decimal_places' }, { label: 'Current Status', render: (x) => MasterPage.badge(x.status) }]);" class="cell-primary" style="color:var(--color-primary); font-weight:600;">${escapeHtml(c.name)}</a>` 
+        },
         { header: "Code", render: (c) => escapeHtml(c.code) },
         { header: "Symbol", render: (c) => escapeHtml(c.symbol || "—") },
         { header: "Decimal Places", render: (c) => c.decimal_places },

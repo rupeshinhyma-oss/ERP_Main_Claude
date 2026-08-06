@@ -135,7 +135,10 @@
         { key: "status", label: "Status (active/inactive)" },
       ],
       columns: [
-        { header: "Name", render: (s) => `<span class="cell-primary">${escapeHtml(s.name)}</span>` },
+        { 
+          header: "Name", 
+          render: (s) => `<a href="#" onclick="event.preventDefault(); MasterPage.openDetailDrawer('/masters/states', '${s.id}', 'name', [{ label: 'State/Province Name', key: 'name', fullWidth: true }, { label: 'State Code', key: 'code' }, { label: 'Country', render: (x) => escapeHtml(countryName(x.country_id)) }, { label: 'Current Status', render: (x) => MasterPage.badge(x.status) }]);" class="cell-primary" style="color:var(--color-primary); font-weight:600;">${escapeHtml(s.name)}</a>` 
+        },
         { header: "Code", render: (s) => escapeHtml(s.code || "—") },
         { header: "Country", render: (s) => escapeHtml(countryName(s.country_id)) },
         { header: "Status", render: (s) => MasterPage.badge(s.status) },

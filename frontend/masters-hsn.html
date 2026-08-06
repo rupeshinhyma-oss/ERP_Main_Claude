@@ -129,7 +129,10 @@
         { key: "status", label: "Status (active/inactive)" },
       ],
       columns: [
-        { header: "HSN Code", render: (h) => `<span class="cell-primary">${escapeHtml(h.code)}</span>` },
+        { 
+          header: "HSN Code", 
+          render: (h) => `<a href="#" onclick="event.preventDefault(); MasterPage.openDetailDrawer('/masters/hsn', '${h.id}', 'code', [{ label: 'HSN Code', key: 'code', fullWidth: true }, { label: 'GST %', render: (x) => x.gst_percent + '%' }, { label: 'Refund VAT %', render: (x) => (x.refund_vat_percent || 0) + '%' }, { label: 'Current Status', render: (x) => MasterPage.badge(x.status) }, { label: 'Description', key: 'description', fullWidth: true }]);" class="cell-primary" style="color:var(--color-primary); font-weight:600;">${escapeHtml(h.code)}</a>` 
+        },
         { header: "Description", render: (h) => escapeHtml(h.description || "—") },
         { header: "GST %", render: (h) => `${h.gst_percent}%` },
         { header: "Refund VAT %", render: (h) => `${h.refund_vat_percent || 0}%` },

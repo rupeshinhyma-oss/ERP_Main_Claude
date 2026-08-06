@@ -87,10 +87,6 @@
             <input id="code" required maxlength="50" />
           </div>
           <div class="field">
-            <label for="logo_url">Logo URL</label>
-            <input id="logo_url" maxlength="500" placeholder="https://..." />
-          </div>
-          <div class="field">
             <label for="status">Status</label>
             <select id="status">
               <option value="active">Active</option>
@@ -125,11 +121,13 @@
         { key: "name", label: "Brand Name", required: true },
         { key: "code", label: "Brand Code", required: true },
         { key: "description", label: "Description" },
-        { key: "logo_url", label: "Logo URL" },
         { key: "status", label: "Status (active/inactive)" },
       ],
       columns: [
-        { header: "Name", render: (b) => `<span class="cell-primary">${escapeHtml(b.name)}</span>` },
+        { 
+          header: "Name", 
+          render: (b) => `<a href="#" onclick="event.preventDefault(); MasterPage.openDetailDrawer('/masters/brands', '${b.id}', 'name', [{ label: 'Brand Name', key: 'name', fullWidth: true }, { label: 'Brand Code', key: 'code' }, { label: 'Current Status', render: (x) => MasterPage.badge(x.status) }, { label: 'Description', key: 'description', fullWidth: true }]);" class="cell-primary" style="color:var(--color-primary); font-weight:600;">${escapeHtml(b.name)}</a>` 
+        },
         { header: "Code", render: (b) => escapeHtml(b.code) },
         { header: "Description", render: (b) => escapeHtml(b.description || "—") },
         { header: "Status", render: (b) => MasterPage.badge(b.status) },
@@ -137,7 +135,6 @@
       fillForm(item) {
         MasterPage.setFieldValue("name", item ? item.name : "");
         MasterPage.setFieldValue("code", item ? item.code : "");
-        MasterPage.setFieldValue("logo_url", item ? item.logo_url : "");
         MasterPage.setFieldValue("description", item ? item.description : "");
         MasterPage.setFieldValue("status", item ? item.status : "active");
       },
@@ -145,7 +142,6 @@
         return {
           name: MasterPage.fieldValue("name").trim(),
           code: MasterPage.fieldValue("code").trim(),
-          logo_url: MasterPage.fieldValue("logo_url").trim() || null,
           description: MasterPage.fieldValue("description").trim() || null,
           status: MasterPage.fieldValue("status"),
         };

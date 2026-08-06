@@ -124,7 +124,10 @@
         { key: "status", label: "Status (active/inactive)" },
       ],
       columns: [
-        { header: "Name", render: (c) => `<span class="cell-primary">${escapeHtml(c.name)}</span>` },
+        { 
+          header: "Name", 
+          render: (c) => `<a href="#" onclick="event.preventDefault(); MasterPage.openDetailDrawer('/masters/product-categories', '${c.id}', 'name', [{ label: 'Category Name', key: 'name', fullWidth: true }, { label: 'Category Code', key: 'code' }, { label: 'Current Status', render: (x) => MasterPage.badge(x.status) }, { label: 'Description', key: 'description', fullWidth: true }]);" class="cell-primary" style="color:var(--color-primary); font-weight:600;">${escapeHtml(c.name)}</a>` 
+        },
         { header: "Code", render: (c) => escapeHtml(c.code) },
         { header: "Description", render: (c) => escapeHtml(c.description || "—") },
         { header: "Status", render: (c) => MasterPage.badge(c.status) },

@@ -56,13 +56,23 @@ class RBACService:
         self.cache = cache
 
     async def invalidate_user_permissions_cache(self, user_id: uuid.UUID | None = None) -> None:
-        """Invalidate user permissions cache to ensure immediate update."""
+        """Invalidate user permissions cache to ensure immediate update.
+
+        When ``user_id`` is given, only that user's cached effective
+        permissions are dropped. When omitted (e.g. after a role's
+        permissions change, which can affect every user holding that
+        role), the entire ``user_perms`` cache namespace is cleared via
+        ``delete_namespace`` -- the same mechanism ``CacheManager`` uses
+        for every other bulk-invalidation case (roles, departments,
+        designations, etc.), so there is exactly one way this is done
+        across the codebase.
+        """
         if self.cache:
             if user_id:
                 key = CacheBackend.build_key("user_perms", str(user_id))
                 await self.cache.delete(key)
             else:
-                await self.cache.clear_pattern("user_perms:*")
+                await self.cache.delete_namespace("user_perms")
 
     # --- Lookups ------------------------------------------------------------------
     async def get_role_or_raise(self, role_id: uuid.UUID) -> Role:

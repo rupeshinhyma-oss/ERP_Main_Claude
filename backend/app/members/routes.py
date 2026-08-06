@@ -35,7 +35,7 @@ from app.core.responses import build_success_response
 from app.members.dependencies import get_team_member_service
 from app.members.schemas import MemberPasswordReset, MemberPasswordReveal, TeamMemberCreate, TeamMemberRead
 from app.members.service import TeamMemberService
-from app.rbac.dependencies import require_permission
+from app.rbac.dependencies import require_all_permissions, require_permission
 
 router = APIRouter(prefix="/members", tags=["Team Members"])
 
@@ -75,7 +75,7 @@ async def create_member(
     payload: TeamMemberCreate,
     request: Request,
     service: TeamMemberService = Depends(get_team_member_service),
-    current_user: CurrentUser = Depends(require_permission("user.create")),
+    current_user: CurrentUser = Depends(require_all_permissions("user.create", "employee.create")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     """
@@ -87,9 +87,6 @@ async def create_member(
     permissions an admin would need to do this via the separate Users and
     Employees APIs already, so this composed shortcut grants nothing extra.
     """
-    if "employee.create" not in current_user.permissions:
-        raise ForbiddenException("This action requires the 'employee.create' permission.")
-
     result = await service.create_member(
         full_name=payload.full_name,
         email=payload.email,

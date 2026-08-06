@@ -327,12 +327,15 @@
         allRoles = data || [];
         const roleSelect = document.getElementById("role_id");
         const assignRoleSelect = document.getElementById("assignRoleId");
-        roleSelect.innerHTML = '<option value="">-- Select System Role --</option>';
+        roleSelect.innerHTML = '<option value="">-- Default (User) --</option>';
         assignRoleSelect.innerHTML = '<option value="">-- Select System Role --</option>';
         for (const r of allRoles) {
           const opt = document.createElement("option");
           opt.value = r.id;
           opt.textContent = r.name + (r.is_system ? " (System)" : "");
+          if (r.name === "user") {
+            opt.selected = true;
+          }
           roleSelect.appendChild(opt.cloneNode(true));
           assignRoleSelect.appendChild(opt);
         }
@@ -656,6 +659,15 @@
     // Assign Role
     window.openAssignRole = function(userId) {
       document.getElementById("assignRoleUserId").value = userId;
+      const u = currentLoadedUsers.find(x => x.id === userId);
+      const assignRoleSelect = document.getElementById("assignRoleId");
+      if (u && u.roles && u.roles.length && allRoles.length) {
+        const currentRoleName = u.roles[0];
+        const matchRole = allRoles.find(r => r.name === currentRoleName);
+        if (matchRole) {
+          assignRoleSelect.value = matchRole.id;
+        }
+      }
       rolesModalBackdrop.style.display = "flex";
     };
 

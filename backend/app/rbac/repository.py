@@ -80,12 +80,16 @@ class RoleRepository(BaseRepository[Role]):
         """
         Resolve the full, de-duplicated set of permission codes granted to a user.
 
-        Combines:
-        1. Assigned Role Permissions (union across user's assigned roles)
-        2. Individual User Permission Overrides (highest priority: explicit grants & revokes)
+        Combines, in increasing priority:
+        1. Department Permissions (granted to every user in the user's department)
+        2. Designation Permissions (granted to every user with the user's designation)
+        3. Assigned Role Permissions (union across the user's assigned roles)
+        4. Individual User Permission Overrides (highest priority: explicit grants & revokes)
 
-        If the user has the super_admin role, returns all system permissions.
+        If the user has the super_admin or admin role, returns all system permissions.
         """
+        from app.users.models import User
+
         # 1. Check if user has super_admin or admin role (both have full system access)
         stmt_super_admin = (
             select(Role.name)
@@ -97,7 +101,32 @@ class RoleRepository(BaseRepository[Role]):
             res = await self.session.execute(all_perms_stmt)
             return set(res.scalars().all())
 
-        # 2. System / Custom Role permissions
+        # 2. Department & Designation permissions (defaults granted to everyone in
+        #    that department / with that designation). Looked up via the user's
+        #    own department_id/designation_id columns.
+        stmt_user_org = select(User.department_id, User.designation_id).where(User.id == user_id)
+        org_row = (await self.session.execute(stmt_user_org)).first()
+        department_id, designation_id = (org_row[0], org_row[1]) if org_row else (None, None)
+
+        department_perms: set[str] = set()
+        if department_id is not None:
+            stmt_dept_perms = (
+                select(Permission.code)
+                .join(DepartmentPermission, DepartmentPermission.permission_id == Permission.id)
+                .where(DepartmentPermission.department_id == department_id)
+            )
+            department_perms = set((await self.session.execute(stmt_dept_perms)).scalars().all())
+
+        designation_perms: set[str] = set()
+        if designation_id is not None:
+            stmt_desig_perms = (
+                select(Permission.code)
+                .join(DesignationPermission, DesignationPermission.permission_id == Permission.id)
+                .where(DesignationPermission.designation_id == designation_id)
+            )
+            designation_perms = set((await self.session.execute(stmt_desig_perms)).scalars().all())
+
+        # 3. System / Custom Role permissions
         stmt_roles = (
             select(Permission.code)
             .join(RolePermission, RolePermission.permission_id == Permission.id)
@@ -107,7 +136,7 @@ class RoleRepository(BaseRepository[Role]):
         )
         role_perms = set((await self.session.execute(stmt_roles)).scalars().all())
 
-        # 3. Individual User permissions (overrides: explicit grants & revokes)
+        # 4. Individual User permissions (overrides: explicit grants & revokes)
         stmt_user_perms = (
             select(Permission.code, UserPermission.is_granted)
             .join(UserPermission, UserPermission.permission_id == Permission.id)
@@ -118,8 +147,11 @@ class RoleRepository(BaseRepository[Role]):
         user_grants = {code for code, is_granted in user_perm_rows if is_granted}
         user_denies = {code for code, is_granted in user_perm_rows if not is_granted}
 
-        # Combine: (Role Permissions + User Grants) - User Denies
-        effective = (role_perms | user_grants) - user_denies
+        # Combine: (Department + Designation + Role Permissions + User Grants) - User Denies.
+        # Individual user overrides are the final word -- an explicit deny always
+        # wins even over a department/designation/role grant, and an explicit
+        # grant always applies even if no department/designation/role provides it.
+        effective = (department_perms | designation_perms | role_perms | user_grants) - user_denies
         return effective
 
     async def get_effective_permissions_breakdown_for_user(self, user_id: uuid.UUID) -> dict:
@@ -159,6 +191,24 @@ class RoleRepository(BaseRepository[Role]):
                 role_name_map[code].append(rname)
 
         role_perms_set = set(role_name_map.keys())
+
+        # Department & Designation permission mapping (code -> True if granted via that source)
+        department_perms_set: set[str] = set()
+        designation_perms_set: set[str] = set()
+        if user.department_id:
+            stmt_dept_perms = (
+                select(Permission.code)
+                .join(DepartmentPermission, DepartmentPermission.permission_id == Permission.id)
+                .where(DepartmentPermission.department_id == user.department_id)
+            )
+            department_perms_set = set((await self.session.execute(stmt_dept_perms)).scalars().all())
+        if user.designation_id:
+            stmt_desig_perms = (
+                select(Permission.code)
+                .join(DesignationPermission, DesignationPermission.permission_id == Permission.id)
+                .where(DesignationPermission.designation_id == user.designation_id)
+            )
+            designation_perms_set = set((await self.session.execute(stmt_desig_perms)).scalars().all())
 
         # User details (Department + Designation for display only)
         employee_name = user.full_name or user.display_name or user.username
@@ -205,6 +255,10 @@ class RoleRepository(BaseRepository[Role]):
                 override_type = "Granted"
             elif code in role_perms_set:
                 source = "System Role"
+            elif code in designation_perms_set:
+                source = "Designation"
+            elif code in department_perms_set:
+                source = "Department"
 
             permission_sources.append({
                 "code": code,
@@ -226,6 +280,8 @@ class RoleRepository(BaseRepository[Role]):
             },
             "is_super_admin": is_super_admin,
             "role_permissions": sorted(list(role_perms_set)),
+            "department_permissions": sorted(list(department_perms_set)),
+            "designation_permissions": sorted(list(designation_perms_set)),
             "user_grants": sorted(list(user_grants_set)),
             "user_denies": sorted(list(user_denies_set)),
             "effective_permissions": sorted(list(effective_set)),

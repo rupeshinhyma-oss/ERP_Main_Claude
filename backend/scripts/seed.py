@@ -208,6 +208,7 @@ USER_ROLE_PERMISSION_CODES: list[str] = [
     "product.view",
     "supplier.read",
     "supplier.view",
+    "crm.view",
     "task.read",
     "task.view",
     "task.create",
@@ -289,6 +290,16 @@ async def seed() -> None:
                 if permission:
                     session.add(RolePermission(role_id=user_role.id, permission_id=permission.id))
             await session.flush()
+        else:
+            # Idempotent backfill: if USER_ROLE_PERMISSION_CODES gains a new
+            # code in a later release (e.g. crm.view), make sure existing
+            # databases pick it up on their next seed run too, the same way
+            # the admin role already does above -- otherwise a permission
+            # added here would silently never reach already-seeded installs.
+            for code in USER_ROLE_PERMISSION_CODES:
+                permission = await permission_repo.get_by_code(code)
+                if permission:
+                    await role_repo.add_permission(user_role, permission)
 
         # --- Purge legacy 'employee' role and migrate assignments to 'user' role ---
         legacy_employee_role = await role_repo.get_by_name("employee")
@@ -324,8 +335,26 @@ async def seed() -> None:
             )
             await session.flush()
             logger.info("Seeded bootstrap admin user.", extra={"username": settings.BOOTSTRAP_ADMIN_USERNAME})
-        else:
-            logger.info("Bootstrap admin user already exists; skipping.")
+        # --- Consolidate duplicate role assignments (ensure max 1 active role per user) ---
+        from sqlalchemy import select
+        from sqlalchemy.orm import selectinload
+        from app.rbac.models import UserRole
+        from app.users.models import User
+        all_users = list((await session.execute(select(User))).scalars().all())
+        for u in all_users:
+            stmt = select(UserRole).where(UserRole.user_id == u.id).options(selectinload(UserRole.role))
+            links = list((await session.execute(stmt)).scalars().all())
+            if len(links) > 1:
+                roles_map = {link.role.name: link for link in links if link.role}
+                primary_link = (
+                    roles_map.get("super_admin")
+                    or roles_map.get("admin")
+                    or links[0]
+                )
+                for link in links:
+                    if link.id != primary_link.id:
+                        await session.delete(link)
+                await session.flush()
 
         await session.commit()
 

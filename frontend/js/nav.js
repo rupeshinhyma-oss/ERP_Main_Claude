@@ -42,14 +42,14 @@ const NAV_SECTIONS = [
   {
     label: "Commercial",
     items: [
-      { key: "buyers", label: "Buyer Profiles", href: "./buyers.html", icon: "users" },
+      { key: "buyers", label: "Buyer Profiles", href: "./buyers.html", icon: "users", permission: "crm.view" },
       { key: "suppliers", label: "Supplier Profiles", href: "./suppliers.html", icon: "truck", permission: "supplier.view" },
     ],
   },
   {
     label: "Operations",
     items: [
-      { key: "inquiries", label: "Inquiries & Consignments", href: "./inquiries.html", icon: "fileText" },
+      { key: "inquiries", label: "Inquiries & Consignments", href: "./inquiries.html", icon: "fileText", permission: "crm.view" },
     ],
   },
   {
@@ -262,7 +262,7 @@ function renderShell(activeKey) {
       if (res && res.data) {
         Auth.updateProfile(res.data);
       }
-    }).catch(() => {});
+    }).catch(() => { });
   }
 
   const profile = Auth.getProfile();

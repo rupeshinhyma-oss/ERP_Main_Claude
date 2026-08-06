@@ -38,7 +38,7 @@ from app.rbac.service import RBACService
 from app.users.models import UserStatus
 from app.users.service import UserService
 
-DEFAULT_MEMBER_ROLE_NAME = "employee"
+DEFAULT_MEMBER_ROLE_NAME = "user"
 
 _USERNAME_SANITIZE_RE = re.compile(r"[^a-z0-9._-]+")
 

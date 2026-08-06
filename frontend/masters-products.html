@@ -292,6 +292,27 @@
     </div>
   </div>
 
+  <!-- Product Detail Modal Overlay (Matching Image 3) -->
+  <div class="modal-backdrop" id="productDetailBackdrop" style="display:none;">
+    <div class="modal-card" style="max-width: 840px; padding: 24px; border-radius: 12px; box-shadow: 0 20px 40px -12px rgba(16, 24, 40, 0.25);">
+      <div class="modal-header" style="border-bottom: 1px solid var(--color-border); padding-bottom: 14px; margin-bottom: 18px; display:flex; align-items:center; justify-content:space-between;">
+        <div>
+          <h2 id="detailTitle" style="font-size: 18px; font-weight: 700; color: var(--color-heading); margin: 0;">Product Detail</h2>
+          <div id="detailSubTitle" style="font-size: 12.5px; color: var(--color-muted); margin-top: 2px;">Code &amp; Master Classification</div>
+        </div>
+        <button class="modal-close" id="productDetailCloseBtn">&times;</button>
+      </div>
+
+      <div id="detailBody" style="display: flex; flex-direction: column; gap: 20px;">
+        <!-- Filled dynamically via JS -->
+      </div>
+
+      <div style="margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--color-border); text-align: right;">
+        <button class="btn" id="productDetailCloseBtn2">Close</button>
+      </div>
+    </div>
+  </div>
+
   <script src="js/api.js"></script>
   <script src="js/nav.js?v=2"></script>
   <script src="js/dropdown-search.js"></script>
@@ -356,7 +377,7 @@
       columns: [
         {
           header: "Product Name (Tally)",
-          render: (p) => `<a href="#" onclick="event.preventDefault(); alert('Item: ' + escapeHtml(p.product_name_tally || p.product_name) + '\\nInvoice Name: ' + escapeHtml(p.product_name_invoice || '-') + '\\nRefund VAT: ' + (p.refund_vat_percent || 0) + '%\\nLicense Requirement: ' + escapeHtml(p.license_certificate_required || 'None'));" class="cell-primary" style="color:var(--color-primary); font-weight:600;">${escapeHtml(p.product_name_tally || p.product_name)}</a>${p.license_certificate_required ? `<br><span style="color:#ef4444; font-size:11px; font-weight:bold;">⚠️ License Required</span>` : ""}`,
+          render: (p) => `<a href="#" onclick="event.preventDefault(); openProductDetailView('${p.id}');" class="cell-primary" style="color:var(--color-primary); font-weight:600;">${escapeHtml(p.product_name_tally || p.product_name)}</a>${p.license_certificate_required ? `<br><span style="color:#ef4444; font-size:11px; font-weight:bold;">⚠️ License Required</span>` : ""}`,
         },
         { header: "Product Code", render: (p) => escapeHtml(p.product_code) },
         { header: "Brand", render: (p) => {
@@ -625,6 +646,98 @@
     };
     document.querySelectorAll(".cbm-calc").forEach((input) => {
       input.addEventListener("input", updateCbmPreview);
+    });
+
+    // --- Product Detail View Modal (Matching Image 3) ---
+    async function openProductDetailView(productId) {
+      try {
+        const res = await apiGet(`/masters/products/${productId}`);
+        const p = res.data;
+        if (!p) return;
+
+        document.getElementById("detailTitle").textContent = p.product_name_tally || p.product_name || "Product Detail";
+        document.getElementById("detailSubTitle").textContent = `Product Code: ${p.product_code || "—"}`;
+
+        const cat = categoriesCache.find(c => c.id === p.category_id);
+        const subCat = subCategoriesCache.find(sc => sc.id === p.sub_category_id);
+        const brand = brandsCache.find(b => b.id === p.brand_id);
+        const hsn = hsnCache.find(h => h.id === p.hsn_id);
+        const uom = uomCache.find(u => u.id === p.uom_id);
+
+        const html = `
+          <!-- Section 1: General Identity -->
+          <div style="background: var(--color-bg); padding: 16px; border-radius: 8px; border: 1px solid var(--color-border);">
+            <div style="font-size: 12.5px; font-weight: 700; color: var(--color-primary); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 12px; display:flex; align-items:center; gap:6px;">
+              <span>🏷️</span> Product Identity &amp; Categorization
+            </div>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px;">
+              <div><span style="font-size:11.5px; color:var(--color-muted); display:block; margin-bottom:2px;">Product Name (Tally)</span><strong style="font-size:13.5px; color:var(--color-heading);">${escapeHtml(p.product_name_tally || p.product_name || "—")}</strong></div>
+              <div><span style="font-size:11.5px; color:var(--color-muted); display:block; margin-bottom:2px;">Product Name (Invoice)</span><strong style="font-size:13.5px; color:var(--color-heading);">${escapeHtml(p.product_name_invoice || "—")}</strong></div>
+              <div><span style="font-size:11.5px; color:var(--color-muted); display:block; margin-bottom:2px;">Product Code</span><strong style="font-size:13.5px; color:var(--color-heading);">${escapeHtml(p.product_code || "—")}</strong></div>
+              <div><span style="font-size:11.5px; color:var(--color-muted); display:block; margin-bottom:2px;">Category</span><strong style="font-size:13.5px; color:var(--color-heading);">${escapeHtml(cat ? cat.name : "—")}</strong></div>
+              <div><span style="font-size:11.5px; color:var(--color-muted); display:block; margin-bottom:2px;">Sub-Category</span><strong style="font-size:13.5px; color:var(--color-heading);">${escapeHtml(subCat ? subCat.name : "—")}</strong></div>
+              <div><span style="font-size:11.5px; color:var(--color-muted); display:block; margin-bottom:2px;">Brand</span><strong style="font-size:13.5px; color:var(--color-heading);">${escapeHtml(brand ? brand.name : "—")}</strong></div>
+            </div>
+          </div>
+
+          <!-- Section 2: Tax & Compliance -->
+          <div style="background: var(--color-bg); padding: 16px; border-radius: 8px; border: 1px solid var(--color-border);">
+            <div style="font-size: 12.5px; font-weight: 700; color: var(--color-primary); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 12px; display:flex; align-items:center; gap:6px;">
+              <span>📜</span> Tax &amp; Regulatory Compliance
+            </div>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px;">
+              <div><span style="font-size:11.5px; color:var(--color-muted); display:block; margin-bottom:2px;">HSN Code</span><strong style="font-size:13.5px; color:var(--color-heading);">${escapeHtml(hsn ? hsn.code : "—")}</strong></div>
+              <div><span style="font-size:11.5px; color:var(--color-muted); display:block; margin-bottom:2px;">Refund VAT %</span><strong style="font-size:13.5px; color:var(--color-success);">${p.refund_vat_percent != null ? p.refund_vat_percent + '%' : "0%"}</strong></div>
+              <div><span style="font-size:11.5px; color:var(--color-muted); display:block; margin-bottom:2px;">Current Status</span><span style="display:inline-block; margin-top:2px;">${MasterPage.badge(p.status)}</span></div>
+            </div>
+            ${p.license_certificate_required ? `
+              <div style="margin-top: 14px; padding: 12px 16px; background: #fff1f2; border: 1px solid #fecdd3; border-radius: 8px; color: #9f1239; font-size: 13px;">
+                <strong style="display:block; margin-bottom:2px;">⚠️ Required License / Certificate:</strong>
+                <span>${escapeHtml(p.license_certificate_required)}</span>
+              </div>
+            ` : ''}
+          </div>
+
+          <!-- Section 3: Packaging & Physical Attributes -->
+          <div style="background: var(--color-bg); padding: 16px; border-radius: 8px; border: 1px solid var(--color-border);">
+            <div style="font-size: 12.5px; font-weight: 700; color: var(--color-primary); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 12px; display:flex; align-items:center; gap:6px;">
+              <span>📦</span> Packaging &amp; Dimensions
+            </div>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px;">
+              <div><span style="font-size:11.5px; color:var(--color-muted); display:block; margin-bottom:2px;">UOM</span><strong style="font-size:13.5px; color:var(--color-heading);">${escapeHtml(uom ? `${uom.name} (${uom.code})` : "—")}</strong></div>
+              <div><span style="font-size:11.5px; color:var(--color-muted); display:block; margin-bottom:2px;">Pkg Quantity</span><strong style="font-size:13.5px; color:var(--color-heading);">${p.packaging_quantity != null ? p.packaging_quantity : "—"}</strong></div>
+              <div><span style="font-size:11.5px; color:var(--color-muted); display:block; margin-bottom:2px;">Pkg Net Wt (kg)</span><strong style="font-size:13.5px; color:var(--color-heading);">${p.packaging_net_weight != null ? p.packaging_net_weight : "—"}</strong></div>
+              <div><span style="font-size:11.5px; color:var(--color-muted); display:block; margin-bottom:2px;">Pkg Gross Wt (kg)</span><strong style="font-size:13.5px; color:var(--color-heading);">${p.packaging_gross_weight != null ? p.packaging_gross_weight : "—"}</strong></div>
+              <div><span style="font-size:11.5px; color:var(--color-muted); display:block; margin-bottom:2px;">Dimensions (L x W x H cm)</span><strong style="font-size:13.5px; color:var(--color-heading);">${(p.length_cm || p.width_cm || p.height_cm || p.length || p.width || p.height) ? `${p.length_cm || p.length || 0} x ${p.width_cm || p.width || 0} x ${p.height_cm || p.height || 0} cm` : "—"}</strong></div>
+              <div><span style="font-size:11.5px; color:var(--color-muted); display:block; margin-bottom:2px;">Packaging Unit CBM</span><strong style="font-size:13.5px; color:var(--color-primary);">${p.packaging_unit_cbm != null ? Number(p.packaging_unit_cbm).toFixed(6) : "—"}</strong></div>
+            </div>
+          </div>
+
+          <!-- Section 4: Specifications & Image -->
+          ${(p.description || p.specification || p.image_url) ? `
+            <div style="background: var(--color-bg); padding: 16px; border-radius: 8px; border: 1px solid var(--color-border);">
+              <div style="font-size: 12.5px; font-weight: 700; color: var(--color-primary); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 12px; display:flex; align-items:center; gap:6px;">
+                <span>📝</span> Specifications &amp; Image
+              </div>
+              ${p.specification ? `<div style="margin-bottom:10px;"><span style="font-size:11.5px; color:var(--color-muted); display:block; margin-bottom:2px;">Specification</span><p style="margin:0; font-size:13px; color:var(--color-heading);">${escapeHtml(p.specification)}</p></div>` : ''}
+              ${p.description ? `<div><span style="font-size:11.5px; color:var(--color-muted); display:block; margin-bottom:2px;">Description</span><p style="margin:0; font-size:13px; color:var(--color-heading);">${escapeHtml(p.description)}</p></div>` : ''}
+              ${p.image_url ? `<div style="margin-top:12px;"><span style="font-size:11.5px; color:var(--color-muted); display:block; margin-bottom:6px;">Product Image</span><img src="${escapeHtml(p.image_url)}" style="max-width:200px; border-radius:8px; border:1px solid var(--color-border); box-shadow:var(--shadow-sm);" /></div>` : ''}
+            </div>
+          ` : ''}
+        `;
+
+        document.getElementById("detailBody").innerHTML = html;
+        openModalShell(document.getElementById("productDetailBackdrop"));
+      } catch (err) {
+        alert("Failed to load product detail: " + err.message);
+      }
+    }
+
+    const closeProductDetailModal = () => closeModalShell(document.getElementById("productDetailBackdrop"));
+    document.getElementById("productDetailCloseBtn").addEventListener("click", closeProductDetailModal);
+    document.getElementById("productDetailCloseBtn2").addEventListener("click", closeProductDetailModal);
+    document.getElementById("productDetailBackdrop").addEventListener("click", (e) => {
+      if (e.target === document.getElementById("productDetailBackdrop")) closeProductDetailModal();
     });
   </script>
 </body>

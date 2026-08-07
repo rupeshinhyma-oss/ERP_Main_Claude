@@ -243,22 +243,25 @@ async def get_user(
     return build_success_response(data=data, request_id=request.state.request_id)
 
 
-@router.patch("/{user_id}", summary="Update a user's profile (admin)")
+@router.patch("/{user_id}", summary="Update a user's profile")
 async def update_user(
     user_id: uuid.UUID,
     payload: UserUpdate,
     request: Request,
     user_service: UserService = Depends(get_user_service),
-    current_user: CurrentUser = Depends(require_permission("user.update")),
+    current_user: CurrentUser = Depends(get_current_user),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     """Update a user's non-credential profile fields."""
+    if current_user.id != user_id and "user.update" not in current_user.permissions:
+        from app.core.exceptions import ForbiddenException
+        raise ForbiddenException("You do not have permission to modify this user account.")
+
+    update_dict = payload.model_dump(exclude_unset=True)
     user = await user_service.update_user(
         user_id,
         updated_by=current_user.id,
-        employee_code=payload.employee_code,
-        email=payload.email,
-        phone=payload.phone,
+        **update_dict,
     )
     await _record_user_action(
         audit_service=audit_service,
@@ -267,7 +270,7 @@ async def update_user(
         actor=current_user,
         target_user_id=user_id,
         description=f"Updated profile for user {user.username!r}.",
-        new_values={"employee_code": payload.employee_code, "email": payload.email, "phone": payload.phone},
+        new_values=update_dict,
     )
     data = UserRead.model_validate(user).model_dump(mode="json")
     return build_success_response(data=data, request_id=request.state.request_id)

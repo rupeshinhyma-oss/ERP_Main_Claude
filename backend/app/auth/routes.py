@@ -227,6 +227,8 @@ async def get_profile(
     roles = await rbac_service.list_roles_for_user(user.id)
     profile = ProfileResponse(
         id=user.id,
+        first_name=user.first_name,
+        last_name=user.last_name,
         employee_code=user.employee_code,
         username=user.username,
         email=user.email,

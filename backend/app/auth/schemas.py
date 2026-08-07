@@ -55,6 +55,8 @@ class ProfileResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
+    first_name: str | None = None
+    last_name: str | None = None
     employee_code: str | None
     username: str
     email: str

@@ -19,6 +19,7 @@ import { ForbiddenPage } from "@/pages/Forbidden";
 import { OrganizationPage } from "@/pages/Organization";
 import { AuditPage } from "@/pages/Audit";
 import { UsersPage } from "@/pages/Users";
+import { ProfilePage } from "@/pages/Profile";
 import { RbacPage } from "@/pages/Rbac";
 import { EffectivePermissionsPage } from "@/pages/EffectivePermissions";
 import { TeamsPage } from "@/pages/Teams";
@@ -37,6 +38,7 @@ import { BrandsPage } from "@/pages/masters/Brands";
 import { CategoriesPage } from "@/pages/masters/Categories";
 import { SubCategoriesPage } from "@/pages/masters/SubCategories";
 import { ProductsPage } from "@/pages/masters/Products";
+import { NetworkStatusNotifier } from "@/components/NetworkStatusNotifier";
 
 export function App() {
   const navigate = useNavigate();
@@ -49,13 +51,16 @@ export function App() {
   }, [navigate]);
 
   return (
-    <Routes>
+    <>
+      <NetworkStatusNotifier />
+      <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/" element={<Navigate to="/dashboard" replace />} />
       <Route path="/dashboard" element={<DashboardPage />} />
       <Route path="/403" element={<ForbiddenPage />} />
       <Route path="/organization" element={<OrganizationPage />} />
       <Route path="/audit" element={<AuditPage />} />
+      <Route path="/profile" element={<ProfilePage />} />
       <Route path="/users" element={<UsersPage />} />
       <Route path="/rbac" element={<RbacPage />} />
       <Route path="/effective-permissions" element={<EffectivePermissionsPage />} />
@@ -82,5 +87,6 @@ export function App() {
 
       <Route path="*" element={<Navigate to="/dashboard" replace />} />
     </Routes>
+    </>
   );
 }

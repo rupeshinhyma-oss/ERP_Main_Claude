@@ -26,7 +26,7 @@ import {
   DEFAULT_BRAND_NAME,
 } from "@/lib/nav";
 import { getCachedBrandName, resolveBrandName, subscribeBrandName } from "@/lib/brand";
-import { ICONS, IconBell, IconLogout } from "./icons";
+import { ICONS, IconBell } from "./icons";
 import { UniversalSearch } from "./UniversalSearch";
 import { ErrorBanner } from "./ui";
 import type { ItemsPage, Profile, Task } from "@/types";
@@ -541,26 +541,163 @@ function Sidebar({ activeKey, brandName: _brandName }: { activeKey: string; bran
 
 function Topbar() {
   const navigate = useNavigate();
+  const [profileOpen, setProfileOpen] = useState(false);
+  const popoverRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
+        setProfileOpen(false);
+      }
+    }
+    if (profileOpen) document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [profileOpen]);
 
   async function handleLogout() {
+    setProfileOpen(false);
     try {
       await apiPost("/auth/logout", { refresh_token: Auth.getRefreshToken() });
     } catch {
-      /* the local session is cleared either way */
+      /* local session is cleared either way */
     }
     Auth.clear();
     navigate("/login", { replace: true });
+  }
+
+  function handleEditProfile() {
+    setProfileOpen(false);
+    navigate("/profile");
   }
 
   return (
     <header className="topbar">
       <UniversalSearch />
       <div className="topbar-spacer" />
-      <div className="topbar-actions">
+      <div className="topbar-actions" ref={popoverRef} style={{ position: "relative" }}>
         <NotificationBell />
-        <button className="icon-btn" title="Log out" onClick={handleLogout}>
-          <IconLogout />
+        <button
+          type="button"
+          onClick={() => setProfileOpen((v) => !v)}
+          style={{
+            background: "#f1f5f9",
+            border: "1px solid #cbd5e1",
+            borderRadius: "50%",
+            width: "36px",
+            height: "36px",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            cursor: "pointer",
+            padding: 0,
+            overflow: "hidden",
+            color: "#64748b",
+          }}
+          title="Profile & Options"
+        >
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+            <circle cx="8.5" cy="8.5" r="1.5"></circle>
+            <polyline points="21 15 16 10 5 21"></polyline>
+          </svg>
         </button>
+
+        {profileOpen && (
+          <div
+            style={{
+              position: "absolute",
+              top: "calc(100% + 8px)",
+              right: 0,
+              background: "#ffffff",
+              borderRadius: "12px",
+              boxShadow: "0 10px 30px rgba(0, 0, 0, 0.12), 0 1px 3px rgba(0,0,0,0.05)",
+              border: "1px solid #e2e8f0",
+              zIndex: 1000,
+              width: "180px",
+              padding: "16px 0",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+            }}
+          >
+            {/* Avatar Icon placeholder */}
+            <div
+              style={{
+                width: "56px",
+                height: "56px",
+                borderRadius: "50%",
+                background: "#f1f5f9",
+                border: "1px solid #e2e8f0",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                color: "#94a3b8",
+                marginBottom: "14px",
+              }}
+            >
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                <polyline points="21 15 16 10 5 21"></polyline>
+              </svg>
+            </div>
+
+            {/* Edit Profile */}
+            <button
+              type="button"
+              onClick={handleEditProfile}
+              style={{
+                width: "100%",
+                padding: "8px 16px",
+                background: "none",
+                border: "none",
+                textAlign: "left",
+                fontSize: "13.5px",
+                color: "#334155",
+                fontWeight: 500,
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                gap: "10px",
+              }}
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 20h9"></path>
+                <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+              </svg>
+              Edit Profile
+            </button>
+
+            <div style={{ width: "100%", height: "1px", background: "#f1f5f9", margin: "4px 0" }} />
+
+            {/* Sign Out */}
+            <button
+              type="button"
+              onClick={handleLogout}
+              style={{
+                width: "100%",
+                padding: "8px 16px",
+                background: "none",
+                border: "none",
+                textAlign: "left",
+                fontSize: "13.5px",
+                color: "#334155",
+                fontWeight: 500,
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                gap: "10px",
+              }}
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+                <polyline points="16 17 21 12 16 7"></polyline>
+                <line x1="21" y1="12" x2="9" y2="12"></line>
+              </svg>
+              Sign Out
+            </button>
+          </div>
+        )}
       </div>
     </header>
   );

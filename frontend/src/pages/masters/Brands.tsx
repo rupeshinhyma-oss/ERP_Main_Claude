@@ -18,6 +18,7 @@ export function BrandsPage() {
       subtitle="Product brand names, referenced by the Product master."
       breadcrumbTrail={["Master Data", "Brands"]}
       newButtonLabel="+ New Brand"
+      hideQuickAdd
       searchPlaceholder="Search name or code or Sr. No..."
       columnHeaders={["Name", "Code", "Description", "Status"]}
       columns={[

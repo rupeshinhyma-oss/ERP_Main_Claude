@@ -36,6 +36,7 @@ export function SubCategoriesPage() {
       subtitle="Belongs to a category; names are unique within their category."
       breadcrumbTrail={["Master Data", "Sub-Categories"]}
       newButtonLabel="+ New Sub-Category"
+      hideQuickAdd
       searchPlaceholder="Search name or code or Sr. No..."
       reloadToken={categories.loaded}
       extraFilters={categoryFilter ? { category_id: categoryFilter } : undefined}

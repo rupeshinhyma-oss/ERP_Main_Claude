@@ -84,6 +84,8 @@ export interface MasterPageProps<T extends MasterRecord> {
   useFullPageForm?: boolean;
   /** Inline style overrides for the modal card (Products widens it). */
   modalCardStyle?: React.CSSProperties;
+  /** Hide the "+ QUICK ADD" button in header actions. */
+  hideQuickAdd?: boolean;
   /**
    * Batch-resolve related-entity names needed to render this page's columns
    * (e.g. Category/Brand/UOM names for a page of Products) -- bounded by page
@@ -140,6 +142,7 @@ export function MasterPage<T extends MasterRecord>({
   toolbarExtras,
   useFullPageForm,
   modalCardStyle,
+  hideQuickAdd,
   resolveNames,
   reloadToken,
   detailFields,
@@ -478,7 +481,7 @@ export function MasterPage<T extends MasterRecord>({
                 <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
               </svg>
             </button>
-            {canCreate && (
+            {canCreate && !hideQuickAdd && (
               <button type="button" className="btn btn-quick-add" onClick={() => openModal(null)}>
                 + QUICK ADD
               </button>

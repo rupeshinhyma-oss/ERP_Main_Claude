@@ -18,6 +18,7 @@ export function CategoriesPage() {
       subtitle={<>The top level of the category &rarr; sub-category product classification.</>}
       breadcrumbTrail={["Master Data", "Categories"]}
       newButtonLabel="+ New Category"
+      hideQuickAdd
       searchPlaceholder="Search name or code or Sr. No..."
       columnHeaders={["Name", "Code", "Description", "Status"]}
       columns={[

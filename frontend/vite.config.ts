@@ -13,7 +13,7 @@ export default defineConfig({
     // /api/v1 are proxied so the browser sees one origin and CORS is a non-issue.
     proxy: {
       "/api": {
-        target: process.env.VITE_API_PROXY_TARGET || "http://localhost:8001",
+        target: process.env.VITE_API_PROXY_TARGET || "http://localhost:8000",
         changeOrigin: true,
       },
     },

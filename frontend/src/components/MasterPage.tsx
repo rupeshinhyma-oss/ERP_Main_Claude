@@ -160,6 +160,7 @@ export function MasterPage<T extends MasterRecord>({
   const [pageSize, setPageSize] = useState(20);
   const [searchInput, setSearchInput] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
+  const [filterOpen, setFilterOpen] = useState(false);
   const [reloadCounter, setReloadCounter] = useState(0);
 
   const [modalOpen, setModalOpen] = useState(false);
@@ -365,6 +366,28 @@ export function MasterPage<T extends MasterRecord>({
             <div className="page-subtitle">{subtitle}</div>
           </div>
           <div className="page-header-actions" style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+            <button
+              type="button"
+              className="btn"
+              style={{
+                background: filterOpen ? "#0061f2" : "#475569",
+                color: "#ffffff",
+                padding: "8px 14px",
+                borderRadius: "6px",
+                border: "none",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                cursor: "pointer",
+                boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
+              }}
+              onClick={() => setFilterOpen((v) => !v)}
+              title="Toggle Filter Options"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
+              </svg>
+            </button>
             {canCreate && (
               <button type="button" className="btn btn-quick-add" onClick={() => openModal(null)}>
                 + QUICK ADD
@@ -438,6 +461,65 @@ export function MasterPage<T extends MasterRecord>({
             </button>
           </div>
 
+          {/* Expandable Filter Box matching Original INHYMA ERP Design */}
+          {filterOpen && (
+            <div
+              style={{
+                padding: "16px 20px",
+                background: "#f8fafc",
+                borderBottom: "1px solid #e2e8f0",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: "16px",
+                flexWrap: "wrap",
+              }}
+            >
+              <div style={{ display: "flex", gap: "14px", alignItems: "center", flexWrap: "wrap", flex: 1 }}>
+                {toolbarExtras}
+              </div>
+              <div style={{ display: "flex", gap: "8px" }}>
+                <button
+                  type="button"
+                  style={{
+                    padding: "7px 16px",
+                    borderRadius: "4px",
+                    border: "1px solid #cbd5e1",
+                    background: "#ffffff",
+                    color: "#475569",
+                    fontWeight: 600,
+                    fontSize: "13px",
+                    cursor: "pointer",
+                  }}
+                  onClick={() => {
+                    setSearchInput("");
+                    setCurrentPage(1);
+                  }}
+                >
+                  Reset
+                </button>
+                <button
+                  type="button"
+                  style={{
+                    padding: "7px 16px",
+                    borderRadius: "4px",
+                    border: "none",
+                    background: "#0061f2",
+                    color: "#ffffff",
+                    fontWeight: 600,
+                    fontSize: "13px",
+                    cursor: "pointer",
+                  }}
+                  onClick={() => {
+                    setCurrentPage(1);
+                  }}
+                >
+                  Apply
+                </button>
+              </div>
+            </div>
+          )}
+
           <div className="toolbar" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 20px" }}>
             <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
               <select
@@ -460,9 +542,8 @@ export function MasterPage<T extends MasterRecord>({
                 placeholder={searchPlaceholder || "Search..."}
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
-                style={{ padding: "8px 14px", borderRadius: "4px", border: "1px solid #cbd5e1", width: "240px", fontSize: "13.5px" }}
+                style={{ padding: "8px 14px", borderRadius: "4px", border: "1px solid #cbd5e1", width: "260px", fontSize: "13.5px" }}
               />
-              {toolbarExtras}
             </div>
           </div>
 
@@ -472,7 +553,7 @@ export function MasterPage<T extends MasterRecord>({
                 <tr>
                   <th>Sr. No.</th>
                   {headerCells}
-                  <th>{actionsHeader}</th>
+                  <th style={{ textAlign: "center" }}>{actionsHeader || "ACTION"}</th>
                 </tr>
               </thead>
               <tbody ref={tableBodyRef}>

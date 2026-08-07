@@ -397,7 +397,7 @@ function ForcePasswordChangeModal({ onDone }: { onDone: () => void }) {
 /* Sidebar                                                            */
 /* ------------------------------------------------------------------ */
 
-function Sidebar({ activeKey, brandName: _brandName }: { activeKey: string; brandName: string }) {
+function Sidebar({ activeKey, brandName }: { activeKey: string; brandName: string }) {
   const { profile, isSuperAdmin, hasPermission } = useAuth();
   const navRef = useRef<HTMLElement>(null);
   const navigate = useNavigate();

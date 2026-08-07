@@ -62,7 +62,7 @@ export function LoginPage() {
 
   useEffect(() => {
     let cancelled = false;
-    document.title = `Sign In — ${brand}`;
+    document.title = `Sign In — ${DEFAULT_LOGIN_BRAND}`;
     (async () => {
       try {
         const { data } = await apiGet<PublicOrgInfo>("/organizations/public");

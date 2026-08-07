@@ -40,7 +40,7 @@ function LoginIllustration() {
       alt="ERP Login Illustration"
       style={{
         width: "100%",
-        maxWidth: "460px",
+        maxWidth: "450px",
         height: "auto",
         objectFit: "contain",
         display: "block",
@@ -111,23 +111,23 @@ export function LoginPage() {
   return (
     <div style={{ minHeight: "100vh", width: "100%", background: "#f8fafc", display: "flex", flexDirection: "column" }}>
       {/* Top Header Logo */}
-      <header style={{ padding: "16px 40px", background: "#ffffff", borderBottom: "1px solid #e2e8f0", display: "flex", alignItems: "center" }}>
+      <header style={{ padding: "10px 32px", background: "#ffffff", borderBottom: "1px solid #e2e8f0", display: "flex", alignItems: "center" }}>
         <Link to="/dashboard" style={{ display: "inline-flex", alignItems: "center", textDecoration: "none", cursor: "pointer" }}>
-          <img src="/logo.png" alt="IHM Logo" style={{ height: "48px", width: "auto", objectFit: "contain" }} />
+          <img src="/logo.png" alt="IHM Logo" style={{ height: "40px", width: "auto", objectFit: "contain" }} />
         </Link>
       </header>
 
       {/* Main Login Content */}
-      <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: "40px 20px" }}>
-        <div style={{ width: "100%", maxWidth: "1050px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "40px", flexWrap: "wrap" }}>
-          
+      <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: "40px 32px" }}>
+        <div style={{ width: "100%", maxWidth: "1150px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "80px", flexWrap: "wrap" }}>
+
           {/* Left Illustration Pane */}
           <div style={{ flex: 1, minWidth: "320px", display: "flex", justifyContent: "center" }}>
             <LoginIllustration />
           </div>
 
           {/* Right Sign In Form Pane */}
-          <div style={{ width: "100%", maxWidth: "380px", background: "#ffffff", padding: "36px 32px", borderRadius: "12px", boxShadow: "0 10px 25px rgba(0,0,0,0.05)", border: "1px solid #e2e8f0" }}>
+          <div style={{ width: "100%", maxWidth: "380px", background: "transparent", padding: "0", borderRadius: "0", boxShadow: "none", border: "none" }}>
             <h2 style={{ fontSize: "24px", fontWeight: 800, color: "#1e293b", margin: "0 0 6px" }}>Sign In</h2>
             <p style={{ fontSize: "13px", color: "#64748b", margin: "0 0 24px" }}>Welcome Back! Please Signin To Continue.</p>
 
@@ -222,9 +222,8 @@ export function LoginPage() {
 
       {/* Footer */}
       <footer style={{ padding: "16px 40px", borderTop: "1px solid #e2e8f0", background: "#ffffff", fontSize: "12px", color: "#64748b", textTransform: "uppercase" }}>
-        © 2026 CREATED BY <span style={{ fontWeight: 700, color: "#0061f2" }}>THE DEZINE</span>
+        © 2026 CREATED BY <span style={{ fontWeight: 700, color: "#0061f2" }}>INHYMA</span>
       </footer>
     </div>
   );
 }
-

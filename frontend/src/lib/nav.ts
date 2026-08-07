@@ -26,7 +26,7 @@ export const NAV_SECTIONS: NavSection[] = [
   {
     label: "DASHBOARD",
     items: [
-      { key: "dashboard", label: "Dashboard", path: "/", icon: "dashboard" },
+      { key: "dashboard", label: "Dashboard", path: "/dashboard", icon: "dashboard" },
     ],
   },
   {
@@ -141,7 +141,7 @@ export const NAV_ITEMS_BY_KEY: Record<string, NavItem> = NAV_SECTIONS.reduce(
  * updated to know about client-side routes) -- see resolveLegacyUrl below.
  */
 export const LEGACY_REDIRECTS: Record<string, string> = {
-  "/index.html": "/",
+  "/index.html": "/dashboard",
   "/login.html": "/login",
   "/403.html": "/403",
   "/organization.html": "/organization",

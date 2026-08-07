@@ -51,7 +51,7 @@ export function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
-      <Route path="/" element={<DashboardPage />} />
+      <Route path="/" element={<Navigate to="/dashboard" replace />} />
       <Route path="/dashboard" element={<DashboardPage />} />
       <Route path="/403" element={<ForbiddenPage />} />
       <Route path="/organization" element={<OrganizationPage />} />
@@ -80,7 +80,7 @@ export function App() {
         <Route key={from} path={from} element={<Navigate to={to} replace />} />
       ))}
 
-      <Route path="*" element={<Navigate to="/" replace />} />
+      <Route path="*" element={<Navigate to="/dashboard" replace />} />
     </Routes>
   );
 }

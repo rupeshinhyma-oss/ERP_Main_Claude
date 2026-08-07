@@ -35,64 +35,17 @@ function EyeIcon({ visible }: { visible: boolean }) {
 /** Vector illustration matching INHYMA ERP login screen: woman working on laptop at desk with chat bubbles */
 function LoginIllustration() {
   return (
-    <svg className="illustration-svg" viewBox="0 0 440 340" fill="none" xmlns="http://www.w3.org/2000/svg">
-      {/* Background Soft Circle */}
-      <circle cx="210" cy="180" r="130" fill="#E8EEFF" />
-      <ellipse cx="210" cy="290" rx="160" ry="12" fill="#DFE6F9" />
-
-      {/* Floating Chat Bubble Top */}
-      <rect x="235" y="45" width="55" height="40" rx="8" fill="#3B82F6" />
-      <path d="M245 75 L240 85 L255 75 Z" fill="#3B82F6" />
-      <rect x="245" y="56" width="35" height="5" rx="2" fill="#FFFFFF" />
-      <rect x="245" y="66" width="22" height="4" rx="2" fill="#93C5FD" />
-
-      {/* Floating Window Left */}
-      <rect x="55" y="105" width="110" height="75" rx="8" fill="#93C5FD" opacity="0.9" />
-      <rect x="55" y="105" width="110" height="16" rx="8" fill="#60A5FA" />
-      <circle cx="65" cy="113" r="2.5" fill="#FFFFFF" />
-      <circle cx="73" cy="113" r="2.5" fill="#FFFFFF" />
-      <circle cx="81" cy="113" r="2.5" fill="#FFFFFF" />
-      <rect x="67" y="130" width="36" height="30" rx="4" fill="#FFFFFF" />
-      <rect x="110" y="132" width="42" height="6" rx="2" fill="#FFFFFF" />
-      <rect x="110" y="144" width="30" height="5" rx="2" fill="#BFDBFE" />
-
-      {/* Floating Window Right */}
-      <rect x="325" y="125" width="70" height="36" rx="6" fill="#1D4ED8" />
-      <rect x="333" y="134" width="30" height="5" rx="2" fill="#FFFFFF" />
-      <rect x="333" y="144" width="20" height="4" rx="2" fill="#93C5FD" />
-      <rect x="372" y="134" width="16" height="18" rx="3" fill="#FFFFFF" />
-
-      {/* Desk & Legs */}
-      <rect x="105" y="208" width="140" height="5" fill="#1E293B" />
-      <rect x="170" y="213" width="5" height="85" fill="#1E293B" />
-      <rect x="235" y="213" width="5" height="85" fill="#1E293B" />
-
-      {/* Laptop */}
-      <path d="M140 185 L200 185 L215 208 L125 208 Z" fill="#3B82F6" />
-      <path d="M142 142 L198 142 L200 185 L140 185 Z" fill="#60A5FA" />
-      <circle cx="170" cy="163" r="4" fill="#FFFFFF" />
-
-      {/* Person Sitting */}
-      {/* Chair */}
-      <path d="M250 180 L290 180 L285 240 L245 240 Z" fill="#1E293B" />
-      <rect x="270" y="240" width="6" height="60" fill="#1E293B" />
-
-      {/* Legs */}
-      <path d="M225 210 C220 250 215 275 190 285 L180 290 L200 295 C225 285 235 255 245 220 Z" fill="#1E1B4B" />
-      <path d="M255 220 C250 255 245 280 225 295 L215 300 L235 305 C255 290 265 260 275 225 Z" fill="#2E2A72" />
-      {/* Shoes */}
-      <path d="M175 285 L195 285 L190 295 L170 295 Z" fill="#1E293B" />
-      <path d="M210 295 L230 295 L225 305 L205 305 Z" fill="#1E293B" />
-
-      {/* Torso & Arm */}
-      <path d="M255 170 C250 145 270 120 305 130 C315 150 310 180 295 210 Z" fill="#2563EB" />
-      <path d="M265 175 L215 195 L200 185 L255 165 Z" fill="#2563EB" />
-      <circle cx="210" cy="190" r="6" fill="#FCA5A5" />
-
-      {/* Head & Hair */}
-      <circle cx="270" cy="115" r="14" fill="#FCA5A5" />
-      <path d="M250 110 C245 80 295 80 305 110 C300 135 285 140 270 140 C255 140 245 125 250 110 Z" fill="#1E1B4B" />
-    </svg>
+    <img
+      src="/login-illustration.png"
+      alt="ERP Login Illustration"
+      style={{
+        width: "100%",
+        maxWidth: "460px",
+        height: "auto",
+        objectFit: "contain",
+        display: "block",
+      }}
+    />
   );
 }
 
@@ -131,7 +84,7 @@ export function LoginPage() {
   }, []);
 
   if (Auth.isLoggedIn()) {
-    return <Navigate to="/" replace />;
+    return <Navigate to="/dashboard" replace />;
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -148,7 +101,7 @@ export function LoginPage() {
       const { data: profile } = await apiGet<Profile>("/auth/profile");
       Auth.updateProfile(profile);
 
-      navigate("/", { replace: true });
+      navigate("/dashboard", { replace: true });
     } catch (err) {
       setError(err);
       setSubmitting(false);

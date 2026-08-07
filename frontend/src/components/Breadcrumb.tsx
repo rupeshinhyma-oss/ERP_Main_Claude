@@ -11,7 +11,7 @@ import { Link } from "react-router-dom";
 export function Breadcrumb({ trail }: { trail: string[] }) {
   return (
     <div className="breadcrumb">
-      <Link to="/">Dashboard</Link>
+      <Link to="/dashboard">Dashboard</Link>
       {trail.map((segment, index) => (
         <span key={`${segment}-${index}`}>
           <span className="sep">/</span>

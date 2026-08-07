@@ -61,6 +61,17 @@ class BrandService:
         """Create a new brand, validating name/code uniqueness."""
         name = field_values.get("name")
         code = field_values.get("code")
+
+        if not code and name:
+            clean_name = "".join(c.upper() for c in name if c.isalnum())[:10]
+            code = f"BR-{clean_name}" if clean_name else "BR-GEN"
+            counter = 1
+            base_code = code
+            while await self.repository.get_by_code(code) is not None:
+                code = f"{base_code}{counter}"
+                counter += 1
+            field_values["code"] = code
+
         if name:
             existing = await self.repository.get_by_name(name)
             if existing is not None:

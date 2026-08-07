@@ -13,7 +13,7 @@ from app.core.constants import RecordStatus
 class ProductCategoryCreate(BaseModel):
     """Payload to create a new product category."""
 
-    code: str = Field(..., min_length=1, max_length=50)
+    code: str | None = Field(default=None, max_length=50)
     name: str = Field(..., min_length=1, max_length=150)
     description: str | None = None
     status: RecordStatus = RecordStatus.ACTIVE

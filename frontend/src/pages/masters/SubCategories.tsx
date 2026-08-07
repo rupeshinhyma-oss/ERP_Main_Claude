@@ -4,9 +4,8 @@ import { useState } from "react";
 import { MasterPage, type FormState } from "@/components/MasterPage";
 import { StatusBadge, dash } from "@/components/ui";
 import {
-  SelectField,
+  SearchableSelectField,
   StatusSelectField,
-  TextAreaField,
   TextField,
   nullIfBlank,
 } from "@/components/fields";
@@ -17,7 +16,6 @@ const EMPTY: FormState = {
   category_id: "",
   code: "",
   name: "",
-  description: "",
   status: "active",
 };
 
@@ -60,7 +58,7 @@ export function SubCategoriesPage() {
       ]}
       importHeaders={[
         { key: "category_code", label: "Category Code", required: true },
-        { key: "code", label: "Sub-Category Code", required: true },
+        { key: "code", label: "Sub-Category Code" },
         { key: "name", label: "Sub-Category Name", required: true },
         { key: "description", label: "Description" },
         { key: "status", label: "Status (active/inactive)" },
@@ -70,7 +68,6 @@ export function SubCategoriesPage() {
         category_id: item?.category_id ?? "",
         code: item?.code ?? "",
         name: item?.name ?? "",
-        description: item?.description ?? "",
         status: item?.status ?? "active",
       })}
       toPayload={(f) => {
@@ -81,37 +78,32 @@ export function SubCategoriesPage() {
           category_id: f.category_id,
           code: nullIfBlank(f.code),
           name: f.name.trim(),
-          description: nullIfBlank(f.description),
           status: f.status,
         };
       }}
       renderFields={(f, set) => (
-        <>
-          <div className="form-grid">
-            <SelectField
-              id="category_id"
-              label="Category *"
-              required
-              value={f.category_id}
-              onChange={(v) => set("category_id", v)}
-            >
-              <option value="">
-                {categories.items.length
-                  ? "-- Select Category --"
-                  : "-- No Categories Found! Create Category First --"}
+        <div className="form-grid">
+          <SearchableSelectField
+            id="category_id"
+            label="Category *"
+            required
+            value={f.category_id}
+            onChange={(v) => set("category_id", v)}
+          >
+            <option value="">
+              {categories.items.length
+                ? "-- Select Category --"
+                : "-- No Categories Found! Create Category First --"}
+            </option>
+            {categories.items.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
               </option>
-              {categories.items.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </SelectField>
-            <TextField id="name" label="Sub-Category Name *" required maxLength={150} placeholder="e.g. Band Sealer, Citric Acid" value={f.name} onChange={(v) => set("name", v)} />
-            <TextField id="code" label="Sub-Category Code (Optional)" maxLength={50} placeholder="Auto-generated if left blank" value={f.code} onChange={(v) => set("code", v)} />
-            <StatusSelectField value={f.status} onChange={(v) => set("status", v)} />
-          </div>
-          <TextAreaField id="description" label="Description" value={f.description} onChange={(v) => set("description", v)} />
-        </>
+            ))}
+          </SearchableSelectField>
+          <TextField id="name" label="Sub-Category Name *" required maxLength={150} placeholder="e.g. Band Sealer, Citric Acid" value={f.name} onChange={(v) => set("name", v)} />
+          <StatusSelectField value={f.status} onChange={(v) => set("status", v)} />
+        </div>
       )}
       detailFields={(s) => [
         { label: "Sub-Category Name", value: s.name, fullWidth: true },

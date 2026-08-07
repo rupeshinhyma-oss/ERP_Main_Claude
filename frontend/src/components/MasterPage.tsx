@@ -421,17 +421,25 @@ export function MasterPage<T extends MasterRecord>({
                   borderTop: "1px solid #e2e8f0",
                 }}
               >
-                <button type="submit" className="btn btn-add-new" style={{ padding: "10px 24px" }}>
-                  Save &amp; Continue
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-quick-add"
-                  style={{ padding: "10px 24px" }}
-                  onClick={closeModal}
-                >
-                  Save &amp; Exit
-                </button>
+                {hideQuickAdd ? (
+                  <button type="submit" className="btn btn-add-new" style={{ padding: "10px 24px", background: "#0061f2", color: "#ffffff", fontWeight: 600 }}>
+                    Save
+                  </button>
+                ) : (
+                  <>
+                    <button type="submit" className="btn btn-add-new" style={{ padding: "10px 24px" }}>
+                      Save &amp; Continue
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-quick-add"
+                      style={{ padding: "10px 24px" }}
+                      onClick={closeModal}
+                    >
+                      Save &amp; Exit
+                    </button>
+                  </>
+                )}
               </div>
             </form>
           </div>
@@ -800,12 +808,34 @@ export function MasterPage<T extends MasterRecord>({
                 {renderFields(form, setField)}
               </div>
               <div className="form-actions" style={{ display: "flex", gap: "12px", width: "100%", padding: "16px 24px", background: "#ffffff", borderTop: "1px solid #e2e8f0" }}>
-                <button type="submit" className="btn btn-add-new" style={{ flex: 1, justifyContent: "center" }}>
-                  Save &amp; Continue
-                </button>
-                <button type="button" className="btn btn-quick-add" style={{ flex: 1, justifyContent: "center" }} onClick={closeModal}>
-                  Save &amp; Exit
-                </button>
+                {hideQuickAdd ? (
+                  <button
+                    type="submit"
+                    className="btn btn-add-new"
+                    style={{
+                      flex: 1,
+                      justifyContent: "center",
+                      background: "#0061f2",
+                      color: "#ffffff",
+                      fontWeight: 600,
+                      padding: "10px 24px",
+                      borderRadius: "6px",
+                      border: "none",
+                      cursor: "pointer",
+                    }}
+                  >
+                    Save
+                  </button>
+                ) : (
+                  <>
+                    <button type="submit" className="btn btn-add-new" style={{ flex: 1, justifyContent: "center" }}>
+                      Save &amp; Continue
+                    </button>
+                    <button type="button" className="btn btn-quick-add" style={{ flex: 1, justifyContent: "center" }} onClick={closeModal}>
+                      Save &amp; Exit
+                    </button>
+                  </>
+                )}
               </div>
             </form>
           </div>

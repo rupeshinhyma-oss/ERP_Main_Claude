@@ -14,7 +14,7 @@ class BrandCreate(BaseModel):
     """Payload to create a new brand."""
 
     name: str = Field(..., min_length=1, max_length=150)
-    code: str = Field(..., min_length=1, max_length=50)
+    code: str | None = Field(default=None, max_length=50)
     description: str | None = None
     logo_url: str | None = Field(default=None, max_length=500)
     status: RecordStatus = RecordStatus.ACTIVE

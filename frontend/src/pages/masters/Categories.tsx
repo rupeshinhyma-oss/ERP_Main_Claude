@@ -2,10 +2,10 @@
 
 import { MasterPage, type FormState } from "@/components/MasterPage";
 import { StatusBadge, dash } from "@/components/ui";
-import { StatusSelectField, TextAreaField, TextField, nullIfBlank } from "@/components/fields";
+import { StatusSelectField, TextField, nullIfBlank } from "@/components/fields";
 import type { ProductCategory } from "@/types";
 
-const EMPTY: FormState = { code: "", name: "", description: "", status: "active" };
+const EMPTY: FormState = { code: "", name: "", status: "active" };
 
 export function CategoriesPage() {
   return (
@@ -28,7 +28,7 @@ export function CategoriesPage() {
         { header: "Status", render: (c) => <StatusBadge status={c.status} /> },
       ]}
       importHeaders={[
-        { key: "code", label: "Category Code", required: true },
+        { key: "code", label: "Category Code" },
         { key: "name", label: "Category Name", required: true },
         { key: "description", label: "Description" },
         { key: "status", label: "Status (active/inactive)" },
@@ -37,24 +37,18 @@ export function CategoriesPage() {
       fillForm={(item) => ({
         code: item?.code ?? "",
         name: item?.name ?? "",
-        description: item?.description ?? "",
         status: item?.status ?? "active",
       })}
       toPayload={(f) => ({
-        code: f.code.trim(),
+        code: nullIfBlank(f.code),
         name: f.name.trim(),
-        description: nullIfBlank(f.description),
         status: f.status,
       })}
       renderFields={(f, set) => (
-        <>
-          <div className="form-grid">
-            <TextField id="code" label="Category Code *" required maxLength={50} value={f.code} onChange={(v) => set("code", v)} />
-            <TextField id="name" label="Category Name *" required maxLength={150} value={f.name} onChange={(v) => set("name", v)} />
-            <StatusSelectField value={f.status} onChange={(v) => set("status", v)} />
-          </div>
-          <TextAreaField id="description" label="Description" value={f.description} onChange={(v) => set("description", v)} />
-        </>
+        <div className="form-grid">
+          <TextField id="name" label="Category Name *" required maxLength={150} value={f.name} onChange={(v) => set("name", v)} />
+          <StatusSelectField value={f.status} onChange={(v) => set("status", v)} />
+        </div>
       )}
       detailFields={(c) => [
         { label: "Category Name", value: c.name, fullWidth: true },

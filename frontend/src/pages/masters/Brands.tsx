@@ -2,10 +2,10 @@
 
 import { MasterPage, type FormState } from "@/components/MasterPage";
 import { StatusBadge, dash } from "@/components/ui";
-import { StatusSelectField, TextAreaField, TextField, nullIfBlank } from "@/components/fields";
+import { StatusSelectField, TextField, nullIfBlank } from "@/components/fields";
 import type { Brand } from "@/types";
 
-const EMPTY: FormState = { name: "", code: "", logo_url: "", description: "", status: "active" };
+const EMPTY: FormState = { name: "", code: "", status: "active" };
 
 export function BrandsPage() {
   return (
@@ -29,7 +29,7 @@ export function BrandsPage() {
       ]}
       importHeaders={[
         { key: "name", label: "Brand Name", required: true },
-        { key: "code", label: "Brand Code", required: true },
+        { key: "code", label: "Brand Code" },
         { key: "description", label: "Description" },
         { key: "logo_url", label: "Logo URL" },
         { key: "status", label: "Status (active/inactive)" },
@@ -38,27 +38,18 @@ export function BrandsPage() {
       fillForm={(item) => ({
         name: item?.name ?? "",
         code: item?.code ?? "",
-        logo_url: item?.logo_url ?? "",
-        description: item?.description ?? "",
         status: item?.status ?? "active",
       })}
       toPayload={(f) => ({
         name: f.name.trim(),
-        code: f.code.trim(),
-        logo_url: nullIfBlank(f.logo_url),
-        description: nullIfBlank(f.description),
+        code: nullIfBlank(f.code),
         status: f.status,
       })}
       renderFields={(f, set) => (
-        <>
-          <div className="form-grid">
-            <TextField id="name" label="Brand Name *" required maxLength={150} value={f.name} onChange={(v) => set("name", v)} />
-            <TextField id="code" label="Brand Code *" required maxLength={50} value={f.code} onChange={(v) => set("code", v)} />
-            <TextField id="logo_url" label="Logo URL" maxLength={500} placeholder="https://..." value={f.logo_url} onChange={(v) => set("logo_url", v)} />
-            <StatusSelectField value={f.status} onChange={(v) => set("status", v)} />
-          </div>
-          <TextAreaField id="description" label="Description" value={f.description} onChange={(v) => set("description", v)} />
-        </>
+        <div className="form-grid">
+          <TextField id="name" label="Brand Name *" required maxLength={150} value={f.name} onChange={(v) => set("name", v)} />
+          <StatusSelectField value={f.status} onChange={(v) => set("status", v)} />
+        </div>
       )}
       detailFields={(b) => [
         { label: "Brand Name", value: b.name, fullWidth: true },

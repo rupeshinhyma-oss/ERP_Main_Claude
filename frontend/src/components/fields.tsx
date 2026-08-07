@@ -250,6 +250,181 @@ export function SelectField({
   );
 }
 
+export function SearchableSelectField({
+  id,
+  label,
+  value,
+  onChange,
+  required,
+  placeholder = "-- Select or type to search --",
+  children,
+  hint,
+  style,
+}: BaseFieldProps & {
+  value: string;
+  onChange: (value: string) => void;
+  required?: boolean;
+  placeholder?: string;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const options: { value: string; label: string }[] = [];
+  React.Children.forEach(children, (child) => {
+    if (React.isValidElement(child) && child.type === "option") {
+      const childProps = child.props as { value?: string | number; children?: ReactNode };
+      options.push({
+        value: String(childProps.value ?? ""),
+        label: String(childProps.children ?? childProps.value ?? ""),
+      });
+    }
+  });
+
+  const selectedOption = options.find((opt) => opt.value === value);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+        setOpen(false);
+        setQuery("");
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const filteredOptions = options.filter((opt) =>
+    opt.value === "" || opt.label.toLowerCase().includes(query.toLowerCase())
+  );
+
+  const displayString = open ? query : (selectedOption ? selectedOption.label : "");
+
+  return (
+    <div className="field" style={{ ...style, position: "relative" }} ref={containerRef}>
+      <label htmlFor={id}>{label}</label>
+
+      <div
+        style={{
+          border: "1px solid var(--color-border-strong)",
+          borderRadius: "var(--radius-sm)",
+          background: "var(--color-surface)",
+          display: "flex",
+          alignItems: "center",
+          position: "relative",
+        }}
+      >
+        <input
+          id={id}
+          type="text"
+          value={displayString}
+          onChange={(e) => {
+            setQuery(e.target.value);
+            if (!open) setOpen(true);
+          }}
+          onClick={() => setOpen(true)}
+          onFocus={() => setOpen(true)}
+          placeholder={selectedOption ? selectedOption.label : placeholder}
+          style={{
+            width: "100%",
+            border: "none",
+            outline: "none",
+            padding: "9px 30px 9px 11px",
+            fontSize: "13.5px",
+            background: "transparent",
+            color: "var(--color-text)",
+          }}
+        />
+        <span
+          onClick={() => setOpen(!open)}
+          style={{
+            position: "absolute",
+            right: "10px",
+            fontSize: "10px",
+            color: "var(--color-muted)",
+            cursor: "pointer",
+            userSelect: "none",
+          }}
+        >
+          {open ? "▲" : "▼"}
+        </span>
+      </div>
+
+      {open && (
+        <div
+          style={{
+            position: "absolute",
+            top: "calc(100% + 2px)",
+            left: 0,
+            right: 0,
+            zIndex: 9999,
+            background: "#ffffff",
+            border: "1px solid #cbd5e0",
+            borderRadius: "6px",
+            boxShadow: "0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)",
+            maxHeight: "220px",
+            overflowY: "auto",
+            padding: "4px 0",
+          }}
+        >
+          {filteredOptions.length === 0 ? (
+            <div style={{ padding: "8px 12px", fontSize: "13px", color: "#64748b" }}>No matching category</div>
+          ) : (
+            filteredOptions.map((opt, idx) => {
+              const isSelected = opt.value === value;
+              return (
+                <div
+                  key={idx}
+                  onClick={() => {
+                    onChange(opt.value);
+                    setOpen(false);
+                    setQuery("");
+                  }}
+                  style={{
+                    padding: "8px 12px",
+                    fontSize: "13.5px",
+                    cursor: "pointer",
+                    background: isSelected ? "#0061f2" : "transparent",
+                    color: isSelected ? "#ffffff" : "#1e293b",
+                    fontWeight: isSelected ? 600 : 400,
+                  }}
+                  onMouseOver={(e) => {
+                    if (!isSelected) e.currentTarget.style.background = "#f1f5f9";
+                  }}
+                  onMouseOut={(e) => {
+                    if (!isSelected) e.currentTarget.style.background = "transparent";
+                  }}
+                >
+                  {opt.label}
+                </div>
+              );
+            })
+          )}
+        </div>
+      )}
+
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        required={required}
+        tabIndex={-1}
+        style={{
+          position: "absolute",
+          opacity: 0,
+          pointerEvents: "none",
+          width: 0,
+          height: 0,
+        }}
+      >
+        {children}
+      </select>
+
+      {hint && <span className="hint">{hint}</span>}
+    </div>
+  );
+}
+
 /** The active/inactive select that closes almost every master form. */
 export function StatusSelectField({
   value,

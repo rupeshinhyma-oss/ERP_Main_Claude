@@ -24,7 +24,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { AppShell } from "./AppShell";
 import { Banner, Can, StatusBadge, TableMessageRow } from "./ui";
 import { Pagination } from "./Pagination";
-import { ImportButton, ImportSummaryPanel } from "./ImportWizard";
+import { ImportSummaryPanel } from "./ImportWizard";
 import { SideDrawer, DetailFieldGrid, type DetailField } from "./SideDrawer";
 import { downloadSampleTemplate } from "@/lib/sampleTemplate";
 import { Breadcrumb } from "./Breadcrumb";
@@ -125,7 +125,7 @@ export function MasterPage<T extends MasterRecord>({
   heading,
   subtitle,
   breadcrumbTrail,
-  newButtonLabel,
+  newButtonLabel: _newButtonLabel,
   searchPlaceholder,
   columns,
   columnHeaders,
@@ -150,7 +150,6 @@ export function MasterPage<T extends MasterRecord>({
   const canCreate = hasPermission(`${permissionPrefix}.create`);
   const canUpdate = hasPermission(`${permissionPrefix}.update`);
   const canDelete = hasPermission(`${permissionPrefix}.delete`);
-  const canExport = hasPermission(`${permissionPrefix}.export`);
   const canImport = hasPermission(`${permissionPrefix}.import`);
 
   const [rows, setRows] = useState<T[]>([]);
@@ -169,8 +168,8 @@ export function MasterPage<T extends MasterRecord>({
 
   const [drawerItem, setDrawerItem] = useState<T | null>(null);
 
-  const [importSummary, setImportSummary] = useState<ImportSummary | null>(null);
-  const [importError, setImportError] = useState<string | null>(null);
+  const [importSummary, _setImportSummary] = useState<ImportSummary | null>(null);
+  const [importError, _setImportError] = useState<string | null>(null);
 
   const srNoJump = useSrNoJump();
   const tableBodyRef = useRef<HTMLTableSectionElement>(null);

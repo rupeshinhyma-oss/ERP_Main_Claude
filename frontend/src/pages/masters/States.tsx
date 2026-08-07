@@ -20,16 +20,16 @@ export function StatesPage() {
       apiBase="/masters/states"
       permissionPrefix="state"
       entityName="state"
-      heading="States"
-      subtitle="Belongs to a country; state names are unique within their country."
-      breadcrumbTrail={["Master Data", "States"]}
-      newButtonLabel="+ New State"
-      searchPlaceholder="Search name or code or Sr. No..."
+      heading="Provinces (First Level Divisions)"
+      subtitle="First-level administrative divisions of China: 23 Provinces, 5 Autonomous Regions, 4 Direct-administered Municipalities (Beijing, Shanghai, Tianjin, Chongqing), and 2 SARs."
+      breadcrumbTrail={["Master Data", "Provinces"]}
+      newButtonLabel="+ New Province"
+      searchPlaceholder="Search province name or code or Sr. No..."
       reloadToken={countries.loaded}
       extraFilters={countryFilter ? { country_id: countryFilter } : undefined}
       toolbarExtras={
         <select value={countryFilter} onChange={(e) => setCountryFilter(e.target.value)}>
-          <option value="">All countries</option>
+          <option value="">All Countries / National Levels</option>
           {countries.items.map((c) => (
             <option key={c.id} value={c.id}>
               {c.name}
@@ -37,17 +37,17 @@ export function StatesPage() {
           ))}
         </select>
       }
-      columnHeaders={["Name", "Code", "Country", "Status"]}
+      columnHeaders={["Province Name", "Province Code", "Country", "Status"]}
       columns={[
-        { header: "Name", render: (s) => <span className="cell-primary">{s.name}</span> },
-        { header: "Code", render: (s) => dash(s.code) },
+        { header: "Province Name", render: (s) => <span className="cell-primary">{s.name}</span> },
+        { header: "Province Code", render: (s) => dash(s.code) },
         { header: "Country", render: (s) => countryName(s.country_id) },
         { header: "Status", render: (s) => <StatusBadge status={s.status} /> },
       ]}
       importHeaders={[
         { key: "country_code", label: "Country Code", required: true },
-        { key: "name", label: "State/Province Name", required: true },
-        { key: "code", label: "State Code" },
+        { key: "name", label: "Province / Region Name", required: true },
+        { key: "code", label: "Province Code" },
         { key: "status", label: "Status (active/inactive)" },
       ]}
       emptyForm={EMPTY}
@@ -72,7 +72,7 @@ export function StatesPage() {
         <div className="form-grid">
           <SelectField
             id="country_id"
-            label="Country *"
+            label="Country / National Level *"
             required
             value={f.country_id}
             onChange={(v) => set("country_id", v)}
@@ -88,14 +88,14 @@ export function StatesPage() {
               </option>
             ))}
           </SelectField>
-          <TextField id="name" label="State Name *" required maxLength={150} value={f.name} onChange={(v) => set("name", v)} />
-          <TextField id="code" label="State Code" maxLength={20} value={f.code} onChange={(v) => set("code", v)} />
+          <TextField id="name" label="Province / Region Name *" required maxLength={150} value={f.name} onChange={(v) => set("name", v)} />
+          <TextField id="code" label="Province Code" maxLength={20} value={f.code} onChange={(v) => set("code", v)} />
           <StatusSelectField value={f.status} onChange={(v) => set("status", v)} />
         </div>
       )}
       detailFields={(s) => [
-        { label: "State/Province Name", value: s.name, fullWidth: true },
-        { label: "State Code", value: dash(s.code) },
+        { label: "Province / Region Name", value: s.name, fullWidth: true },
+        { label: "Province Code", value: dash(s.code) },
         { label: "Country", value: countryName(s.country_id) },
         { label: "Current Status", value: <StatusBadge status={s.status} /> },
       ]}

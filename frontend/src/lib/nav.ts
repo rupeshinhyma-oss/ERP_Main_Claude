@@ -34,7 +34,7 @@ export const NAV_SECTIONS: NavSection[] = [
     items: [
       { key: "suppliers", label: "Companies", path: "/suppliers", icon: "users", permission: "supplier.view" },
       { key: "buyers", label: "Agents", path: "/buyers", icon: "user", permission: "crm.view" },
-      { key: "industrial-zones", label: "Industrial Zones", path: "/masters/cities", icon: "sliders", permission: "city.view" },
+      { key: "industrial-zones", label: "Prefectures & Counties", path: "/masters/cities", icon: "sliders", permission: "city.view" },
     ],
   },
   {
@@ -74,8 +74,8 @@ export const NAV_SECTIONS: NavSection[] = [
     items: [
       { key: "masters-hsn", label: "HSN Codes", path: "/masters/hsn", icon: "tag", permission: "hsn.view" },
       { key: "masters-countries", label: "Countries", path: "/masters/countries", icon: "globe", permission: "country.view" },
-      { key: "masters-states", label: "States", path: "/masters/states", icon: "map", permission: "state.view" },
-      { key: "masters-cities", label: "Cities", path: "/masters/cities", icon: "pin", permission: "city.view" },
+      { key: "masters-states", label: "Provinces", path: "/masters/states", icon: "map", permission: "state.view" },
+      { key: "masters-cities", label: "Prefectures & Counties", path: "/masters/cities", icon: "pin", permission: "city.view" },
       { key: "masters-currencies", label: "Currencies", path: "/masters/currencies", icon: "coins", permission: "currency.view" },
       { key: "masters-uom", label: "Units of Measurement", path: "/masters/uom", icon: "ruler", permission: "uom.view" },
       { key: "organization", label: "Organization Settings", path: "/organization", icon: "building", permission: "organization.manage", superAdminOnly: true },
@@ -102,9 +102,9 @@ export const PAGE_TITLES: Record<string, string> = {
   organization: "Organization Settings",
   teams: "Teams",
   users: "Users",
-  "masters-countries": "Countries",
-  "masters-states": "States",
-  "masters-cities": "Industrial Zones & Cities",
+  "masters-countries": "Countries (National Level)",
+  "masters-states": "Provinces (First Level Divisions)",
+  "masters-cities": "Prefectures & Counties (Second & Third Level)",
   "masters-currencies": "Currencies",
   "masters-uom": "Units of Measurement",
   "masters-hsn": "HSN Codes",

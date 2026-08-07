@@ -27,23 +27,23 @@ export function CitiesPage() {
       apiBase="/masters/cities"
       permissionPrefix="city"
       entityName="city"
-      heading="Cities"
-      subtitle="Belongs to a state and country; city names are unique within their state."
-      breadcrumbTrail={["Master Data", "Cities"]}
-      newButtonLabel="+ New City"
-      searchPlaceholder="Search city name or Sr. No..."
+      heading="Prefectures & Counties (Second & Third Level)"
+      subtitle="Second and third level administrative divisions of China: Prefectures, Prefecture-level Cities, Autonomous Prefectures, Counties, and Districts."
+      breadcrumbTrail={["Master Data", "Prefectures & Counties"]}
+      newButtonLabel="+ New Prefecture / County"
+      searchPlaceholder="Search prefecture or county name or Sr. No..."
       reloadToken={`${countries.loaded}-${states.loaded}`}
-      columnHeaders={["City", "State", "Country", "Status"]}
+      columnHeaders={["Prefecture / County", "Province / Region", "Country", "Status"]}
       columns={[
-        { header: "City", render: (c) => <span className="cell-primary">{c.name}</span> },
-        { header: "State", render: (c) => stateName(c.state_id) },
+        { header: "Prefecture / County", render: (c) => <span className="cell-primary">{c.name}</span> },
+        { header: "Province / Region", render: (c) => stateName(c.state_id) },
         { header: "Country", render: (c) => countryName(c.country_id) },
         { header: "Status", render: (c) => <StatusBadge status={c.status} /> },
       ]}
       importHeaders={[
         { key: "country_code", label: "Country Code", required: true },
-        { key: "state_name", label: "State/Province Name", required: true },
-        { key: "name", label: "City Name", required: true },
+        { key: "state_name", label: "Province / Region Name", required: true },
+        { key: "name", label: "Prefecture / County Name", required: true },
         { key: "status", label: "Status (active/inactive)" },
       ]}
       emptyForm={EMPTY}
@@ -55,7 +55,7 @@ export function CitiesPage() {
       })}
       toPayload={(f) => {
         if (!f.country_id) throw new Error("Please select a valid Country.");
-        if (!f.state_id) throw new Error("Please select a valid State.");
+        if (!f.state_id) throw new Error("Please select a valid Province.");
         return {
           country_id: f.country_id,
           state_id: f.state_id,
@@ -71,12 +71,12 @@ export function CitiesPage() {
           <div className="form-grid">
             <SelectField
               id="country_id"
-              label="Country *"
+              label="Country / National Level *"
               required
               value={f.country_id}
               onChange={(v) => {
                 set("country_id", v);
-                // Changing country invalidates the chosen state.
+                // Changing country invalidates the chosen province.
                 set("state_id", "");
               }}
             >
@@ -93,15 +93,15 @@ export function CitiesPage() {
             </SelectField>
             <SelectField
               id="state_id"
-              label="State *"
+              label="Province / Region *"
               required
               value={f.state_id}
               onChange={(v) => set("state_id", v)}
             >
               <option value="">
                 {scopedStates.length
-                  ? "-- Select State --"
-                  : "-- No States Found! Create State First --"}
+                  ? "-- Select Province --"
+                  : "-- No Provinces Found! Create Province First --"}
               </option>
               {scopedStates.map((s) => (
                 <option key={s.id} value={s.id}>
@@ -109,14 +109,14 @@ export function CitiesPage() {
                 </option>
               ))}
             </SelectField>
-            <TextField id="name" label="City Name *" required maxLength={150} value={f.name} onChange={(v) => set("name", v)} />
+            <TextField id="name" label="Prefecture / County Name *" required maxLength={150} value={f.name} onChange={(v) => set("name", v)} />
             <StatusSelectField value={f.status} onChange={(v) => set("status", v)} />
           </div>
         );
       }}
       detailFields={(c) => [
-        { label: "City Name", value: c.name, fullWidth: true },
-        { label: "State / Province", value: stateName(c.state_id) },
+        { label: "Prefecture / County Name", value: c.name, fullWidth: true },
+        { label: "Province / Region", value: stateName(c.state_id) },
         { label: "Country", value: countryName(c.country_id) },
         { label: "Current Status", value: <StatusBadge status={c.status} /> },
       ]}

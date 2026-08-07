@@ -23,8 +23,8 @@ export function CountriesPage() {
       apiBase="/masters/countries"
       permissionPrefix="country"
       entityName="country"
-      heading="Countries"
-      subtitle="The root of the geography hierarchy — referenced by states, cities, and future modules."
+      heading="Countries (National Level)"
+      subtitle="National-level administrative divisions — People's Republic of China and international trading partners."
       breadcrumbTrail={["Master Data", "Countries"]}
       newButtonLabel="+ New Country"
       searchPlaceholder="Search code or name or Sr. No..."

@@ -1,0 +1,854 @@
+/**
+ * ImportWizard -- shared column-mapping import flow for every page that
+ * imports CSV/Excel data (all Master Data pages + Suppliers).
+ *
+ * Flow (matches the familiar Bitrix24 / typical ERP import pattern):
+ *   1. User picks a file (.csv or .xlsx).
+ *   2. The header row and every data row are parsed entirely in the browser
+ *      (no upload yet) using PapaParse (CSV) or SheetJS (XLSX).
+ *   3. A modal shows every target field this module accepts, each with a
+ *      <select> pre-filled with our best-guess match against the uploaded
+ *      sheet's own column names (case/spacing/punctuation-insensitive, plus
+ *      common synonyms). The user can override any mapping.
+ *   4. A live preview table shows the first few rows re-mapped into target
+ *      columns, so correctness can be eyeballed before committing.
+ *   5. On "Import", every row from the *entire* file is remapped into the
+ *      target header order, encoded back into a CSV blob client-side, and
+ *      POSTed to the existing `${apiBase}/import` endpoint -- so the backend's
+ *      row validators (which already key off these exact header names) need no
+ *      changes. Uploads go in fixed-size chunks so progress stays accurate.
+ *   6. While the request is in flight a spinner + "Importing..." state shows;
+ *      when it resolves the created/failed/duplicate summary renders.
+ *
+ * Ported from import-wizard.js. The two parser libraries were previously
+ * injected from a CDN on first use; they are now npm dependencies loaded via
+ * dynamic import(), which keeps them out of the initial bundle exactly as the
+ * lazy CDN load did, but without the third-party runtime dependency.
+ */
+
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { API_BASE, isAbortError, errorMessage } from "@/lib/api";
+import { Auth } from "@/lib/auth";
+import { useBodyScrollLock } from "@/lib/hooks";
+import type {
+  ColumnMapping,
+  ImportDuplicate,
+  ImportHeader,
+  ImportSummary,
+  SheetRow,
+} from "@/types";
+
+/* ------------------------------------------------------------------ */
+/* Header name normalization + fuzzy auto-match                        */
+/* ------------------------------------------------------------------ */
+
+function normalize(str: unknown): string {
+  return String(str || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+/**
+ * Common synonym groups so e.g. a sheet column called "Item Code" auto-maps to
+ * our target field "product_code", "SKU" maps too, etc. Each target field key
+ * maps to extra normalized phrases (beyond its own label/key) that should also
+ * count as a match.
+ */
+const SYNONYMS: Record<string, string[]> = {
+  product_code: ["sku", "item code", "item no", "part number", "part no"],
+  product_name: ["item name", "title", "product title"],
+  company_name: ["supplier name", "vendor name", "name of company", "business name"],
+  category_code: ["category", "product category"],
+  sub_category_code: ["subcategory", "sub category", "sub cat"],
+  brand_code: ["brand", "manufacturer"],
+  hsn_code: ["hsn", "hsn/sac", "hsn code", "tax code"],
+  uom_code: ["uom", "unit", "unit of measurement", "measure"],
+  secondary_uom_code: ["secondary uom", "alt unit", "alternate unit"],
+  country_code: ["country", "iso code"],
+  state_name: ["state", "province"],
+  city_name: ["city"],
+  gst_percent: ["gst", "tax percent", "gst rate", "tax rate"],
+  contact_calling_number: ["phone", "phone number", "mobile", "contact number", "tel"],
+  contact_whatsapp_number: ["whatsapp", "whatsapp number"],
+  contact_wechat_number: ["wechat", "wechat id"],
+  contact_full_name: ["contact name", "contact person", "poc"],
+  contact_designation: ["designation", "job title", "title"],
+  email: ["email address", "e mail", "mail"],
+  tax_id_number: ["tax id", "gstin", "vat number", "tax number"],
+  primary_website: ["website", "url", "web site"],
+  standard_cost: ["cost", "unit cost", "purchase price"],
+  standard_price: ["price", "selling price", "unit price", "mrp"],
+  minimum_order_quantity: ["moq", "min order qty", "min qty"],
+  reorder_level: ["reorder point", "reorder qty"],
+};
+
+/**
+ * Given one target field { key, label } and the list of actual sheet column
+ * names, return the best-guess sheet column name, or null.
+ */
+function bestMatch(target: ImportHeader, sheetColumns: string[]): string | null {
+  const candidates = new Set([normalize(target.key), normalize(target.label)]);
+  (SYNONYMS[target.key] || []).forEach((s) => candidates.add(normalize(s)));
+
+  // 1. exact normalized match
+  for (const col of sheetColumns) {
+    if (candidates.has(normalize(col))) return col;
+  }
+  // 2. substring match either direction
+  for (const col of sheetColumns) {
+    const normCol = normalize(col);
+    for (const cand of candidates) {
+      if (!cand) continue;
+      if (normCol.includes(cand) || cand.includes(normCol)) return col;
+    }
+  }
+  return null;
+}
+
+/* ------------------------------------------------------------------ */
+/* File parsing                                                       */
+/* ------------------------------------------------------------------ */
+
+async function parseCsvFile(file: File): Promise<SheetRow[]> {
+  const { default: Papa } = await import("papaparse");
+  return new Promise((resolve, reject) => {
+    Papa.parse<SheetRow>(file, {
+      header: true,
+      skipEmptyLines: true,
+      complete: (results) => resolve(results.data),
+      error: (err) => reject(err),
+    });
+  });
+}
+
+async function parseXlsxFile(file: File): Promise<SheetRow[]> {
+  const XLSX = await import("xlsx");
+  const buffer = await file.arrayBuffer();
+  const wb = XLSX.read(buffer, { type: "array" });
+  const sheet = wb.Sheets[wb.SheetNames[0]];
+  return XLSX.utils.sheet_to_json<SheetRow>(sheet, { defval: "" });
+}
+
+async function parseFile(file: File): Promise<SheetRow[]> {
+  const lower = file.name.toLowerCase();
+  if (lower.endsWith(".csv")) return parseCsvFile(file);
+  if (lower.endsWith(".xlsx")) return parseXlsxFile(file);
+  throw new Error("Unsupported file type. Please upload a .csv or .xlsx file.");
+}
+
+/* ------------------------------------------------------------------ */
+/* Remap parsed rows into target headers, build a CSV blob            */
+/* ------------------------------------------------------------------ */
+
+function csvEscape(value: unknown): string {
+  const str = value === null || value === undefined ? "" : String(value);
+  if (/[",\n]/.test(str)) {
+    return `"${str.replace(/"/g, '""')}"`;
+  }
+  return str;
+}
+
+function buildRemappedCsv(
+  rows: SheetRow[],
+  mapping: ColumnMapping,
+  importHeaders: ImportHeader[]
+): Blob {
+  const headerLine = importHeaders.map((h) => csvEscape(h.key)).join(",");
+  const lines = [headerLine];
+  for (const row of rows) {
+    const cells = importHeaders.map((h) => {
+      const sourceCol = mapping[h.key];
+      if (!sourceCol) return "";
+      return csvEscape(row[sourceCol]);
+    });
+    lines.push(cells.join(","));
+  }
+  return new Blob([lines.join("\n")], { type: "text/csv" });
+}
+
+/* ------------------------------------------------------------------ */
+/* Chunked upload with live "X of Y rows" progress                    */
+/* ------------------------------------------------------------------ */
+
+/** Rows per request -- frequent enough for live progress, large enough to stay fast. */
+const CHUNK_SIZE = 250;
+
+async function uploadChunk(
+  rowsChunk: SheetRow[],
+  mapping: ColumnMapping,
+  apiBase: string,
+  importHeaders: ImportHeader[],
+  signal: AbortSignal
+): Promise<ImportSummary> {
+  const csvBlob = buildRemappedCsv(rowsChunk, mapping, importHeaders);
+  const formData = new FormData();
+  formData.append("file", csvBlob, "import.csv");
+
+  const token = Auth.getAccessToken();
+  const res = await fetch(`${API_BASE}${apiBase}/import`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: formData,
+    signal,
+  });
+  const body = await res.json();
+  if (!res.ok || body.success === false) {
+    throw new Error(body.message || "Import failed.");
+  }
+  return body.data as ImportSummary;
+}
+
+function mergeSummaries(
+  target: ImportSummary,
+  chunkSummary: ImportSummary,
+  rowOffset: number
+): void {
+  target.total_rows += chunkSummary.total_rows || 0;
+  target.created += chunkSummary.created || 0;
+  target.failed += chunkSummary.failed || 0;
+  target.duplicate_count += chunkSummary.duplicate_count || 0;
+  // Row numbers inside each chunk's summary are 1-indexed *within that chunk's
+  // own CSV* (row 1 = header, row 2 = first data row) -- offset them back to
+  // the row's true position in the original uploaded file so error/duplicate
+  // messages point at the right row.
+  for (const err of chunkSummary.errors || []) {
+    target.errors.push({ ...err, row: err.row + rowOffset });
+  }
+  for (const dup of chunkSummary.duplicates || []) {
+    target.duplicates.push({ ...dup, row: dup.row + rowOffset });
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Duplicate detection UI helpers                                     */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Pick the best human-readable label for one row's data, trying common
+ * "name-like" fields in priority order. Returns null if nothing recognizable is
+ * found (e.g. a module with unusual field names), so callers can fall back to
+ * the row number.
+ */
+function labelForRow(rowData?: Record<string, unknown>): string | null {
+  if (!rowData) return null;
+  const candidates = [
+    "company_name",
+    "product_name",
+    "name",
+    "title",
+    "display_name",
+    "person_name",
+    "code",
+    "product_code",
+    "employee_code",
+  ];
+  for (const key of candidates) {
+    if (rowData[key]) return String(rowData[key]);
+  }
+  return null;
+}
+
+/**
+ * Find an identifying code for a row if the module exposes one (some modules
+ * key duplicates by a serial/code rather than a name) -- used to phrase
+ * "<code> in your file matches <code> in the system" when both sides have one.
+ */
+function idLabelForRow(rowData?: Record<string, unknown> | null): string | null {
+  if (!rowData) return null;
+  const candidates = ["product_code", "code", "employee_code"];
+  for (const key of candidates) {
+    if (rowData[key]) return String(rowData[key]);
+  }
+  return null;
+}
+
+interface DiffRow {
+  key: string;
+  aStr: string;
+  bStr: string;
+  differs: boolean;
+}
+
+function fieldDiffRows(
+  importedRow: Record<string, unknown>,
+  existingRow: Record<string, unknown>
+): DiffRow[] {
+  const keys = new Set([
+    ...Object.keys(importedRow || {}),
+    ...Object.keys(existingRow || {}),
+  ]);
+  // Skip internal/bookkeeping columns that aren't meaningful to compare.
+  const skip = new Set(["id", "created_at", "updated_at", "deleted_at"]);
+  const rows: DiffRow[] = [];
+  for (const key of keys) {
+    if (skip.has(key)) continue;
+    const a = importedRow ? importedRow[key] : undefined;
+    const b = existingRow ? existingRow[key] : undefined;
+    const aStr = a === undefined || a === null || a === "" ? "—" : String(a);
+    const bStr = b === undefined || b === null || b === "" ? "—" : String(b);
+    rows.push({ key, aStr, bStr, differs: aStr !== bStr });
+  }
+  // Differing fields first, so what's actually different is visible without
+  // scrolling through a long list of identical values.
+  rows.sort((a, b) => Number(b.differs) - Number(a.differs));
+  return rows;
+}
+
+function DuplicateCompareModal({
+  duplicate,
+  onClose,
+}: {
+  duplicate: ImportDuplicate;
+  onClose: () => void;
+}) {
+  useBodyScrollLock(true);
+
+  const importedRow = duplicate.row_data || {};
+  const existingRow = duplicate.existing || null;
+  const importedLabel = labelForRow(importedRow) || `Row ${duplicate.row}`;
+  const existingLabel = existingRow ? labelForRow(existingRow) || "Existing record" : null;
+  const importedIdLabel = idLabelForRow(importedRow);
+  const existingIdLabel = existingRow ? idLabelForRow(existingRow) : null;
+  const diffRows = existingRow ? fieldDiffRows(importedRow, existingRow) : [];
+
+  return (
+    <div
+      className="modal-backdrop iw-compare-backdrop"
+      style={{ display: "flex" }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div className="modal-card iw-compare-card">
+        <div className="modal-header">
+          <h2>Duplicate Comparison</h2>
+          <button type="button" className="modal-close" onClick={onClose}>
+            &times;
+          </button>
+        </div>
+
+        <div className="iw-compare-match-note">
+          {importedIdLabel && existingIdLabel ? (
+            <>
+              Row {duplicate.row} in your file (<b>{importedIdLabel}</b>) matches an existing
+              record with the same identifier (<b>{existingIdLabel}</b>) already in the system.
+            </>
+          ) : (
+            <>
+              Row {duplicate.row} in your file matches an existing record already in the
+              system.
+            </>
+          )}
+        </div>
+
+        {existingRow ? (
+          <div className="table-scroll iw-compare-scroll">
+            <table className="iw-compare-table">
+              <thead>
+                <tr>
+                  <th>Field</th>
+                  <th>Your file ({importedLabel})</th>
+                  <th>Already in system ({existingLabel})</th>
+                </tr>
+              </thead>
+              <tbody>
+                {diffRows.map((r) => (
+                  <tr key={r.key} className={r.differs ? "iw-diff-row" : ""}>
+                    <td className="iw-diff-key">{r.key}</td>
+                    <td>{r.aStr}</td>
+                    <td>{r.bStr}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="muted" style={{ padding: "var(--space-3) 0" }}>
+            The existing record's details weren't available to compare, but this row was
+            skipped because it duplicates something already in the system.
+          </div>
+        )}
+
+        <div className="form-actions">
+          <div style={{ flex: 1 }} />
+          <button type="button" className="btn btn-primary" onClick={onClose}>
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Import summary panel                                               */
+/* ------------------------------------------------------------------ */
+
+export function ImportSummaryPanel({
+  summary,
+  error,
+}: {
+  summary?: ImportSummary | null;
+  error?: string | null;
+}) {
+  const [compareDuplicate, setCompareDuplicate] = useState<ImportDuplicate | null>(null);
+
+  if (error) {
+    return (
+      <div className="import-summary">
+        <span style={{ color: "var(--color-danger)" }}>{error}</span>
+      </div>
+    );
+  }
+
+  if (!summary) return null;
+
+  const duplicates = summary.duplicates || [];
+  const errors = summary.errors || [];
+
+  return (
+    <>
+      <div className="import-summary">
+        <div className="import-stats">
+          <div className="import-stat">
+            <b>{summary.total_rows}</b>
+            <span className="muted">Total rows</span>
+          </div>
+          <div className="import-stat">
+            <b style={{ color: "var(--color-success)" }}>{summary.created}</b>
+            <span className="muted">Created</span>
+          </div>
+          <div className="import-stat">
+            <b style={{ color: "var(--color-danger)" }}>{summary.failed}</b>
+            <span className="muted">Failed</span>
+          </div>
+          {summary.duplicate_count ? (
+            <div className="import-stat">
+              <b style={{ color: "var(--color-danger)" }}>{summary.duplicate_count}</b>
+              <span className="muted">Duplicates</span>
+            </div>
+          ) : null}
+        </div>
+
+        {/* Generic validation failures stay plain text lines; duplicates get
+            their own red banner with per-row compare buttons, since "this row
+            is invalid" and "this row already exists" call for different
+            follow-up actions. */}
+        {duplicates.length > 0 && (
+          <div className="import-duplicates-banner">
+            <div className="import-duplicates-header">
+              ⚠ {duplicates.length} record{duplicates.length > 1 ? "s" : ""} already existed
+              and {duplicates.length > 1 ? "were" : "was"} skipped during import
+            </div>
+            <div className="import-duplicates-list">
+              {duplicates.map((dup, index) => (
+                <button
+                  type="button"
+                  className="iw-dup-chip"
+                  key={`${dup.row}-${index}`}
+                  onClick={() => setCompareDuplicate(dup)}
+                >
+                  <span className="iw-dup-name">
+                    {labelForRow(dup.row_data) || `Row ${dup.row}`}
+                  </span>
+                  <span className="iw-dup-hint">Row {dup.row} &middot; compare →</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {errors.length > 0 && (
+          <div className="import-errors">
+            {errors.map((er, i) => (
+              <div key={`${er.row}-${i}`}>
+                Row {er.row}: {er.error}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {compareDuplicate && (
+        <DuplicateCompareModal
+          duplicate={compareDuplicate}
+          onClose={() => setCompareDuplicate(null)}
+        />
+      )}
+    </>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* The wizard modal                                                   */
+/* ------------------------------------------------------------------ */
+
+interface WizardModalProps {
+  file: File;
+  rows: SheetRow[];
+  sheetColumns: string[];
+  apiBase: string;
+  entityName: string;
+  importHeaders: ImportHeader[];
+  onClose: () => void;
+  onComplete: (summary: ImportSummary | null) => void;
+  onError: (message: string) => void;
+}
+
+function WizardModal({
+  file,
+  rows,
+  sheetColumns,
+  apiBase,
+  entityName,
+  importHeaders,
+  onClose,
+  onComplete,
+  onError,
+}: WizardModalProps) {
+  useBodyScrollLock(true);
+
+  const [mapping, setMapping] = useState<ColumnMapping>(() => {
+    const initial: ColumnMapping = {};
+    for (const h of importHeaders) {
+      initial[h.key] = bestMatch(h, sheetColumns);
+    }
+    return initial;
+  });
+  const [importing, setImporting] = useState(false);
+  const [progressText, setProgressText] = useState("Importing...");
+  const [progressPercent, setProgressPercent] = useState(0);
+  const abortRef = useRef<AbortController | null>(null);
+
+  useEffect(
+    () => () => {
+      if (abortRef.current) abortRef.current.abort();
+    },
+    []
+  );
+
+  const missingRequired = useMemo(
+    () => importHeaders.filter((h) => h.required && !mapping[h.key]),
+    [importHeaders, mapping]
+  );
+  const canImport = missingRequired.length === 0;
+
+  const previewRows = rows.slice(0, 5);
+  const rowLabel = `${rows.length} row${rows.length === 1 ? "" : "s"}`;
+
+  /**
+   * Uploads rows in fixed-size chunks (sequentially, so progress reporting
+   * stays accurate and the backend never receives more than CHUNK_SIZE rows per
+   * request). Returns one aggregated summary identical in shape to what a
+   * single-shot import would have returned -- duplicates/errors from every
+   * chunk are preserved with corrected row numbers.
+   */
+  const runChunkedImport = useCallback(
+    async (signal: AbortSignal): Promise<ImportSummary> => {
+      const total = rows.length;
+      const aggregated: ImportSummary = {
+        total_rows: 0,
+        created: 0,
+        failed: 0,
+        duplicate_count: 0,
+        errors: [],
+        duplicates: [],
+      };
+
+      if (total <= CHUNK_SIZE) {
+        setProgressText(`Uploading ${total} row${total === 1 ? "" : "s"}...`);
+        setProgressPercent(40);
+        const chunkSummary = await uploadChunk(rows, mapping, apiBase, importHeaders, signal);
+        setProgressPercent(100);
+        setProgressText(`Imported ${total} of ${total} row${total === 1 ? "" : "s"}`);
+        mergeSummaries(aggregated, chunkSummary, 0);
+        return aggregated;
+      }
+
+      let uploaded = 0;
+      for (let start = 0; start < total; start += CHUNK_SIZE) {
+        const chunk = rows.slice(start, start + CHUNK_SIZE);
+        const chunkSummary = await uploadChunk(chunk, mapping, apiBase, importHeaders, signal);
+        mergeSummaries(aggregated, chunkSummary, start);
+        uploaded += chunk.length;
+
+        const percent = Math.round((uploaded / total) * 100);
+        setProgressPercent(percent);
+        setProgressText(`Imported ${uploaded} of ${total} rows (${percent}%)`);
+      }
+
+      return aggregated;
+    },
+    [rows, mapping, apiBase, importHeaders]
+  );
+
+  async function handleImport() {
+    if (!canImport) return;
+    setImporting(true);
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    try {
+      const summary = await runChunkedImport(controller.signal);
+      setProgressText("Done!");
+      onClose();
+      onComplete(summary);
+    } catch (err) {
+      if (isAbortError(err)) {
+        // Cancelled mid-import: chunks already created remain created, so the
+        // caller still refreshes its table to reflect them.
+        onComplete(null);
+        return;
+      }
+      setImporting(false);
+      setProgressPercent(0);
+      onError(errorMessage(err) || "Import failed.");
+    }
+  }
+
+  /**
+   * Cancel always works, even mid-import: abort the in-flight request, then
+   * close. Whatever chunks already completed have already been created
+   * server-side -- cancelling stops further chunks from being sent, it does not
+   * roll back completed ones.
+   */
+  function handleCancel() {
+    if (abortRef.current) abortRef.current.abort();
+    onClose();
+    if (importing) onComplete(null);
+  }
+
+  return (
+    <div
+      className={`modal-backdrop import-wizard-backdrop ${importing ? "iw-locked" : ""}`.trim()}
+      style={{ display: "flex" }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget && !importing) onClose();
+      }}
+    >
+      <div className="modal-card import-wizard-card">
+        <div className="modal-header">
+          <h2>Import {entityName} &mdash; Map Columns</h2>
+          <button
+            type="button"
+            className="modal-close"
+            disabled={importing}
+            onClick={() => {
+              if (!importing) onClose();
+            }}
+          >
+            &times;
+          </button>
+        </div>
+
+        <div className="iw-file-info">
+          <span className="iw-file-name">📄 {file.name}</span>
+          <span className="muted">{rowLabel} detected</span>
+        </div>
+
+        <div className="iw-mapping-section">
+          <div className="section-title">Match your columns</div>
+          <div className="muted" style={{ marginBottom: "var(--space-2)" }}>
+            We've auto-matched what we could recognize. Review each field below and adjust any
+            dropdown that isn't right.
+          </div>
+          <div className="iw-mapping-table">
+            {importHeaders.map((h) => (
+              <div className="iw-mapping-row" key={h.key}>
+                <div className="iw-target-field">
+                  <span className="iw-target-label">{h.label}</span>
+                  {h.required && <span className="iw-required">*</span>}
+                  <span className="iw-target-key">{h.key}</span>
+                </div>
+                <div className="iw-arrow">→</div>
+                <select
+                  className="iw-source-select"
+                  value={mapping[h.key] || ""}
+                  disabled={importing}
+                  onChange={(e) =>
+                    setMapping((prev) => ({ ...prev, [h.key]: e.target.value || null }))
+                  }
+                >
+                  <option value="">— Don't import —</option>
+                  {sheetColumns.map((col) => (
+                    <option key={col} value={col}>
+                      {col}
+                    </option>
+                  ))}
+                </select>
+                <span
+                  className={`iw-match-badge ${
+                    mapping[h.key] ? "iw-match-auto" : "iw-match-none"
+                  }`}
+                >
+                  {mapping[h.key] ? "Matched" : h.required ? "Required" : "Optional"}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="iw-preview-section">
+          <div className="section-title">Preview (first 5 rows)</div>
+          <div className="table-scroll iw-preview-scroll">
+            <table className="iw-preview-table">
+              <thead>
+                <tr>
+                  {importHeaders.map((h) => (
+                    <th key={h.key}>{h.label}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {previewRows.length === 0 ? (
+                  <tr>
+                    <td colSpan={importHeaders.length} className="muted">
+                      No rows to preview.
+                    </td>
+                  </tr>
+                ) : (
+                  previewRows.map((row, i) => (
+                    <tr key={i}>
+                      {importHeaders.map((h) => {
+                        const sourceCol = mapping[h.key];
+                        const val = sourceCol ? row[sourceCol] : "";
+                        return (
+                          <td key={h.key}>
+                            {val === undefined || val === null || val === "" ? (
+                              <span className="muted">—</span>
+                            ) : (
+                              String(val)
+                            )}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {importing && (
+          <div className="iw-progress" style={{ display: "flex" }}>
+            <div className="iw-progress-row">
+              <div className="iw-spinner" />
+              <span>{progressText}</span>
+            </div>
+            <div className="iw-progress-track">
+              <div className="iw-progress-bar" style={{ width: `${progressPercent}%` }} />
+            </div>
+          </div>
+        )}
+
+        <div className="form-actions iw-actions">
+          <span className="muted">
+            {missingRequired.length > 0 && (
+              <span style={{ color: "var(--color-danger)" }}>
+                ⚠ Required field{missingRequired.length > 1 ? "s" : ""} not mapped:{" "}
+                {missingRequired.map((h) => h.label).join(", ")}
+              </span>
+            )}
+          </span>
+          <div style={{ flex: 1 }} />
+          <button type="button" className="btn" onClick={handleCancel}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="btn btn-primary"
+            disabled={!canImport || importing}
+            onClick={handleImport}
+          >
+            {importing ? "Importing..." : `Import ${rowLabel}`}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Public: the Import button + wizard                                 */
+/* ------------------------------------------------------------------ */
+
+export interface ImportButtonProps {
+  apiBase: string;
+  entityName: string;
+  importHeaders: ImportHeader[];
+  onComplete: (summary: ImportSummary | null) => void;
+  onSummary: (summary: ImportSummary | null) => void;
+  onError: (message: string | null) => void;
+}
+
+/**
+ * The "Import" file-picker button plus the mapping wizard it opens.
+ *
+ * Mirrors `<div class="btn file-btn"><input type="file" …></div>` from the
+ * original pages: a styled button with a transparent file input laid over it.
+ */
+export function ImportButton({
+  apiBase,
+  entityName,
+  importHeaders,
+  onComplete,
+  onSummary,
+  onError,
+}: ImportButtonProps) {
+  const [pending, setPending] = useState<{
+    file: File;
+    rows: SheetRow[];
+    sheetColumns: string[];
+  } | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    // Allow re-selecting the same file later.
+    if (inputRef.current) inputRef.current.value = "";
+
+    onError(null);
+    try {
+      const rows = await parseFile(file);
+      if (!rows.length) {
+        throw new Error("The file appears to be empty or has no data rows.");
+      }
+      setPending({ file, rows, sheetColumns: Object.keys(rows[0]) });
+    } catch (err) {
+      onError(errorMessage(err) || "Could not read that file.");
+    }
+  }
+
+  return (
+    <>
+      <div className="btn file-btn">
+        Import
+        <input
+          ref={inputRef}
+          type="file"
+          accept=".csv,.xlsx"
+          onChange={handleFileChange}
+        />
+      </div>
+      {pending && (
+        <WizardModal
+          file={pending.file}
+          rows={pending.rows}
+          sheetColumns={pending.sheetColumns}
+          apiBase={apiBase}
+          entityName={entityName}
+          importHeaders={importHeaders}
+          onClose={() => setPending(null)}
+          onComplete={(summary) => {
+            onSummary(summary);
+            onComplete(summary);
+          }}
+          onError={onError}
+        />
+      )}
+    </>
+  );
+}

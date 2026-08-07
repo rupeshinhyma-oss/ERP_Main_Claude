@@ -47,38 +47,18 @@ async def _record_org_action(
     request.state.audit_logged = True
 
 
-from app.auth.dependencies import get_current_user
-
-
-@router.get("/public", summary="Get public organization profile details")
-async def get_public_organization(
-    request: Request,
-    organization_service: OrganizationService = Depends(get_organization_service),
-) -> dict:
-    """Fetch public organization profile data unauthenticated for login/signup UI."""
-    try:
-        organization = await organization_service.get_or_raise()
-        data = {
-            "company_name": organization.company_name,
-            "legal_name": organization.legal_name,
-            "logo_url": organization.logo_url,
-        }
-    except Exception:
-        data = {"company_name": "ERP Admin", "legal_name": None, "logo_url": None}
-    request_id = getattr(request.state, "request_id", "-")
-    return build_success_response(data=data, request_id=request_id)
-
+from app.rbac.dependencies import require_super_admin
 
 @router.get("", summary="Get the organization profile")
 async def get_organization(
     request: Request,
     organization_service: OrganizationService = Depends(get_organization_service),
-    _current_user: CurrentUser = Depends(get_current_user),
+    _current_user: CurrentUser = Depends(require_super_admin()),
 ) -> dict:
-    """Fetch the single company profile. Accessible by all authenticated users."""
+    """Fetch the single company profile. Only accessible by Super Administrators."""
     organization = await organization_service.get_or_raise()
     data = OrganizationRead.model_validate(organization).model_dump(mode="json")
-    return build_success_response(data=data, request_id=getattr(request.state, "request_id", "-"))
+    return build_success_response(data=data, request_id=request.state.request_id)
 
 
 @router.post("", status_code=status.HTTP_201_CREATED, summary="Create the organization profile")
@@ -86,10 +66,10 @@ async def create_organization(
     payload: OrganizationCreate,
     request: Request,
     organization_service: OrganizationService = Depends(get_organization_service),
-    current_user: CurrentUser = Depends(require_permission("organization.manage")),
+    current_user: CurrentUser = Depends(require_super_admin()),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
-    """Create the organization profile. Only one may ever exist. Requires ``organization.manage``."""
+    """Create the organization profile. Only one may ever exist. Restricted to Super Administrators."""
     organization = await organization_service.create(**payload.model_dump())
     data = OrganizationRead.model_validate(organization).model_dump(mode="json")
     await _record_org_action(
@@ -109,10 +89,10 @@ async def update_organization(
     payload: OrganizationUpdate,
     request: Request,
     organization_service: OrganizationService = Depends(get_organization_service),
-    current_user: CurrentUser = Depends(require_permission("organization.manage")),
+    current_user: CurrentUser = Depends(require_super_admin()),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
-    """Update the organization profile's fields. Requires ``organization.manage``."""
+    """Update the organization profile's fields. Restricted to Super Administrators."""
     organization = await organization_service.update(**payload.model_dump())
     data = OrganizationRead.model_validate(organization).model_dump(mode="json")
     await _record_org_action(

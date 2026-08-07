@@ -142,14 +142,15 @@ class StateService:
             country_code = field_values.pop("country_code")
             country = await self.country_repository.get_by_code(country_code)
             if country is None:
-                countries = await self.country_repository.list(limit=250)
-                country = next((c for c in countries if c.code.lower() == country_code.lower() or c.name.lower() == country_code.lower()), None)
-            if country is None:
-                raise ValueError(f"Country '{country_code}' does not exist.")
+                raise ValueError(f"Country code {country_code!r} does not exist.")
             field_values["country_id"] = country.id
             name = field_values["name"]
-            if await self.repository.name_exists_in_country(country.id, name):
-                raise ValueError(f"State '{name}' already exists in country '{country.name}'.")
+            existing = await self.repository.get_by_name_in_country(country.id, name)
+            if existing is not None:
+                raise ConflictException(
+                    f"State {name!r} already exists in country {country_code!r}.",
+                    details={"existing": model_to_dict(existing)},
+                )
             return await self.repository.create(**field_values)
 
         summary = await run_import(rows, row_validator=validate_state_row, row_creator=_create)

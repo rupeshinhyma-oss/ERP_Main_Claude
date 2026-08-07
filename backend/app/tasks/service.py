@@ -10,7 +10,7 @@ import uuid
 from datetime import datetime
 
 from app.core.exceptions import NotFoundException
-from app.tasks.models import Task, TaskPriority, TaskStatus, TaskVisibility
+from app.tasks.models import Task, TaskPriority, TaskStatus
 from app.tasks.repository import TaskRepository
 from app.users.repository import UserRepository
 
@@ -39,8 +39,6 @@ class TaskService:
         assigned_to_id: uuid.UUID | None = None,
         created_by_id: uuid.UUID | None = None,
         search_query: str | None = None,
-        current_user_id: uuid.UUID | None = None,
-        is_admin: bool = False,
     ) -> tuple[list[Task], int]:
         """List tasks with filters and total count."""
         return await self.task_repository.list_tasks(
@@ -51,8 +49,6 @@ class TaskService:
             assigned_to_id=assigned_to_id,
             created_by_id=created_by_id,
             search_query=search_query,
-            current_user_id=current_user_id,
-            is_admin=is_admin,
         )
 
     async def create_task(
@@ -61,7 +57,6 @@ class TaskService:
         title: str,
         description: str | None,
         priority: TaskPriority,
-        visibility: TaskVisibility = TaskVisibility.PRIVATE,
         due_date: datetime | None,
         assigned_to_id: uuid.UUID | None,
         created_by_id: uuid.UUID,
@@ -79,7 +74,6 @@ class TaskService:
             description=description,
             status=TaskStatus.PENDING,
             priority=priority,
-            visibility=visibility,
             due_date=due_date,
             assigned_to_id=assigned_to_id,
             created_by_id=created_by_id,
@@ -96,7 +90,6 @@ class TaskService:
         description: str | None = None,
         status: TaskStatus | None = None,
         priority: TaskPriority | None = None,
-        visibility: TaskVisibility | None = None,
         due_date: datetime | None = None,
         assigned_to_id: uuid.UUID | None = None,
         related_entity_type: str | None = None,
@@ -109,24 +102,27 @@ class TaskService:
             assignee = await self.user_repository.get_by_id(assigned_to_id)
             if assignee is None:
                 raise NotFoundException(f"Assignee user with ID {assigned_to_id} not found.")
+            task.assigned_to_id = assigned_to_id
 
-        kwargs = {}
-        if title is not None: kwargs["title"] = title
-        if description is not None: kwargs["description"] = description
-        if status is not None: kwargs["status"] = status
-        if priority is not None: kwargs["priority"] = priority
-        if visibility is not None: kwargs["visibility"] = visibility
-        if due_date is not None: kwargs["due_date"] = due_date
-        if assigned_to_id is not None: kwargs["assigned_to_id"] = assigned_to_id
-        if related_entity_type is not None: kwargs["related_entity_type"] = related_entity_type
-        if related_entity_id is not None: kwargs["related_entity_id"] = related_entity_id
+        if title is not None:
+            task.title = title
+        if description is not None:
+            task.description = description
+        if status is not None:
+            task.status = status
+        if priority is not None:
+            task.priority = priority
+        if due_date is not None:
+            task.due_date = due_date
+        if related_entity_type is not None:
+            task.related_entity_type = related_entity_type
+        if related_entity_id is not None:
+            task.related_entity_id = related_entity_id
 
-        if kwargs:
-            await self.task_repository.update(task, **kwargs)
+        await self.task_repository.update(task)
         return await self.get_by_id_or_raise(task_id)
 
-    async def delete_task(self, task_id: uuid.UUID) -> bool:
+    async def delete_task(self, task_id: uuid.UUID) -> None:
         """Delete a task by ID."""
         task = await self.get_by_id_or_raise(task_id)
         await self.task_repository.delete(task)
-        return True

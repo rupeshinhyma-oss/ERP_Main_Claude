@@ -55,13 +55,17 @@ def validate_supplier_row(raw_row: dict[str, str], row_number: int) -> dict[str,
     """
     company_name = (raw_row.get("company_name") or "").strip()
     country_code = (raw_row.get("country_code") or "").strip().upper()
-    state_name = (raw_row.get("state_name") or raw_row.get("state") or "").strip()
-    city_name = (raw_row.get("city_name") or raw_row.get("city") or "").strip()
+    state_name = (raw_row.get("state_name") or "").strip()
+    city_name = (raw_row.get("city_name") or "").strip()
 
     if not company_name:
         raise BadRequestException(f"Row {row_number}: 'company_name' is required.")
     if not country_code:
         raise BadRequestException(f"Row {row_number}: 'country_code' is required.")
+    if not state_name:
+        raise BadRequestException(f"Row {row_number}: 'state_name' is required.")
+    if not city_name:
+        raise BadRequestException(f"Row {row_number}: 'city_name' is required.")
 
     supplier_type_raw = (raw_row.get("supplier_type") or "").strip().lower()
     supplier_type = None

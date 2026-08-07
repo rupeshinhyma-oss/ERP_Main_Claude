@@ -72,6 +72,13 @@ class Settings(BaseSettings):
     REDOC_URL: str | None = "/redoc"
     OPENAPI_URL: str | None = "/openapi.json"
 
+    # Absolute path to the built frontend (the React app's `dist/` folder).
+    # Unset by default: local development runs the API and the Vite dev
+    # server as two separate processes (see frontend/vite.config.ts's proxy).
+    # Set this for a same-origin production deploy where this backend also
+    # serves the built SPA -- see create_application()'s static mount.
+    FRONTEND_DIST_DIR: str | None = None
+
     # -------------------------------------------------------------------
     # Server
     # -------------------------------------------------------------------

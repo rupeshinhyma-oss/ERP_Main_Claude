@@ -169,17 +169,27 @@ BOOTSTRAP_PERMISSIONS: list[tuple[str, str, str, str, str, str]] = [
 ]
 
 SUPER_ADMIN_ROLE_NAME = "super_admin"
-USER_ROLE_NAME = "user"
+EMPLOYEE_ROLE_NAME = "employee"
 
-# NOTE: There are intentionally only 3 seeded system roles: super_admin, admin,
-# and user. Anything beyond this (department-style roles like "sales",
-# "purchase", "hr", "accounts", "inventory", etc.) is NOT hardcoded here --
-# admins/super admins create, edit, and delete custom roles entirely through
-# the Roles & Permissions UI ("+ New Role"), which is backed by the fully
-# dynamic /rbac/roles CRUD API. This keeps the role model flexible instead of
-# baking a fixed set of business-department roles into every fresh install.
+DEFAULT_BUSINESS_ROLES = [
+    ("sales", "Sales Department Role for Managing Clients, Inquiries, and Suppliers.", [
+        "supplier.view", "supplier.create", "product.view", "brand.view", "category.view", "subcategory.view"
+    ]),
+    ("purchase", "Purchase Department Role for Supplier Management and Procurement.", [
+        "supplier.view", "supplier.create", "supplier.update", "supplier.export", "supplier.import", "product.view", "uom.view", "hsn.view"
+    ]),
+    ("hr", "Human Resources Department Role for Employee and Team Management.", [
+        "employee.view", "employee.create", "employee.update", "employee.export", "employee.import", "employee.approve", "department.view", "department.create", "department.update", "designation.view", "designation.create", "designation.update", "user.view"
+    ]),
+    ("accounts", "Accounts & Finance Role for Tax, Currencies, and Financial Reports.", [
+        "currency.view", "currency.create", "currency.update", "hsn.view", "hsn.create", "hsn.update", "supplier.view", "reports.view", "reports.export"
+    ]),
+    ("inventory", "Inventory & Warehouse Management Role.", [
+        "inventory.view", "inventory.create", "inventory.update", "inventory.approve", "inventory.export", "inventory.import", "product.view", "product.create", "product.update", "uom.view", "category.view", "subcategory.view"
+    ]),
+]
 
-USER_ROLE_PERMISSION_CODES: list[str] = [
+EMPLOYEE_ROLE_PERMISSION_CODES: list[str] = [
     "employee.read",
     "employee.view",
     "department.read",
@@ -208,7 +218,6 @@ USER_ROLE_PERMISSION_CODES: list[str] = [
     "product.view",
     "supplier.read",
     "supplier.view",
-    "crm.view",
     "task.read",
     "task.view",
     "task.create",
@@ -274,47 +283,24 @@ async def seed() -> None:
                 session.add(RolePermission(role_id=admin_role.id, permission_id=permission.id))
             await session.flush()
         else:
-            for permission in created_permissions:
-                await role_repo.add_permission(admin_role, permission)
+            org_perm = await permission_repo.get_by_code("organization.manage")
+            if org_perm:
+                await role_repo.add_permission(admin_role, org_perm)
 
-        user_role = await role_repo.get_by_name(USER_ROLE_NAME)
-        if user_role is None:
-            user_role = await role_repo.create(
-                name=USER_ROLE_NAME,
-                description="Default system user role.",
-                is_system=True,
-            )
-            logger.info("Seeded role.", extra={"role_name": USER_ROLE_NAME})
-            for code in USER_ROLE_PERMISSION_CODES:
-                permission = await permission_repo.get_by_code(code)
-                if permission:
-                    session.add(RolePermission(role_id=user_role.id, permission_id=permission.id))
-            await session.flush()
-        else:
-            # Idempotent backfill: if USER_ROLE_PERMISSION_CODES gains a new
-            # code in a later release (e.g. crm.view), make sure existing
-            # databases pick it up on their next seed run too, the same way
-            # the admin role already does above -- otherwise a permission
-            # added here would silently never reach already-seeded installs.
-            for code in USER_ROLE_PERMISSION_CODES:
-                permission = await permission_repo.get_by_code(code)
-                if permission:
-                    await role_repo.add_permission(user_role, permission)
-
-        # --- Purge legacy 'employee' role and migrate assignments to 'user' role ---
-        legacy_employee_role = await role_repo.get_by_name("employee")
-        if legacy_employee_role is not None:
-            from sqlalchemy import delete
-            from app.rbac.models import RolePermission, UserRole
-            await session.execute(
-                delete(UserRole).where(UserRole.role_id == legacy_employee_role.id)
-            )
-            await session.execute(
-                delete(RolePermission).where(RolePermission.role_id == legacy_employee_role.id)
-            )
-            await session.delete(legacy_employee_role)
-            await session.flush()
-            logger.info("Purged legacy employee role.")
+        for r_name, r_desc, r_perms in DEFAULT_BUSINESS_ROLES:
+            b_role = await role_repo.get_by_name(r_name)
+            if b_role is None:
+                b_role = await role_repo.create(
+                    name=r_name,
+                    description=r_desc,
+                    is_system=False,
+                )
+                logger.info("Seeded business role.", extra={"role_name": r_name})
+                for code in r_perms:
+                    permission = await permission_repo.get_by_code(code)
+                    if permission:
+                        session.add(RolePermission(role_id=b_role.id, permission_id=permission.id))
+                await session.flush()
 
         # --- 3. Bootstrap admin user ----------------------------------------------------
         admin = await user_repo.get_by_username(settings.BOOTSTRAP_ADMIN_USERNAME)
@@ -335,26 +321,8 @@ async def seed() -> None:
             )
             await session.flush()
             logger.info("Seeded bootstrap admin user.", extra={"username": settings.BOOTSTRAP_ADMIN_USERNAME})
-        # --- Consolidate duplicate role assignments (ensure max 1 active role per user) ---
-        from sqlalchemy import select
-        from sqlalchemy.orm import selectinload
-        from app.rbac.models import UserRole
-        from app.users.models import User
-        all_users = list((await session.execute(select(User))).scalars().all())
-        for u in all_users:
-            stmt = select(UserRole).where(UserRole.user_id == u.id).options(selectinload(UserRole.role))
-            links = list((await session.execute(stmt)).scalars().all())
-            if len(links) > 1:
-                roles_map = {link.role.name: link for link in links if link.role}
-                primary_link = (
-                    roles_map.get("super_admin")
-                    or roles_map.get("admin")
-                    or links[0]
-                )
-                for link in links:
-                    if link.id != primary_link.id:
-                        await session.delete(link)
-                await session.flush()
+        else:
+            logger.info("Bootstrap admin user already exists; skipping.")
 
         await session.commit()
 

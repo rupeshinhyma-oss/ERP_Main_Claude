@@ -58,22 +58,14 @@ class HsnService:
         await self.cache_manager.invalidate_dropdown(DROPDOWN_CACHE_NAME)
 
     async def create(self, **field_values: Any) -> HsnCode:
-        """Create or reactivate an HSN code, validating code uniqueness."""
+        """Create a new HSN code, validating code uniqueness."""
         code = field_values.get("code")
         if code:
-            existing = await self.repository.get_by_code_all(code)
+            existing = await self.repository.get_by_code(code)
             if existing is not None:
-                if existing.deleted_at is not None:
-                    # Reactivate soft-deleted row with new details
-                    existing.deleted_at = None
-                    changes = {k: v for k, v in field_values.items() if v is not None}
-                    await self.repository.update(existing, **changes)
-                    await self._invalidate_cache()
-                    return existing
-                else:
-                    raise ConflictException(
-                        f"HSN code {code!r} is already in use.", details={"existing": model_to_dict(existing)}
-                    )
+                raise ConflictException(
+                    f"HSN code {code!r} is already in use.", details={"existing": model_to_dict(existing)}
+                )
 
         hsn = await self.repository.create(**field_values)
         await self._invalidate_cache()

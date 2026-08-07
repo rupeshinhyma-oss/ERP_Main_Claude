@@ -107,25 +107,9 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
     )
 
 
-async def integrity_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-    """Handle database unique/foreign key integrity errors (duplicate entries)."""
-    request_id = _get_request_id(request)
-    logger.warning("Database integrity constraint error.", extra={"path": request.url.path, "request_id": request_id})
-    return JSONResponse(
-        status_code=status.HTTP_400_BAD_REQUEST,
-        content=build_error_response(
-            code="DUPLICATE_ENTRY",
-            message="A record with this code or unique detail already exists.",
-            request_id=request_id,
-        ),
-    )
-
-
 def register_exception_handlers(app: FastAPI) -> None:
     """Register all global exception handlers on the given FastAPI app instance."""
-    from sqlalchemy.exc import IntegrityError
     app.add_exception_handler(AppException, app_exception_handler)
     app.add_exception_handler(StarletteHTTPException, http_exception_handler)
     app.add_exception_handler(RequestValidationError, validation_exception_handler)
-    app.add_exception_handler(IntegrityError, integrity_exception_handler)
     app.add_exception_handler(Exception, unhandled_exception_handler)

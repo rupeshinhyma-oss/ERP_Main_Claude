@@ -1,0 +1,165 @@
+/**
+ * Session + permission store.
+ *
+ * Ported from the `Auth` object in the original api.js. Tokens and the cached
+ * profile still live in localStorage under the same keys, so an existing
+ * logged-in session survives the migration to this app.
+ *
+ * The original broadcast a DOM `auth:permissions-updated` CustomEvent whenever
+ * the profile changed, and listeners re-ran `applyPermissionVisibility()` to
+ * hide buttons the user may no longer use. Here the same signal drives React
+ * state via a tiny subscribe/notify store (see useAuth), so permission changes
+ * re-render the sidebar and any permission-gated control declaratively rather
+ * than by mutating the DOM after the fact.
+ */
+
+import type { Profile, TokenPair } from "@/types";
+
+const ACCESS_TOKEN_KEY = "erp_access_token";
+const REFRESH_TOKEN_KEY = "erp_refresh_token";
+const PROFILE_KEY = "erp_profile";
+
+type Listener = (profile: Profile | null) => void;
+
+const listeners = new Set<Listener>();
+
+function notify(profile: Profile | null): void {
+  listeners.forEach((listener) => listener(profile));
+}
+
+export const Auth = {
+  /** Subscribe to profile/permission changes. Returns an unsubscribe fn. */
+  subscribe(listener: Listener): () => void {
+    listeners.add(listener);
+    return () => listeners.delete(listener);
+  },
+
+  getAccessToken(): string | null {
+    return localStorage.getItem(ACCESS_TOKEN_KEY);
+  },
+
+  getRefreshToken(): string | null {
+    return localStorage.getItem(REFRESH_TOKEN_KEY);
+  },
+
+  getProfile(): Profile | null {
+    const raw = localStorage.getItem(PROFILE_KEY);
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw) as Profile;
+    } catch {
+      return null;
+    }
+  },
+
+  setSession(tokens: TokenPair, profile?: Profile): void {
+    localStorage.setItem(ACCESS_TOKEN_KEY, tokens.access_token);
+    localStorage.setItem(REFRESH_TOKEN_KEY, tokens.refresh_token);
+    if (profile) {
+      this.updateProfile(profile);
+    }
+  },
+
+  updateProfile(profile: Profile): void {
+    const oldRaw = localStorage.getItem(PROFILE_KEY);
+    const nextRaw = JSON.stringify(profile);
+    localStorage.setItem(PROFILE_KEY, nextRaw);
+    if (oldRaw !== nextRaw) {
+      notify(profile);
+    }
+  },
+
+  clear(): void {
+    localStorage.removeItem(ACCESS_TOKEN_KEY);
+    localStorage.removeItem(REFRESH_TOKEN_KEY);
+    localStorage.removeItem(PROFILE_KEY);
+    notify(null);
+  },
+
+  isLoggedIn(): boolean {
+    return Boolean(this.getAccessToken());
+  },
+
+  isSuperAdmin(): boolean {
+    const profile = this.getProfile();
+    return Boolean(
+      profile && Array.isArray(profile.roles) && profile.roles.includes("super_admin")
+    );
+  },
+
+  /**
+   * Permission check with the backend's alias fallbacks. Super admins pass
+   * everything; otherwise a code matches if it is granted directly or via one
+   * of the documented aliases (view<->read, export/import fallbacks, the
+   * employee<->user module pair, or a hierarchical short form such as
+   * masters.brand.create -> brand.create).
+   */
+  hasPermission(code?: string | null): boolean {
+    if (!code) return true;
+    const profile = this.getProfile();
+    if (!profile) return false;
+    if (Array.isArray(profile.roles) && profile.roles.includes("super_admin")) return true;
+    if (!Array.isArray(profile.permissions)) return false;
+    const perms = profile.permissions;
+    if (perms.includes(code)) return true;
+
+    // Check alias mapping (view <-> read)
+    if (code.endsWith(".view")) {
+      const readAlias = code.replace(/\.view$/, ".read");
+      if (perms.includes(readAlias)) return true;
+    } else if (code.endsWith(".read")) {
+      const viewAlias = code.replace(/\.read$/, ".view");
+      if (perms.includes(viewAlias)) return true;
+    }
+
+    // Check export & import alias fallbacks
+    if (code.endsWith(".export")) {
+      const readAlias = code.replace(/\.export$/, ".read");
+      const viewAlias = code.replace(/\.export$/, ".view");
+      if (perms.includes(readAlias) || perms.includes(viewAlias)) return true;
+    }
+    if (code.endsWith(".import")) {
+      const createAlias = code.replace(/\.import$/, ".create");
+      if (perms.includes(createAlias)) return true;
+    }
+
+    // Check employee <-> user module alias fallback
+    if (code.startsWith("employee.")) {
+      const userAlias = code.replace(/^employee\./, "user.");
+      if (perms.includes(userAlias)) return true;
+    } else if (code.startsWith("user.")) {
+      const empAlias = code.replace(/^user\./, "employee.");
+      if (perms.includes(empAlias)) return true;
+    }
+
+    // Hierarchical or module fallback (e.g. masters.brand.create -> brand.create)
+    const parts = code.split(".");
+    if (parts.length > 2) {
+      const shortCode = parts.slice(1).join(".");
+      if (perms.includes(shortCode)) return true;
+    }
+    return false;
+  },
+
+  can(action: string, page?: string | null): boolean {
+    if (!page) return false;
+    return this.hasPermission(`${page}.${action}`);
+  },
+};
+
+/** Two-letter initials, matching the original `initials()` helper exactly. */
+export function initials(name?: string | null): string {
+  if (!name) return "?";
+  return name.trim().slice(0, 2).toUpperCase();
+}
+
+/** Human-readable role label shown under the username in the sidebar. */
+export function roleLabel(profile: Profile | null): string {
+  if (profile && Array.isArray(profile.roles) && profile.roles.includes("super_admin")) {
+    return "Super Administrator";
+  }
+  if (profile && Array.isArray(profile.roles) && profile.roles.includes("admin")) {
+    return "Administrator";
+  }
+  return "User";
+}

@@ -20,7 +20,7 @@ from app.audit.service import AuditService
 from app.auth.dependencies import get_auth_service
 from app.auth.schemas import SessionRead
 from app.auth.service import AuthService, CurrentUser
-from app.common.pagination import PageParams
+from app.common.pagination import PageMeta, PageParams
 from app.core.responses import build_success_response
 from app.database.session import get_db_session
 from app.rbac.dependencies import get_rbac_service, require_permission
@@ -217,7 +217,15 @@ async def list_users(
         "offset": page_params.offset,
         "limit": page_params.limit,
     }
-    return build_success_response(data=data, request_id=request.state.request_id)
+    # meta.pagination alongside the existing items/total/offset/limit shape --
+    # kept for backwards compatibility with any caller already reading `total`,
+    # while bringing this endpoint in line with every other paginated list
+    # endpoint in the API, whose meta.pagination the frontend's shared
+    # pagination component reads from.
+    meta = PageMeta.build(
+        page=page_params.page, page_size=page_params.page_size, total_records=total
+    ).as_meta_dict()
+    return build_success_response(data=data, request_id=request.state.request_id, meta=meta)
 
 
 @router.get("/{user_id}", summary="Get a user (admin)")

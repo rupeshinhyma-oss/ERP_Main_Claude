@@ -1,36 +1,28 @@
-# Environment / secrets
+# Environment files
 .env
-.env.*
+*.env
 !.env.example
+
+# Dependencies & Build
+node_modules/
+dist/
+dist-ssr/
+*.local
 
 # Python
 __pycache__/
 *.py[cod]
 *$py.class
-*.egg-info/
-.eggs/
-.venv/
-venv/
-env/
-build/
-dist/
-
-# Testing / coverage
 .pytest_cache/
 .coverage
 htmlcov/
+*.egg-info/
+.venv/
+venv/
+*.pyc
 
-# Node / Frontend
-node_modules/
-npm-debug.log*
-
-# Editors / OS
-.vscode/
-.idea/
+# IDE / OS
 .DS_Store
 Thumbs.db
-
-# Logs & DBs
-*.log
-*.sqlite
-*.db
+.vscode/
+.idea/

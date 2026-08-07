@@ -50,25 +50,6 @@ def require_permission(permission_code: str) -> Callable[..., Coroutine[Any, Any
     return _checker
 
 
-def require_all_permissions(*permission_codes: str) -> Callable[..., Coroutine[Any, Any, CurrentUser]]:
-    """
-    Build a FastAPI dependency that authorizes a request against MULTIPLE permission
-    codes, all of which must be held. Use this (instead of a raw
-    ``if code not in current_user.permissions`` check inside a route body) for any
-    endpoint that composes more than one underlying operation, so every
-    permission-gated route in the app is enforced through this single mechanism --
-    never scattered, ad-hoc checks that are easy to miss during an audit.
-    """
-
-    async def _checker(current_user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
-        missing = [code for code in permission_codes if code not in current_user.permissions]
-        if missing:
-            raise ForbiddenException(f"This action requires the {', '.join(missing)!r} permission(s).")
-        return current_user
-
-    return _checker
-
-
 def require_super_admin() -> Callable[..., Coroutine[Any, Any, CurrentUser]]:
     """
     Build a FastAPI dependency that verifies the current user has the super_admin role.

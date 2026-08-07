@@ -146,24 +146,27 @@ class CityService:
         rows = parse_rows_from_file(filename, raw_bytes)
 
         async def _create(field_values: dict[str, Any]) -> City:
-            country_code = field_values.pop("country_code", "")
-            state_name = field_values.pop("state_name", "")
-            all_states = await self.state_repository.list_all()
-            all_countries = await self.country_repository.list_all()
-
-            target_state = None
-            if state_name:
-                target_state = next((s for s in all_states if s.name.lower() == state_name.lower() or (s.code and s.code.lower() == state_name.lower())), None)
-            
-            if target_state is None:
-                raise ValueError(f"State '{state_name}' does not exist. Please create state '{state_name}' first.")
-
-            field_values["state_id"] = target_state.id
-            field_values["country_id"] = target_state.country_id
-
+            country_code = field_values.pop("country_code")
+            state_name = field_values.pop("state_name")
+            country = await self.country_repository.get_by_code(country_code)
+            if country is None:
+                raise ValueError(f"Country code {country_code!r} does not exist.")
+            matching_states = [
+                s for s in await self.state_repository.list_all()
+                if s.country_id == country.id and s.name == state_name
+            ]
+            if not matching_states:
+                raise ValueError(f"State {state_name!r} does not exist in country {country_code!r}.")
+            state = matching_states[0]
+            field_values["country_id"] = country.id
+            field_values["state_id"] = state.id
             name = field_values["name"]
-            if await self.repository.city_exists(field_values["country_id"], field_values.get("state_id"), name):
-                raise ValueError(f"City '{name}' already exists.")
+            existing = await self.repository.get_by_name_in_state(state.id, name)
+            if existing is not None:
+                raise ConflictException(
+                    f"City {name!r} already exists in state {state_name!r}.",
+                    details={"existing": model_to_dict(existing)},
+                )
             return await self.repository.create(**field_values)
 
         summary = await run_import(rows, row_validator=validate_city_row, row_creator=_create)

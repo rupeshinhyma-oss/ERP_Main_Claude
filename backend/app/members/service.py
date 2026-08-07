@@ -38,7 +38,7 @@ from app.rbac.service import RBACService
 from app.users.models import UserStatus
 from app.users.service import UserService
 
-DEFAULT_MEMBER_ROLE_NAME = "user"
+DEFAULT_MEMBER_ROLE_NAME = "employee"
 
 _USERNAME_SANITIZE_RE = re.compile(r"[^a-z0-9._-]+")
 
@@ -97,32 +97,30 @@ class TeamMemberService:
         full_name: str,
         email: str,
         password: str,
-        department_id: uuid.UUID | None = None,
-        designation_id: uuid.UUID | None = None,
-        role_id: uuid.UUID | None = None,
-        role_name: str | None = None,
+        department_id: uuid.UUID | None,
+        designation_id: uuid.UUID | None,
         created_by: uuid.UUID,
     ) -> dict:
         """
         Create a new team member: a User (login, with the ADMIN-SUPPLIED
-        password) + Employee (HR profile), linked, with the specified role assigned
-        (defaulting to 'employee' if none provided).
+        password) + Employee (HR profile), linked, with the default
+        'employee' role assigned. The password is also stored
+        reversible-encrypted in the vault so the admin can view/reset it
+        later (see module docstring).
+
+        Raises :class:`ConflictException` if the email is already in use,
+        and :class:`BadRequestException` if a given department/designation
+        ID doesn't exist, or if the default 'employee' role hasn't been
+        seeded yet. Password strength is validated at the schema layer
+        (app.members.schemas.TeamMemberCreate), before this is ever called.
         """
         if department_id is not None and await self.department_repository.get_by_id(department_id) is None:
             raise BadRequestException("The specified department does not exist.")
         if designation_id is not None and await self.designation_repository.get_by_id(designation_id) is None:
             raise BadRequestException("The specified designation does not exist.")
 
-        assigned_role = None
-        if role_id is not None:
-            assigned_role = await self.rbac_service.role_repository.get_by_id(role_id)
-        elif role_name is not None:
-            assigned_role = await self.rbac_service.role_repository.get_by_name(role_name)
-
-        if assigned_role is None:
-            assigned_role = await self.rbac_service.role_repository.get_by_name(DEFAULT_MEMBER_ROLE_NAME)
-
-        if assigned_role is None:
+        default_role = await self.rbac_service.role_repository.get_by_name(DEFAULT_MEMBER_ROLE_NAME)
+        if default_role is None:
             raise BadRequestException(
                 f"The default {DEFAULT_MEMBER_ROLE_NAME!r} role has not been seeded. "
                 "Run the bootstrap seed script before adding team members."
@@ -133,40 +131,74 @@ class TeamMemberService:
 
         username = await self._generate_unique_username(email)
 
-        first_name, last_name = _split_full_name(full_name)
-        employee_code = f"EMP{uuid.uuid4().hex[:6].upper()}"
+        # Deliberately NOT using UserService.create_user() here: that
+        # method always GENERATES a temporary password server-side, which
+        # is the opposite of this feature's explicit requirement (the
+        # admin sets the password directly). Everything else it would
+        # have done (role assignment) is still done via the existing
+        # UserService.assign_role() below, so this only diverges from the
+        # existing flow at the one point it must.
         user = await self.user_service.user_repository.create(
-            first_name=first_name,
-            last_name=last_name,
-            display_name=full_name.strip(),
-            employee_code=employee_code,
+            employee_code=None,
             username=username,
             email=email,
             phone=None,
             password_hash=hash_password(password),
-            department_id=department_id,
-            designation_id=designation_id,
-            date_of_joining=date.today(),
             status=UserStatus.PENDING,
             is_active=True,
-            must_change_password=False,
+            must_change_password=False,  # the admin set this password deliberately; don't force an immediate change
             failed_login_count=0,
             created_by=created_by,
             updated_by=created_by,
         )
-        await self.user_service.assign_role(user.id, assigned_role.id, assigned_by=created_by)
+        await self.user_service.assign_role(user.id, default_role.id, assigned_by=created_by)
         await self.password_vault_repository.upsert(user.id, encrypt_password(password))
+
+        first_name, last_name = _split_full_name(full_name)
+        try:
+            employee = await self.employee_service.create(
+                created_by=created_by,
+                first_name=first_name,
+                last_name=last_name,
+                display_name=full_name.strip(),
+                email=email,
+                phone=None,
+                date_of_birth=None,
+                gender=None,
+                date_of_joining=date.today(),
+                department_id=department_id,
+                designation_id=designation_id,
+                manager_id=None,
+                employment_type=EmploymentType.FULL_TIME,
+                profile_picture_url=None,
+                address=None,
+                city=None,
+                state=None,
+                country=None,
+                postal_code=None,
+                notes=None,
+                user_id=user.id,
+            )
+        except ConflictException:
+            # The User account (and its vault entry) was already created
+            # and committed at this point (a genuinely separate, real
+            # account); re-raise with a clearer message rather than
+            # silently leaving an orphaned user with no employee profile.
+            raise ConflictException(
+                f"User {username!r} was created, but an employee profile with email {email!r} "
+                "already exists. Please check for a duplicate employee record."
+            )
 
         return {
             "user_id": user.id,
-            "employee_id": user.id,
-            "employee_code": user.employee_code,
+            "employee_id": employee.id,
+            "employee_code": employee.employee_code,
             "full_name": full_name.strip(),
             "username": username,
             "email": email,
             "department_id": department_id,
             "designation_id": designation_id,
-            "role": assigned_role.name,
+            "role": DEFAULT_MEMBER_ROLE_NAME,
             "must_change_password": False,
             "created_at": user.created_at,
         }

@@ -60,16 +60,7 @@ class DesignationService:
         return designation
 
     async def delete(self, designation_id: uuid.UUID) -> None:
-        """Delete a designation cleanly, clearing designation_id on any assigned users and employees."""
+        """Delete a designation. ``Designation`` has no soft-delete mixin, so this is a hard delete."""
         designation = await self.get_by_id_or_raise(designation_id)
-        from sqlalchemy import update
-        from app.users.models import User
-        from app.employees.models import Employee
-        await self.repository.session.execute(
-            update(User).where(User.designation_id == designation_id).values(designation_id=None)
-        )
-        await self.repository.session.execute(
-            update(Employee).where(Employee.designation_id == designation_id).values(designation_id=None)
-        )
         await self.repository.delete(designation)
         await self.cache_manager.invalidate_designations()

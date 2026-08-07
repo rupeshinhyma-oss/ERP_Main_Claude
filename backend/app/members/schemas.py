@@ -52,8 +52,6 @@ class TeamMemberCreate(BaseModel):
     password: str = Field(..., min_length=1, max_length=255)
     department_id: uuid.UUID | None = None
     designation_id: uuid.UUID | None = None
-    role_id: uuid.UUID | None = None
-    role_name: str | None = None
 
     _validate_password = field_validator("password")(_validate_password_field)
 
@@ -72,7 +70,7 @@ class TeamMemberRead(BaseModel):
 
     user_id: uuid.UUID
     employee_id: uuid.UUID
-    employee_code: str | None = None
+    employee_code: str
     full_name: str
     username: str
     email: str

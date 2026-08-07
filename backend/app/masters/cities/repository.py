@@ -33,20 +33,6 @@ class CityRepository(BaseRepository[City]):
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none() is not None
 
-    async def city_exists(
-        self, country_id: uuid.UUID, state_id: uuid.UUID | None, name: str, *, exclude_id: uuid.UUID | None = None
-    ) -> bool:
-        """Return True if another city in this state or country already uses this name."""
-        stmt = self._base_select().with_only_columns(City.id).where(City.country_id == country_id, City.name == name)
-        if state_id is not None:
-            stmt = stmt.where(City.state_id == state_id)
-        else:
-            stmt = stmt.where(City.state_id.is_(None))
-        if exclude_id is not None:
-            stmt = stmt.where(City.id != exclude_id)
-        result = await self.session.execute(stmt)
-        return result.scalar_one_or_none() is not None
-
     async def get_by_name_in_state(
         self, state_id: uuid.UUID, name: str, *, exclude_id: uuid.UUID | None = None
     ) -> City | None:

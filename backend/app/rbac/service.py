@@ -56,23 +56,13 @@ class RBACService:
         self.cache = cache
 
     async def invalidate_user_permissions_cache(self, user_id: uuid.UUID | None = None) -> None:
-        """Invalidate user permissions cache to ensure immediate update.
-
-        When ``user_id`` is given, only that user's cached effective
-        permissions are dropped. When omitted (e.g. after a role's
-        permissions change, which can affect every user holding that
-        role), the entire ``user_perms`` cache namespace is cleared via
-        ``delete_namespace`` -- the same mechanism ``CacheManager`` uses
-        for every other bulk-invalidation case (roles, departments,
-        designations, etc.), so there is exactly one way this is done
-        across the codebase.
-        """
+        """Invalidate user permissions cache to ensure immediate update."""
         if self.cache:
             if user_id:
                 key = CacheBackend.build_key("user_perms", str(user_id))
                 await self.cache.delete(key)
             else:
-                await self.cache.delete_namespace("user_perms")
+                await self.cache.clear_pattern("user_perms:*")
 
     # --- Lookups ------------------------------------------------------------------
     async def get_role_or_raise(self, role_id: uuid.UUID) -> Role:
@@ -140,10 +130,10 @@ class RBACService:
         return role
 
     async def delete_role(self, role_id: uuid.UUID) -> None:
-        """Delete a role. Rejects deleting the root super_admin role."""
+        """Delete a role. Rejects deleting a system role."""
         role = await self.get_role_or_raise(role_id)
-        if role.name == "super_admin":
-            raise ForbiddenException("The primary super_admin system role cannot be deleted.")
+        if role.is_system:
+            raise ForbiddenException("System roles cannot be deleted.")
         await self.role_repository.delete(role)
         await self.invalidate_user_permissions_cache()
 
@@ -224,27 +214,6 @@ class RBACService:
         if not removed:
             raise NotFoundException("The user does not have that permission override.")
         await self.invalidate_user_permissions_cache(user_id)
-
-    async def bulk_update_user_permissions(
-        self,
-        user_id: uuid.UUID,
-        overrides: list[tuple[uuid.UUID, bool]],
-        granted_by: uuid.UUID | None = None,
-    ) -> int:
-        """Bulk update or replace permission overrides for an individual user."""
-        existing_links = await self.user_permission_repository.list_for_user(user_id)
-        for link in existing_links:
-            await self.user_permission_repository.delete(link)
-
-        updated_count = 0
-        for perm_id, is_granted in overrides:
-            await self.user_permission_repository.add_permission(
-                user_id, perm_id, is_granted=is_granted, granted_by=granted_by
-            )
-            updated_count += 1
-
-        await self.invalidate_user_permissions_cache(user_id)
-        return updated_count
 
     # --- Effective Permissions & Breakdown -----------------------------------------
     async def get_user_effective_permissions(self, user_id: uuid.UUID) -> dict:

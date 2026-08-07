@@ -15,7 +15,6 @@ from datetime import datetime, timezone
 
 from app.auth.security import generate_temporary_password, hash_password
 from app.auth.service import AuthService
-from app.core.config import settings
 from app.core.exceptions import ConflictException, NotFoundException
 from app.rbac.repository import UserRoleRepository
 from app.rbac.service import RBACService
@@ -72,11 +71,6 @@ class UserService:
         """Return True if the user has the super_admin role."""
         roles = await self.rbac_service.list_roles_for_user(user_id)
         return any(r.name == "super_admin" for r in roles)
-
-    async def is_admin_or_super_admin(self, user_id: uuid.UUID) -> bool:
-        """Return True if the user has the super_admin or admin role."""
-        roles = await self.rbac_service.list_roles_for_user(user_id)
-        return any(r.name in ["super_admin", "admin"] for r in roles)
 
     async def _ensure_not_last_super_admin(
         self, user_id: uuid.UUID, role_id_to_remove: uuid.UUID | None = None
@@ -177,12 +171,6 @@ class UserService:
             updated_by=created_by,
         )
 
-        # Default to 'user' role if no role_ids supplied
-        if not role_ids:
-            user_role = await self.rbac_service.role_repository.get_by_name("user")
-            if user_role:
-                role_ids = [user_role.id]
-
         for role_id in (role_ids or []):
             await self.assign_role(user.id, role_id, assigned_by=created_by)
 
@@ -206,8 +194,11 @@ class UserService:
         if employee_code and isinstance(employee_code, str) and await self.user_repository.employee_code_exists(employee_code, exclude_user_id=user_id):
             raise ConflictException("An account is already linked to that employee code.")
 
-        updated_user = await self.user_repository.update(user, updated_by=updated_by, **fields)
-        return updated_user
+        changes = {k: v for k, v in fields.items() if v is not None}
+        if changes:
+            changes["updated_by"] = updated_by
+            await self.user_repository.update(user, **changes)
+        return user
 
     # --- Admin: Reset / Set Password ------------------------------------------------
     async def admin_reset_password(
@@ -232,38 +223,44 @@ class UserService:
 
     # --- Admin: Activate / Deactivate / Unlock ---------------------------------------
     async def activate_user(self, user_id: uuid.UUID, *, updated_by: uuid.UUID) -> User:
-        """Activate a user account."""
+        """Activate a pending or inactive user account."""
         user = await self.get_by_id_or_raise(user_id)
         if await self.is_super_admin(user_id) and not await self.is_super_admin(updated_by):
             from app.core.exceptions import ForbiddenException
             raise ForbiddenException("Only Super Administrators can modify Super Administrator accounts.")
-        await self.user_repository.update(user, status=UserStatus.ACTIVE, is_active=True, updated_by=updated_by)
+        await self.user_repository.update(
+            user, status=UserStatus.ACTIVE, is_active=True, updated_by=updated_by
+        )
         return user
 
     async def deactivate_user(self, user_id: uuid.UUID, *, updated_by: uuid.UUID) -> User:
-        """Deactivate a user account and force-logout all active sessions."""
+        """Deactivate a user account and force-logout all of their active sessions."""
         user = await self.get_by_id_or_raise(user_id)
         if await self.is_super_admin(user_id) and not await self.is_super_admin(updated_by):
             from app.core.exceptions import ForbiddenException
             raise ForbiddenException("Only Super Administrators can modify Super Administrator accounts.")
         await self._ensure_not_last_super_admin(user_id)
-        await self.user_repository.update(user, status=UserStatus.INACTIVE, is_active=False, updated_by=updated_by)
-        await self.force_logout_user(user_id)
+        await self.user_repository.update(
+            user, status=UserStatus.INACTIVE, is_active=False, updated_by=updated_by
+        )
+        await self.auth_service.force_logout_user(user.id, reason="account_deactivated")
         return user
 
     async def suspend_user(self, user_id: uuid.UUID, *, updated_by: uuid.UUID) -> User:
-        """Suspend a user account and force-logout all active sessions."""
+        """Suspend a user account and force-logout all of their active sessions."""
         user = await self.get_by_id_or_raise(user_id)
         if await self.is_super_admin(user_id) and not await self.is_super_admin(updated_by):
             from app.core.exceptions import ForbiddenException
             raise ForbiddenException("Only Super Administrators can modify Super Administrator accounts.")
         await self._ensure_not_last_super_admin(user_id)
-        await self.user_repository.update(user, status=UserStatus.SUSPENDED, is_active=False, updated_by=updated_by)
-        await self.force_logout_user(user_id)
+        await self.user_repository.update(
+            user, status=UserStatus.SUSPENDED, is_active=False, updated_by=updated_by
+        )
+        await self.auth_service.force_logout_user(user.id, reason="account_suspended")
         return user
 
     async def unlock_user(self, user_id: uuid.UUID, *, updated_by: uuid.UUID) -> User:
-        """Clear a user's lockout state."""
+        """Clear a user's failed-login lockout state."""
         user = await self.get_by_id_or_raise(user_id)
         if await self.is_super_admin(user_id) and not await self.is_super_admin(updated_by):
             from app.core.exceptions import ForbiddenException
@@ -276,33 +273,17 @@ class UserService:
 
     # --- Admin: Role assignment ------------------------------------------------------
     async def assign_role(self, user_id: uuid.UUID, role_id: uuid.UUID, *, assigned_by: uuid.UUID) -> None:
-        """Assign a role to a user, replacing any existing assigned role."""
-        target_user = await self.get_by_id_or_raise(user_id)  # 404s cleanly if user doesn't exist
-        role = await self.rbac_service.get_role_or_raise(role_id)  # 404s cleanly if role doesn't exist
+        """Assign a role to a user, if not already assigned."""
+        await self.get_by_id_or_raise(user_id)  # 404s cleanly if the user doesn't exist
+        role = await self.rbac_service.get_role_or_raise(role_id)  # 404s cleanly if the role doesn't exist
 
         if role.name == "super_admin" and not await self.is_super_admin(assigned_by):
             from app.core.exceptions import ForbiddenException
             raise ForbiddenException("Only Super Administrators can promote a user to Super Administrator.")
 
-        if role.name == "admin" and not await self.is_admin_or_super_admin(assigned_by):
-            from app.core.exceptions import ForbiddenException
-            raise ForbiddenException("Only Administrators can assign Administrator roles.")
-
-        existing_user_roles = await self.user_role_repository.list_for_user(user_id)
-        if len(existing_user_roles) == 1 and existing_user_roles[0].role_id == role_id:
-            return
-
-        # Check safety before stripping super_admin role
-        has_super_admin = any(
-            link.role and link.role.name == "super_admin" for link in existing_user_roles
-        )
-        if has_super_admin and role.name != "super_admin":
-            super_admin_role = next(link.role for link in existing_user_roles if link.role and link.role.name == "super_admin")
-            await self._ensure_not_last_super_admin(user_id, super_admin_role.id)
-
-        # Replace existing assigned roles with the single selected role
-        for link in existing_user_roles:
-            await self.user_role_repository.delete(link)
+        existing = await self.user_role_repository.get(user_id, role_id)
+        if existing is not None:
+            raise ConflictException("The user already has that role.")
 
         await self.user_role_repository.create(
             user_id=user_id,
@@ -310,34 +291,18 @@ class UserService:
             assigned_at=datetime.now(timezone.utc),
             assigned_by=assigned_by,
         )
-        await self.rbac_service.invalidate_user_permissions_cache(user_id)
 
     async def remove_role(self, user_id: uuid.UUID, role_id: uuid.UUID, *, removed_by: uuid.UUID | None = None) -> None:
-        """Remove a role assignment from a user, defaulting back to 'user' role if no roles remain."""
-        target_user = await self.get_by_id_or_raise(user_id)
+        """Remove a role assignment from a user."""
         link = await self.user_role_repository.get(user_id, role_id)
         if link is None:
             raise NotFoundException("The user does not have that role.")
         role = await self.rbac_service.get_role_or_raise(role_id)
-        if role.name == "super_admin" and target_user.username == settings.BOOTSTRAP_ADMIN_USERNAME:
+        if role.name == "super_admin" and removed_by and not await self.is_super_admin(removed_by):
             from app.core.exceptions import ForbiddenException
-            raise ForbiddenException("The super_admin role cannot be removed from the primary system administrator account.")
+            raise ForbiddenException("Only Super Administrators can remove Super Administrator rights.")
         await self._ensure_not_last_super_admin(user_id, role_id)
         await self.user_role_repository.delete(link)
-
-        # Default back to 'user' role if no role assignments remain
-        remaining_roles = await self.user_role_repository.list_for_user(user_id)
-        if not remaining_roles:
-            user_role = await self.rbac_service.role_repository.get_by_name("user")
-            if user_role and user_role.id != role_id:
-                await self.user_role_repository.create(
-                    user_id=user_id,
-                    role_id=user_role.id,
-                    assigned_at=datetime.now(timezone.utc),
-                    assigned_by=removed_by or user_id,
-                )
-
-        await self.rbac_service.invalidate_user_permissions_cache(user_id)
 
     # --- Admin: Sessions / Force logout -----------------------------------------------
     async def view_active_sessions(self, user_id: uuid.UUID):  # noqa: ANN201

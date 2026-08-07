@@ -16,8 +16,7 @@ def validate_brand_row(raw_row: dict[str, str], row_number: int) -> dict[str, An
     if not name:
         raise BadRequestException(f"Row {row_number}: 'name' is required.")
     if not code:
-        import re
-        code = "BR-" + re.sub(r"[^A-Z0-9]", "", name.upper())[:8]
+        raise BadRequestException(f"Row {row_number}: 'code' is required.")
 
     status_raw = (raw_row.get("status") or "active").strip().lower()
     try:

@@ -27,13 +27,6 @@ class HsnRepository(BaseRepository[HsnCode]):
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
-    async def get_by_code_all(self, code: str) -> HsnCode | None:
-        """Fetch an HSN code by its unique code, including soft-deleted rows."""
-        from sqlalchemy import select
-        stmt = select(HsnCode).where(HsnCode.code == code)
-        result = await self.session.execute(stmt)
-        return result.scalar_one_or_none()
-
     async def code_exists(self, code: str, *, exclude_id: uuid.UUID | None = None) -> bool:
         """Return True if another (non-deleted) HSN code row already uses this code."""
         stmt = self._base_select().with_only_columns(HsnCode.id).where(HsnCode.code == code)

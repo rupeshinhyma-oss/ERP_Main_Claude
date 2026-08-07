@@ -15,9 +15,12 @@ from __future__ import annotations
 
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.api.v1.router import api_router
 from app.cache.dependency import get_cleanup_worker
@@ -135,7 +138,74 @@ def create_application() -> FastAPI:
 
     app.include_router(api_router, prefix=settings.API_V1_PREFIX)
 
+    # ---------------------------------------------------------------
+    # Optional same-origin frontend serving.
+    #
+    # Off unless FRONTEND_DIST_DIR is set, so local development (API and
+    # Vite dev server as two separate processes, see
+    # frontend/vite.config.ts's proxy) is completely unaffected. Registered
+    # last, after every API route, so a same-origin deploy still can't have
+    # the SPA fallback shadow an API path -- FastAPI resolves routes in
+    # registration order, and the mount below only ever answers requests
+    # that fell through everything above it.
+    # ---------------------------------------------------------------
+    _mount_frontend(app)
+
     return app
+
+
+def _mount_frontend(app: FastAPI) -> None:
+    """
+    Serve the built React app from the same origin as the API, if configured.
+
+    Two pieces:
+      - `/assets` (Vite's hashed JS/CSS output) mounted as plain static files,
+        so the browser can cache them aggressively.
+      - a catch-all GET route that returns `index.html` for any other
+        unmatched path, which is what makes client-side routes like
+        `/masters/products` survive a hard refresh -- without this, the
+        browser asks the server for that exact path, the server has no such
+        route, and the SPA never gets a chance to load and take over routing.
+
+    Silently does nothing if `FRONTEND_DIST_DIR` is unset or the directory
+    doesn't exist, so a misconfigured path fails at first request (a clear
+    404) rather than at import time.
+    """
+    if not settings.FRONTEND_DIST_DIR:
+        return
+
+    dist_dir = Path(settings.FRONTEND_DIST_DIR)
+    index_file = dist_dir / "index.html"
+    assets_dir = dist_dir / "assets"
+
+    if not dist_dir.is_dir() or not index_file.is_file():
+        logger.warning(
+            "FRONTEND_DIST_DIR is set but no built frontend was found there; "
+            "the API will run without serving the SPA.",
+            extra={"frontend_dist_dir": str(dist_dir)},
+        )
+        return
+
+    if assets_dir.is_dir():
+        app.mount("/assets", StaticFiles(directory=assets_dir), name="frontend-assets")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def serve_spa(request: Request, full_path: str) -> FileResponse:
+        """
+        Serve a specific static file if one exists at this path (favicon,
+        manifest, etc.), otherwise fall back to `index.html` so the SPA's own
+        router can resolve the URL client-side. Never intercepts `/api/*`,
+        `/docs`, `/redoc`, `/openapi.json`, or `/health/*` -- those are all
+        registered above and matched first.
+        """
+        candidate = dist_dir / full_path
+        if full_path and candidate.is_file():
+            return FileResponse(candidate)
+
+        if not index_file.is_file():
+            raise HTTPException(status_code=404, detail="Not Found")
+
+        return FileResponse(index_file)
 
 
 app = create_application()

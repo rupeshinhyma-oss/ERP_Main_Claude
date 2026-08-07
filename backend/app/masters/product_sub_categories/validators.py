@@ -19,11 +19,10 @@ def validate_product_sub_category_row(raw_row: dict[str, str], row_number: int) 
     name = (raw_row.get("name") or "").strip()
     category_code = (raw_row.get("category_code") or "").strip()
 
+    if not code:
+        raise BadRequestException(f"Row {row_number}: 'code' is required.")
     if not name:
         raise BadRequestException(f"Row {row_number}: 'name' is required.")
-    if not code:
-        import re
-        code = "SUB-" + re.sub(r"[^A-Z0-9]", "", name.upper())[:8]
     if not category_code:
         raise BadRequestException(f"Row {row_number}: 'category_code' is required.")
 

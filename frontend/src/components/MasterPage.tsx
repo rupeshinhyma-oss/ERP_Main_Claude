@@ -365,67 +365,106 @@ export function MasterPage<T extends MasterRecord>({
             <h1>{heading}</h1>
             <div className="page-subtitle">{subtitle}</div>
           </div>
-          <div className="page-header-actions">
+          <div className="page-header-actions" style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+            {canCreate && (
+              <button type="button" className="btn btn-quick-add" onClick={() => openModal(null)}>
+                + QUICK ADD
+              </button>
+            )}
+            {canCreate && (
+              <button type="button" className="btn btn-add-new" onClick={() => openModal(null)}>
+                + ADD NEW
+              </button>
+            )}
             {canImport && (
               <button
                 type="button"
-                className="btn"
-                title="Download a pre-formatted CSV template with example data"
+                className="btn btn-imp-exp"
                 onClick={() => downloadSampleTemplate(importHeaders, entityName)}
               >
-                📥 Sample Template
+                Imp / Exp ▾
               </button>
             )}
-            {canImport && (
-              <ImportButton
-                apiBase={apiBase}
-                entityName={entityName}
-                importHeaders={importHeaders}
-                onSummary={setImportSummary}
-                onError={setImportError}
-                onComplete={() => reload()}
-              />
-            )}
-            {canExport && (
-              <>
-                <button className="btn" onClick={() => handleExport("csv")}>
-                  Export CSV
-                </button>
-                <button className="btn" onClick={() => handleExport("xlsx")}>
-                  Export Excel
-                </button>
-              </>
-            )}
-            {canCreate && (
-              <button className="btn btn-primary" onClick={() => openModal(null)}>
-                {newButtonLabel}
-              </button>
-            )}
+            <button
+              type="button"
+              className="btn btn-bulk-actions"
+              onClick={() => handleExport("csv")}
+            >
+              Bulk Actions ▾
+            </button>
           </div>
         </div>
         <Banner error={error} />
         <ImportSummaryPanel summary={importSummary} error={importError} />
 
         <div className="card">
-          <div className="toolbar">
-            <input
-              type="text"
-              placeholder={searchPlaceholder}
-              value={searchInput}
-              onChange={(e) => setSearchInput(e.target.value)}
-            />
-            {toolbarExtras}
-            <select
-              value={statusFilter}
-              onChange={(e) => {
+          <div className="card-tabs" style={{ display: "flex", gap: "24px", padding: "14px 20px 0", borderBottom: "1px solid #e2e8f0" }}>
+            <button
+              type="button"
+              style={{
+                background: "none",
+                border: "none",
+                borderBottom: statusFilter !== "inactive" ? "2.5px solid #0061f2" : "2.5px solid transparent",
+                color: statusFilter !== "inactive" ? "#0061f2" : "#64748b",
+                fontWeight: 700,
+                fontSize: "14px",
+                paddingBottom: "10px",
+                cursor: "pointer",
+              }}
+              onClick={() => {
                 setCurrentPage(1);
-                setStatusFilter(e.target.value);
+                setStatusFilter("");
               }}
             >
-              <option value="">All statuses</option>
-              <option value="active">Active</option>
-              <option value="inactive">Inactive</option>
-            </select>
+              Active
+            </button>
+            <button
+              type="button"
+              style={{
+                background: "none",
+                border: "none",
+                borderBottom: statusFilter === "inactive" ? "2.5px solid #0061f2" : "2.5px solid transparent",
+                color: statusFilter === "inactive" ? "#0061f2" : "#64748b",
+                fontWeight: 700,
+                fontSize: "14px",
+                paddingBottom: "10px",
+                cursor: "pointer",
+              }}
+              onClick={() => {
+                setCurrentPage(1);
+                setStatusFilter("inactive");
+              }}
+            >
+              Inactive
+            </button>
+          </div>
+
+          <div className="toolbar" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 20px" }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+              <select
+                value={pageSize}
+                onChange={(e) => {
+                  setPageSize(Number(e.target.value));
+                  setCurrentPage(1);
+                }}
+                style={{ padding: "6px 12px", borderRadius: "4px", border: "1px solid #cbd5e1", width: "90px" }}
+              >
+                <option value={10}>10</option>
+                <option value={50}>50</option>
+                <option value={100}>100</option>
+              </select>
+              <span style={{ fontSize: "12px", color: "#64748b", fontWeight: 500 }}>Items/Page</span>
+            </div>
+            <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
+              <input
+                type="text"
+                placeholder={searchPlaceholder || "Search..."}
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+                style={{ padding: "8px 14px", borderRadius: "4px", border: "1px solid #cbd5e1", width: "240px", fontSize: "13.5px" }}
+              />
+              {toolbarExtras}
+            </div>
           </div>
 
           <div className="table-scroll">
@@ -535,12 +574,12 @@ export function MasterPage<T extends MasterRecord>({
             </div>
             <form onSubmit={handleSubmit}>
               {renderFields(form, setField)}
-              <div className="form-actions">
-                <button type="submit" className="btn btn-primary">
-                  Save
+              <div className="form-actions" style={{ display: "flex", gap: "12px", width: "100%" }}>
+                <button type="submit" className="btn btn-add-new" style={{ flex: 1, justifyContent: "center" }}>
+                  Save &amp; Continue
                 </button>
-                <button type="button" className="btn" onClick={closeModal}>
-                  Cancel
+                <button type="button" className="btn btn-quick-add" style={{ flex: 1, justifyContent: "center" }} onClick={closeModal}>
+                  Save &amp; Exit
                 </button>
               </div>
             </form>

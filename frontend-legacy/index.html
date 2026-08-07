@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Dashboard — Inhyma ERP</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <div id="sidebarMount"></div>
+    <div class="main-column">
+      <div id="topbarMount"></div>
+      <main class="page">
+        <div class="page-header">
+          <div>
+            <h1 id="welcomeHeading">Welcome back</h1>
+            <div class="page-subtitle">Here's what's happening across your organization today.</div>
+          </div>
+        </div>
+        <div id="banner"></div>
+
+        <div class="stat-grid" id="statGrid">
+          <div class="stat-card" data-permission="user.read">
+            <div>
+              <div class="stat-value" id="userStatValue">&mdash;</div>
+              <div class="stat-label">Users</div>
+            </div>
+            <div class="stat-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="20" height="20"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+            </div>
+          </div>
+          <div class="stat-card tone-success" data-permission="supplier.read">
+            <div>
+              <div class="stat-value" id="supplierStatValue">&mdash;</div>
+              <div class="stat-label">Suppliers</div>
+            </div>
+            <div class="stat-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="20" height="20"><path d="M1 3h15v13H1z"/><path d="M16 8h4l3 3v5h-7V8z"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
+            </div>
+          </div>
+          <div class="stat-card tone-warning" data-permission="task.read">
+            <div>
+              <div class="stat-value" id="taskStatValue">&mdash;</div>
+              <div class="stat-label">Active Tasks</div>
+            </div>
+            <div class="stat-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="20" height="20"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+            </div>
+          </div>
+          <div class="stat-card tone-success" data-permission="department.read">
+            <div>
+              <div class="stat-value" id="deptStatValue">&mdash;</div>
+              <div class="stat-label">Departments</div>
+            </div>
+            <div class="stat-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="20" height="20"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
+            </div>
+          </div>
+          <div class="stat-card tone-warning" data-permission="designation.read">
+            <div>
+              <div class="stat-value" id="desigStatValue">&mdash;</div>
+              <div class="stat-label">Designations</div>
+            </div>
+            <div class="stat-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="20" height="20"><circle cx="12" cy="8" r="6"/><path d="M15.48 13.06 17 22l-5-3-5 3 1.52-8.94"/></svg>
+            </div>
+          </div>
+          <div class="stat-card" data-permission="organization.manage">
+            <div>
+              <div class="stat-value" id="orgStatValue" style="font-size:16px;">Not set up</div>
+              <div class="stat-label">Organization</div>
+            </div>
+            <div class="stat-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="20" height="20"><path d="M6 22V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v18Z"/></svg>
+            </div>
+          </div>
+        </div>
+
+        <div class="card-header" id="masterDataHeader" style="margin-top: var(--space-2);">
+          <div class="section-title" style="margin:0;">Master Data</div>
+        </div>
+        <div class="stat-grid" id="masterStatGrid">
+          <div class="stat-card" data-permission="country.read"><div><div class="stat-value" id="countryStatValue">&mdash;</div><div class="stat-label">Countries</div></div></div>
+          <div class="stat-card" data-permission="state.read"><div><div class="stat-value" id="stateStatValue">&mdash;</div><div class="stat-label">States</div></div></div>
+          <div class="stat-card" data-permission="city.read"><div><div class="stat-value" id="cityStatValue">&mdash;</div><div class="stat-label">Cities</div></div></div>
+          <div class="stat-card" data-permission="product.read"><div><div class="stat-value" id="productStatValue">&mdash;</div><div class="stat-label">Products</div></div></div>
+        </div>
+
+        <div class="card" id="quickLinksCard">
+          <div class="section-title" style="margin-top:0;">Quick links</div>
+          <div class="form-grid" style="grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));">
+            <p data-permission="user.read"><a href="./users.html">Manage users</a></p>
+            <p data-permission="supplier.read"><a href="./suppliers.html">Manage suppliers</a></p>
+            <p data-permission="department.read"><a href="./teams.html">Manage departments</a></p>
+            <p data-permission="country.read"><a href="./masters-countries.html">Manage countries</a></p>
+            <p data-permission="product.read"><a href="./masters-products.html">Manage products</a></p>
+            <p data-permission="brand.read"><a href="./masters-brands.html">Manage brands</a></p>
+            <p data-permission="organization.manage"><a href="./organization.html">Organization settings</a></p>
+            <p data-permission="settings.manage"><a href="./rbac.html">Roles & Permissions</a></p>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <script src="js/api.js"></script>
+  <script src="js/nav.js?v=2"></script>
+  <script>
+    renderShell("dashboard");
+
+    const profile = Auth.getProfile();
+    if (profile) {
+      document.getElementById("welcomeHeading").textContent = `Welcome back, ${profile.username}`;
+    }
+
+    async function loadStats() {
+      const banner = document.getElementById("banner");
+
+      const fetches = [];
+      const fetchKeys = [];
+
+      if (Auth.hasPermission("user.read")) { fetches.push(apiGet("/users?page=1&page_size=1")); fetchKeys.push("user"); }
+      if (Auth.hasPermission("supplier.read")) { fetches.push(apiGet("/suppliers?page=1&page_size=1")); fetchKeys.push("supplier"); }
+      if (Auth.hasPermission("task.read")) { fetches.push(apiGet("/tasks?limit=100")); fetchKeys.push("task"); }
+      if (Auth.hasPermission("department.read")) { fetches.push(apiGet("/departments?page=1&page_size=1")); fetchKeys.push("dept"); }
+      if (Auth.hasPermission("designation.read")) { fetches.push(apiGet("/designations?page=1&page_size=1")); fetchKeys.push("desig"); }
+      if (Auth.hasPermission("organization.manage")) { fetches.push(apiGet("/organizations")); fetchKeys.push("org"); }
+      if (Auth.hasPermission("country.read")) { fetches.push(apiGet("/masters/countries?page=1&page_size=1")); fetchKeys.push("country"); }
+      if (Auth.hasPermission("state.read")) { fetches.push(apiGet("/masters/states?page=1&page_size=1")); fetchKeys.push("state"); }
+      if (Auth.hasPermission("city.read")) { fetches.push(apiGet("/masters/cities?page=1&page_size=1")); fetchKeys.push("city"); }
+      if (Auth.hasPermission("product.read")) { fetches.push(apiGet("/masters/products?page=1&page_size=1")); fetchKeys.push("product"); }
+
+      const results = await Promise.allSettled(fetches);
+
+      results.forEach((res, idx) => {
+        const key = fetchKeys[idx];
+        if (res.status === "fulfilled" && res.value) {
+          if (key === "user") document.getElementById("userStatValue").textContent = res.value.data?.total ?? res.value.meta?.pagination?.total_records ?? (res.value.data?.items?.length ?? "—");
+          if (key === "supplier") document.getElementById("supplierStatValue").textContent = res.value.meta?.pagination?.total_records ?? "—";
+          if (key === "task" && res.value.data && Array.isArray(res.value.data.items)) {
+            const activeCount = res.value.data.items.filter(t => t.status === "PENDING" || t.status === "IN_PROGRESS").length;
+            document.getElementById("taskStatValue").textContent = activeCount;
+          }
+          if (key === "dept") document.getElementById("deptStatValue").textContent = res.value.meta?.pagination?.total_records ?? "—";
+          if (key === "desig") document.getElementById("desigStatValue").textContent = res.value.meta?.pagination?.total_records ?? "—";
+          if (key === "org" && res.value.data) document.getElementById("orgStatValue").textContent = res.value.data.company_name;
+          if (key === "country") document.getElementById("countryStatValue").textContent = res.value.meta?.pagination?.total_records ?? "—";
+          if (key === "state") document.getElementById("stateStatValue").textContent = res.value.meta?.pagination?.total_records ?? "—";
+          if (key === "city") document.getElementById("cityStatValue").textContent = res.value.meta?.pagination?.total_records ?? "—";
+          if (key === "product") document.getElementById("productStatValue").textContent = res.value.meta?.pagination?.total_records ?? "—";
+        }
+      });
+
+      // Hide Master Data section header if no master card is visible
+      const hasMasterCards = ["country.read", "state.read", "city.read", "product.read"].some(p => Auth.hasPermission(p));
+      const masterHeader = document.getElementById("masterDataHeader");
+      if (masterHeader) {
+        masterHeader.style.display = hasMasterCards ? "block" : "none";
+      }
+    }
+
+    loadStats();
+
+    window.addEventListener("auth:permissions-updated", () => {
+      loadStats();
+    });
+  </script>
+</body>
+</html>

@@ -498,8 +498,16 @@ function Sidebar({ activeKey, brandName }: { activeKey: string; brandName: strin
   return (
     <aside className="sidebar">
       <div className="sidebar-brand">
-        <div className="logo-mark">{initials(brandName)}</div>
-        <span className="brand-text">{brandName}</span>
+        <div className="logo-mark" style={{ background: "#0061f2", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", borderRadius: "6px", width: "32px", height: "32px", fontWeight: "bold" }}>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="13 17 18 12 13 7"></polyline>
+            <polyline points="6 17 11 12 6 7"></polyline>
+          </svg>
+        </div>
+        <div className="brand-text-group" style={{ display: "flex", flexDirection: "column", gap: "1px" }}>
+          <span className="brand-text" style={{ fontWeight: 800, fontSize: "15px", color: "#0061f2", letterSpacing: "0.5px" }}>YINGLIMA</span>
+          <span style={{ fontSize: "9px", color: "#d97706", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.4px" }}>YOUR INDUSTRIAL HYPERMARKET</span>
+        </div>
       </div>
       <nav className="sidebar-nav" ref={navRef}>
         {visibleSections.map((section) => (

@@ -669,21 +669,22 @@ export function SuppliersPage() {
                 />
               )}
             </Can>
-            <Can permission="supplier.export">
-              <button className="btn" onClick={() => handleExport("csv")}>
-                Export CSV
-              </button>
-            </Can>
-            <Can permission="supplier.export">
-              <button className="btn" onClick={() => handleExport("xlsx")}>
-                Export Excel
-              </button>
-            </Can>
             {canCreate && (
-              <button className="btn btn-primary" onClick={() => openModal(null)}>
-                + New Supplier
+              <button className="btn btn-quick-add" onClick={() => openModal(null)}>
+                + QUICK ADD
               </button>
             )}
+            {canCreate && (
+              <button className="btn btn-add-new" onClick={() => openModal(null)}>
+                + ADD NEW
+              </button>
+            )}
+            <button className="btn btn-imp-exp" onClick={() => downloadSampleTemplate(SUPPLIER_IMPORT_HEADERS, "Companies")}>
+              Imp / Exp ▾
+            </button>
+            <button className="btn btn-bulk-actions" onClick={() => handleExport("csv")}>
+              Bulk Actions ▾
+            </button>
           </div>
         </div>
         <Banner error={error} />
@@ -1105,13 +1106,22 @@ export function SuppliersPage() {
                   <TextField id="emails_input" label="Email ID(s)" placeholder="comma-separated for multiple" hint="Separate multiple emails with commas." value={form.emails_input} onChange={(v) => setField("emails_input", v)} />
                 </div>
 
-                <div className="form-actions" style={{ borderTop: "none" }}>
+                <div className="form-actions" style={{ borderTop: "none", display: "flex", gap: "12px", width: "100%" }}>
                   <button
                     type="button"
-                    className="btn btn-primary"
+                    className="btn btn-add-new"
+                    style={{ flex: 1, justifyContent: "center" }}
                     onClick={() => setModalTab("second")}
                   >
-                    Next: Main Profile &rarr;
+                    Save &amp; Continue
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-quick-add"
+                    style={{ flex: 1, justifyContent: "center" }}
+                    onClick={closeModal}
+                  >
+                    Save &amp; Exit
                   </button>
                 </div>
               </div>
@@ -1202,15 +1212,12 @@ export function SuppliersPage() {
                   <option value="false">Inactive</option>
                 </SelectField>
 
-                <div className="form-actions">
-                  <button type="button" className="btn" onClick={() => setModalTab("first")}>
-                    &larr; Back
+                <div className="form-actions" style={{ display: "flex", gap: "12px", width: "100%" }}>
+                  <button type="submit" className="btn btn-add-new" style={{ flex: 1, justifyContent: "center" }}>
+                    Save &amp; Continue
                   </button>
-                  <button type="submit" className="btn btn-primary">
-                    Save Supplier
-                  </button>
-                  <button type="button" className="btn" onClick={closeModal}>
-                    Cancel
+                  <button type="button" className="btn btn-quick-add" style={{ flex: 1, justifyContent: "center" }} onClick={closeModal}>
+                    Save &amp; Exit
                   </button>
                 </div>
               </div>

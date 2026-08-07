@@ -211,7 +211,9 @@ export function DashboardPage() {
       <main className="page">
         <div className="page-header">
           <div>
-            <h1>{profile ? `Welcome back, ${profile.username}` : "Welcome back"}</h1>
+            <h1 style={{ color: "#0061f2", fontWeight: 700, fontSize: "22px" }}>
+              {profile ? `Welcome To ${profile.full_name || profile.username}` : "Welcome To Rupesh Malla"}
+            </h1>
             <div className="page-subtitle">
               Here's what's happening across your organization today.
             </div>

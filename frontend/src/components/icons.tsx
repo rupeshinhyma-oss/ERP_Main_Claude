@@ -315,6 +315,7 @@ export function IconKanbanView(props: IconProps) {
 export const ICONS = {
   dashboard: IconDashboard,
   users: IconUsers,
+  user: IconUsers,
   building: IconBuilding,
   briefcase: IconBriefcase,
   globe: IconGlobe,
@@ -332,6 +333,10 @@ export const ICONS = {
   truck: IconTruck,
   task: IconTask,
   fileText: IconFileText,
+  sliders: IconBriefcase,
+  refresh: IconClock,
+  grid: IconBox,
+  folder: IconLayers,
 } as const;
 
 export type IconKey = keyof typeof ICONS;

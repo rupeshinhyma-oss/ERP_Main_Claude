@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Product Sub-Categories — Inhyma ERP</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <div id="sidebarMount"></div>
+    <div class="main-column">
+      <div id="topbarMount"></div>
+      <main class="page">
+        <div class="breadcrumb">
+          <a href="./index.html">Dashboard</a><span class="sep">/</span><span class="current">Master Data</span><span class="sep">/</span><span class="current">Sub-Categories</span>
+        </div>
+        <div class="page-header">
+          <div>
+            <h1>Product Sub-Categories</h1>
+            <div class="page-subtitle">Belongs to a category; names are unique within their category.</div>
+          </div>
+          <div class="page-header-actions">
+            <button class="btn" id="sampleTemplateBtn">📌 Sample Template</button>
+            <div class="btn file-btn" id="importBtnWrapper">
+              Import
+              <input type="file" id="importInput" accept=".csv,.xlsx" />
+            </div>
+            <button class="btn" id="exportCsvBtn">Export CSV</button>
+            <button class="btn" id="exportXlsxBtn">Export Excel</button>
+            <button class="btn btn-primary" id="newBtn">+ New Sub-Category</button>
+          </div>
+        </div>
+        <div id="banner"></div>
+        <div id="importSummary"></div>
+
+        <div class="card">
+          <div class="toolbar">
+            <input type="text" id="searchInput" placeholder="Search name or code or Sr. No..." />
+            <select id="categoryFilter">
+              <option value="">All categories</option>
+            </select>
+            <select id="statusFilter">
+              <option value="">All statuses</option>
+              <option value="active">Active</option>
+              <option value="inactive">Inactive</option>
+            </select>
+          </div>
+
+          <div class="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th style="width: 40px;"><input type="checkbox" class="select-all-checkbox" /></th>
+                  <th>Sr. No.</th>
+                  <th>Name</th>
+                  <th>Code</th>
+                  <th>Category</th>
+                  <th>Description</th>
+                  <th>Status</th>
+                  <th>ACTION</th>
+                </tr>
+              </thead>
+              <tbody id="tableBody">
+                <tr><td colspan="7" class="muted">Loading...</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="pagination" id="pagination"></div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="modalBackdrop" style="display:none;">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h2 id="modalTitle">New Sub-Category</h2>
+        <button class="modal-close" id="modalCloseBtn">&times;</button>
+      </div>
+      <form id="entityForm">
+        <input type="hidden" id="entityId" />
+        <div id="modalBanner"></div>
+        <div class="form-grid">
+          <div class="field">
+            <label for="category_id">Category *</label>
+            <select id="category_id" required>
+              <option value="">-- Select Category --</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="name">Sub-Category Name *</label>
+            <input id="name" required maxlength="150" placeholder="e.g. Band Sealer, Citric Acid" />
+          </div>
+          <div class="field">
+            <label for="code">Sub-Category Code (Optional)</label>
+            <input id="code" maxlength="50" placeholder="Auto-generated if left blank" />
+          </div>
+          <div class="field">
+            <label for="status">Status</label>
+            <select id="status">
+              <option value="active">Active</option>
+              <option value="inactive">Inactive</option>
+            </select>
+          </div>
+        </div>
+        <div class="field">
+          <label for="description">Description</label>
+          <textarea id="description"></textarea>
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="btn btn-primary">Save</button>
+          <button type="button" class="btn" id="cancelBtn">Cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script src="js/api.js"></script>
+  <script src="js/nav.js?v=2"></script>
+  <script src="js/import-wizard.js"></script>
+  <script src="js/masters-common.js?v=200"></script>
+  <script>
+    renderShell("masters-subcategories");
+
+    let categoriesCache = [];
+
+    function categoryName(id) {
+      const c = categoriesCache.find((x) => x.id === id);
+      return c ? c.name : "—";
+    }
+
+    MasterPage.init({
+      apiBase: "/masters/product-sub-categories",
+      permissionPrefix: "subcategory",
+      entityName: "sub-category",
+      importHeaders: [
+        { key: "category_code", label: "Category Code", required: true },
+        { key: "code", label: "Sub-Category Code", required: true },
+        { key: "name", label: "Sub-Category Name", required: true },
+        { key: "description", label: "Description" },
+        { key: "status", label: "Status (active/inactive)" },
+      ],
+      columns: [
+        { 
+          header: "Name", 
+          render: (s) => `<a href="#" onclick="event.preventDefault(); MasterPage.openDetailDrawer('/masters/product-sub-categories', '${s.id}', 'name', [{ label: 'Sub-Category Name', key: 'name', fullWidth: true }, { label: 'Sub-Category Code', key: 'code' }, { label: 'Parent Category', render: (x) => escapeHtml(categoryName(x.category_id)) }, { label: 'Current Status', render: (x) => MasterPage.badge(x.status) }, { label: 'Description', key: 'description', fullWidth: true }]);" class="cell-primary" style="color:var(--color-primary); font-weight:600;">${escapeHtml(s.name)}</a>` 
+        },
+        { header: "Code", render: (s) => escapeHtml(s.code) },
+        { header: "Category", render: (s) => escapeHtml(categoryName(s.category_id)) },
+        { header: "Description", render: (s) => escapeHtml(s.description || "—") },
+        { header: "Status", render: (s) => MasterPage.badge(s.status) },
+      ],
+      extraFilters() {
+        const val = document.getElementById("categoryFilter").value;
+        return val ? { category_id: val } : {};
+      },
+      async loadLookups() {
+        try {
+          const { data } = await apiGet("/masters/product-categories" + toQueryString({ page: 1, page_size: 250, sort_order: "asc", status: "active" }));
+          categoriesCache = data || [];
+          const categorySelect = document.getElementById("category_id");
+          const categoryFilter = document.getElementById("categoryFilter");
+          
+          categorySelect.innerHTML = categoriesCache.length 
+            ? '<option value="">-- Select Category --</option>' 
+            : '<option value="">-- No Categories Found! Create Category First --</option>';
+          
+          categoryFilter.innerHTML = '<option value="">All categories</option>';
+
+          for (const c of categoriesCache) {
+            const opt1 = document.createElement("option");
+            opt1.value = c.id;
+            opt1.textContent = c.name;
+            categorySelect.appendChild(opt1);
+
+            const opt2 = document.createElement("option");
+            opt2.value = c.id;
+            opt2.textContent = c.name;
+            categoryFilter.appendChild(opt2);
+          }
+          categoryFilter.addEventListener("change", () => {
+            document.getElementById("searchInput").dispatchEvent(new Event("input"));
+          });
+        } catch (e) {
+          /* lookups handling */
+        }
+      },
+      fillForm(item) {
+        MasterPage.setFieldValue("category_id", item ? item.category_id : "");
+        MasterPage.setFieldValue("code", item ? item.code : "");
+        MasterPage.setFieldValue("name", item ? item.name : "");
+        MasterPage.setFieldValue("description", item ? item.description : "");
+        MasterPage.setFieldValue("status", item ? item.status : "active");
+      },
+      toPayload() {
+        const catId = MasterPage.fieldValue("category_id");
+        if (!catId) {
+          throw new Error("Please select a valid Category.");
+        }
+        return {
+          category_id: catId,
+          code: MasterPage.fieldValue("code").trim() || null,
+          name: MasterPage.fieldValue("name").trim(),
+          description: MasterPage.fieldValue("description").trim() || null,
+          status: MasterPage.fieldValue("status"),
+        };
+      },
+    });
+  </script>
+</body>
+</html>

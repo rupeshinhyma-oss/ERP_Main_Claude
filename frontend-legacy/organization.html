@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Organization Settings — ERP Admin</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <div id="sidebarMount"></div>
+    <div class="main-column">
+      <div id="topbarMount"></div>
+      <main class="page">
+        <div class="breadcrumb">
+          <a href="./index.html">Dashboard</a><span class="sep">/</span><span class="current">Settings</span><span class="sep">/</span><span class="current">Organization</span>
+        </div>
+        <div class="page-header">
+          <div>
+            <h1>Organization Settings</h1>
+            <div class="page-subtitle">Your company's profile, used throughout the ERP and shown as the sidebar's brand name.</div>
+          </div>
+          <div class="page-header-actions" id="viewModeActions">
+            <button class="btn btn-primary" id="editBtn" data-permission="organization.manage">Edit</button>
+          </div>
+        </div>
+        <div id="banner"></div>
+
+        <!-- VIEW MODE (default) -->
+        <div class="card" id="viewCard">
+          <div class="detail-grid">
+            <div><div class="label">Company Name</div><div class="value" id="v_company_name">—</div></div>
+            <div><div class="label">Legal Name</div><div class="value" id="v_legal_name">—</div></div>
+            <div><div class="label">Email</div><div class="value" id="v_email">—</div></div>
+            <div><div class="label">Phone</div><div class="value" id="v_phone">—</div></div>
+            <div><div class="label">Website</div><div class="value" id="v_website">—</div></div>
+            <div><div class="label">GST Number</div><div class="value" id="v_gst_number">—</div></div>
+            <div><div class="label">PAN Number</div><div class="value" id="v_pan_number">—</div></div>
+            <div><div class="label">Timezone</div><div class="value" id="v_timezone">—</div></div>
+            <div><div class="label">Currency</div><div class="value" id="v_currency">—</div></div>
+            <div><div class="label">Status</div><div class="value" id="v_status">—</div></div>
+          </div>
+          <div class="section-title">Address</div>
+          <div class="detail-grid">
+            <div style="grid-column: 1 / -1;"><div class="label">Address</div><div class="value" id="v_address">—</div></div>
+            <div><div class="label">City</div><div class="value" id="v_city">—</div></div>
+            <div><div class="label">State</div><div class="value" id="v_state">—</div></div>
+            <div><div class="label">Country</div><div class="value" id="v_country">—</div></div>
+            <div><div class="label">Postal Code</div><div class="value" id="v_postal_code">—</div></div>
+          </div>
+          <div class="section-title">Other</div>
+          <div class="detail-grid">
+            <div><div class="label">Business Hours</div><div class="value" id="v_business_hours">—</div></div>
+          </div>
+        </div>
+
+        <!-- EDIT MODE (hidden until Edit is clicked) -->
+        <div class="card" id="editCard" style="display:none;">
+          <form id="orgForm">
+            <div class="form-grid">
+              <div class="field">
+                <label for="company_name">Company name *</label>
+                <input id="company_name" required maxlength="200" />
+              </div>
+              <div class="field">
+                <label for="legal_name">Legal name</label>
+                <input id="legal_name" maxlength="200" />
+              </div>
+              <div class="field">
+                <label for="email">Email</label>
+                <input id="email" type="email" />
+              </div>
+              <div class="field">
+                <label for="phone">Phone</label>
+                <input id="phone" maxlength="30" />
+              </div>
+              <div class="field">
+                <label for="website">Website</label>
+                <input id="website" maxlength="255" />
+              </div>
+              <div class="field">
+                <label for="gst_number">GST number</label>
+                <input id="gst_number" maxlength="50" />
+              </div>
+              <div class="field">
+                <label for="pan_number">PAN number</label>
+                <input id="pan_number" maxlength="50" />
+              </div>
+              <div class="field">
+                <label for="timezone">Timezone</label>
+                <input id="timezone" maxlength="50" placeholder="UTC" />
+              </div>
+              <div class="field">
+                <label for="currency">Currency</label>
+                <input id="currency" maxlength="10" placeholder="USD" />
+              </div>
+              <div class="field">
+                <label for="status">Status</label>
+                <select id="status">
+                  <option value="ACTIVE">Active</option>
+                  <option value="INACTIVE">Inactive</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="field">
+              <label for="address">Address</label>
+              <textarea id="address"></textarea>
+            </div>
+            <div class="form-grid">
+              <div class="field">
+                <label for="city">City</label>
+                <input id="city" maxlength="100" />
+              </div>
+              <div class="field">
+                <label for="state">State</label>
+                <input id="state" maxlength="100" />
+              </div>
+              <div class="field">
+                <label for="country">Country</label>
+                <input id="country" maxlength="100" />
+              </div>
+              <div class="field">
+                <label for="postal_code">Postal code</label>
+                <input id="postal_code" maxlength="20" />
+              </div>
+            </div>
+            <div class="field">
+              <label for="business_hours">Business hours</label>
+              <input id="business_hours" maxlength="255" placeholder="Mon–Fri, 9am–6pm" />
+            </div>
+
+            <div class="form-actions">
+              <button type="submit" class="btn btn-primary" id="saveBtn">Save</button>
+              <button type="button" class="btn" id="cancelEditBtn">Cancel</button>
+            </div>
+          </form>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <script src="js/api.js"></script>
+  <script src="js/nav.js?v=2"></script>
+  <script>
+    renderNav("organization");
+
+    const banner = document.getElementById("banner");
+    const form = document.getElementById("orgForm");
+    const saveBtn = document.getElementById("saveBtn");
+    const viewCard = document.getElementById("viewCard");
+    const editCard = document.getElementById("editCard");
+    const viewModeActions = document.getElementById("viewModeActions");
+
+    let mode = "create"; // or "update", once an org record exists
+    let currentOrg = null;
+
+    const fieldIds = [
+      "company_name", "legal_name", "email", "phone", "website", "gst_number",
+      "pan_number", "timezone", "currency", "status", "address", "city",
+      "state", "country", "postal_code", "business_hours",
+    ];
+
+    function readForm() {
+      const payload = {};
+      for (const id of fieldIds) {
+        const el = document.getElementById(id);
+        const value = el.value.trim();
+        payload[id] = value === "" ? null : value;
+      }
+      if (!payload.timezone) payload.timezone = "UTC";
+      if (!payload.currency) payload.currency = "USD";
+      return payload;
+    }
+
+    function fillForm(org) {
+      for (const id of fieldIds) {
+        const el = document.getElementById(id);
+        el.value = org[id] ?? "";
+      }
+    }
+
+    function fillView(org) {
+      const statusLabel = org.status === "ACTIVE" ? "Active" : org.status === "INACTIVE" ? "Inactive" : "—";
+      const fields = {
+        company_name: org.company_name,
+        legal_name: org.legal_name,
+        email: org.email,
+        phone: org.phone,
+        website: org.website,
+        gst_number: org.gst_number,
+        pan_number: org.pan_number,
+        timezone: org.timezone,
+        currency: org.currency,
+        status: statusLabel,
+        address: org.address,
+        city: org.city,
+        state: org.state,
+        country: org.country,
+        postal_code: org.postal_code,
+        business_hours: org.business_hours,
+      };
+      for (const [key, value] of Object.entries(fields)) {
+        const el = document.getElementById(`v_${key}`);
+        if (el) el.textContent = value || "—";
+      }
+    }
+
+    function showViewMode() {
+      viewCard.style.display = "block";
+      editCard.style.display = "none";
+      viewModeActions.style.display = "flex";
+    }
+
+    function showEditMode() {
+      viewCard.style.display = "none";
+      editCard.style.display = "block";
+      viewModeActions.style.display = "none";
+      if (currentOrg) fillForm(currentOrg);
+    }
+
+    document.getElementById("editBtn").addEventListener("click", showEditMode);
+    document.getElementById("cancelEditBtn").addEventListener("click", () => {
+      banner.innerHTML = "";
+      showViewMode();
+    });
+
+    async function load() {
+      try {
+        const { data } = await apiGet("/organizations");
+        currentOrg = data;
+        fillView(data);
+        mode = "update";
+        showViewMode();
+      } catch (err) {
+        if (err.status === 404) {
+          mode = "create";
+          // No organization profile exists yet -- go straight to the edit
+          // form so the user can create one; there's nothing to "view" yet.
+          showEditMode();
+        } else {
+          showError(banner, err);
+        }
+      }
+    }
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      banner.innerHTML = "";
+      saveBtn.disabled = true;
+      const payload = readForm();
+
+      try {
+        let data;
+        if (mode === "create") {
+          ({ data } = await apiPost("/organizations", payload));
+          mode = "update";
+        } else {
+          ({ data } = await apiPatch("/organizations", payload));
+        }
+        currentOrg = data;
+        fillView(data);
+        // The sidebar's brand name is cached for the session -- clear it
+        // so a renamed company shows up immediately, on this page and
+        // every other open tab's next navigation.
+        invalidateBrandNameCache();
+        if (data && data.company_name) {
+          sessionStorage.setItem("erp_org_company_name", data.company_name);
+          const brandTextEl = document.getElementById("sidebarBrandText");
+          const logoMarkEl = document.getElementById("sidebarLogoMark");
+          if (brandTextEl) brandTextEl.textContent = data.company_name;
+          if (logoMarkEl) logoMarkEl.textContent = initials(data.company_name);
+          document.title = `Organization Settings — ${data.company_name}`;
+        }
+        banner.innerHTML = '<div class="success-banner">Saved.</div>';
+        showViewMode();
+      } catch (err) {
+        showError(banner, err);
+      } finally {
+        saveBtn.disabled = false;
+      }
+    });
+
+    load();
+  </script>
+</body>
+</html>

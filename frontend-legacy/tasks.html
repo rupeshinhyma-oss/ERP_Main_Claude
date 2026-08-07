@@ -1,0 +1,700 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Tasks & Work Management — ERP</title>
+  <link rel="stylesheet" href="css/style.css" />
+  <style>
+    /* Tasks Module Custom Styles */
+    .task-stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+    .task-stat-card {
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      box-shadow: var(--shadow-card);
+    }
+    .task-stat-card .label {
+      font-size: 12.5px;
+      font-weight: 600;
+      color: var(--color-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .task-stat-card .value {
+      font-size: 26px;
+      font-weight: 700;
+      color: var(--color-text);
+      line-height: 1.1;
+    }
+    .task-stat-card .subtext {
+      font-size: 12px;
+      color: var(--color-muted);
+    }
+
+    /* Views Toolbar */
+    .task-toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 20px;
+      background: var(--color-surface);
+      padding: 14px 18px;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow-card);
+    }
+    .task-toolbar-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .task-toolbar-right {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .preset-pills {
+      display: flex;
+      gap: 6px;
+      background: var(--color-bg);
+      padding: 3px;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--color-border);
+    }
+    .preset-pill-btn {
+      border: none;
+      background: transparent;
+      padding: 6px 12px;
+      font-size: 12.5px;
+      font-weight: 600;
+      color: var(--color-muted);
+      cursor: pointer;
+      border-radius: var(--radius-sm);
+      transition: all 0.15s ease;
+    }
+    .preset-pill-btn:hover {
+      color: var(--color-text);
+    }
+    .preset-pill-btn.active {
+      background: var(--color-surface);
+      color: var(--color-primary);
+      box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    }
+
+    .view-switch-btns {
+      display: flex;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-sm);
+      overflow: hidden;
+    }
+    .view-switch-btn {
+      border: none;
+      background: var(--color-surface);
+      padding: 7px 14px;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--color-muted);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .view-switch-btn:hover { background: var(--color-bg); color: var(--color-text); }
+    .view-switch-btn.active {
+      background: var(--color-primary);
+      color: #fff;
+    }
+
+    /* Badges */
+    .badge-status {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 3px 10px;
+      border-radius: 12px;
+      font-size: 11.5px;
+      font-weight: 600;
+      text-transform: capitalize;
+    }
+    .badge-status-pending { background: #fef3c7; color: #92400e; }
+    .badge-status-in_progress { background: #dbeafe; color: #1e40af; }
+    .badge-status-in_review { background: #f3e8ff; color: #6b21a8; }
+    .badge-status-completed { background: #dcfce7; color: #166534; }
+    .badge-status-cancelled { background: #f3f4f6; color: #4b5563; }
+
+    .badge-priority {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.3px;
+      text-transform: uppercase;
+    }
+    .badge-priority-low { background: #e0f2fe; color: #0369a1; }
+    .badge-priority-medium { background: #fef9c3; color: #854d0e; }
+    .badge-priority-high { background: #ffedd5; color: #c2410c; }
+    .badge-priority-urgent { background: #fee2e2; color: #991b1b; }
+
+    /* Kanban Board Layout */
+    .kanban-board {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(240px, 1fr));
+      gap: 16px;
+      overflow-x: auto;
+      padding-bottom: 16px;
+    }
+    .kanban-column {
+      background: #f8fafc;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      display: flex;
+      flex-direction: column;
+      max-height: 80vh;
+    }
+    .kanban-header {
+      padding: 12px 14px;
+      font-size: 13.5px;
+      font-weight: 700;
+      color: var(--color-text-secondary);
+      border-bottom: 1px solid var(--color-border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: var(--color-surface);
+      border-top-left-radius: var(--radius);
+      border-top-right-radius: var(--radius);
+    }
+    .kanban-count {
+      background: var(--color-bg);
+      color: var(--color-muted);
+      border: 1px solid var(--color-border);
+      border-radius: 12px;
+      padding: 2px 8px;
+      font-size: 11px;
+      font-weight: 700;
+    }
+    .kanban-cards {
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      overflow-y: auto;
+      flex: 1;
+      min-height: 120px;
+    }
+    .kanban-card {
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-sm);
+      padding: 14px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+      cursor: pointer;
+      transition: transform 0.15s ease, box-shadow 0.15s ease;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .kanban-card:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+      border-color: var(--color-border-strong);
+    }
+    .kanban-card-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--color-text);
+      line-height: 1.35;
+    }
+    .kanban-card-desc {
+      font-size: 12.5px;
+      color: var(--color-muted);
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    .kanban-card-meta {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 12px;
+      color: var(--color-muted);
+      margin-top: 4px;
+      padding-top: 8px;
+      border-top: 1px dashed var(--color-border);
+    }
+    .kanban-card-user {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      font-weight: 500;
+    }
+    .avatar-xs {
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      background: var(--color-primary-soft);
+      color: var(--color-primary);
+      font-size: 10px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    /* Modal Form Styling */
+    .modal-overlay {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(16, 24, 40, 0.6);
+      backdrop-filter: blur(2px);
+      z-index: 1000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s ease;
+    }
+    .modal-overlay.active {
+      opacity: 1;
+      pointer-events: auto;
+    }
+    .modal-content {
+      background: var(--color-surface);
+      border-radius: var(--radius-lg);
+      width: 100%;
+      max-width: 620px;
+      max-height: 90vh;
+      overflow-y: auto;
+      box-shadow: var(--shadow-pop);
+      display: flex;
+      flex-direction: column;
+    }
+    .modal-header {
+      padding: 20px 24px;
+      border-bottom: 1px solid var(--color-border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .modal-header h2 {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 700;
+    }
+    .modal-body {
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .modal-footer {
+      padding: 16px 24px;
+      border-top: 1px solid var(--color-border);
+      display: flex;
+      justify-content: flex-end;
+      gap: 12px;
+      background: var(--color-bg);
+      border-bottom-left-radius: var(--radius-lg);
+      border-bottom-right-radius: var(--radius-lg);
+    }
+
+    .form-row-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+    }
+
+    .detail-section {
+      background: var(--color-bg);
+      padding: 14px 16px;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--color-border);
+    }
+    .detail-label {
+      font-size: 11.5px;
+      font-weight: 700;
+      color: var(--color-muted);
+      text-transform: uppercase;
+      margin-bottom: 4px;
+    }
+    .detail-val {
+      font-size: 14px;
+      color: var(--color-text);
+    }
+  </style>
+</head>
+<body>
+  <div class="app-shell">
+    <div id="sidebarMount"></div>
+    <div class="main-column">
+      <div id="topbarMount"></div>
+      <main class="page">
+        <!-- Breadcrumb & Header -->
+        <div class="breadcrumb">
+          <a href="./index.html">Dashboard</a>
+          <span class="sep">/</span>
+          <span class="current">Tasks</span>
+        </div>
+        
+        <div class="page-header">
+          <div>
+            <h1>Tasks & Work Management</h1>
+            <div class="page-subtitle">Track project tasks, set priorities, assign team members, and monitor progress.</div>
+          </div>
+          <div class="page-header-actions">
+            <button class="btn btn-primary" id="createNewTaskBtn" data-permission="task.create">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              New Task
+            </button>
+          </div>
+        </div>
+
+        <div id="banner"></div>
+
+        <!-- Stat Cards -->
+        <div class="task-stats-grid">
+          <div class="task-stat-card">
+            <span class="label">Total Tasks</span>
+            <span class="value" id="statTotal">0</span>
+            <span class="subtext">All assigned work items</span>
+          </div>
+          <div class="task-stat-card">
+            <span class="label">Pending / In Progress</span>
+            <span class="value" id="statActive" style="color: #2563eb;">0</span>
+            <span class="subtext">Active tasks being worked on</span>
+          </div>
+          <div class="task-stat-card">
+            <span class="label">In Review</span>
+            <span class="value" id="statReview" style="color: #7c3aed;">0</span>
+            <span class="subtext">Awaiting feedback/approval</span>
+          </div>
+          <div class="task-stat-card">
+            <span class="label">Completed</span>
+            <span class="value" id="statCompleted" style="color: #16a34a;">0</span>
+            <span class="subtext">Successfully finished tasks</span>
+          </div>
+          <div class="task-stat-card">
+            <span class="label">Urgent / Overdue</span>
+            <span class="value" id="statUrgent" style="color: #dc2626;">0</span>
+            <span class="subtext">Requires immediate attention</span>
+          </div>
+        </div>
+
+        <!-- Task Toolbar -->
+        <div class="task-toolbar">
+          <div class="task-toolbar-left">
+            <!-- Preset Pills -->
+            <div class="preset-pills">
+              <button class="preset-pill-btn active" data-preset="all">All Tasks</button>
+              <button class="preset-pill-btn" data-preset="my_assigned">Assigned to Me</button>
+              <button class="preset-pill-btn" data-preset="my_created">Created by Me</button>
+              <button class="preset-pill-btn" data-preset="urgent">Urgent</button>
+            </div>
+
+            <!-- Search -->
+            <div style="position: relative; min-width: 220px;">
+              <input type="text" id="taskSearchInput" placeholder="Search tasks by title or details..." style="width:100%; padding: 7px 12px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); font-size: 13px;" />
+            </div>
+
+            <!-- Filters -->
+            <select id="statusFilterSelect" style="padding: 7px 10px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); font-size: 13px;">
+              <option value="">All Statuses</option>
+              <option value="PENDING">Pending</option>
+              <option value="IN_PROGRESS">In Progress</option>
+              <option value="IN_REVIEW">In Review</option>
+              <option value="COMPLETED">Completed</option>
+              <option value="CANCELLED">Cancelled</option>
+            </select>
+
+            <select id="priorityFilterSelect" style="padding: 7px 10px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); font-size: 13px;">
+              <option value="">All Priorities</option>
+              <option value="LOW">Low</option>
+              <option value="MEDIUM">Medium</option>
+              <option value="HIGH">High</option>
+              <option value="URGENT">Urgent</option>
+            </select>
+          </div>
+
+          <div class="task-toolbar-right">
+            <!-- View Switcher -->
+            <div class="view-switch-btns">
+              <button class="view-switch-btn active" id="btnListView">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+                List
+              </button>
+              <button class="view-switch-btn" id="btnKanbanView">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="5" height="18" rx="1"/><rect x="12" y="3" width="5" height="12" rx="1"/><rect x="21" y="3" width="5" height="8" rx="1"/></svg>
+                Kanban
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- ======================= LIST VIEW ======================= -->
+        <div id="listViewContainer" class="card">
+          <div class="table-container" style="overflow-x:auto;">
+            <table class="data-table" id="tasksTable">
+              <thead>
+                <tr>
+                  <th style="width: 40px;"><input type="checkbox" class="select-all-checkbox" /></th>
+                  <th>Task Title</th>
+                  <th>Status</th>
+                  <th>Priority</th>
+                  <th>Assignee</th>
+                  <th>Due Date</th>
+                  <th>Created By</th>
+                  <th style="text-align: right;">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="tasksTbody">
+                <tr>
+                  <td colspan="8" style="text-align:center; padding: 40px; color: var(--color-muted);">Loading tasks...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- ======================= KANBAN VIEW ======================= -->
+        <div id="kanbanViewContainer" style="display: none;">
+          <div class="kanban-board">
+            <!-- Pending Column -->
+            <div class="kanban-column" data-status="PENDING">
+              <div class="kanban-header">
+                <span>📋 Pending</span>
+                <span class="kanban-count" id="countPending">0</span>
+              </div>
+              <div class="kanban-cards" id="cardsPending"></div>
+            </div>
+
+            <!-- In Progress Column -->
+            <div class="kanban-column" data-status="IN_PROGRESS">
+              <div class="kanban-header">
+                <span>⚡ In Progress</span>
+                <span class="kanban-count" id="countInProgress">0</span>
+              </div>
+              <div class="kanban-cards" id="cardsInProgress"></div>
+            </div>
+
+            <!-- In Review Column -->
+            <div class="kanban-column" data-status="IN_REVIEW">
+              <div class="kanban-header">
+                <span>🔍 In Review</span>
+                <span class="kanban-count" id="countInReview">0</span>
+              </div>
+              <div class="kanban-cards" id="cardsInReview"></div>
+            </div>
+
+            <!-- Completed Column -->
+            <div class="kanban-column" data-status="COMPLETED">
+              <div class="kanban-header">
+                <span>✅ Completed</span>
+                <span class="kanban-count" id="countCompleted">0</span>
+              </div>
+              <div class="kanban-cards" id="cardsCompleted"></div>
+            </div>
+
+            <!-- Cancelled Column -->
+            <div class="kanban-column" data-status="CANCELLED">
+              <div class="kanban-header">
+                <span>🚫 Cancelled</span>
+                <span class="kanban-count" id="countCancelled">0</span>
+              </div>
+              <div class="kanban-cards" id="cardsCancelled"></div>
+            </div>
+          </div>
+        </div>
+
+      </main>
+    </div>
+  </div>
+
+  <!-- ======================= TASK FORM MODAL ======================= -->
+  <div class="modal-overlay" id="taskModal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2 id="modalTitle">Create New Task</h2>
+        <button type="button" class="btn-close" id="closeModalBtn" style="border:none; background:none; font-size:20px; cursor:pointer; color:var(--color-muted);">&times;</button>
+      </div>
+      <form id="taskForm">
+        <input type="hidden" id="taskId" />
+        <div class="modal-body">
+          <div id="modalError"></div>
+
+          <div>
+            <label style="display:block; font-size:13px; font-weight:600; margin-bottom:6px;">Task Title <span style="color:var(--color-danger)">*</span></label>
+            <input type="text" id="taskTitle" required placeholder="e.g. Follow up on supplier quotation, review inventory audit" style="width:100%; padding:9px 12px; border:1px solid var(--color-border); border-radius:var(--radius-sm); font-size:14px;" />
+          </div>
+
+          <div>
+            <label style="display:block; font-size:13px; font-weight:600; margin-bottom:6px;">Description / Guidelines</label>
+            <textarea id="taskDescription" rows="4" placeholder="Add detailed instructions, reference links, or notes..." style="width:100%; padding:9px 12px; border:1px solid var(--color-border); border-radius:var(--radius-sm); font-size:13.5px; font-family:inherit;"></textarea>
+          </div>
+
+          <div class="form-row-2">
+            <div>
+              <label style="display:block; font-size:13px; font-weight:600; margin-bottom:6px;">Priority</label>
+              <select id="taskPriority" style="width:100%; padding:9px 12px; border:1px solid var(--color-border); border-radius:var(--radius-sm); font-size:13.5px;">
+                <option value="LOW">Low</option>
+                <option value="MEDIUM" selected>Medium</option>
+                <option value="HIGH">High</option>
+                <option value="URGENT">Urgent</option>
+              </select>
+            </div>
+            <div>
+              <label style="display:block; font-size:13px; font-weight:600; margin-bottom:6px;">Status</label>
+              <select id="taskStatus" style="width:100%; padding:9px 12px; border:1px solid var(--color-border); border-radius:var(--radius-sm); font-size:13.5px;">
+                <option value="PENDING">Pending</option>
+                <option value="IN_PROGRESS">In Progress</option>
+                <option value="IN_REVIEW">In Review</option>
+                <option value="COMPLETED">Completed</option>
+                <option value="CANCELLED">Cancelled</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-row-2">
+            <div>
+              <label style="display:block; font-size:13px; font-weight:600; margin-bottom:6px;">Task Visibility</label>
+              <select id="taskVisibility" style="width:100%; padding:9px 12px; border:1px solid var(--color-border); border-radius:var(--radius-sm); font-size:13.5px;">
+                <option value="PRIVATE" selected>🔒 Private (Creator & Assignee Only)</option>
+                <option value="PUBLIC">🌐 Public (Visible to Everyone)</option>
+              </select>
+            </div>
+            <div>
+              <label style="display:block; font-size:13px; font-weight:600; margin-bottom:6px;">Assign To User</label>
+              <select id="taskAssignee" style="width:100%; padding:9px 12px; border:1px solid var(--color-border); border-radius:var(--radius-sm); font-size:13.5px;">
+                <option value="">-- Select Assignee --</option>
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label style="display:block; font-size:13px; font-weight:600; margin-bottom:6px;">Due Date & Time</label>
+            <input type="datetime-local" id="taskDueDate" style="width:100%; padding:8.5px 12px; border:1px solid var(--color-border); border-radius:var(--radius-sm); font-size:13.5px;" />
+          </div>
+
+          <div class="form-row-2">
+            <div>
+              <label style="display:block; font-size:13px; font-weight:600; margin-bottom:6px;">Related Module / Entity</label>
+              <select id="taskRelatedType" style="width:100%; padding:9px 12px; border:1px solid var(--color-border); border-radius:var(--radius-sm); font-size:13.5px;">
+                <option value="">None (General Task)</option>
+                <option value="supplier">Supplier Profile</option>
+                <option value="product">Product Catalog</option>
+                <option value="employee">Employee / HR</option>
+                <option value="organization">Organization</option>
+              </select>
+            </div>
+            <div>
+              <label style="display:block; font-size:13px; font-weight:600; margin-bottom:6px;">Entity Reference ID / Code</label>
+              <input type="text" id="taskRelatedId" placeholder="e.g. SUP-0012, PROD-45" style="width:100%; padding:9px 12px; border:1px solid var(--color-border); border-radius:var(--radius-sm); font-size:13.5px;" />
+            </div>
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" id="cancelModalBtn">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="saveTaskBtn">Save Task</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ======================= TASK DETAIL VIEW MODAL ======================= -->
+  <div class="modal-overlay" id="taskDetailModal">
+    <div class="modal-content" style="max-width: 680px;">
+      <div class="modal-header">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <span id="detailStatusBadge"></span>
+          <span id="detailPriorityBadge"></span>
+          <span id="detailVisibilityBadge"></span>
+        </div>
+        <button type="button" class="btn-close" id="closeDetailModalBtn" style="border:none; background:none; font-size:20px; cursor:pointer; color:var(--color-muted);">&times;</button>
+      </div>
+
+      <div class="modal-body">
+        <h2 id="detailTitle" style="font-size: 20px; font-weight:700; margin:0 0 10px 0; color:var(--color-text);"></h2>
+
+        <div class="detail-section" style="margin-bottom:14px;">
+          <div class="detail-label">Description</div>
+          <div id="detailDescription" class="detail-val" style="white-space: pre-wrap; line-height: 1.5; color:var(--color-text-secondary);">No description provided.</div>
+        </div>
+
+        <div class="form-row-2" style="margin-bottom:14px;">
+          <div class="detail-section">
+            <div class="detail-label">Assignee</div>
+            <div id="detailAssignee" class="detail-val" style="font-weight:600;">Unassigned</div>
+          </div>
+          <div class="detail-section">
+            <div class="detail-label">Due Date</div>
+            <div id="detailDueDate" class="detail-val">Not set</div>
+          </div>
+        </div>
+
+        <div class="form-row-2">
+          <div class="detail-section">
+            <div class="detail-label">Created By</div>
+            <div id="detailCreatedBy" class="detail-val">System</div>
+          </div>
+          <div class="detail-section">
+            <div class="detail-label">Created / Updated</div>
+            <div id="detailTimestamps" class="detail-val" style="font-size: 12.5px;">-</div>
+          </div>
+        </div>
+
+        <div id="detailRelatedSection" class="detail-section" style="display:none; margin-top:14px;">
+          <div class="detail-label">Related Reference</div>
+          <div id="detailRelatedInfo" class="detail-val"></div>
+        </div>
+
+        <!-- Quick Status Transition Bar -->
+        <div style="margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--color-border);">
+          <div class="detail-label" style="margin-bottom: 10px;">Update Task Status</div>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap;" id="quickStatusBtns">
+            <button class="btn btn-secondary" onclick="updateTaskStatusDirect('PENDING')">Mark Pending</button>
+            <button class="btn btn-secondary" onclick="updateTaskStatusDirect('IN_PROGRESS')">Start Work (In Progress)</button>
+            <button class="btn btn-secondary" onclick="updateTaskStatusDirect('IN_REVIEW')">Submit for Review</button>
+            <button class="btn btn-primary" onclick="updateTaskStatusDirect('COMPLETED')" style="background-color: var(--color-success); border-color: var(--color-success);">Mark Complete</button>
+            <button class="btn btn-secondary" onclick="updateTaskStatusDirect('CANCELLED')" style="color: var(--color-danger);">Cancel Task</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" id="editFromDetailBtn" data-permission="task.update">Edit Task</button>
+        <button type="button" class="btn btn-danger" id="deleteFromDetailBtn" data-permission="task.delete" style="background-color: var(--color-danger); color:#fff; border:none; padding:8px 16px; border-radius: var(--radius-sm); cursor:pointer;">Delete Task</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/api.js"></script>
+  <script src="js/nav.js"></script>
+  <script src="js/tasks.js"></script>
+  <script>
+    document.addEventListener("DOMContentLoaded", () => {
+      renderShell("tasks");
+    });
+  </script>
+</body>
+</html>

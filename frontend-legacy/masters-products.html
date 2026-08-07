@@ -1,0 +1,786 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Products — Inhyma ERP</title>
+  <link rel="stylesheet" href="css/style.css" />
+  <style>
+    /* Squeeze table to fit on 1 screen without scrolling (doc line 65) */
+    .table-scroll {
+      overflow-x: auto;
+    }
+    .table-scroll table {
+      font-size: 12.5px;
+      width: 100%;
+    }
+    .table-scroll th, .table-scroll td {
+      padding: 6px 8px !important;
+      white-space: nowrap;
+    }
+    .table-scroll td.cell-name {
+      white-space: normal;
+      max-width: 180px;
+      word-break: break-word;
+    }
+    .btn-small {
+      padding: 3px 7px !important;
+      font-size: 11.5px !important;
+    }
+  </style>
+</head>
+<body>
+  <div class="app-shell">
+    <div id="sidebarMount"></div>
+    <div class="main-column">
+      <div id="topbarMount"></div>
+      <main class="page">
+        <div class="breadcrumb">
+          <a href="./index.html">Dashboard</a><span class="sep">/</span><span class="current">Master Data</span><span class="sep">/</span><span class="current">Products</span>
+        </div>
+        <div class="page-header">
+          <div>
+            <h1>Products Master</h1>
+            <div class="page-subtitle">Manage items, packaging weights, CBM, refund VAT, and license warnings.</div>
+          </div>
+          <div class="page-header-actions">
+            <button class="btn" id="sampleTemplateBtn">📌 Sample Template</button>
+            <div class="btn file-btn" id="importBtnWrapper">
+              Import
+              <input type="file" id="importInput" accept=".csv,.xlsx" />
+            </div>
+            <button class="btn" id="exportCsvBtn">Export CSV</button>
+            <button class="btn" id="exportXlsxBtn">Export Excel</button>
+            <button class="btn btn-primary" id="newBtn">+ New Product</button>
+          </div>
+        </div>
+        <div id="banner"></div>
+        <div id="importSummary"></div>
+
+        <div class="card">
+          <div class="toolbar">
+            <input type="text" id="searchInput" placeholder="Search code, name, or barcode or Sr. No..." />
+            <select id="categoryFilter">
+              <option value="">All Categories</option>
+            </select>
+            <select id="subCategoryFilter">
+              <option value="">All Sub-Categories</option>
+            </select>
+            <select id="brandFilter">
+              <option value="">All Brands</option>
+            </select>
+            <select id="statusFilter">
+              <option value="">All Statuses</option>
+              <option value="active">Active</option>
+              <option value="inactive">Inactive</option>
+            </select>
+          </div>
+
+          <div class="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th style="width: 40px;"><input type="checkbox" class="select-all-checkbox" /></th>
+                  <th>Sr. No.</th>
+                  <th>Product Name (Tally)</th>
+                  <th>Product Code</th>
+                  <th>Brand</th>
+                  <th>Sub-Category</th>
+                  <th>HSN Code</th>
+                  <th>UOM</th>
+                  <th>Pkg Qty</th>
+                  <th>Gross Wt (kg)</th>
+                  <th>Unit CBM</th>
+                  <th>Status</th>
+                  <th>ACTION</th>
+                </tr>
+              </thead>
+              <tbody id="tableBody">
+                <tr><td colspan="13" class="muted">Loading...</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="pagination" id="pagination"></div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="modalBackdrop" style="display:none;">
+    <div class="modal-card" style="max-width: 820px; width: 90vw;">
+      <div class="modal-header">
+        <h2 id="modalTitle">New product</h2>
+        <button class="modal-close" id="modalCloseBtn">&times;</button>
+      </div>
+      <form id="entityForm">
+        <input type="hidden" id="entityId" />
+        <div id="modalBanner"></div>
+        <div class="section-title">Identity</div>
+        <div class="form-grid">
+          <div class="field">
+            <label for="product_code">Product Code *</label>
+            <input id="product_code" required maxlength="50" placeholder="e.g. PRD-001" />
+          </div>
+          <div class="field">
+            <label for="product_name_tally">Product Name (As per Tally) *</label>
+            <input id="product_name_tally" required maxlength="255" placeholder="Name as in Tally" />
+          </div>
+          <div class="field">
+            <label for="product_name_invoice">Product Name (As per Invoice)</label>
+            <input id="product_name_invoice" maxlength="255" placeholder="Name for Tax Invoices" />
+          </div>
+          <div class="field">
+            <label for="barcode">Barcode</label>
+            <input id="barcode" maxlength="100" />
+          </div>
+        </div>
+
+        <div class="section-title">Classification &amp; Tax</div>
+        <div class="form-grid">
+          <div class="field">
+            <label for="category_id">Category *</label>
+            <select id="category_id" required>
+              <option value="">-- Select Category --</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="sub_category_id">Sub-Category</label>
+            <select id="sub_category_id">
+              <option value="">-- Select Sub-Category --</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="brand_id">Brand</label>
+            <select id="brand_id">
+              <option value="">-- Select Brand --</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="hsn_id">HSN Code</label>
+            <select id="hsn_id">
+              <option value="">-- Select HSN Code --</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="refund_vat_percent">Refund VAT %</label>
+            <input id="refund_vat_percent" type="number" step="0.01" min="0" max="100" placeholder="Auto from HSN or manual" />
+          </div>
+          <div class="field">
+            <label for="uom_id">Primary UOM *</label>
+            <select id="uom_id" required>
+              <option value="">-- Select Primary UOM --</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="secondary_uom_id">Secondary UOM</label>
+            <select id="secondary_uom_id">
+              <option value="">-- Select Secondary UOM --</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="conversion_factor">Conversion Factor</label>
+            <input id="conversion_factor" type="number" step="0.0001" min="0" placeholder="Secondary per 1 primary" />
+          </div>
+        </div>
+
+        <div class="section-title">Compliance &amp; License Requirements</div>
+        <div class="form-grid">
+          <div class="field" style="grid-column: span 2;">
+            <label for="license_certificate_required">Any License / Certificate (if needed)</label>
+            <textarea id="license_certificate_required" rows="2" placeholder="e.g. Import License, Drug Certificate. Highlighted RED in Inquiry if set."></textarea>
+          </div>
+        </div>
+
+        <div class="section-title">Description</div>
+        <div class="form-grid">
+          <div class="field">
+            <label for="specification">Specification</label>
+            <textarea id="specification"></textarea>
+          </div>
+          <div class="field">
+            <label for="description">Description</label>
+            <textarea id="description"></textarea>
+          </div>
+        </div>
+
+        <div class="section-title">Packaging &amp; Physical Attributes</div>
+        <div class="form-grid">
+          <div class="field">
+            <label for="packaging_quantity">Packaging Quantity (unit)</label>
+            <input id="packaging_quantity" type="number" step="0.001" min="0" />
+          </div>
+          <div class="field">
+            <label for="packaging_net_weight">Packaging Net Weight (kg)</label>
+            <input id="packaging_net_weight" type="number" step="0.001" min="0" />
+          </div>
+          <div class="field">
+            <label for="packaging_gross_weight">Packaging Gross Weight (kg)</label>
+            <input id="packaging_gross_weight" type="number" step="0.001" min="0" />
+          </div>
+          <div class="field">
+            <label for="length_cm">Length (cm)</label>
+            <input id="length_cm" type="number" step="0.001" min="0" class="cbm-calc" />
+          </div>
+          <div class="field">
+            <label for="width_cm">Width (cm)</label>
+            <input id="width_cm" type="number" step="0.001" min="0" class="cbm-calc" />
+          </div>
+          <div class="field">
+            <label for="height_cm">Height (cm)</label>
+            <input id="height_cm" type="number" step="0.001" min="0" class="cbm-calc" />
+          </div>
+          <div class="field">
+            <label for="packaging_unit_cbm">Packaging Unit CBM (auto)</label>
+            <input id="packaging_unit_cbm" type="number" step="0.000001" readonly style="background-color: var(--color-surface-hover);" placeholder="Auto-calculated (L*W*H / 1,000,000)" />
+          </div>
+          <div class="field">
+            <label for="color">Color</label>
+            <input id="color" maxlength="50" />
+          </div>
+          <div class="field">
+            <label for="material">Material</label>
+            <input id="material" maxlength="100" />
+          </div>
+        </div>
+
+        <div class="section-title">Commercial &amp; Inventory Planning</div>
+        <div class="form-grid">
+          <div class="field">
+            <label for="minimum_order_quantity">Min. Order Qty</label>
+            <input id="minimum_order_quantity" type="number" step="0.001" min="0" />
+          </div>
+          <div class="field">
+            <label for="reorder_level">Reorder Level</label>
+            <input id="reorder_level" type="number" step="0.001" min="0" />
+          </div>
+          <div class="field">
+            <label for="standard_cost">Standard Cost</label>
+            <input id="standard_cost" type="number" step="0.01" min="0" />
+          </div>
+          <div class="field">
+            <label for="standard_price">Standard Price</label>
+            <input id="standard_price" type="number" step="0.01" min="0" />
+          </div>
+          <div class="field">
+            <label for="is_purchasable">Purchasable</label>
+            <select id="is_purchasable">
+              <option value="true">Yes</option>
+              <option value="false">No</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="is_sellable">Sellable</label>
+            <select id="is_sellable">
+              <option value="true">Yes</option>
+              <option value="false">No</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="status">Status</label>
+            <select id="status">
+              <option value="active">Active</option>
+              <option value="inactive">Inactive</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-actions">
+          <button type="submit" class="btn btn-primary">Save</button>
+          <button type="button" class="btn" id="cancelBtn">Cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Right-Side Offcanvas Drawer (Matching Inhyma ERP Screenshot) -->
+  <div class="side-drawer-backdrop" id="productDetailDrawerBackdrop">
+    <div class="side-drawer-card">
+      <div style="padding: 18px 24px; border-bottom: 1px solid var(--color-border); display: flex; align-items: center; justify-content: space-between; background: #fff;">
+        <div>
+          <h3 id="drawerTitle" style="font-size: 17.5px; font-weight: 700; color: var(--color-heading); margin: 0;">Product Detail</h3>
+          <div id="drawerSubTitle" style="font-size: 12.5px; color: var(--color-muted); margin-top: 2px;">Code &amp; Specifications</div>
+        </div>
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <button class="btn btn-primary" id="productDetailEditBtn" style="padding: 7px 14px; font-size: 13px; font-weight: 600;">✏️ Edit Product</button>
+          <button class="modal-close" id="productDetailCloseBtn" style="width: 32px; height: 32px; font-size: 20px;">&times;</button>
+        </div>
+      </div>
+
+      <div id="drawerBody" style="padding: 24px; flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 16px;">
+        <!-- Filled dynamically via JS -->
+      </div>
+    </div>
+  </div>
+
+  <script src="js/api.js"></script>
+  <script src="js/nav.js?v=2"></script>
+  <script src="js/dropdown-search.js"></script>
+  <script src="js/import-wizard.js"></script>
+  <script src="js/masters-common.js?v=200"></script>
+  <script>
+    renderShell("masters-products");
+
+    let categoriesCache = [];
+    let subCategoriesCache = [];
+    let brandsCache = [];
+    let hsnCache = [];
+    let uomCache = [];
+
+    function populateSubCategoryOptions(selectedCategoryId) {
+      const subCatSelect = document.getElementById("sub_category_id");
+      subCatSelect.innerHTML = '<option value="">-- Select Sub-Category --</option>';
+      
+      const filtered = selectedCategoryId 
+        ? subCategoriesCache.filter(sc => sc.category_id === selectedCategoryId) 
+        : subCategoriesCache;
+
+      for (const sc of filtered) {
+        const opt = document.createElement("option");
+        opt.value = sc.id;
+        opt.textContent = sc.name;
+        subCatSelect.appendChild(opt);
+      }
+    }
+
+    MasterPage.init({
+      apiBase: "/masters/products",
+      permissionPrefix: "product",
+      entityName: "product",
+      importHeaders: [
+        { key: "product_code", label: "Product Code", required: true },
+        { key: "product_name", label: "Product Name", required: true },
+        { key: "barcode", label: "Barcode" },
+        { key: "category_code", label: "Category Code", required: true },
+        { key: "sub_category_code", label: "Sub-Category Code" },
+        { key: "brand_code", label: "Brand Code" },
+        { key: "hsn_code", label: "HSN Code" },
+        { key: "uom_code", label: "UOM Code", required: true },
+        { key: "secondary_uom_code", label: "Secondary UOM Code" },
+        { key: "specification", label: "Specification" },
+        { key: "description", label: "Description" },
+        { key: "weight", label: "Weight (kg)" },
+        { key: "length", label: "Length (cm)" },
+        { key: "width", label: "Width (cm)" },
+        { key: "height", label: "Height (cm)" },
+        { key: "color", label: "Color" },
+        { key: "material", label: "Material" },
+        { key: "conversion_factor", label: "Conversion Factor" },
+        { key: "minimum_order_quantity", label: "Min. Order Qty" },
+        { key: "reorder_level", label: "Reorder Level" },
+        { key: "standard_cost", label: "Standard Cost" },
+        { key: "standard_price", label: "Standard Price" },
+        { key: "is_purchasable", label: "Purchasable (true/false)" },
+        { key: "is_sellable", label: "Sellable (true/false)" },
+        { key: "status", label: "Status (active/inactive)" },
+      ],
+      columns: [
+        {
+          header: "Product Name (Tally)",
+          render: (p) => `<a href="#" onclick="event.preventDefault(); openProductDetailView('${p.id}');" class="cell-primary" style="color:var(--color-primary); font-weight:600;">${escapeHtml(p.product_name_tally || p.product_name)}</a>${p.license_certificate_required ? `<br><span style="color:#ef4444; font-size:11px; font-weight:bold;">⚠️ License Required</span>` : ""}`,
+        },
+        { header: "Product Code", render: (p) => escapeHtml(p.product_code) },
+        { header: "Brand", render: (p) => {
+            const b = brandsCache.find(x => x.id === p.brand_id);
+            return escapeHtml(b ? b.name : "—");
+          } 
+        },
+        { header: "Sub-Category", render: (p) => {
+            const sc = subCategoriesCache.find(x => x.id === p.sub_category_id);
+            return escapeHtml(sc ? sc.name : "—");
+          } 
+        },
+        { header: "HSN Code", render: (p) => {
+            const h = hsnCache.find(x => x.id === p.hsn_id);
+            return escapeHtml(h ? h.code : "—");
+          } 
+        },
+        { header: "UOM", render: (p) => {
+            const u = uomCache.find(x => x.id === p.uom_id);
+            return escapeHtml(u ? `${u.name} (${u.code})` : "—");
+          } 
+        },
+        { header: "Pkg Qty", render: (p) => (p.packaging_quantity != null ? p.packaging_quantity : "—") },
+        { header: "Gross Wt (kg)", render: (p) => (p.packaging_gross_weight != null ? p.packaging_gross_weight : "—") },
+        { header: "Unit CBM", render: (p) => (p.packaging_unit_cbm != null ? Number(p.packaging_unit_cbm).toFixed(6) : "—") },
+        { header: "Status", render: (p) => MasterPage.badge(p.status) },
+      ],
+      extraFilters() {
+        const filters = {};
+        const catEl = document.getElementById("categoryFilter");
+        const subCatEl = document.getElementById("subCategoryFilter");
+        const brandEl = document.getElementById("brandFilter");
+        const catVal = catEl ? catEl.value : "";
+        const subCatVal = subCatEl ? subCatEl.value : "";
+        const brandVal = brandEl ? brandEl.value : "";
+        if (catVal) filters.category_id = catVal;
+        if (subCatVal) filters.sub_category_id = subCatVal;
+        if (brandVal) filters.brand_id = brandVal;
+        return filters;
+      },
+      async loadLookups() {
+        try {
+          const [catRes, subCatRes, brandRes, hsnRes, uomRes] = await Promise.all([
+            apiGet("/masters/product-categories" + toQueryString({ page: 1, page_size: 250, sort_order: "asc", status: "active" })),
+            apiGet("/masters/product-sub-categories" + toQueryString({ page: 1, page_size: 500, sort_order: "asc", status: "active" })),
+            apiGet("/masters/brands" + toQueryString({ page: 1, page_size: 250, sort_order: "asc", status: "active" })),
+            apiGet("/masters/hsn" + toQueryString({ page: 1, page_size: 250, sort_order: "asc", status: "active" })),
+            apiGet("/masters/uom" + toQueryString({ page: 1, page_size: 250, sort_order: "asc", status: "active" })),
+          ]);
+
+          categoriesCache = catRes.data || [];
+          subCategoriesCache = subCatRes.data || [];
+          brandsCache = brandRes.data || [];
+          hsnCache = hsnRes.data || [];
+          uomCache = uomRes.data || [];
+
+          // Populate Category Selects
+          const catSelect = document.getElementById("category_id");
+          const catFilter = document.getElementById("categoryFilter");
+          const subCatFilter = document.getElementById("subCategoryFilter");
+
+          if (catSelect) catSelect.innerHTML = '<option value="">-- Select Category --</option>';
+          if (catFilter) catFilter.innerHTML = '<option value="">All Categories</option>';
+          for (const c of categoriesCache) {
+            if (catSelect) {
+              const opt1 = document.createElement("option"); opt1.value = c.id; opt1.textContent = c.name; catSelect.appendChild(opt1);
+            }
+            if (catFilter) {
+              const opt2 = document.createElement("option"); opt2.value = c.id; opt2.textContent = c.name; catFilter.appendChild(opt2);
+            }
+          }
+
+          const populateSubCatFilter = (catId) => {
+            subCatFilter.innerHTML = '<option value="">All Sub-Categories</option>';
+            const list = catId ? subCategoriesCache.filter(s => s.category_id === catId) : subCategoriesCache;
+            for (const s of list) {
+              const opt = document.createElement("option"); opt.value = s.id; opt.textContent = s.name; subCatFilter.appendChild(opt);
+            }
+          };
+          populateSubCatFilter("");
+
+          catFilter.addEventListener("change", () => {
+            populateSubCatFilter(catFilter.value);
+            document.getElementById("searchInput").dispatchEvent(new Event("input"));
+          });
+          subCatFilter.addEventListener("change", () => {
+            document.getElementById("searchInput").dispatchEvent(new Event("input"));
+          });
+
+          // Category change filters Sub-Categories
+          if (catSelect) {
+            catSelect.addEventListener("change", () => {
+              populateSubCategoryOptions(catSelect.value);
+            });
+          }
+          populateSubCategoryOptions("");
+
+          // Populate Brand Selects
+          const brandSelect = document.getElementById("brand_id");
+          const brandFilter = document.getElementById("brandFilter");
+          if (brandSelect) brandSelect.innerHTML = '<option value="">-- Select Brand --</option>';
+          if (brandFilter) brandFilter.innerHTML = '<option value="">All brands</option>';
+          for (const b of brandsCache) {
+            if (brandSelect) {
+              const opt1 = document.createElement("option"); opt1.value = b.id; opt1.textContent = b.name; brandSelect.appendChild(opt1);
+            }
+            if (brandFilter) {
+              const opt2 = document.createElement("option"); opt2.value = b.id; opt2.textContent = b.name; brandFilter.appendChild(opt2);
+            }
+          }
+
+          // Populate HSN Select
+          const hsnSelect = document.getElementById("hsn_id");
+          if (hsnSelect) {
+            hsnSelect.innerHTML = '<option value="">-- Select HSN Code --</option>';
+            for (const h of hsnCache) {
+              const opt = document.createElement("option");
+              opt.value = h.id;
+              opt.textContent = `${h.code} - ${h.description || ''} (Refund VAT: ${h.refund_vat_percent || 0}%)`;
+              opt.dataset.vat = h.refund_vat_percent != null ? h.refund_vat_percent : 0;
+              hsnSelect.appendChild(opt);
+            }
+
+            // HSN selection auto-fills Refund VAT %
+            hsnSelect.addEventListener("change", () => {
+              const selectedOpt = hsnSelect.options[hsnSelect.selectedIndex];
+              if (selectedOpt && selectedOpt.dataset.vat !== undefined) {
+                const vatElem = document.getElementById("refund_vat_percent");
+                if (vatElem) vatElem.value = selectedOpt.dataset.vat;
+              }
+            });
+          }
+
+          // Populate UOM Selects
+          const uomSelect = document.getElementById("uom_id");
+          const secUomSelect = document.getElementById("secondary_uom_id");
+          if (uomSelect) uomSelect.innerHTML = '<option value="">-- Select Primary UOM --</option>';
+          if (secUomSelect) secUomSelect.innerHTML = '<option value="">-- Select Secondary UOM --</option>';
+          for (const u of uomCache) {
+            if (uomSelect) {
+              const opt1 = document.createElement("option"); opt1.value = u.id; opt1.textContent = `${u.name} (${u.code})`; uomSelect.appendChild(opt1);
+            }
+            if (secUomSelect) {
+              const opt2 = document.createElement("option"); opt2.value = u.id; opt2.textContent = `${u.name} (${u.code})`; secUomSelect.appendChild(opt2);
+            }
+          }
+
+          // Filter listeners for toolbar
+          catFilter?.addEventListener("change", () => document.getElementById("searchInput")?.dispatchEvent(new Event("input")));
+          brandFilter?.addEventListener("change", () => document.getElementById("searchInput")?.dispatchEvent(new Event("input")));
+
+        } catch (e) {
+          console.error("Failed loading lookup dropdowns:", e);
+        }
+      },
+      fillForm(item) {
+        MasterPage.setFieldValue("product_code", item ? item.product_code : "");
+        MasterPage.setFieldValue("product_name_tally", item ? (item.product_name_tally || item.product_name) : "");
+        MasterPage.setFieldValue("product_name_invoice", item ? item.product_name_invoice : "");
+        MasterPage.setFieldValue("barcode", item ? item.barcode : "");
+
+        const catId = item ? item.category_id : "";
+        MasterPage.setFieldValue("category_id", catId);
+        populateSubCategoryOptions(catId);
+
+        MasterPage.setFieldValue("sub_category_id", item ? item.sub_category_id : "");
+        MasterPage.setFieldValue("brand_id", item ? item.brand_id : "");
+        MasterPage.setFieldValue("hsn_id", item ? item.hsn_id : "");
+        MasterPage.setFieldValue("uom_id", item ? item.uom_id : "");
+        MasterPage.setFieldValue("secondary_uom_id", item ? item.secondary_uom_id : "");
+
+        MasterPage.setFieldValue("refund_vat_percent", item ? item.refund_vat_percent : "");
+        MasterPage.setFieldValue("license_certificate_required", item ? item.license_certificate_required : "");
+        MasterPage.setFieldValue("conversion_factor", item ? item.conversion_factor : "");
+        MasterPage.setFieldValue("specification", item ? item.specification : "");
+        MasterPage.setFieldValue("description", item ? item.description : "");
+        MasterPage.setFieldValue("packaging_quantity", item ? item.packaging_quantity : "");
+        MasterPage.setFieldValue("packaging_net_weight", item ? item.packaging_net_weight : "");
+        MasterPage.setFieldValue("packaging_gross_weight", item ? item.packaging_gross_weight : "");
+        MasterPage.setFieldValue("length_cm", item ? (item.length_cm || item.length) : "");
+        MasterPage.setFieldValue("width_cm", item ? (item.width_cm || item.width) : "");
+        MasterPage.setFieldValue("height_cm", item ? (item.height_cm || item.height) : "");
+        MasterPage.setFieldValue("packaging_unit_cbm", item ? item.packaging_unit_cbm : "");
+        MasterPage.setFieldValue("color", item ? item.color : "");
+        MasterPage.setFieldValue("material", item ? item.material : "");
+        MasterPage.setFieldValue("minimum_order_quantity", item ? item.minimum_order_quantity : "");
+        MasterPage.setFieldValue("reorder_level", item ? item.reorder_level : "");
+        MasterPage.setFieldValue("standard_cost", item ? item.standard_cost : "");
+        MasterPage.setFieldValue("standard_price", item ? item.standard_price : "");
+        MasterPage.setFieldValue("is_purchasable", item ? String(item.is_purchasable) : "true");
+        MasterPage.setFieldValue("is_sellable", item ? String(item.is_sellable) : "true");
+        MasterPage.setFieldValue("status", item ? item.status : "active");
+      },
+      toPayload() {
+        const num = (id) => {
+          const v = MasterPage.fieldValue(id);
+          return v === "" || v === null || v === undefined ? null : parseFloat(v);
+        };
+        const l = num("length_cm");
+        const w = num("width_cm");
+        const h = num("height_cm");
+        const cbm = (l && w && h) ? Number(((l * w * h) / 1000000).toFixed(6)) : num("packaging_unit_cbm");
+
+        const catId = MasterPage.fieldValue("category_id");
+        const uomId = MasterPage.fieldValue("uom_id");
+        if (!catId) {
+          throw new Error("Please select a Category.");
+        }
+        if (!uomId) {
+          throw new Error("Please select a Primary UOM.");
+        }
+
+        let secUomId = MasterPage.fieldValue("secondary_uom_id") || null;
+        if (secUomId === uomId) {
+          secUomId = null;
+        }
+
+        return {
+          product_code: MasterPage.fieldValue("product_code").trim(),
+          product_name_tally: MasterPage.fieldValue("product_name_tally").trim(),
+          product_name_invoice: MasterPage.fieldValue("product_name_invoice").trim() || null,
+          product_name: MasterPage.fieldValue("product_name_tally").trim(),
+          barcode: MasterPage.fieldValue("barcode").trim() || null,
+          category_id: catId,
+          sub_category_id: MasterPage.fieldValue("sub_category_id") || null,
+          brand_id: MasterPage.fieldValue("brand_id") || null,
+          hsn_id: MasterPage.fieldValue("hsn_id") || null,
+          uom_id: uomId,
+          secondary_uom_id: secUomId,
+          refund_vat_percent: num("refund_vat_percent"),
+          license_certificate_required: MasterPage.fieldValue("license_certificate_required").trim() || null,
+          conversion_factor: num("conversion_factor"),
+          specification: MasterPage.fieldValue("specification").trim() || null,
+          description: MasterPage.fieldValue("description").trim() || null,
+          packaging_quantity: num("packaging_quantity"),
+          packaging_net_weight: num("packaging_net_weight"),
+          packaging_gross_weight: num("packaging_gross_weight"),
+          length_cm: l,
+          width_cm: w,
+          height_cm: h,
+          length: l,
+          width: w,
+          height: h,
+          packaging_unit_cbm: cbm,
+          color: MasterPage.fieldValue("color").trim() || null,
+          material: MasterPage.fieldValue("material").trim() || null,
+          minimum_order_quantity: num("minimum_order_quantity"),
+          reorder_level: num("reorder_level"),
+          standard_cost: num("standard_cost"),
+          standard_price: num("standard_price"),
+          is_purchasable: MasterPage.fieldValue("is_purchasable") === "true",
+          is_sellable: MasterPage.fieldValue("is_sellable") === "true",
+          status: MasterPage.fieldValue("status"),
+        };
+      },
+    });
+
+    // Auto calculate CBM on live typing in dimensions
+    const updateCbmPreview = () => {
+      const l = parseFloat(document.getElementById("length_cm").value) || 0;
+      const w = parseFloat(document.getElementById("width_cm").value) || 0;
+      const h = parseFloat(document.getElementById("height_cm").value) || 0;
+      if (l > 0 && w > 0 && h > 0) {
+        document.getElementById("packaging_unit_cbm").value = ((l * w * h) / 1000000).toFixed(6);
+      }
+    };
+    document.querySelectorAll(".cbm-calc").forEach((input) => {
+      input.addEventListener("input", updateCbmPreview);
+    });
+
+    let activeViewingProduct = null;
+
+    // --- Product Detail Offcanvas Side-Drawer (Matching Inhyma ERP Screenshot) ---
+    async function openProductDetailView(productId) {
+      try {
+        const res = await apiGet(`/masters/products/${productId}`);
+        const p = res.data;
+        if (!p) return;
+        activeViewingProduct = p;
+
+        document.getElementById("drawerTitle").textContent = `Product Detail #${p.product_code || p.id.slice(0, 6)}`;
+        document.getElementById("drawerSubTitle").textContent = p.product_name_tally || p.product_name || "";
+
+        const cat = categoriesCache.find(c => c.id === p.category_id);
+        const subCat = subCategoriesCache.find(sc => sc.id === p.sub_category_id);
+        const brand = brandsCache.find(b => b.id === p.brand_id);
+        const hsn = hsnCache.find(h => h.id === p.hsn_id);
+        const uom = uomCache.find(u => u.id === p.uom_id);
+
+        const html = `
+          <!-- Section 1: Main Overview Card (Exact layout matching screenshot) -->
+          <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px;">
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px 20px;">
+              <div style="grid-column: span 2;">
+                <span style="font-size: 12px; font-weight: 600; color: #64748b; display: block; margin-bottom: 3px;">Product Name (As Per Tally)</span>
+                <strong style="font-size: 14px; color: #0f172a; word-break: break-word;">${escapeHtml(p.product_name_tally || p.product_name || "—")}</strong>
+              </div>
+              
+              <div>
+                <span style="font-size: 12px; font-weight: 600; color: #64748b; display: block; margin-bottom: 3px;">Brand</span>
+                <strong style="font-size: 14px; color: #0f172a;">${escapeHtml(brand ? brand.name : "—")}</strong>
+              </div>
+
+              <div>
+                <span style="font-size: 12px; font-weight: 600; color: #64748b; display: block; margin-bottom: 3px;">Category</span>
+                <strong style="font-size: 14px; color: #0f172a;">${escapeHtml(cat ? cat.name : "—")}</strong>
+              </div>
+
+              <div>
+                <span style="font-size: 12px; font-weight: 600; color: #64748b; display: block; margin-bottom: 3px;">Sub Category</span>
+                <strong style="font-size: 14px; color: #0f172a;">${escapeHtml(subCat ? subCat.name : "—")}</strong>
+              </div>
+
+              <div>
+                <span style="font-size: 12px; font-weight: 600; color: #64748b; display: block; margin-bottom: 3px;">HSN Code</span>
+                <strong style="font-size: 14px; color: #0f172a;">${escapeHtml(hsn ? hsn.code : "—")}</strong>
+              </div>
+
+              <div>
+                <span style="font-size: 12px; font-weight: 600; color: #64748b; display: block; margin-bottom: 3px;">Refund VAT % / GST %</span>
+                <strong style="font-size: 14px; color: #16a34a;">${p.refund_vat_percent != null ? p.refund_vat_percent + '%' : "0%"}</strong>
+              </div>
+
+              <div>
+                <span style="font-size: 12px; font-weight: 600; color: #64748b; display: block; margin-bottom: 3px;">UOM</span>
+                <strong style="font-size: 14px; color: #0f172a;">${escapeHtml(uom ? `${uom.name} (${uom.code})` : "—")}</strong>
+              </div>
+
+              <div>
+                <span style="font-size: 12px; font-weight: 600; color: #64748b; display: block; margin-bottom: 3px;">Packaging Quantity</span>
+                <strong style="font-size: 14px; color: #0f172a;">${p.packaging_quantity != null ? p.packaging_quantity : "—"}</strong>
+              </div>
+            </div>
+          </div>
+
+          <!-- Section 2: Secondary Attributes Card -->
+          <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px;">
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px 20px;">
+              <div style="grid-column: span 2;">
+                <span style="font-size: 12px; font-weight: 600; color: #64748b; display: block; margin-bottom: 3px;">Product Name (As Per Invoice)</span>
+                <strong style="font-size: 14px; color: #0f172a; word-break: break-word;">${escapeHtml(p.product_name_invoice || "—")}</strong>
+              </div>
+
+              <div>
+                <span style="font-size: 12px; font-weight: 600; color: #64748b; display: block; margin-bottom: 3px;">Pkg Net Wt (kg)</span>
+                <strong style="font-size: 14px; color: #0f172a;">${p.packaging_net_weight != null ? p.packaging_net_weight : "—"}</strong>
+              </div>
+
+              <div>
+                <span style="font-size: 12px; font-weight: 600; color: #64748b; display: block; margin-bottom: 3px;">Pkg Gross Wt (kg)</span>
+                <strong style="font-size: 14px; color: #0f172a;">${p.packaging_gross_weight != null ? p.packaging_gross_weight : "—"}</strong>
+              </div>
+
+              <div>
+                <span style="font-size: 12px; font-weight: 600; color: #64748b; display: block; margin-bottom: 3px;">Dimensions (L x W x H cm)</span>
+                <strong style="font-size: 14px; color: #0f172a;">${(p.length_cm || p.width_cm || p.height_cm || p.length || p.width || p.height) ? `${p.length_cm || p.length || 0} x ${p.width_cm || p.width || 0} x ${p.height_cm || p.height || 0} cm` : "—"}</strong>
+              </div>
+
+              <div>
+                <span style="font-size: 12px; font-weight: 600; color: #64748b; display: block; margin-bottom: 3px;">Packaging Unit CBM</span>
+                <strong style="font-size: 14px; color: var(--color-primary);">${p.packaging_unit_cbm != null ? Number(p.packaging_unit_cbm).toFixed(6) : "—"}</strong>
+              </div>
+            </div>
+
+            ${p.license_certificate_required ? `
+              <div style="margin-top: 16px; padding: 12px 14px; background: #fff1f2; border: 1px solid #fecdd3; border-radius: 6px; color: #9f1239; font-size: 13px;">
+                <strong style="display:block; margin-bottom:2px;">⚠️ Required License / Certificate:</strong>
+                <span>${escapeHtml(p.license_certificate_required)}</span>
+              </div>
+            ` : ''}
+          </div>
+
+          ${(p.description || p.specification || p.image_url) ? `
+            <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px;">
+              <span style="font-size: 12px; font-weight: 600; color: #64748b; display: block; margin-bottom: 6px;">Specifications &amp; Attachments</span>
+              ${p.specification ? `<p style="margin:0 0 8px; font-size:13px; color:#0f172a;"><strong>Spec:</strong> ${escapeHtml(p.specification)}</p>` : ''}
+              ${p.description ? `<p style="margin:0; font-size:13px; color:#0f172a;"><strong>Desc:</strong> ${escapeHtml(p.description)}</p>` : ''}
+              ${p.image_url ? `<img src="${escapeHtml(p.image_url)}" style="max-width:180px; border-radius:6px; margin-top:10px; border:1px solid #cbd5e1;" />` : ''}
+            </div>
+          ` : ''}
+        `;
+
+        document.getElementById("drawerBody").innerHTML = html;
+        document.getElementById("productDetailDrawerBackdrop").classList.add("open");
+      } catch (err) {
+        alert("Failed to load product detail: " + err.message);
+      }
+    }
+
+    const closeProductDetailDrawer = () => document.getElementById("productDetailDrawerBackdrop").classList.remove("open");
+    document.getElementById("productDetailCloseBtn").addEventListener("click", closeProductDetailDrawer);
+    document.getElementById("productDetailDrawerBackdrop").addEventListener("click", (e) => {
+      if (e.target === document.getElementById("productDetailDrawerBackdrop")) closeProductDetailDrawer();
+    });
+
+    document.getElementById("productDetailEditBtn").addEventListener("click", () => {
+      closeProductDetailDrawer();
+      if (activeViewingProduct) {
+        const editBtn = document.querySelector(`[data-edit="${activeViewingProduct.id}"]`);
+        if (editBtn) {
+          editBtn.click();
+        }
+      }
+    });
+  </script>
+</body>
+</html>

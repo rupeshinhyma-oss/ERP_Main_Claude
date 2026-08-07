@@ -336,15 +336,6 @@ export function MasterPage<T extends MasterRecord>({
     }
   }
 
-  async function handleSetActive(id: string, activate: boolean) {
-    try {
-      await apiPost(`${apiBase}/${id}/${activate ? "activate" : "deactivate"}`);
-      reload();
-    } catch (err) {
-      setError(err);
-    }
-  }
-
   async function handleExport(format: "csv" | "xlsx") {
     try {
       await downloadExport(apiBase, format, entityName);

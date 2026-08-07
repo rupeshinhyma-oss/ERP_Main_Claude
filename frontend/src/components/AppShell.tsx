@@ -485,16 +485,18 @@ function Sidebar({
       <div
         className="sidebar-brand"
         style={{
-          padding: collapsed ? "12px 8px" : "12px 16px",
+          height: "64px",
+          padding: collapsed ? "0 8px" : "0 16px",
           display: "flex",
           alignItems: "center",
           justifyContent: collapsed ? "center" : "space-between",
+          boxSizing: "border-box",
           gap: "6px",
         }}
       >
         {!collapsed && (
           <Link to="/dashboard" style={{ display: "inline-flex", alignItems: "center", textDecoration: "none", cursor: "pointer" }}>
-            <img src="/logo.png" alt="IHM Logo" style={{ height: "40px", width: "auto", objectFit: "contain" }} />
+            <img src="/logo.png" alt="IHM Logo" style={{ height: "38px", width: "auto", objectFit: "contain" }} />
           </Link>
         )}
         <button
@@ -502,15 +504,16 @@ function Sidebar({
           style={{
             background: collapsed ? "#e2e8f0" : "none",
             border: collapsed ? "1px solid #cbd5e0" : "none",
-            fontSize: "22px",
+            fontSize: "20px",
             color: "#1e293b",
             cursor: "pointer",
-            padding: collapsed ? "6px 12px" : "2px 6px",
+            padding: collapsed ? "6px 12px" : "4px 8px",
             borderRadius: "6px",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
             width: collapsed ? "100%" : "auto",
+            lineHeight: 1,
           }}
           onClick={onToggleSidebar}
           title={collapsed ? "Open Sidebar Menu" : "Collapse Sidebar Menu"}

@@ -828,9 +828,7 @@ svg {
 }
 
 .modal-card form > :not(.form-actions) {
-  padding: 20px 24px;
-  overflow-y: auto;
-  flex: 1;
+  padding: 16px 24px;
 }
 
 .modal-card .form-actions {
@@ -1469,6 +1467,25 @@ td .cell-secondary {
 .iw-diff-row .iw-diff-key {
   color: var(--color-warning);
   font-weight: 700;
+}
+
+.sidebar.collapsed {
+  width: 72px;
+}
+
+.sidebar.collapsed .nav-group-label,
+.sidebar.collapsed .nav-item span.nav-label,
+.sidebar.collapsed .sidebar-user .user-meta {
+  display: none !important;
+}
+
+.sidebar.collapsed .nav-item,
+.sidebar.collapsed .sidebar-user {
+  justify-content: center;
+}
+
+.app-shell.sidebar-collapsed .main-column {
+  margin-left: 72px;
 }
 
 /* Responsive: collapse sidebar on narrow viewports */

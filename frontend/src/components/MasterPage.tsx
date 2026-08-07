@@ -80,6 +80,8 @@ export interface MasterPageProps<T extends MasterRecord> {
   extraFilters?: Record<string, string>;
   /** Extra toolbar controls rendered after the search box. */
   toolbarExtras?: ReactNode;
+  /** Render form as a full page view preserving sidebar instead of popup overlay. */
+  useFullPageForm?: boolean;
   /** Inline style overrides for the modal card (Products widens it). */
   modalCardStyle?: React.CSSProperties;
   /**
@@ -136,6 +138,7 @@ export function MasterPage<T extends MasterRecord>({
   renderFields,
   extraFilters,
   toolbarExtras,
+  useFullPageForm,
   modalCardStyle,
   resolveNames,
   reloadToken,
@@ -390,6 +393,59 @@ export function MasterPage<T extends MasterRecord>({
   // page -- so page 2 continues at 21, 22, 23... rather than restarting at 1.
   const startingSrNo = (currentPage - 1) * pageSize + 1;
 
+  if (useFullPageForm && modalOpen) {
+    return (
+      <AppShell activeKey={activeKey}>
+        <main className="page">
+          <Breadcrumb trail={[...breadcrumbTrail, editingId ? `Edit ${entityName}` : `Add ${entityName}`]} />
+          <div className="page-header" style={{ marginBottom: "20px" }}>
+            <div>
+              <h1 style={{ textTransform: "capitalize" }}>{editingId ? `Edit ${entityName}` : `Add ${entityName}`}</h1>
+            </div>
+            <div>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={closeModal}
+                style={{ display: "flex", alignItems: "center", gap: "6px", padding: "8px 16px", fontWeight: 600 }}
+              >
+                ← BACK
+              </button>
+            </div>
+          </div>
+          <Banner error={error} />
+          <div className="card" style={{ padding: "24px", marginBottom: "500px" }}>
+            <form onSubmit={handleSubmit}>
+              {renderFields(form, setField)}
+              <div
+                className="form-actions"
+                style={{
+                  display: "flex",
+                  gap: "12px",
+                  marginTop: "24px",
+                  paddingTop: "16px",
+                  borderTop: "1px solid #e2e8f0",
+                }}
+              >
+                <button type="submit" className="btn btn-add-new" style={{ padding: "10px 24px" }}>
+                  Save &amp; Continue
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-quick-add"
+                  style={{ padding: "10px 24px" }}
+                  onClick={closeModal}
+                >
+                  Save &amp; Exit
+                </button>
+              </div>
+            </form>
+          </div>
+        </main>
+      </AppShell>
+    );
+  }
+
   return (
     <AppShell activeKey={activeKey}>
       <main className="page">
@@ -454,6 +510,71 @@ export function MasterPage<T extends MasterRecord>({
         <Banner error={error} />
         <ImportSummaryPanel summary={importSummary} error={importError} />
 
+        {/* Expandable Filter Box matching Original INHYMA ERP Design (Above the main card) */}
+        {filterOpen && (
+          <div
+            className="card"
+            style={{
+              padding: "16px 20px",
+              marginBottom: "16px",
+              background: "#ffffff",
+              borderRadius: "8px",
+              border: "1px solid #e2e8f0",
+              boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: "16px",
+              flexWrap: "wrap",
+            }}
+          >
+            <div style={{ display: "flex", gap: "14px", alignItems: "center", flexWrap: "wrap", flex: 1 }}>
+              {toolbarExtras}
+            </div>
+            <div style={{ display: "flex", gap: "10px", alignItems: "flex-end" }}>
+              <button
+                type="button"
+                style={{
+                  padding: "8px 20px",
+                  borderRadius: "6px",
+                  border: "none",
+                  background: "#64748b",
+                  color: "#ffffff",
+                  fontWeight: 600,
+                  fontSize: "13.5px",
+                  cursor: "pointer",
+                }}
+                onClick={() => {
+                  setSearchInput("");
+                  setCurrentPage(1);
+                  reload();
+                }}
+              >
+                Reset
+              </button>
+              <button
+                type="button"
+                style={{
+                  padding: "8px 20px",
+                  borderRadius: "6px",
+                  border: "none",
+                  background: "#f59e0b",
+                  color: "#ffffff",
+                  fontWeight: 600,
+                  fontSize: "13.5px",
+                  cursor: "pointer",
+                }}
+                onClick={() => {
+                  setCurrentPage(1);
+                  reload();
+                }}
+              >
+                Search
+              </button>
+            </div>
+          </div>
+        )}
+
         <div className="card">
           <div className="card-tabs" style={{ display: "flex", gap: "24px", padding: "14px 20px 0", borderBottom: "1px solid #e2e8f0" }}>
             <button
@@ -495,65 +616,6 @@ export function MasterPage<T extends MasterRecord>({
               Inactive
             </button>
           </div>
-
-          {/* Expandable Filter Box matching Original INHYMA ERP Design */}
-          {filterOpen && (
-            <div
-              style={{
-                padding: "16px 20px",
-                background: "#f8fafc",
-                borderBottom: "1px solid #e2e8f0",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: "16px",
-                flexWrap: "wrap",
-              }}
-            >
-              <div style={{ display: "flex", gap: "14px", alignItems: "center", flexWrap: "wrap", flex: 1 }}>
-                {toolbarExtras}
-              </div>
-              <div style={{ display: "flex", gap: "8px" }}>
-                <button
-                  type="button"
-                  style={{
-                    padding: "7px 16px",
-                    borderRadius: "4px",
-                    border: "1px solid #cbd5e1",
-                    background: "#ffffff",
-                    color: "#475569",
-                    fontWeight: 600,
-                    fontSize: "13px",
-                    cursor: "pointer",
-                  }}
-                  onClick={() => {
-                    setSearchInput("");
-                    setCurrentPage(1);
-                  }}
-                >
-                  Reset
-                </button>
-                <button
-                  type="button"
-                  style={{
-                    padding: "7px 16px",
-                    borderRadius: "4px",
-                    border: "none",
-                    background: "#0061f2",
-                    color: "#ffffff",
-                    fontWeight: 600,
-                    fontSize: "13px",
-                    cursor: "pointer",
-                  }}
-                  onClick={() => {
-                    setCurrentPage(1);
-                  }}
-                >
-                  Apply
-                </button>
-              </div>
-            </div>
-          )}
 
           <div className="toolbar" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 20px" }}>
             <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
@@ -716,9 +778,11 @@ export function MasterPage<T extends MasterRecord>({
                 &times;
               </button>
             </div>
-            <form onSubmit={handleSubmit}>
-              {renderFields(form, setField)}
-              <div className="form-actions" style={{ display: "flex", gap: "12px", width: "100%" }}>
+            <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", height: "calc(100vh - 60px)", overflow: "hidden" }}>
+              <div style={{ flex: 1, overflowY: "auto", padding: "20px 24px" }}>
+                {renderFields(form, setField)}
+              </div>
+              <div className="form-actions" style={{ display: "flex", gap: "12px", width: "100%", padding: "16px 24px", background: "#ffffff", borderTop: "1px solid #e2e8f0" }}>
                 <button type="submit" className="btn btn-add-new" style={{ flex: 1, justifyContent: "center" }}>
                   Save &amp; Continue
                 </button>

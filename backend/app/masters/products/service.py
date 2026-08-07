@@ -152,6 +152,9 @@ class ProductService:
             if hsn_obj and getattr(hsn_obj, "refund_vat_percent", None) is not None:
                 field_values["refund_vat_percent"] = hsn_obj.refund_vat_percent
 
+        if field_values.get("refund_vat_percent") is None:
+            field_values["refund_vat_percent"] = 0.0
+
         product = await self.repository.create(**field_values)
         await self._invalidate_cache()
         return product

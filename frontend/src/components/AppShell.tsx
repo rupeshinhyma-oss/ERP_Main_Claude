@@ -397,7 +397,17 @@ function ForcePasswordChangeModal({ onDone }: { onDone: () => void }) {
 /* Sidebar                                                            */
 /* ------------------------------------------------------------------ */
 
-function Sidebar({ activeKey, brandName: _brandName }: { activeKey: string; brandName: string }) {
+function Sidebar({
+  activeKey,
+  brandName: _brandName,
+  collapsed,
+  onToggleSidebar,
+}: {
+  activeKey: string;
+  brandName: string;
+  collapsed: boolean;
+  onToggleSidebar: () => void;
+}) {
   const { isSuperAdmin, hasPermission } = useAuth();
   const navRef = useRef<HTMLElement>(null);
 
@@ -413,16 +423,6 @@ function Sidebar({ activeKey, brandName: _brandName }: { activeKey: string; bran
     [isSuperAdmin, hasPermission]
   );
 
-  /**
-   * Restore the nav's scroll offset and make sure the active item is visible,
-   * before the first paint.
-   *
-   * Deliberately NOT smooth-scrolled: this list is taller than the viewport on
-   * scaled displays and the shell re-runs this on every navigation, so any
-   * correction would otherwise animate in front of the user -- the sidebar
-   * visibly sliding on its own after landing on Audit Log or Organization
-   * Settings. It must land instantly.
-   */
   useEffect(() => {
     const navEl = navRef.current;
     if (!navEl) return;
@@ -449,7 +449,6 @@ function Sidebar({ activeKey, brandName: _brandName }: { activeKey: string; bran
     }
   }, [activeKey, visibleSections]);
 
-  // Persist the scroll offset (throttled to one write per frame).
   useEffect(() => {
     const navEl = navRef.current;
     if (!navEl) return;
@@ -458,7 +457,7 @@ function Sidebar({ activeKey, brandName: _brandName }: { activeKey: string; bran
       try {
         sessionStorage.setItem(NAV_SCROLL_KEY, String(Math.round(navEl.scrollTop)));
       } catch {
-        /* storage may be unavailable (private mode); scroll memory is optional */
+        /* storage may be unavailable */
       }
     };
 
@@ -482,11 +481,42 @@ function Sidebar({ activeKey, brandName: _brandName }: { activeKey: string; bran
   }, []);
 
   return (
-    <aside className="sidebar">
-      <div className="sidebar-brand" style={{ padding: "12px 16px", display: "flex", alignItems: "center" }}>
-        <Link to="/dashboard" style={{ display: "inline-flex", alignItems: "center", textDecoration: "none", cursor: "pointer" }}>
-          <img src="/logo.png" alt="IHM Logo" style={{ height: "42px", width: "auto", objectFit: "contain" }} />
-        </Link>
+    <aside className={`sidebar ${collapsed ? "collapsed" : ""}`}>
+      <div
+        className="sidebar-brand"
+        style={{
+          padding: collapsed ? "12px 8px" : "12px 16px",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: collapsed ? "center" : "space-between",
+          gap: "6px",
+        }}
+      >
+        {!collapsed && (
+          <Link to="/dashboard" style={{ display: "inline-flex", alignItems: "center", textDecoration: "none", cursor: "pointer" }}>
+            <img src="/logo.png" alt="IHM Logo" style={{ height: "40px", width: "auto", objectFit: "contain" }} />
+          </Link>
+        )}
+        <button
+          type="button"
+          style={{
+            background: collapsed ? "#e2e8f0" : "none",
+            border: collapsed ? "1px solid #cbd5e0" : "none",
+            fontSize: "22px",
+            color: "#1e293b",
+            cursor: "pointer",
+            padding: collapsed ? "6px 12px" : "2px 6px",
+            borderRadius: "6px",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            width: collapsed ? "100%" : "auto",
+          }}
+          onClick={onToggleSidebar}
+          title={collapsed ? "Open Sidebar Menu" : "Collapse Sidebar Menu"}
+        >
+          ≡
+        </button>
       </div>
       <nav className="sidebar-nav" ref={navRef}>
         {visibleSections.map((section) => (
@@ -499,6 +529,7 @@ function Sidebar({ activeKey, brandName: _brandName }: { activeKey: string; bran
                   key={item.key}
                   to={item.path}
                   className={`nav-item ${item.key === activeKey ? "active" : ""}`}
+                  title={collapsed ? item.label : undefined}
                 >
                   <Icon />
                   <span className="nav-label">{item.label}</span>
@@ -696,11 +727,20 @@ export function AppShell({ activeKey, children, pageClassName }: AppShellProps) 
   const location = useLocation();
   const [brandName, setBrandName] = useState(() => getCachedBrandName());
   const [passwordModalDismissed, setPasswordModalDismissed] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(
+    () => localStorage.getItem("erp_sidebar_collapsed") === "true"
+  );
+
+  const toggleSidebar = useCallback(() => {
+    setSidebarCollapsed((prev) => {
+      const next = !prev;
+      localStorage.setItem("erp_sidebar_collapsed", String(next));
+      return next;
+    });
+  }, []);
 
   const loggedIn = Auth.isLoggedIn();
 
-  // Background-sync the latest profile & permissions from the backend so a
-  // role change elsewhere takes effect without a re-login.
   useEffect(() => {
     if (!loggedIn) return;
     apiGet<Profile>("/auth/profile")
@@ -708,7 +748,7 @@ export function AppShell({ activeKey, children, pageClassName }: AppShellProps) 
         if (res && res.data) Auth.updateProfile(res.data);
       })
       .catch(() => {
-        /* a failed refresh just leaves the cached profile in place */
+        /* profile refresh fallback */
       });
   }, [loggedIn]);
 
@@ -725,7 +765,6 @@ export function AppShell({ activeKey, children, pageClassName }: AppShellProps) 
     };
   }, [loggedIn]);
 
-  // Keep the tab title as "<Page> — <Company>".
   useEffect(() => {
     const titlePrefix = PAGE_TITLES[activeKey] || "ERP";
     document.title = `${titlePrefix} — ${brandName || DEFAULT_BRAND_NAME}`;
@@ -740,8 +779,6 @@ export function AppShell({ activeKey, children, pageClassName }: AppShellProps) 
     return <Navigate to="/login" replace state={{ from: location.pathname }} />;
   }
 
-  // Page-level access check. A page whose nav entry is gated sends the user to
-  // /403 with the module name, so the denial names what was refused.
   const navItem = NAV_ITEMS_BY_KEY[activeKey];
   if (navItem && activeKey !== "403") {
     const deniedBySuperAdmin = navItem.superAdminOnly && !isSuperAdmin;
@@ -755,8 +792,10 @@ export function AppShell({ activeKey, children, pageClassName }: AppShellProps) 
   const mustChangePassword = Boolean(profile?.must_change_password) && !passwordModalDismissed;
 
   return (
-    <div className={`app-shell ${pageClassName || ""}`.trim()}>
-      <Sidebar activeKey={activeKey} brandName={brandName} />
+    <div
+      className={`app-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""} ${pageClassName || ""}`.trim()}
+    >
+      <Sidebar activeKey={activeKey} brandName={brandName} collapsed={sidebarCollapsed} onToggleSidebar={toggleSidebar} />
       <div className="main-column">
         <Topbar />
         {children}

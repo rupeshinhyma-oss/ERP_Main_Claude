@@ -39,6 +39,7 @@ import { CategoriesPage } from "@/pages/masters/Categories";
 import { SubCategoriesPage } from "@/pages/masters/SubCategories";
 import { ProductsPage } from "@/pages/masters/Products";
 import { NetworkStatusNotifier } from "@/components/NetworkStatusNotifier";
+import { ProductGalleryPage } from "@/pages/ProductGallery";
 
 export function App() {
   const navigate = useNavigate();
@@ -80,6 +81,7 @@ export function App() {
       <Route path="/masters/categories" element={<CategoriesPage />} />
       <Route path="/masters/subcategories" element={<SubCategoriesPage />} />
       <Route path="/masters/products" element={<ProductsPage />} />
+      <Route path="/product-gallery" element={<ProductGalleryPage />} />
 
       {Object.entries(LEGACY_REDIRECTS).map(([from, to]) => (
         <Route key={from} path={from} element={<Navigate to={to} replace />} />

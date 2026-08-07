@@ -48,7 +48,7 @@ export const NAV_SECTIONS: NavSection[] = [
     label: "INVENTORY",
     items: [
       { key: "masters-products", label: "Product Master", path: "/masters/products", icon: "box", permission: "product.view" },
-      { key: "product-gallery", label: "Product Gallery", path: "/masters/products", icon: "grid", permission: "product.view" },
+      { key: "product-gallery", label: "Product Gallery", path: "/product-gallery", icon: "grid", permission: "product.view" },
       { key: "masters-categories", label: "Categories", path: "/masters/categories", icon: "folder", permission: "category.view" },
       { key: "masters-subcategories", label: "Sub Categories", path: "/masters/subcategories", icon: "folder", permission: "subcategory.view" },
       { key: "masters-brands", label: "Brands", path: "/masters/brands", icon: "tag", permission: "brand.view" },

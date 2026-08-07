@@ -6,7 +6,7 @@
  * style.css.
  */
 
-import type { ReactNode } from "react";
+import React, { useState, useRef, useEffect, type ReactNode } from "react";
 
 interface BaseFieldProps {
   id: string;
@@ -118,17 +118,133 @@ export function SelectField({
   required?: boolean;
   children: ReactNode;
 }) {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const options: { value: string; label: ReactNode }[] = [];
+  React.Children.forEach(children, (child) => {
+    if (React.isValidElement(child) && child.type === "option") {
+      const childProps = child.props as { value?: string | number; children?: ReactNode };
+      options.push({
+        value: String(childProps.value ?? ""),
+        label: childProps.children ?? childProps.value ?? "",
+      });
+    }
+  });
+
+  const selectedOption = options.find((opt) => opt.value === value);
+  const displayLabel = selectedOption ? selectedOption.label : (options[0]?.label || "-- Select --");
+
   return (
-    <div className="field" style={style}>
+    <div className="field" style={{ ...style, position: "relative" }} ref={containerRef}>
       <label htmlFor={id}>{label}</label>
-      <select
+
+      <div
         id={id}
+        tabIndex={0}
+        onClick={() => setOpen(!open)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            setOpen(!open);
+          }
+        }}
+        style={{
+          border: "1px solid var(--color-border-strong)",
+          borderRadius: "var(--radius-sm)",
+          padding: "9px 11px",
+          fontSize: "13.5px",
+          background: "var(--color-surface)",
+          color: "var(--color-text)",
+          cursor: "pointer",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          userSelect: "none",
+        }}
+      >
+        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {displayLabel}
+        </span>
+        <span style={{ fontSize: "10px", color: "var(--color-muted)", marginLeft: "8px" }}>
+          {open ? "▲" : "▼"}
+        </span>
+      </div>
+
+      {open && (
+        <div
+          style={{
+            position: "absolute",
+            top: "calc(100% + 2px)",
+            left: 0,
+            right: 0,
+            zIndex: 9999,
+            background: "#ffffff",
+            border: "1px solid #cbd5e0",
+            borderRadius: "6px",
+            boxShadow: "0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)",
+            maxHeight: "220px",
+            overflowY: "auto",
+            padding: "4px 0",
+          }}
+        >
+          {options.map((opt, idx) => {
+            const isSelected = opt.value === value;
+            return (
+              <div
+                key={idx}
+                onClick={() => {
+                  onChange(opt.value);
+                  setOpen(false);
+                }}
+                style={{
+                  padding: "8px 12px",
+                  fontSize: "13.5px",
+                  cursor: "pointer",
+                  background: isSelected ? "#0061f2" : "transparent",
+                  color: isSelected ? "#ffffff" : "#1e293b",
+                  fontWeight: isSelected ? 600 : 400,
+                }}
+                onMouseOver={(e) => {
+                  if (!isSelected) e.currentTarget.style.background = "#f1f5f9";
+                }}
+                onMouseOut={(e) => {
+                  if (!isSelected) e.currentTarget.style.background = "transparent";
+                }}
+              >
+                {opt.label}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
         required={required}
+        tabIndex={-1}
+        style={{
+          position: "absolute",
+          opacity: 0,
+          pointerEvents: "none",
+          width: 0,
+          height: 0,
+        }}
       >
         {children}
       </select>
+
       {hint && <span className="hint">{hint}</span>}
     </div>
   );

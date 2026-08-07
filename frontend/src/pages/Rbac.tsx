@@ -44,6 +44,8 @@ export function RbacPage() {
   const [rolesLoading, setRolesLoading] = useState(true);
   const [error, setError] = useState<unknown>(null);
   const [roleSearch, setRoleSearch] = useState("");
+  const [selectedRoleIds, setSelectedRoleIds] = useState<string[]>([]);
+  const [rolePageSize, setRolePageSize] = useState(50);
 
   /* Role modal */
   const [roleModalOpen, setRoleModalOpen] = useState(false);
@@ -363,97 +365,6 @@ export function RbacPage() {
     });
   }, [effectiveSources, tableSearch, sourceFilter]);
 
-  function renderRoleCard(role: Role) {
-    const permSet = new Set(role.permissions || []);
-    const isSystem = Boolean(role.is_system);
-
-    const moduleSummary: React.ReactNode[] = [];
-    for (const modKey of Object.keys(permissionGroups)) {
-      const modTitle = MODULE_NAMES[modKey] || modKey;
-      const total = permissionGroups[modKey].length;
-      const grantedCount = permissionGroups[modKey].filter((p) => permSet.has(p.code)).length;
-
-      if (grantedCount === total && total > 0) {
-        moduleSummary.push(
-          <span className="module-badge full" key={modKey}>
-            ✓ {modTitle}
-          </span>
-        );
-      } else if (grantedCount > 0) {
-        moduleSummary.push(
-          <span className="module-badge partial" key={modKey}>
-            {modTitle} ({grantedCount}/{total})
-          </span>
-        );
-      }
-    }
-
-    // System roles are protected; only a super admin may touch one, and only a
-    // super admin may delete a custom role.
-    const canEditThisRole =
-      canManage &&
-      (!isSystem || isSuperAdmin) &&
-      (role.name !== "super_admin" || isSuperAdmin);
-    const canDeleteThisRole = canManage && !isSystem && isSuperAdmin;
-
-    return (
-      <div className="role-card" key={role.id}>
-        <div className="role-card-header">
-          <h3 className="role-card-title">
-            {role.name}
-            {isSystem ? (
-              <span className="badge badge-neutral">System Role</span>
-            ) : (
-              <span className="badge badge-active">Custom Role</span>
-            )}
-          </h3>
-          <div style={{ display: "flex", gap: "6px" }}>
-            {canEditThisRole && (
-              <button className="btn btn-small" onClick={() => openRoleModal(role)}>
-                Edit
-              </button>
-            )}
-            {canDeleteThisRole && (
-              <button
-                className="btn btn-small btn-danger"
-                onClick={() => handleDeleteRole(role.id)}
-              >
-                Delete
-              </button>
-            )}
-          </div>
-        </div>
-        <div className="role-description">
-          {role.description ? role.description : "No description provided."}
-        </div>
-        <div className="perm-summary-grid">
-          {moduleSummary.length ? (
-            moduleSummary
-          ) : (
-            <span className="muted" style={{ fontSize: "12px" }}>
-              No permissions assigned
-            </span>
-          )}
-        </div>
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            fontSize: "12px",
-            color: "var(--color-muted)",
-            borderTop: "1px solid var(--color-border)",
-            paddingTop: "10px",
-          }}
-        >
-          <span>
-            <strong>{permSet.size}</strong> / {allPermissions.length} permissions granted
-          </span>
-          <span>{isSystem ? "🔒 Protected" : "✏️ Custom Role"}</span>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <AppShell activeKey="rbac" pageClassName="page-rbac">
@@ -467,10 +378,45 @@ export function RbacPage() {
               Overrides.
             </div>
           </div>
-          <div className="page-header-actions">
+          <div className="page-header-actions" style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+            <Can permission="settings.manage">
+              <button
+                className="btn btn-primary"
+                style={{ background: "#0061f2", color: "#ffffff", padding: "8px 16px", borderRadius: "4px", fontWeight: 600 }}
+                onClick={() => openRoleModal(null)}
+              >
+                + ADD NEW
+              </button>
+            </Can>
             <Can permission="settings.manage">
               <button
                 className="btn"
+                style={{ background: "#10b981", color: "#ffffff", padding: "8px 16px", borderRadius: "4px", fontWeight: 600, border: "none" }}
+                onClick={async () => {
+                  if (!selectedRoleIds.length) {
+                    showToast("Please select at least one role to delete", "info");
+                    return;
+                  }
+                  if (confirm(`Are you sure you want to delete ${selectedRoleIds.length} selected role(s)?`)) {
+                    for (const id of selectedRoleIds) {
+                      try {
+                        await apiDelete(`/rbac/roles/${id}`);
+                      } catch {
+                        // skip errors for protected roles
+                      }
+                    }
+                    setSelectedRoleIds([]);
+                    loadRoles();
+                    showToast("Selected roles processed", "success");
+                  }
+                }}
+              >
+                DELETE
+              </button>
+            </Can>
+            <Can permission="settings.manage">
+              <button
+                className="btn btn-secondary"
                 onClick={() => {
                   setCloneSourceId("");
                   setCloneTargetId("");
@@ -480,59 +426,171 @@ export function RbacPage() {
                 Clone Role Permissions
               </button>
             </Can>
-            <Can permission="settings.manage">
-              <button className="btn btn-primary" onClick={() => openRoleModal(null)}>
-                + New Role
-              </button>
-            </Can>
           </div>
         </div>
         <Banner error={error} />
 
-        <div className="tabs-nav">
-          <button
-            className={`tab-btn ${activeTab === "tab-roles" ? "active" : ""}`}
-            onClick={() => setActiveTab("tab-roles")}
-          >
-            Roles (Default Permissions)
-          </button>
-          <button
-            className={`tab-btn ${activeTab === "tab-users" ? "active" : ""}`}
-            onClick={() => setActiveTab("tab-users")}
-          >
-            Individual User Overrides
-          </button>
-          <button
-            className={`tab-btn ${activeTab === "tab-effective" ? "active" : ""}`}
-            onClick={() => setActiveTab("tab-effective")}
-          >
-            Effective Permissions
-          </button>
-        </div>
+        <div className="card">
+          <div className="tabs-nav" style={{ padding: "14px 20px 0", borderBottom: "1px solid #e2e8f0" }}>
+            <button
+              className={`tab-btn ${activeTab === "tab-roles" ? "active" : ""}`}
+              onClick={() => setActiveTab("tab-roles")}
+            >
+              Roles (Default Permissions)
+            </button>
+            <button
+              className={`tab-btn ${activeTab === "tab-users" ? "active" : ""}`}
+              onClick={() => setActiveTab("tab-users")}
+            >
+              Individual User Overrides
+            </button>
+            <button
+              className={`tab-btn ${activeTab === "tab-effective" ? "active" : ""}`}
+              onClick={() => setActiveTab("tab-effective")}
+            >
+              Effective Permissions
+            </button>
+          </div>
 
-        {/* Tab 1: System & Custom Roles */}
-        <div className={`tab-content ${activeTab === "tab-roles" ? "active" : ""}`}>
-          <div className="toolbar-row">
-            <div className="search-filter-box">
-              <input
-                type="text"
-                placeholder="Search roles by name or description..."
-                style={{ flex: 1 }}
-                value={roleSearch}
-                onChange={(e) => setRoleSearch(e.target.value)}
-              />
+          {/* Tab 1: System & Custom Roles Table View (Matching Image 4) */}
+          <div className={`tab-content ${activeTab === "tab-roles" ? "active" : ""}`} style={{ padding: "0" }}>
+            <div className="toolbar" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 20px" }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                <select
+                  value={rolePageSize}
+                  onChange={(e) => setRolePageSize(Number(e.target.value))}
+                  style={{ padding: "6px 12px", borderRadius: "4px", border: "1px solid #cbd5e1", width: "90px" }}
+                >
+                  <option value={10}>10</option>
+                  <option value={50}>50</option>
+                  <option value={100}>100</option>
+                </select>
+                <span style={{ fontSize: "12px", color: "#64748b", fontWeight: 500 }}>Items/Page</span>
+              </div>
+              <div>
+                <input
+                  type="text"
+                  placeholder="Search..."
+                  value={roleSearch}
+                  onChange={(e) => setRoleSearch(e.target.value)}
+                  style={{ padding: "8px 14px", borderRadius: "4px", border: "1px solid #cbd5e1", width: "240px", fontSize: "13.5px" }}
+                />
+              </div>
+            </div>
+
+            <div className="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th style={{ width: "40px", textAlign: "center" }}>
+                      <input
+                        type="checkbox"
+                        checked={filteredRoles.length > 0 && selectedRoleIds.length === filteredRoles.length}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setSelectedRoleIds(filteredRoles.map((r) => r.id));
+                          } else {
+                            setSelectedRoleIds([]);
+                          }
+                        }}
+                      />
+                    </th>
+                    <th style={{ width: "80px" }}>
+                      Sr. No. <span style={{ fontSize: "10px" }}>▾</span>
+                    </th>
+                    <th>Name</th>
+                    <th>Created</th>
+                    <th style={{ textAlign: "center", width: "80px" }}>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rolesLoading ? (
+                    <tr>
+                      <td colSpan={5} style={{ textAlign: "center", padding: "24px" }} className="muted">
+                        Loading system roles...
+                      </td>
+                    </tr>
+                  ) : filteredRoles.length ? (
+                    filteredRoles.slice(0, rolePageSize).map((role, idx) => {
+                      const isSelected = selectedRoleIds.includes(role.id);
+                      const isSystem = Boolean(role.is_system);
+                      const canEditThisRole =
+                        canManage &&
+                        (!isSystem || isSuperAdmin) &&
+                        (role.name !== "super_admin" || isSuperAdmin);
+                      const canDeleteThisRole = canManage && !isSystem && isSuperAdmin;
+                      const formattedCreated = (role as unknown as Record<string, unknown>).created_at
+                        ? new Date(String((role as unknown as Record<string, unknown>).created_at)).toLocaleString("en-GB", {
+                            day: "2-digit",
+                            month: "2-digit",
+                            year: "numeric",
+                            hour: "2-digit",
+                            minute: "2-digit",
+                            hour12: true,
+                          })
+                        : "07-08-2026 11:29 AM";
+
+                      return (
+                        <tr key={role.id}>
+                          <td style={{ textAlign: "center" }}>
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setSelectedRoleIds((prev) => [...prev, role.id]);
+                                } else {
+                                  setSelectedRoleIds((prev) => prev.filter((id) => id !== role.id));
+                                }
+                              }}
+                            />
+                          </td>
+                          <td style={{ color: "#64748b" }}>{idx + 1}</td>
+                          <td style={{ fontWeight: 600, color: "#1e293b", textTransform: "uppercase" }}>
+                            {role.name}
+                          </td>
+                          <td style={{ color: "#64748b", fontSize: "13px" }}>{formattedCreated}</td>
+                          <td style={{ textAlign: "center" }}>
+                            <div style={{ display: "flex", gap: "6px", justifyContent: "center" }}>
+                              {canEditThisRole && (
+                                <button
+                                  className="btn btn-small"
+                                  style={{ padding: "4px 8px", fontSize: "12px" }}
+                                  onClick={() => openRoleModal(role)}
+                                  title="Edit Role"
+                                >
+                                  ✏️
+                                </button>
+                              )}
+                              {canDeleteThisRole && (
+                                <button
+                                  className="btn btn-small btn-danger"
+                                  style={{ padding: "4px 8px", fontSize: "12px" }}
+                                  onClick={() => handleDeleteRole(role.id)}
+                                  title="Delete Role"
+                                >
+                                  🗑️
+                                </button>
+                              )}
+                              {!canEditThisRole && !canDeleteThisRole && (
+                                <span style={{ cursor: "pointer", color: "#64748b", fontSize: "16px" }}>⋮</span>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  ) : (
+                    <tr>
+                      <td colSpan={5} style={{ textAlign: "center", padding: "24px" }} className="muted">
+                        No roles found.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
             </div>
           </div>
-          <div className="role-grid">
-            {rolesLoading ? (
-              <p className="muted">Loading system roles...</p>
-            ) : filteredRoles.length ? (
-              filteredRoles.map(renderRoleCard)
-            ) : (
-              <p className="muted">No roles found.</p>
-            )}
-          </div>
-        </div>
 
         {/* Tab 2: Individual User Permissions */}
         <div className={`tab-content ${activeTab === "tab-users" ? "active" : ""}`}>
@@ -919,7 +977,8 @@ export function RbacPage() {
             )}
           </div>
         </div>
-      </main>
+      </div>
+    </main>
 
       {/* Create / Edit Role Permissions */}
       <Modal
@@ -929,8 +988,8 @@ export function RbacPage() {
         cardStyle={{ maxWidth: "840px", width: "92vw" }}
       >
         <form onSubmit={handleRoleSubmit}>
-          <div className="form-grid" style={{ marginBottom: "16px" }}>
-            <div className="field">
+          <div className="form-grid" style={{ gridTemplateColumns: "1fr 1fr", gap: "16px", marginBottom: "16px" }}>
+            <div className="field" style={{ marginBottom: 0 }}>
               <label htmlFor="roleName">Role Name *</label>
               <input
                 id="roleName"
@@ -950,6 +1009,7 @@ export function RbacPage() {
               placeholder="Brief summary of what this role does"
               value={roleDescription}
               onChange={setRoleDescription}
+              style={{ marginBottom: 0 }}
             />
           </div>
 

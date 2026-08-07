@@ -40,6 +40,7 @@ import { SubCategoriesPage } from "@/pages/masters/SubCategories";
 import { ProductsPage } from "@/pages/masters/Products";
 import { NetworkStatusNotifier } from "@/components/NetworkStatusNotifier";
 import { ProductGalleryPage } from "@/pages/ProductGallery";
+import { TrashPage } from "@/pages/Trash";
 
 export function App() {
   const navigate = useNavigate();
@@ -61,6 +62,7 @@ export function App() {
       <Route path="/403" element={<ForbiddenPage />} />
       <Route path="/organization" element={<OrganizationPage />} />
       <Route path="/audit" element={<AuditPage />} />
+      <Route path="/trash" element={<TrashPage />} />
       <Route path="/profile" element={<ProfilePage />} />
       <Route path="/users" element={<UsersPage />} />
       <Route path="/rbac" element={<RbacPage />} />

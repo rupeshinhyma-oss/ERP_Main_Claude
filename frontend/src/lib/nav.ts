@@ -80,11 +80,13 @@ export const NAV_SECTIONS: NavSection[] = [
       { key: "masters-uom", label: "Units of Measurement", path: "/masters/uom", icon: "ruler", permission: "uom.view" },
       { key: "organization", label: "Organization Settings", path: "/organization", icon: "building", permission: "organization.manage", superAdminOnly: true },
       { key: "audit", label: "Audit Log", path: "/audit", icon: "clock", permission: "audit.view" },
+      { key: "trash", label: "Trash", path: "/trash", icon: "trash" },
     ],
   },
 ];
 
 export const PAGE_TITLES: Record<string, string> = {
+  trash: "Trash Management",
   dashboard: "Dashboard",
   tasks: "Tasks & Work Management",
   reports: "Reports & Analytics",

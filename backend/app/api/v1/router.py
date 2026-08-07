@@ -32,6 +32,7 @@ from app.queue.routes import router as queue_router
 from app.rbac.routes import router as rbac_router
 from app.suppliers.routes import router as suppliers_router
 from app.tasks.routes import router as tasks_router
+from app.trash.routes import router as trash_router
 from app.users.routes import router as users_router
 
 api_router = APIRouter()
@@ -43,6 +44,7 @@ api_router.include_router(rbac_router)
 api_router.include_router(queue_router)
 api_router.include_router(cache_router)
 api_router.include_router(audit_router)
+api_router.include_router(trash_router)
 
 # Phase 6: Core Organization & User Management.
 api_router.include_router(organizations_router)

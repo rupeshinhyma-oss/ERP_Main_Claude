@@ -796,11 +796,10 @@ export function RbacPage() {
                       <div className="info-label">Account Status</div>
                       <div className="info-value">
                         <span
-                          className={`badge ${
-                            effectiveBreakdown.user_info.status === "ACTIVE"
+                          className={`badge ${effectiveBreakdown.user_info.status === "ACTIVE"
                               ? "badge-success"
                               : "badge-warning"
-                          }`}
+                            }`}
                         >
                           {effectiveBreakdown.user_info.status}
                         </span>

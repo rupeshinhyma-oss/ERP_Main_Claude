@@ -24,9 +24,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { AppShell } from "./AppShell";
 import { Banner, Can, StatusBadge, TableMessageRow } from "./ui";
 import { Pagination } from "./Pagination";
-import { ImportSummaryPanel } from "./ImportWizard";
+import { ImpExpDropdown, BulkActionsDropdown, ImportSummaryPanel } from "./ImportWizard";
 import { SideDrawer, DetailFieldGrid, type DetailField } from "./SideDrawer";
-import { downloadSampleTemplate } from "@/lib/sampleTemplate";
 import { Breadcrumb } from "./Breadcrumb";
 import {
   apiDelete,
@@ -169,8 +168,9 @@ export function MasterPage<T extends MasterRecord>({
 
   const [drawerItem, setDrawerItem] = useState<T | null>(null);
 
-  const [importSummary, _setImportSummary] = useState<ImportSummary | null>(null);
-  const [importError, _setImportError] = useState<string | null>(null);
+  const [importSummary, setImportSummary] = useState<ImportSummary | null>(null);
+  const [importError, setImportError] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
   const srNoJump = useSrNoJump();
   const tableBodyRef = useRef<HTMLTableSectionElement>(null);
@@ -179,7 +179,7 @@ export function MasterPage<T extends MasterRecord>({
   // (the backend's search is text-based and knows no such field).
   const [effectiveSearch, setEffectiveSearch] = useState("");
 
-  const colCount = columns.length + 2; // +1 for Sr. No., +1 for actions
+  const colCount = columns.length + 3; // +1 for Checkbox, +1 for Sr. No., +1 for actions
   const extraFiltersKey = JSON.stringify(extraFilters || {});
 
   const reload = useCallback(() => setReloadCounter((n) => n + 1), []);
@@ -347,6 +347,40 @@ export function MasterPage<T extends MasterRecord>({
     }
   }
 
+  async function handleBulkActivate() {
+    if (!selectedIds.length) return;
+    try {
+      await Promise.all(selectedIds.map((id) => apiPost(`${apiBase}/${id}/activate`)));
+      setSelectedIds([]);
+      reload();
+    } catch (err) {
+      setError(err);
+    }
+  }
+
+  async function handleBulkDeactivate() {
+    if (!selectedIds.length) return;
+    try {
+      await Promise.all(selectedIds.map((id) => apiPost(`${apiBase}/${id}/deactivate`)));
+      setSelectedIds([]);
+      reload();
+    } catch (err) {
+      setError(err);
+    }
+  }
+
+  async function handleBulkDelete() {
+    if (!selectedIds.length) return;
+    if (!confirm(`Delete ${selectedIds.length} selected ${entityName}(s)? This cannot be undone.`)) return;
+    try {
+      await Promise.all(selectedIds.map((id) => apiDelete(`${apiBase}/${id}`)));
+      setSelectedIds([]);
+      reload();
+    } catch (err) {
+      setError(err);
+    }
+  }
+
   const headerCells = useMemo(() => {
     const labels = columnHeaders ?? columns.map((col) => col.header);
     return labels.map((label, i) => <th key={`${label}-${i}`}>{label}</th>);
@@ -399,21 +433,22 @@ export function MasterPage<T extends MasterRecord>({
               </button>
             )}
             {canImport && (
-              <button
-                type="button"
-                className="btn btn-imp-exp"
-                onClick={() => downloadSampleTemplate(importHeaders, entityName)}
-              >
-                Imp / Exp ▾
-              </button>
+              <ImpExpDropdown
+                apiBase={apiBase}
+                entityName={entityName}
+                importHeaders={importHeaders}
+                onComplete={() => reload()}
+                onSummary={setImportSummary}
+                onError={(msg) => setImportError(msg)}
+                onExportCsv={() => handleExport("csv")}
+              />
             )}
-            <button
-              type="button"
-              className="btn btn-bulk-actions"
-              onClick={() => handleExport("csv")}
-            >
-              Bulk Actions ▾
-            </button>
+            <BulkActionsDropdown
+              selectedCount={selectedIds.length}
+              onBulkActivate={canUpdate ? handleBulkActivate : undefined}
+              onBulkDeactivate={canUpdate ? handleBulkDeactivate : undefined}
+              onBulkDelete={canDelete ? handleBulkDelete : undefined}
+            />
           </div>
         </div>
         <Banner error={error} />
@@ -551,6 +586,20 @@ export function MasterPage<T extends MasterRecord>({
             <table>
               <thead>
                 <tr>
+                  <th style={{ width: "40px", textAlign: "center" }}>
+                    <input
+                      type="checkbox"
+                      checked={rows.length > 0 && rows.every((r) => selectedIds.includes(String(r.id)))}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setSelectedIds(rows.map((r) => String(r.id)));
+                        } else {
+                          setSelectedIds([]);
+                        }
+                      }}
+                      style={{ cursor: "pointer", width: "16px", height: "16px" }}
+                    />
+                  </th>
                   <th>Sr. No.</th>
                   {headerCells}
                   <th style={{ textAlign: "center" }}>{actionsHeader || "ACTION"}</th>
@@ -564,6 +613,21 @@ export function MasterPage<T extends MasterRecord>({
                 ) : (
                   rows.map((item, index) => (
                     <tr key={item.id}>
+                      <td style={{ width: "40px", textAlign: "center" }}>
+                        <input
+                          type="checkbox"
+                          checked={selectedIds.includes(String(item.id))}
+                          onChange={(e) => {
+                            const idStr = String(item.id);
+                            if (e.target.checked) {
+                              setSelectedIds((prev) => [...prev, idStr]);
+                            } else {
+                              setSelectedIds((prev) => prev.filter((i) => i !== idStr));
+                            }
+                          }}
+                          style={{ cursor: "pointer", width: "16px", height: "16px" }}
+                        />
+                      </td>
                       <td className="cell-srno">{startingSrNo + index}</td>
                       {columns.map((col, colIndex) => (
                         <td key={col.header}>

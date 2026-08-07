@@ -19,7 +19,7 @@ import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { Banner, Can, TableMessageRow } from "@/components/ui";
 import { Pagination } from "@/components/Pagination";
-import { ImportButton, ImportSummaryPanel } from "@/components/ImportWizard";
+import { ImpExpDropdown, BulkActionsDropdown, ImportSummaryPanel } from "@/components/ImportWizard";
 import {
   SearchableDropdown,
   SearchableDropdownMulti,
@@ -35,7 +35,6 @@ import {
   toQueryString,
 } from "@/lib/api";
 import { createNameResolver } from "@/lib/nameResolver";
-import { downloadSampleTemplate } from "@/lib/sampleTemplate";
 import { useAuth, useSrNoJump, isSrNoQuery } from "@/lib/hooks";
 import type {
   ImportHeader,
@@ -174,6 +173,7 @@ export function SuppliersPage() {
 
   const [importSummary, setImportSummary] = useState<ImportSummary | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
   /* Modal state */
   const [modalOpen, setModalOpen] = useState(false);
@@ -615,6 +615,18 @@ export function SuppliersPage() {
     }
   }
 
+  async function handleBulkDelete() {
+    if (!selectedIds.length) return;
+    if (!confirm(`Delete ${selectedIds.length} selected supplier(s)? This cannot be undone.`)) return;
+    try {
+      await Promise.all(selectedIds.map((id) => apiDelete(`/suppliers/${id}`)));
+      setSelectedIds([]);
+      reload();
+    } catch (err) {
+      setError(err);
+    }
+  }
+
   async function handleInlineUpdate(path: string, payload: unknown) {
     try {
       await apiPatch(path, payload);
@@ -646,29 +658,22 @@ export function SuppliersPage() {
               Supplier directory, contacts, product categories, and sourcing status.
             </div>
           </div>
-          <div className="page-header-actions">
+          <div className="page-header-actions" style={{ display: "flex", gap: "10px", alignItems: "center" }}>
             <Can permission="supplier.import">
-              {canCreate && (
-                <button
-                  type="button"
-                  className="btn"
-                  title="Download a pre-formatted CSV template with example supplier data"
-                  onClick={() => downloadSampleTemplate(SUPPLIER_IMPORT_HEADERS, "suppliers")}
-                >
-                  📥 Sample Template
-                </button>
-              )}
-              {canCreate && (
-                <ImportButton
-                  apiBase="/suppliers"
-                  entityName="supplier"
-                  importHeaders={SUPPLIER_IMPORT_HEADERS}
-                  onSummary={setImportSummary}
-                  onError={setImportError}
-                  onComplete={() => reload()}
-                />
-              )}
+              <ImpExpDropdown
+                apiBase="/suppliers"
+                entityName="supplier"
+                importHeaders={SUPPLIER_IMPORT_HEADERS}
+                onSummary={setImportSummary}
+                onError={setImportError}
+                onComplete={() => reload()}
+                onExportCsv={() => handleExport("csv")}
+              />
             </Can>
+            <BulkActionsDropdown
+              selectedCount={selectedIds.length}
+              onBulkDelete={canDelete ? handleBulkDelete : undefined}
+            />
             {canCreate && (
               <button className="btn btn-quick-add" onClick={() => openModal(null)}>
                 + QUICK ADD
@@ -679,12 +684,6 @@ export function SuppliersPage() {
                 + ADD NEW
               </button>
             )}
-            <button className="btn btn-imp-exp" onClick={() => downloadSampleTemplate(SUPPLIER_IMPORT_HEADERS, "Companies")}>
-              Imp / Exp ▾
-            </button>
-            <button className="btn btn-bulk-actions" onClick={() => handleExport("csv")}>
-              Bulk Actions ▾
-            </button>
           </div>
         </div>
         <Banner error={error} />
@@ -835,7 +834,15 @@ export function SuppliersPage() {
               <thead>
                 <tr>
                   <th>
-                    <input type="checkbox" />
+                    <input
+                      type="checkbox"
+                      checked={rows.length > 0 && rows.every((r) => selectedIds.includes(r.id))}
+                      onChange={(e) => {
+                        if (e.target.checked) setSelectedIds(rows.map((r) => r.id));
+                        else setSelectedIds([]);
+                      }}
+                      style={{ cursor: "pointer", width: "16px", height: "16px" }}
+                    />
                   </th>
                   <th>Sr. No.</th>
                   <th>Company Name</th>
@@ -862,7 +869,16 @@ export function SuppliersPage() {
                   rows.map((s, index) => (
                     <tr key={s.id}>
                       <td>
-                        <input type="checkbox" className="row-select" />
+                        <input
+                          type="checkbox"
+                          className="row-select"
+                          checked={selectedIds.includes(s.id)}
+                          onChange={(e) => {
+                            if (e.target.checked) setSelectedIds((prev) => [...prev, s.id]);
+                            else setSelectedIds((prev) => prev.filter((i) => i !== s.id));
+                          }}
+                          style={{ cursor: "pointer", width: "16px", height: "16px" }}
+                        />
                       </td>
                       <td className="cell-srno">{startSrNo + index}</td>
                       <td>

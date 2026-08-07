@@ -852,3 +852,325 @@ export function ImportButton({
     </>
   );
 }
+
+export interface ImpExpDropdownProps {
+  apiBase: string;
+  entityName: string;
+  importHeaders: ImportHeader[];
+  onComplete: (summary: ImportSummary | null) => void;
+  onSummary: (summary: ImportSummary | null) => void;
+  onError: (message: string | null) => void;
+  onExportCsv: () => void;
+}
+
+export function ImpExpDropdown({
+  apiBase,
+  entityName,
+  importHeaders,
+  onComplete,
+  onSummary,
+  onError,
+  onExportCsv,
+}: ImpExpDropdownProps) {
+  const [open, setOpen] = useState(false);
+  const [pending, setPending] = useState<{
+    file: File;
+    rows: SheetRow[];
+    sheetColumns: string[];
+  } | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    if (open) document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [open]);
+
+  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (inputRef.current) inputRef.current.value = "";
+    setOpen(false);
+
+    onError(null);
+    try {
+      const rows = await parseFile(file);
+      if (!rows.length) {
+        throw new Error("The file appears to be empty or has no data rows.");
+      }
+      setPending({ file, rows, sheetColumns: Object.keys(rows[0]) });
+    } catch (err) {
+      onError(errorMessage(err) || "Could not read that file.");
+    }
+  }
+
+  return (
+    <div ref={menuRef} style={{ position: "relative", display: "inline-block" }}>
+      <button
+        type="button"
+        className="btn btn-imp-exp"
+        onClick={() => setOpen((v) => !v)}
+        style={{
+          background: "#f59e0b",
+          color: "#ffffff",
+          padding: "8px 16px",
+          borderRadius: "6px",
+          border: "none",
+          fontWeight: 700,
+          fontSize: "13px",
+          cursor: "pointer",
+          display: "inline-flex",
+          alignItems: "center",
+          gap: "6px",
+        }}
+      >
+        Imp / Exp ▾
+      </button>
+
+      {open && (
+        <div
+          style={{
+            position: "absolute",
+            top: "100%",
+            right: 0,
+            marginTop: "4px",
+            background: "#ffffff",
+            borderRadius: "6px",
+            boxShadow: "0 10px 25px rgba(0,0,0,0.15)",
+            border: "1px solid #e2e8f0",
+            zIndex: 1000,
+            minWidth: "160px",
+            overflow: "hidden",
+          }}
+        >
+          <label
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
+              padding: "10px 14px",
+              fontSize: "13.5px",
+              color: "#334155",
+              fontWeight: 600,
+              cursor: "pointer",
+              margin: 0,
+            }}
+          >
+            📥 Import
+            <input
+              ref={inputRef}
+              type="file"
+              accept=".csv,.xlsx"
+              onChange={handleFileChange}
+              style={{ display: "none" }}
+            />
+          </label>
+          <button
+            type="button"
+            onClick={() => {
+              setOpen(false);
+              onExportCsv();
+            }}
+            style={{
+              width: "100%",
+              textAlign: "left",
+              padding: "10px 14px",
+              fontSize: "13.5px",
+              color: "#334155",
+              fontWeight: 600,
+              background: "none",
+              border: "none",
+              borderTop: "1px solid #f1f5f9",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
+            }}
+          >
+            📤 CSV export
+          </button>
+        </div>
+      )}
+
+      {pending && (
+        <WizardModal
+          file={pending.file}
+          rows={pending.rows}
+          sheetColumns={pending.sheetColumns}
+          apiBase={apiBase}
+          entityName={entityName}
+          importHeaders={importHeaders}
+          onClose={() => setPending(null)}
+          onComplete={(summary) => {
+            onSummary(summary);
+            onComplete(summary);
+          }}
+          onError={onError}
+        />
+      )}
+    </div>
+  );
+}
+
+export interface BulkActionsDropdownProps {
+  selectedCount: number;
+  onBulkActivate?: () => void;
+  onBulkDeactivate?: () => void;
+  onBulkDelete?: () => void;
+}
+
+export function BulkActionsDropdown({
+  selectedCount,
+  onBulkActivate,
+  onBulkDeactivate,
+  onBulkDelete,
+}: BulkActionsDropdownProps) {
+  const [open, setOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    if (open) document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [open]);
+
+  const hasSelection = selectedCount > 0;
+
+  return (
+    <div ref={menuRef} style={{ position: "relative", display: "inline-block" }}>
+      <button
+        type="button"
+        className="btn btn-bulk-actions"
+        onClick={() => setOpen((v) => !v)}
+        style={{
+          background: "#10b981",
+          color: "#ffffff",
+          padding: "8px 16px",
+          borderRadius: "6px",
+          border: "none",
+          fontWeight: 700,
+          fontSize: "13px",
+          cursor: "pointer",
+          display: "inline-flex",
+          alignItems: "center",
+          gap: "6px",
+        }}
+      >
+        Bulk Actions {hasSelection ? `(${selectedCount})` : ""} ▾
+      </button>
+
+      {open && (
+        <div
+          style={{
+            position: "absolute",
+            top: "100%",
+            right: 0,
+            marginTop: "4px",
+            background: "#ffffff",
+            borderRadius: "6px",
+            boxShadow: "0 10px 25px rgba(0,0,0,0.15)",
+            border: "1px solid #e2e8f0",
+            zIndex: 1000,
+            minWidth: "180px",
+            overflow: "hidden",
+          }}
+        >
+          {!hasSelection ? (
+            <div style={{ padding: "10px 14px", fontSize: "12.5px", color: "#64748b", fontStyle: "italic" }}>
+              Select 1 or more items from list first
+            </div>
+          ) : (
+            <>
+              {onBulkActivate && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOpen(false);
+                    onBulkActivate();
+                  }}
+                  style={{
+                    width: "100%",
+                    textAlign: "left",
+                    padding: "10px 14px",
+                    fontSize: "13.5px",
+                    color: "#059669",
+                    fontWeight: 600,
+                    background: "none",
+                    border: "none",
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
+                  }}
+                >
+                  ▶️ Bulk Activate ({selectedCount})
+                </button>
+              )}
+              {onBulkDeactivate && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOpen(false);
+                    onBulkDeactivate();
+                  }}
+                  style={{
+                    width: "100%",
+                    textAlign: "left",
+                    padding: "10px 14px",
+                    fontSize: "13.5px",
+                    color: "#d97706",
+                    fontWeight: 600,
+                    background: "none",
+                    border: "none",
+                    borderTop: "1px solid #f1f5f9",
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
+                  }}
+                >
+                  ⏸️ Bulk Deactivate ({selectedCount})
+                </button>
+              )}
+              {onBulkDelete && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOpen(false);
+                    onBulkDelete();
+                  }}
+                  style={{
+                    width: "100%",
+                    textAlign: "left",
+                    padding: "10px 14px",
+                    fontSize: "13.5px",
+                    color: "#dc2626",
+                    fontWeight: 600,
+                    background: "none",
+                    border: "none",
+                    borderTop: "1px solid #f1f5f9",
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
+                  }}
+                >
+                  🗑️ Bulk Delete ({selectedCount})
+                </button>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}

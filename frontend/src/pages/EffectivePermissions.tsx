@@ -45,6 +45,7 @@ export function EffectivePermissionsPage() {
   const [moduleFilter, setModuleFilter] = useState("");
   const [sourceFilter, setSourceFilter] = useState("");
   const [tablePage, setTablePage] = useState(1);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
   useEffect(() => {
     (async () => {
@@ -355,6 +356,17 @@ export function EffectivePermissionsPage() {
               <table className="data-table">
                 <thead>
                   <tr>
+                    <th style={{ width: "40px", textAlign: "center" }}>
+                      <input
+                        type="checkbox"
+                        checked={pageItems.length > 0 && pageItems.every((item) => selectedIds.includes(item.code))}
+                        onChange={(e) => {
+                          if (e.target.checked) setSelectedIds(pageItems.map((item) => item.code));
+                          else setSelectedIds([]);
+                        }}
+                        style={{ cursor: "pointer", width: "16px", height: "16px" }}
+                      />
+                    </th>
                     <th>Permission Code</th>
                     <th>Module</th>
                     <th>Inherited Role(s)</th>
@@ -365,13 +377,24 @@ export function EffectivePermissionsPage() {
                 <tbody>
                   {pageItems.length === 0 ? (
                     <tr>
-                      <td colSpan={5} className="muted" style={{ textAlign: "center" }}>
+                      <td colSpan={6} className="muted" style={{ textAlign: "center" }}>
                         No permissions found.
                       </td>
                     </tr>
                   ) : (
                     pageItems.map((item) => (
                       <tr key={item.code}>
+                        <td style={{ width: "40px", textAlign: "center" }}>
+                          <input
+                            type="checkbox"
+                            checked={selectedIds.includes(item.code)}
+                            onChange={(e) => {
+                              if (e.target.checked) setSelectedIds((prev) => [...prev, item.code]);
+                              else setSelectedIds((prev) => prev.filter((i) => i !== item.code));
+                            }}
+                            style={{ cursor: "pointer", width: "16px", height: "16px" }}
+                          />
+                        </td>
                         <td>
                           <strong style={{ fontFamily: "monospace", color: "#0f172a" }}>
                             {item.code}

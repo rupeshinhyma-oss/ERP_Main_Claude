@@ -40,7 +40,7 @@ function LoginIllustration() {
       alt="ERP Login Illustration"
       style={{
         width: "100%",
-        maxWidth: "450px",
+        maxWidth: "400px",
         height: "auto",
         objectFit: "contain",
         display: "block",
@@ -118,8 +118,8 @@ export function LoginPage() {
       </header>
 
       {/* Main Login Content */}
-      <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: "40px 32px" }}>
-        <div style={{ width: "100%", maxWidth: "1150px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "80px", flexWrap: "wrap" }}>
+      <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: "40px 60px" }}>
+        <div style={{ width: "100%", maxWidth: "1350px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "160px", flexWrap: "wrap" }}>
 
           {/* Left Illustration Pane */}
           <div style={{ flex: 1, minWidth: "320px", display: "flex", justifyContent: "center" }}>

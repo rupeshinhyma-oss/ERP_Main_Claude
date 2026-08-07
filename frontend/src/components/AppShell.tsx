@@ -17,7 +17,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { apiGet, apiPost } from "@/lib/api";
-import { Auth, initials, roleLabel } from "@/lib/auth";
+import { Auth } from "@/lib/auth";
 import { useAuth } from "@/lib/hooks";
 import {
   NAV_ITEMS_BY_KEY,
@@ -398,9 +398,8 @@ function ForcePasswordChangeModal({ onDone }: { onDone: () => void }) {
 /* ------------------------------------------------------------------ */
 
 function Sidebar({ activeKey, brandName: _brandName }: { activeKey: string; brandName: string }) {
-  const { profile, isSuperAdmin, hasPermission } = useAuth();
+  const { isSuperAdmin, hasPermission } = useAuth();
   const navRef = useRef<HTMLElement>(null);
-  const navigate = useNavigate();
 
   const visibleSections = useMemo(
     () =>
@@ -482,19 +481,6 @@ function Sidebar({ activeKey, brandName: _brandName }: { activeKey: string; bran
     };
   }, []);
 
-  const displayName = profile ? profile.username : "User";
-
-  async function handleLogout() {
-    if (!confirm("Log out?")) return;
-    try {
-      await apiPost("/auth/logout", { refresh_token: Auth.getRefreshToken() });
-    } catch {
-      /* the local session is cleared either way */
-    }
-    Auth.clear();
-    navigate("/login", { replace: true });
-  }
-
   return (
     <aside className="sidebar">
       <div className="sidebar-brand" style={{ padding: "12px 16px", display: "flex", alignItems: "center" }}>
@@ -522,15 +508,6 @@ function Sidebar({ activeKey, brandName: _brandName }: { activeKey: string; bran
           </div>
         ))}
       </nav>
-      <div className="sidebar-footer">
-        <div className="sidebar-user" style={{ cursor: "pointer" }} onClick={handleLogout}>
-          <div className="avatar">{initials(displayName)}</div>
-          <div className="user-meta">
-            <div className="user-name">{displayName}</div>
-            <div className="user-role">{roleLabel(profile)}</div>
-          </div>
-        </div>
-      </div>
     </aside>
   );
 }

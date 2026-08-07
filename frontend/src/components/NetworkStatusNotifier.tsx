@@ -11,6 +11,7 @@
  */
 
 import { useEffect, useState } from "react";
+import { getCachedBrandName } from "@/lib/brand";
 
 function updateFavicon(isOnline: boolean) {
   let faviconLink = document.getElementById("dynamic-favicon") as HTMLLinkElement | null;
@@ -58,6 +59,11 @@ export function NetworkStatusNotifier() {
   useEffect(() => {
     updateFavicon(isOnline);
 
+    const brandName = getCachedBrandName();
+    if (!isOnline) {
+      document.title = `${brandName} — Offline`;
+    }
+
     function handleOnline() {
       setIsOnline(true);
       updateFavicon(true);
@@ -70,6 +76,7 @@ export function NetworkStatusNotifier() {
       setIsOnline(false);
       updateFavicon(false);
       setShowRestored(false);
+      document.title = `${getCachedBrandName()} — Offline`;
     }
 
     window.addEventListener("online", handleOnline);

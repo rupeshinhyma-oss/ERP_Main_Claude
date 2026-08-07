@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.audit.constants import AuditAction
 from app.audit.dependencies import get_audit_service
 from app.audit.service import AuditService
-from app.auth.dependencies import get_auth_service
+from app.auth.dependencies import get_auth_service, get_current_user
 from app.auth.schemas import SessionRead
 from app.auth.service import AuthService, CurrentUser
 from app.common.pagination import PageMeta, PageParams

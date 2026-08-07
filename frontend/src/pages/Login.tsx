@@ -3,7 +3,7 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import { Navigate, useNavigate } from "react-router-dom";
+import { Link, Navigate, useNavigate } from "react-router-dom";
 import { apiGet, apiPost } from "@/lib/api";
 import { Auth } from "@/lib/auth";
 import { setBrandName } from "@/lib/brand";
@@ -158,19 +158,10 @@ export function LoginPage() {
   return (
     <div style={{ minHeight: "100vh", width: "100%", background: "#f8fafc", display: "flex", flexDirection: "column" }}>
       {/* Top Header Logo */}
-      <header style={{ padding: "20px 40px", background: "#ffffff", borderBottom: "1px solid #e2e8f0", display: "flex", alignItems: "center" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-          <div style={{ background: "#0061f2", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", borderRadius: "6px", width: "32px", height: "32px", fontWeight: "bold" }}>
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="13 17 18 12 13 7"></polyline>
-              <polyline points="6 17 11 12 6 7"></polyline>
-            </svg>
-          </div>
-          <div style={{ display: "flex", flexDirection: "column" }}>
-            <span style={{ fontWeight: 800, fontSize: "16px", color: "#0061f2", letterSpacing: "0.5px" }}>YINGLIMA</span>
-            <span style={{ fontSize: "9px", color: "#d97706", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.4px" }}>YOUR INDUSTRIAL HYPERMARKET</span>
-          </div>
-        </div>
+      <header style={{ padding: "16px 40px", background: "#ffffff", borderBottom: "1px solid #e2e8f0", display: "flex", alignItems: "center" }}>
+        <Link to="/dashboard" style={{ display: "inline-flex", alignItems: "center", textDecoration: "none", cursor: "pointer" }}>
+          <img src="/logo.png" alt="IHM Logo" style={{ height: "48px", width: "auto", objectFit: "contain" }} />
+        </Link>
       </header>
 
       {/* Main Login Content */}

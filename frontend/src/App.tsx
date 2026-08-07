@@ -52,6 +52,7 @@ export function App() {
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/" element={<DashboardPage />} />
+      <Route path="/dashboard" element={<DashboardPage />} />
       <Route path="/403" element={<ForbiddenPage />} />
       <Route path="/organization" element={<OrganizationPage />} />
       <Route path="/audit" element={<AuditPage />} />

@@ -47,9 +47,6 @@ export const NAV_SECTIONS: NavSection[] = [
   {
     label: "INVENTORY",
     items: [
-      { key: "product-stock", label: "Product Stock", path: "/masters/products", icon: "box", permission: "product.view" },
-      { key: "stock-adjustment", label: "Stock Adjustment", path: "/masters/products", icon: "sliders", permission: "product.view" },
-      { key: "stock-transfer", label: "Stock Transfer", path: "/masters/products", icon: "refresh", permission: "product.view" },
       { key: "masters-products", label: "Product Master", path: "/masters/products", icon: "box", permission: "product.view" },
       { key: "product-gallery", label: "Product Gallery", path: "/masters/products", icon: "grid", permission: "product.view" },
       { key: "masters-categories", label: "Categories", path: "/masters/categories", icon: "folder", permission: "category.view" },

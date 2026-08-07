@@ -81,37 +81,6 @@ export function Pagination({
       }}
     >
       <div style={{ display: "flex", alignItems: "center", gap: "14px", flexWrap: "wrap" }}>
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "6px",
-            fontSize: "13px",
-            color: "var(--color-muted, #64748b)",
-          }}
-        >
-          <span>Show</span>
-          <select
-            className="page-size-select"
-            value={effectivePageSize}
-            onChange={(e) => onPageSizeChange?.(parseInt(e.target.value, 10))}
-            style={{
-              padding: "4px 8px",
-              border: "1px solid var(--color-border, #cbd5e0)",
-              borderRadius: "var(--radius, 6px)",
-              fontSize: "13px",
-              background: "#fff",
-              cursor: "pointer",
-            }}
-          >
-            {ALLOWED_SIZES.map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </select>
-          <span>per page</span>
-        </div>
         <span className="muted" style={{ fontSize: "13px", color: "var(--color-muted, #64748b)" }}>
           Showing{" "}
           <strong>

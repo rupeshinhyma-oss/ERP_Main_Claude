@@ -871,15 +871,22 @@ table {
   width: 100%;
   border-collapse: collapse;
   background: var(--color-surface);
+  border: 1px solid #e2e8f0;
 }
 
 th,
 td {
   text-align: left;
   padding: 11px 12px;
-  border-bottom: 1px solid var(--color-border);
+  border-bottom: 1px solid #e2e8f0;
+  border-right: 1px solid #e2e8f0;
   vertical-align: middle;
   font-size: 13.5px;
+}
+
+th:last-child,
+td:last-child {
+  border-right: none;
 }
 
 th {
@@ -888,8 +895,8 @@ th {
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  border-bottom: 1px solid var(--color-border);
-  background: #fafbfc;
+  border-bottom: 1px solid #e2e8f0;
+  background: #f8fafc;
   white-space: nowrap;
 }
 

@@ -12,8 +12,6 @@
 
 import type { PaginationMeta } from "@/types";
 
-const ALLOWED_SIZES = [20, 25, 50, 100];
-
 export interface PaginationProps {
   pagination?: PaginationMeta;
   pageSize: number;
@@ -49,7 +47,6 @@ export function Pagination({
   pagination,
   pageSize,
   onPageChange,
-  onPageSizeChange,
 }: PaginationProps) {
   if (!pagination) return null;
 

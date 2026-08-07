@@ -138,6 +138,11 @@ def create_application() -> FastAPI:
 
     app.include_router(api_router, prefix=settings.API_V1_PREFIX)
 
+    uploads_dir = Path("uploads")
+    uploads_dir.mkdir(exist_ok=True)
+    (uploads_dir / "products").mkdir(exist_ok=True)
+    app.mount("/uploads", StaticFiles(directory=uploads_dir), name="uploads")
+
     # ---------------------------------------------------------------
     # Optional same-origin frontend serving.
     #

@@ -219,6 +219,19 @@ export function apiPost<T>(
   });
 }
 
+export async function apiPostMultipart<T>(path: string, formData: FormData): Promise<ApiResult<T>> {
+  const token = Auth.getAccessToken();
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: "POST",
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: formData,
+  });
+  if (!res.ok) {
+    throw new ApiError(`Upload failed: ${res.statusText}`, res.status);
+  }
+  return res.json();
+}
+
 export function apiPatch<T>(
   path: string,
   payload?: unknown,

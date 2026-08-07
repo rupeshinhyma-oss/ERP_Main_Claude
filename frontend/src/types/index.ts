@@ -159,6 +159,8 @@ export interface Product extends MasterRecord {
   conversion_factor?: number | null;
   specification?: string | null;
   description?: string | null;
+  image_url?: string | null;
+  images?: string[] | null;
   packaging_quantity?: number | null;
   packaging_net_weight?: number | null;
   packaging_gross_weight?: number | null;
@@ -178,7 +180,6 @@ export interface Product extends MasterRecord {
   standard_price?: number | null;
   is_purchasable?: boolean;
   is_sellable?: boolean;
-  image_url?: string | null;
 }
 
 /* ------------------------------------------------------------------ */

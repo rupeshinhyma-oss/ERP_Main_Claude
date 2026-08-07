@@ -25,7 +25,7 @@ import {
   nullIfBlank,
   numOrNull,
 } from "@/components/fields";
-import { apiGet } from "@/lib/api";
+import { apiGet, apiPostMultipart } from "@/lib/api";
 import { useLookup } from "@/lib/lookups";
 import type {
   Brand,
@@ -81,6 +81,14 @@ function computeCbm(length: string, width: string, height: string): string {
   return "";
 }
 
+export function resolveImageUrl(url: string | null | undefined): string {
+  if (!url) return "";
+  if (url.startsWith("data:") || url.startsWith("http://") || url.startsWith("https://")) {
+    return url;
+  }
+  return `http://localhost:8000${url.startsWith("/") ? "" : "/"}${url}`;
+}
+
 export function ProductsPage() {
   const categories = useLookup<ProductCategory>("/masters/product-categories", 250);
   const subCategories = useLookup<ProductSubCategory>("/masters/product-sub-categories", 500);
@@ -89,6 +97,7 @@ export function ProductsPage() {
   const uoms = useLookup<Uom>("/masters/uom", 250);
 
   const [categoryFilter, setCategoryFilter] = useState("");
+  const [subCategoryFilter, setSubCategoryFilter] = useState("");
   const [brandFilter, setBrandFilter] = useState("");
 
   const [drawerProduct, setDrawerProduct] = useState<Product | null>(null);
@@ -105,8 +114,13 @@ export function ProductsPage() {
     uoms.loaded,
   ].join("-");
 
+  const scopedFilterSubCategories = categoryFilter
+    ? subCategories.items.filter((sc) => sc.category_id === categoryFilter)
+    : subCategories.items;
+
   const extraFilters: Record<string, string> = {};
   if (categoryFilter) extraFilters.category_id = categoryFilter;
+  if (subCategoryFilter) extraFilters.sub_category_id = subCategoryFilter;
   if (brandFilter) extraFilters.brand_id = brandFilter;
 
   /** Fetches the product fresh and opens the detail drawer, matching openProductDetailView() in the source. */
@@ -135,27 +149,85 @@ export function ProductsPage() {
       newButtonLabel="+ New Product"
       searchPlaceholder="Search code, name, or barcode or Sr. No..."
       reloadToken={lookupsReady}
-      modalCardStyle={{ maxWidth: "820px", width: "90vw" }}
+      useFullPageForm={true}
       extraFilters={Object.keys(extraFilters).length ? extraFilters : undefined}
       toolbarExtras={
-        <>
-          <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}>
-            <option value="">All categories</option>
-            {categories.items.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
-          <select value={brandFilter} onChange={(e) => setBrandFilter(e.target.value)}>
-            <option value="">All brands</option>
-            {brands.items.map((b) => (
-              <option key={b.id} value={b.id}>
-                {b.name}
-              </option>
-            ))}
-          </select>
-        </>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "20px", width: "100%" }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+            <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155" }}>Category</label>
+            <select
+              value={categoryFilter}
+              onChange={(e) => {
+                setCategoryFilter(e.target.value);
+                setSubCategoryFilter("");
+              }}
+              style={{
+                padding: "9px 12px",
+                borderRadius: "6px",
+                border: "1px solid #cbd5e0",
+                fontSize: "13.5px",
+                background: "#ffffff",
+                color: "#1e293b",
+                width: "100%",
+              }}
+            >
+              <option value="">All</option>
+              {categories.items.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+            <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155" }}>Sub Category</label>
+            <select
+              value={subCategoryFilter}
+              onChange={(e) => setSubCategoryFilter(e.target.value)}
+              style={{
+                padding: "9px 12px",
+                borderRadius: "6px",
+                border: "1px solid #cbd5e0",
+                fontSize: "13.5px",
+                background: "#ffffff",
+                color: "#1e293b",
+                width: "100%",
+              }}
+            >
+              <option value="">All</option>
+              {scopedFilterSubCategories.map((sc) => (
+                <option key={sc.id} value={sc.id}>
+                  {sc.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+            <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155" }}>Brand</label>
+            <select
+              value={brandFilter}
+              onChange={(e) => setBrandFilter(e.target.value)}
+              style={{
+                padding: "9px 12px",
+                borderRadius: "6px",
+                border: "1px solid #cbd5e0",
+                fontSize: "13.5px",
+                background: "#ffffff",
+                color: "#1e293b",
+                width: "100%",
+              }}
+            >
+              <option value="">All</option>
+              {brands.items.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
       }
       /**
        * The shipped thead carried 11 middle headers for only 10 rendered cells
@@ -164,16 +236,15 @@ export function ProductsPage() {
        * the handover notes if you'd rather it were corrected.
        */
       columnHeaders={[
-        "Product",
-        "Code",
-        "Category / Sub-Cat.",
+        "Product Name (As Per Tally)",
+        "Product Code",
         "Brand",
-        "Sub-Category",
+        "Sub Category",
         "HSN Code",
         "UOM",
-        "Pkg Qty",
-        "Gross Wt (kg)",
-        "Unit CBM",
+        "Pack. Qty",
+        "Pack. Gross Weight",
+        "Pack. Unit CBM",
         "Status",
       ]}
       actionsHeader="Action"
@@ -285,6 +356,7 @@ export function ProductsPage() {
           conversion_factor: str(item?.conversion_factor),
           specification: str(item?.specification),
           description: str(item?.description),
+          image_url: str(item ? item.image_url || (item.images && item.images[0]) : ""),
           packaging_quantity: str(item?.packaging_quantity),
           packaging_net_weight: str(item?.packaging_net_weight),
           packaging_gross_weight: str(item?.packaging_gross_weight),
@@ -333,11 +405,12 @@ export function ProductsPage() {
           hsn_id: f.hsn_id || null,
           uom_id: f.uom_id,
           secondary_uom_id: secUomId,
-          refund_vat_percent: numOrNull(f.refund_vat_percent),
+          refund_vat_percent: numOrNull(f.refund_vat_percent) ?? 0,
           license_certificate_required: nullIfBlank(f.license_certificate_required),
           conversion_factor: numOrNull(f.conversion_factor),
           specification: nullIfBlank(f.specification),
           description: nullIfBlank(f.description),
+          images: f.image_url ? [f.image_url] : [],
           packaging_quantity: numOrNull(f.packaging_quantity),
           packaging_net_weight: numOrNull(f.packaging_net_weight),
           packaging_gross_weight: numOrNull(f.packaging_gross_weight),
@@ -377,10 +450,9 @@ export function ProductsPage() {
           <>
             <div className="section-title">Identity</div>
             <div className="form-grid">
-              <TextField id="product_code" label="Product Code *" required maxLength={50} placeholder="e.g. PRD-001" value={f.product_code} onChange={(v) => set("product_code", v)} />
               <TextField id="product_name_tally" label="Product Name (As per Tally) *" required maxLength={255} placeholder="Name as in Tally" value={f.product_name_tally} onChange={(v) => set("product_name_tally", v)} />
               <TextField id="product_name_invoice" label="Product Name (As per Invoice)" maxLength={255} placeholder="Name for Tax Invoices" value={f.product_name_invoice} onChange={(v) => set("product_name_invoice", v)} />
-              <TextField id="barcode" label="Barcode" maxLength={100} value={f.barcode} onChange={(v) => set("barcode", v)} />
+              <TextField id="product_code" label="Product Code" maxLength={50} placeholder="e.g. PRD-001" value={f.product_code} onChange={(v) => set("product_code", v)} />
             </div>
 
             <div className="section-title">Classification &amp; Tax</div>
@@ -402,7 +474,7 @@ export function ProductsPage() {
                   </option>
                 ))}
               </SelectField>
-              <SelectField id="sub_category_id" label="Sub-Category" value={f.sub_category_id} onChange={(v) => set("sub_category_id", v)}>
+              <SelectField id="sub_category_id" label="Sub-Category *" value={f.sub_category_id} onChange={(v) => set("sub_category_id", v)}>
                 <option value="">-- Select Sub-Category --</option>
                 {scopedSubCategories.map((sc) => (
                   <option key={sc.id} value={sc.id}>
@@ -410,7 +482,7 @@ export function ProductsPage() {
                   </option>
                 ))}
               </SelectField>
-              <SelectField id="brand_id" label="Brand" value={f.brand_id} onChange={(v) => set("brand_id", v)}>
+              <SelectField id="brand_id" label="Brand *" value={f.brand_id} onChange={(v) => set("brand_id", v)}>
                 <option value="">-- Select Brand --</option>
                 {brands.items.map((b) => (
                   <option key={b.id} value={b.id}>
@@ -420,7 +492,7 @@ export function ProductsPage() {
               </SelectField>
               <SelectField
                 id="hsn_id"
-                label="HSN Code"
+                label="HSN Code *"
                 value={f.hsn_id}
                 onChange={(v) => {
                   set("hsn_id", v);
@@ -437,23 +509,14 @@ export function ProductsPage() {
                 ))}
               </SelectField>
               <TextField id="refund_vat_percent" label="Refund VAT %" type="number" step="0.01" min={0} max={100} placeholder="Auto from HSN or manual" value={f.refund_vat_percent} onChange={(v) => set("refund_vat_percent", v)} />
-              <SelectField id="uom_id" label="Primary UOM *" required value={f.uom_id} onChange={(v) => set("uom_id", v)}>
-                <option value="">-- Select Primary UOM --</option>
+              <SelectField id="uom_id" label="UOM (Unit of Measure) *" required value={f.uom_id} onChange={(v) => set("uom_id", v)}>
+                <option value="">-- Select UOM --</option>
                 {uoms.items.map((u) => (
                   <option key={u.id} value={u.id}>
                     {`${u.name} (${u.code})`}
                   </option>
                 ))}
               </SelectField>
-              <SelectField id="secondary_uom_id" label="Secondary UOM" value={f.secondary_uom_id} onChange={(v) => set("secondary_uom_id", v)}>
-                <option value="">-- Select Secondary UOM --</option>
-                {uoms.items.map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {`${u.name} (${u.code})`}
-                  </option>
-                ))}
-              </SelectField>
-              <TextField id="conversion_factor" label="Conversion Factor" type="number" step="0.0001" min={0} placeholder="Secondary per 1 primary" value={f.conversion_factor} onChange={(v) => set("conversion_factor", v)} />
             </div>
 
             <div className="section-title">Compliance &amp; License Requirements</div>
@@ -469,10 +532,9 @@ export function ProductsPage() {
               />
             </div>
 
-            <div className="section-title">Description</div>
+            <div className="section-title">Specifications</div>
             <div className="form-grid">
-              <TextAreaField id="specification" label="Specification" value={f.specification} onChange={(v) => set("specification", v)} />
-              <TextAreaField id="description" label="Description" value={f.description} onChange={(v) => set("description", v)} />
+              <TextAreaField id="specification" label="Specification" value={f.specification} onChange={(v) => set("specification", v)} style={{ gridColumn: "span 2" }} />
             </div>
 
             <div className="section-title">Packaging &amp; Physical Attributes</div>
@@ -494,24 +556,99 @@ export function ProductsPage() {
                 value={f.packaging_unit_cbm}
                 onChange={(v) => set("packaging_unit_cbm", v)}
               />
-              <TextField id="color" label="Color" maxLength={50} value={f.color} onChange={(v) => set("color", v)} />
-              <TextField id="material" label="Material" maxLength={100} value={f.material} onChange={(v) => set("material", v)} />
             </div>
 
-            <div className="section-title">Commercial &amp; Inventory Planning</div>
+            <div className="section-title">Image Of Product</div>
+            <div className="form-grid" style={{ gridTemplateColumns: "1fr" }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                <label style={{ fontSize: "12.5px", fontWeight: 600, color: "var(--color-text-secondary)" }}>
+                  Product Image (Photo)
+                </label>
+                <div style={{ display: "flex", gap: "16px", alignItems: "center" }}>
+                  <div
+                    style={{
+                      width: "110px",
+                      height: "110px",
+                      borderRadius: "8px",
+                      border: "2px dashed #cbd5e0",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      background: "#f8fafc",
+                      overflow: "hidden",
+                    }}
+                  >
+                    {f.image_url ? (
+                      <img src={resolveImageUrl(f.image_url)} alt="Product Preview" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                    ) : (
+                      <div style={{ textAlign: "center", color: "#94a3b8" }}>
+                        <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                          <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                          <circle cx="8.5" cy="8.5" r="1.5" />
+                          <polyline points="21 15 16 10 5 21" />
+                        </svg>
+                        <div style={{ fontSize: "11px", marginTop: "4px" }}>No Image</div>
+                      </div>
+                    )}
+                  </div>
+
+                  <div>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      id="product_image_file"
+                      style={{ display: "none" }}
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          // Instant on-screen preview
+                          const reader = new FileReader();
+                          reader.onload = (uploadEvent) => {
+                            const base64Data = uploadEvent.target?.result as string;
+                            if (base64Data) set("image_url", base64Data);
+                          };
+                          reader.readAsDataURL(file);
+
+                          // Upload to Supabase Storage in background
+                          const formData = new FormData();
+                          formData.append("file", file);
+                          apiPostMultipart<{ url: string }>("/masters/products/upload-image", formData)
+                            .then((res) => {
+                              if (res.data?.url) set("image_url", res.data.url);
+                            })
+                            .catch((err) => {
+                              console.warn("Background upload to Supabase fell back to local preview:", err);
+                            });
+                        }
+                      }}
+                    />
+                    <label
+                      htmlFor="product_image_file"
+                      className="btn btn-secondary"
+                      style={{ padding: "8px 16px", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "6px" }}
+                    >
+                      📁 Select Image
+                    </label>
+                    {f.image_url && (
+                      <button
+                        type="button"
+                        className="btn"
+                        style={{ marginLeft: "8px", background: "#ef4444", color: "#ffffff", padding: "8px 12px" }}
+                        onClick={() => set("image_url", "")}
+                      >
+                        Remove
+                      </button>
+                    )}
+                    <div style={{ fontSize: "12px", color: "#64748b", marginTop: "6px" }}>
+                      Upload PNG, JPG, or WEBP photo of the product.
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="section-title">Status</div>
             <div className="form-grid">
-              <TextField id="minimum_order_quantity" label="Min. Order Qty" type="number" step="0.001" min={0} value={f.minimum_order_quantity} onChange={(v) => set("minimum_order_quantity", v)} />
-              <TextField id="reorder_level" label="Reorder Level" type="number" step="0.001" min={0} value={f.reorder_level} onChange={(v) => set("reorder_level", v)} />
-              <TextField id="standard_cost" label="Standard Cost" type="number" step="0.01" min={0} value={f.standard_cost} onChange={(v) => set("standard_cost", v)} />
-              <TextField id="standard_price" label="Standard Price" type="number" step="0.01" min={0} value={f.standard_price} onChange={(v) => set("standard_price", v)} />
-              <SelectField id="is_purchasable" label="Purchasable" value={f.is_purchasable} onChange={(v) => set("is_purchasable", v)}>
-                <option value="true">Yes</option>
-                <option value="false">No</option>
-              </SelectField>
-              <SelectField id="is_sellable" label="Sellable" value={f.is_sellable} onChange={(v) => set("is_sellable", v)}>
-                <option value="true">Yes</option>
-                <option value="false">No</option>
-              </SelectField>
               <StatusSelectField value={f.status} onChange={(v) => set("status", v)} />
             </div>
           </>
@@ -562,6 +699,21 @@ export function ProductsPage() {
           </div>
         ) : (
           <>
+            {(p.image_url || (p.images && p.images.length > 0)) && (
+              <div style={{ marginBottom: "20px", textAlign: "center", background: "#f8fafc", padding: "16px", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
+                <img
+                  src={resolveImageUrl(p.image_url || p.images?.[0])}
+                  alt="Product Photo"
+                  style={{
+                    maxHeight: "220px",
+                    maxWidth: "100%",
+                    borderRadius: "8px",
+                    objectFit: "contain",
+                    boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.1)",
+                  }}
+                />
+              </div>
+            )}
             <DetailFieldGrid
               fields={[
                 {

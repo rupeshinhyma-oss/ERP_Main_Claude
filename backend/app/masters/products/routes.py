@@ -139,6 +139,51 @@ async def import_products(
     return build_success_response(data=data, request_id=request.state.request_id)
 
 
+@router.post("/upload-image", summary="Upload product image to Supabase Storage")
+async def upload_product_image(
+    file: UploadFile = File(...),
+    _current_user: CurrentUser = Depends(require_permission("product.create")),
+) -> dict:
+    from pathlib import Path
+    import urllib.request
+    import os
+
+    content = await file.read()
+    filename = f"{uuid.uuid4().hex}_{file.filename}"
+    supabase_project_id = os.getenv("SUPABASE_PROJECT_ID", "mpvzjzunkiqchhhvxrza")
+    supabase_key = os.getenv("SUPABASE_SERVICE_KEY") or os.getenv("SUPABASE_ANON_KEY", "")
+
+    # Try direct upload to Supabase Storage Bucket 'product-images'
+    if supabase_key:
+        try:
+            supabase_upload_url = f"https://{supabase_project_id}.supabase.co/storage/v1/object/product-images/{filename}"
+            req = urllib.request.Request(
+                supabase_upload_url,
+                data=content,
+                headers={
+                    "Authorization": f"Bearer {supabase_key}",
+                    "Content-Type": file.content_type or "image/jpeg",
+                    "x-upsert": "true",
+                },
+                method="POST"
+            )
+            with urllib.request.urlopen(req) as resp:
+                if resp.status in (200, 201):
+                    public_url = f"https://{supabase_project_id}.supabase.co/storage/v1/object/public/product-images/{filename}"
+                    return {"success": True, "data": {"url": public_url}}
+        except Exception:
+            pass
+
+    # Save to local server storage folder as fallback
+    uploads_dir = Path("uploads/products")
+    uploads_dir.mkdir(parents=True, exist_ok=True)
+    file_path = uploads_dir / filename
+    with open(file_path, "wb") as f:
+        f.write(content)
+    image_url = f"/uploads/products/{filename}"
+    return {"success": True, "data": {"url": image_url}}
+
+
 @router.get("/{product_id}", summary="Get a product")
 async def get_product(
     product_id: uuid.UUID,

@@ -19,12 +19,10 @@ export function CategoriesPage() {
       breadcrumbTrail={["Master Data", "Categories"]}
       newButtonLabel="+ New Category"
       hideQuickAdd
-      searchPlaceholder="Search name or code or Sr. No..."
-      columnHeaders={["Name", "Code", "Description", "Status"]}
+      searchPlaceholder="Search name or Sr. No..."
+      columnHeaders={["Name", "Status"]}
       columns={[
         { header: "Name", render: (c) => <span className="cell-primary">{c.name}</span> },
-        { header: "Code", render: (c) => c.code },
-        { header: "Description", render: (c) => dash(c.description) },
         { header: "Status", render: (c) => <StatusBadge status={c.status} /> },
       ]}
       importHeaders={[

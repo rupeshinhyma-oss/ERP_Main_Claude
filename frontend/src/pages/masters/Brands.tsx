@@ -19,12 +19,10 @@ export function BrandsPage() {
       breadcrumbTrail={["Master Data", "Brands"]}
       newButtonLabel="+ New Brand"
       hideQuickAdd
-      searchPlaceholder="Search name or code or Sr. No..."
-      columnHeaders={["Name", "Code", "Description", "Status"]}
+      searchPlaceholder="Search name or Sr. No..."
+      columnHeaders={["Name", "Status"]}
       columns={[
         { header: "Name", render: (b) => <span className="cell-primary">{b.name}</span> },
-        { header: "Code", render: (b) => b.code },
-        { header: "Description", render: (b) => dash(b.description) },
         { header: "Status", render: (b) => <StatusBadge status={b.status} /> },
       ]}
       importHeaders={[

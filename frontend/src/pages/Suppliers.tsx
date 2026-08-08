@@ -31,6 +31,7 @@ import {
   apiGet,
   apiPatch,
   apiPost,
+  apiPostMultipart,
   downloadExport,
   toQueryString,
 } from "@/lib/api";
@@ -159,6 +160,7 @@ export function SuppliersPage() {
   const tableBodyRef = useRef<HTMLTableSectionElement>(null);
 
   /* Filters */
+  const [filterOpen, setFilterOpen] = useState(false);
   const [categoryFilter, setCategoryFilter] = useState<string | null>(null);
   const [subCategoryFilter, setSubCategoryFilter] = useState<string | null>(null);
   const [productFilter, setProductFilter] = useState<string | null>(null);
@@ -170,6 +172,21 @@ export function SuppliersPage() {
   const [statusFilter, setStatusFilter] = useState("");
   const [potentialFilter, setPotentialFilter] = useState("");
   const [visitedFilter, setVisitedFilter] = useState("");
+
+  const handleResetFilters = () => {
+    setCategoryFilter(null);
+    setSubCategoryFilter(null);
+    setProductFilter(null);
+    setCountryFilter(null);
+    setStateFilter(null);
+    setCityFilter(null);
+    setSupplierTypeFilter("");
+    setGradeFilter("");
+    setStatusFilter("");
+    setPotentialFilter("");
+    setVisitedFilter("");
+    setCurrentPage(1);
+  };
 
   const [importSummary, setImportSummary] = useState<ImportSummary | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
@@ -194,6 +211,51 @@ export function SuppliersPage() {
   const [wechatSameAsCalling, setWechatSameAsCalling] = useState(false);
   const [callingNumberError, setCallingNumberError] = useState<string | null>(null);
   const [defaultChinaId, setDefaultChinaId] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [uploadingMedia, setUploadingMedia] = useState(false);
+
+  const mediaList = useMemo(() => {
+    return form.visit_media_input
+      .split(",")
+      .map((u) => u.trim())
+      .filter(Boolean);
+  }, [form.visit_media_input]);
+
+  const addMediaUrls = (newUrls: string[]) => {
+    const combined = [...mediaList, ...newUrls];
+    const unique = Array.from(new Set(combined));
+    setField("visit_media_input", unique.join(", "));
+  };
+
+  const removeMediaUrl = (urlToRemove: string) => {
+    const filtered = mediaList.filter((u) => u !== urlToRemove);
+    setField("visit_media_input", filtered.join(", "));
+  };
+
+  const handleMediaFileUpload = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    setUploadingMedia(true);
+    const uploadedUrls: string[] = [];
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      try {
+        const formData = new FormData();
+        formData.append("file", file);
+        const res = await apiPostMultipart<{ url: string }>("/suppliers/upload-media", formData);
+        if (res.data?.url) {
+          uploadedUrls.push(res.data.url);
+        }
+      } catch (err) {
+        console.warn("Failed to upload media to Supabase storage:", err);
+      }
+    }
+
+    if (uploadedUrls.length > 0) {
+      addMediaUrls(uploadedUrls);
+    }
+    setUploadingMedia(false);
+  };
 
   const fetchChinaId = useCallback(async (): Promise<string | null> => {
     try {
@@ -702,6 +764,7 @@ export function SuppliersPage() {
     }
 
     setError(null);
+    setSaving(true);
     try {
       const { stateId, cityId } = await resolveCustomGeography(formCountryId);
       if (!stateId && !formStateCustomText.trim()) {
@@ -738,6 +801,8 @@ export function SuppliersPage() {
     } catch (err) {
       setError(err);
       return false;
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -880,407 +945,102 @@ export function SuppliersPage() {
 
   return (
     <AppShell activeKey="suppliers" pageClassName="page-suppliers">
-      <main className="page">
-        <Breadcrumb trail={["Supplier Profiles"]} />
-        <div className="page-header">
-          <div>
-            <h1>Supplier Profiles</h1>
-            <div className="page-subtitle">
-              Supplier directory, contacts, product categories, and sourcing status.
-            </div>
-          </div>
-          <div className="page-header-actions" style={{ display: "flex", gap: "10px", alignItems: "center" }}>
-            <Can permission="supplier.import">
-              <ImpExpDropdown
-                apiBase="/suppliers"
-                entityName="supplier"
-                importHeaders={SUPPLIER_IMPORT_HEADERS}
-                onSummary={setImportSummary}
-                onError={setImportError}
-                onComplete={() => reload()}
-                onExportCsv={() => handleExport("csv")}
-              />
-            </Can>
-            <BulkActionsDropdown
-              selectedCount={selectedIds.length}
-              onBulkDelete={canDelete ? handleBulkDelete : undefined}
-            />
-            {canCreate && (
-              <button className="btn btn-quick-add" onClick={() => openModal(null, "quick")}>
-                + QUICK ADD
-              </button>
-            )}
-            {canCreate && (
-              <button className="btn btn-add-new" onClick={() => openModal(null, "full")}>
-                + ADD NEW
-              </button>
-            )}
-          </div>
-        </div>
-        <Banner error={error} />
-        <ImportSummaryPanel summary={importSummary} error={importError} />
-
-        <div className="card">
-          <div className="toolbar">
-            <input
-              type="text"
-              placeholder="Search company name or Sr. No..."
-              value={searchInput}
-              onChange={(e) => setSearchInput(e.target.value)}
-            />
-            <div style={{ minWidth: "200px" }}>
-              <SearchableDropdown
-                value={categoryFilter}
-                onChange={(v) => {
-                  setCurrentPage(1);
-                  setCategoryFilter(v);
-                }}
-                placeholder="Filter: Product Category"
-                fetchOptions={searchFetcher("/masters/product-categories")}
-              />
-            </div>
-            <div style={{ minWidth: "200px" }}>
-              <SearchableDropdown
-                value={subCategoryFilter}
-                onChange={(v) => {
-                  setCurrentPage(1);
-                  setSubCategoryFilter(v);
-                }}
-                placeholder="Filter: Key Strength Sub-Category"
-                fetchOptions={searchFetcher("/masters/product-sub-categories")}
-              />
-            </div>
-            <div style={{ minWidth: "200px" }}>
-              <SearchableDropdown
-                value={productFilter}
-                onChange={(v) => {
-                  setCurrentPage(1);
-                  setProductFilter(v);
-                }}
-                placeholder="Filter: Product Supplied"
-                fetchOptions={productFetcher}
-              />
-            </div>
-            <div style={{ minWidth: "180px" }}>
-              <SearchableDropdown
-                value={countryFilter}
-                onChange={(v) => {
-                  setCountryFilter(v);
-                  // Narrowing the country invalidates province and city.
-                  setStateFilter(null);
-                  setCityFilter(null);
-                  setCurrentPage(1);
-                }}
-                placeholder="Filter: Country"
-                fetchOptions={searchFetcher("/masters/countries")}
-              />
-            </div>
-            <div style={{ minWidth: "180px" }}>
-              <SearchableDropdown
-                value={stateFilter}
-                onChange={(v) => {
-                  setStateFilter(v);
-                  setCityFilter(null);
-                  setCurrentPage(1);
-                }}
-                placeholder="Filter: Province"
-                fetchOptions={searchFetcher("/masters/states", (): Record<string, string> =>
-                  countryFilter ? { country_id: countryFilter } : {}
-                )}
-              />
-            </div>
-            <div style={{ minWidth: "180px" }}>
-              <SearchableDropdown
-                value={cityFilter}
-                onChange={(v) => {
-                  setCityFilter(v);
-                  setCurrentPage(1);
-                }}
-                placeholder="Filter: City"
-                fetchOptions={searchFetcher("/masters/cities", (): Record<string, string> =>
-                  stateFilter ? { state_id: stateFilter } : {}
-                )}
-              />
-            </div>
-            <select
-              value={supplierTypeFilter}
-              onChange={(e) => {
-                setCurrentPage(1);
-                setSupplierTypeFilter(e.target.value);
-              }}
-            >
-              <option value="">Supplier Type: All</option>
-              <option value="manufacturer">Manufacturer</option>
-              <option value="trader">Trader</option>
-            </select>
-            <select
-              value={gradeFilter}
-              onChange={(e) => {
-                setCurrentPage(1);
-                setGradeFilter(e.target.value);
-              }}
-            >
-              <option value="">Grade: All</option>
-              <option value="A">A</option>
-              <option value="B">B</option>
-              <option value="C">C</option>
-            </select>
-            <select
-              value={statusFilter}
-              onChange={(e) => {
-                setCurrentPage(1);
-                setStatusFilter(e.target.value);
-              }}
-            >
-              <option value="">Current Status: All</option>
-              <option value="new">New</option>
-              <option value="existing">Existing</option>
-            </select>
-            <select
-              value={potentialFilter}
-              onChange={(e) => {
-                setCurrentPage(1);
-                setPotentialFilter(e.target.value);
-              }}
-            >
-              <option value="">Potential: All</option>
-              <option value="yes">Yes</option>
-              <option value="no">No</option>
-            </select>
-            <select
-              value={visitedFilter}
-              onChange={(e) => {
-                setCurrentPage(1);
-                setVisitedFilter(e.target.value);
-              }}
-            >
-              <option value="">Visited Factory/Office: All</option>
-              <option value="true">Yes</option>
-              <option value="false">No</option>
-            </select>
-          </div>
-
-          <div className="table-scroll">
-            <table>
-              <thead>
-                <tr>
-                  <th>
-                    <input
-                      type="checkbox"
-                      checked={rows.length > 0 && rows.every((r) => selectedIds.includes(r.id))}
-                      onChange={(e) => {
-                        if (e.target.checked) setSelectedIds(rows.map((r) => r.id));
-                        else setSelectedIds([]);
-                      }}
-                      style={{ cursor: "pointer", width: "16px", height: "16px" }}
-                    />
-                  </th>
-                  <th>Sr. No.</th>
-                  <th>Company Name</th>
-                  <th>Product Category</th>
-                  <th>Key Strength Sub-Category</th>
-                  <th>Products Supplied</th>
-                  <th>Secondary Products</th>
-                  <th>Country</th>
-                  <th>City, Province</th>
-                  <th>Brand</th>
-                  <th>Supplier Type</th>
-                  <th>Current Status</th>
-                  <th>Grade</th>
-                  <th>Potential</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody ref={tableBodyRef} data-names-version={namesVersion}>
-                {loading ? (
-                  <TableMessageRow colSpan={15}>Loading...</TableMessageRow>
-                ) : rows.length === 0 ? (
-                  <TableMessageRow colSpan={15}>No suppliers found.</TableMessageRow>
-                ) : (
-                  rows.map((s, index) => (
-                    <tr key={s.id}>
-                      <td>
-                        <input
-                          type="checkbox"
-                          className="row-select"
-                          checked={selectedIds.includes(s.id)}
-                          onChange={(e) => {
-                            if (e.target.checked) setSelectedIds((prev) => [...prev, s.id]);
-                            else setSelectedIds((prev) => prev.filter((i) => i !== s.id));
-                          }}
-                          style={{ cursor: "pointer", width: "16px", height: "16px" }}
-                        />
-                      </td>
-                      <td className="cell-srno">{startSrNo + index}</td>
-                      <td>
-                        <a
-                          href="#"
-                          onClick={(e) => {
-                            e.preventDefault();
-                            void handleRowEdit(s.id);
-                          }}
-                        >
-                          {s.company_name}
-                        </a>
-                      </td>
-                      <td>{chipList(s.category_ids, "categories")}</td>
-                      <td>{chipList(s.sub_category_ids, "subCategories")}</td>
-                      <td>{chipList(s.product_ids, "products")}</td>
-                      <td>
-                        {s.secondary_products_description ? (
-                          s.secondary_products_description.slice(0, 60)
-                        ) : (
-                          <span className="muted">—</span>
-                        )}
-                      </td>
-                      <td>{resolver.get("countries", s.country_id) || "…"}</td>
-                      <td>
-                        {resolver.get("cities", s.city_id) || "…"},{" "}
-                        {resolver.get("states", s.state_id) || "…"}
-                      </td>
-                      <td>
-                        {s.brand_description ? (
-                          s.brand_description
-                        ) : (
-                          <span className="muted">—</span>
-                        )}
-                      </td>
-                      <td>
-                        {s.supplier_type ? s.supplier_type : <span className="muted">—</span>}
-                      </td>
-                      <td>
-                        <StatusPill value={s.current_status} />
-                      </td>
-                      <td>
-                        {canUpdate ? (
-                          <select
-                            className="inline-select"
-                            defaultValue={s.supplier_grade || ""}
-                            onChange={(e) =>
-                              handleInlineUpdate(`/suppliers/${s.id}/grade`, {
-                                supplier_grade: e.target.value || null,
-                              })
-                            }
-                          >
-                            <option value="">Select</option>
-                            <option value="A">A</option>
-                            <option value="B">B</option>
-                            <option value="C">C</option>
-                          </select>
-                        ) : (
-                          <span>{s.supplier_grade || "—"}</span>
-                        )}
-                      </td>
-                      <td>
-                        {canUpdate ? (
-                          <select
-                            className="inline-select"
-                            defaultValue={s.potential || ""}
-                            onChange={(e) =>
-                              handleInlineUpdate(`/suppliers/${s.id}/potential`, {
-                                potential: e.target.value || null,
-                              })
-                            }
-                          >
-                            <option value="">Select</option>
-                            <option value="yes">Yes</option>
-                            <option value="no">No</option>
-                          </select>
-                        ) : (
-                          <span>{s.potential ? s.potential.toUpperCase() : "—"}</span>
-                        )}
-                      </td>
-                      <td className="actions">
-                        {canUpdate && (
-                          <button className="btn btn-small" onClick={() => handleRowEdit(s.id)}>
-                            Edit
-                          </button>
-                        )}
-                        {canDelete && (
-                          <button
-                            className="btn btn-small btn-danger"
-                            onClick={() => handleRowDelete(s.id)}
-                          >
-                            Delete
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-          <div className="pagination">
-            <Pagination
-              pagination={pagination}
-              pageSize={pageSize}
-              onPageChange={setCurrentPage}
-              onPageSizeChange={(size) => {
-                setPageSize(size);
-                setCurrentPage(1);
-              }}
-            />
-          </div>
-        </div>
-      </main>
-
-      {/* ============ CREATE / EDIT SUPPLIER MODAL ============ */}
-      {modalOpen && (
-        <div
-          className="modal-backdrop"
-          style={{ display: "flex" }}
-          onClick={(e) => {
-            if (e.target === e.currentTarget) closeModal();
-          }}
-        >
-          <div className="modal-card" style={{ maxWidth: "820px" }}>
-            <div className="modal-header">
-              <h2>
-                {modalMode === "quick"
-                  ? "Quick Add Supplier"
-                  : currentSupplierId && form.company_name
-                    ? `Edit ${form.company_name}`
-                    : "New Supplier"}
-              </h2>
-              <button className="modal-close" onClick={closeModal}>
-                &times;
-              </button>
-            </div>
-
-            {modalMode === "full" && (
-              <div className="toolbar" style={{ marginBottom: "var(--space-3)" }}>
-                <button
-                  type="button"
-                  className={`btn btn-small ${modalTab === "first" ? "btn-primary" : ""}`}
-                  onClick={() => setModalTab("first")}
-                >
-                  1. First Data Form
-                </button>
-                <button
-                  type="button"
-                  className={`btn btn-small ${modalTab === "second" ? "btn-primary" : ""}`}
-                  onClick={() => setModalTab("second")}
-                >
-                  2. Main Profile
-                </button>
-                {currentSupplierId && (
-                  <button
-                    type="button"
-                    className={`btn btn-small ${modalTab === "contacts" ? "btn-primary" : ""}`}
-                    style={{ display: "inline-flex" }}
-                    onClick={() => setModalTab("contacts")}
-                  >
-                    3. Contacts
-                  </button>
-                )}
+      {modalOpen && modalMode === "full" ? (
+        <main className="page" style={{ width: "100%", padding: "20px 24px" }}>
+          {/* Header Bar with Back Button */}
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
+            <div>
+              <h1 style={{ fontSize: "22px", fontWeight: 700, color: "#0f172a", margin: 0 }}>
+                {currentSupplierId ? "Edit Supplier" : "Add Supplier"}
+              </h1>
+              <div style={{ fontSize: "13px", color: "#64748b", marginTop: "2px" }}>
+                Complete the supplier details below.
               </div>
-            )}
+            </div>
+            <button
+              type="button"
+              className="btn"
+              onClick={closeModal}
+              style={{
+                background: "#ffffff",
+                border: "1px solid #cbd5e1",
+                color: "#475569",
+                fontWeight: 600,
+                fontSize: "13px",
+                padding: "8px 18px",
+                borderRadius: "6px",
+                cursor: "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+              }}
+            >
+              ← BACK TO SUPPLIERS
+            </button>
+          </div>
+
+          <div className="card" style={{ background: "#ffffff", padding: "28px", borderRadius: "10px", border: "1px solid #e2e8f0" }}>
+            {/* TAB NAVIGATION BAR */}
+            <div className="toolbar" style={{ marginBottom: "24px", borderBottom: "1px solid #e2e8f0", paddingBottom: "16px", display: "flex", gap: "10px" }}>
+              <button
+                type="button"
+                className={`btn ${modalTab === "first" ? "btn-primary" : ""}`}
+                style={{
+                  background: modalTab === "first" ? "#0061f2" : "#f1f5f9",
+                  color: modalTab === "first" ? "#ffffff" : "#475569",
+                  fontWeight: 600,
+                  fontSize: "13.5px",
+                  padding: "9px 22px",
+                  borderRadius: "6px",
+                  border: "none",
+                  cursor: "pointer",
+                }}
+                onClick={() => setModalTab("first")}
+              >
+                1. First Data Form (Supplier)
+              </button>
+              <button
+                type="button"
+                className={`btn ${modalTab === "second" ? "btn-primary" : ""}`}
+                style={{
+                  background: modalTab === "second" ? "#0061f2" : "#f1f5f9",
+                  color: modalTab === "second" ? "#ffffff" : "#475569",
+                  fontWeight: 600,
+                  fontSize: "13.5px",
+                  padding: "9px 22px",
+                  borderRadius: "6px",
+                  border: "none",
+                  cursor: "pointer",
+                }}
+                onClick={() => setModalTab("second")}
+              >
+                2. Main Profile Form
+              </button>
+              {currentSupplierId && (
+                <button
+                  type="button"
+                  className={`btn ${modalTab === "contacts" ? "btn-primary" : ""}`}
+                  style={{
+                    background: modalTab === "contacts" ? "#0061f2" : "#f1f5f9",
+                    color: modalTab === "contacts" ? "#ffffff" : "#475569",
+                    fontWeight: 600,
+                    fontSize: "13.5px",
+                    padding: "9px 22px",
+                    borderRadius: "6px",
+                    border: "none",
+                    cursor: "pointer",
+                  }}
+                  onClick={() => setModalTab("contacts")}
+                >
+                  3. Contacts
+                </button>
+              )}
+            </div>
 
             <form onSubmit={handleSubmit}>
               {/* TAB 1 */}
               <div style={{ display: modalTab === "first" ? "block" : "none" }}>
-                <div className="form-grid">
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "18px", marginBottom: "24px" }}>
                   <div className="field">
                     <label>Name of Company *</label>
                     <SearchableDropdown
@@ -1308,12 +1068,11 @@ export function SuppliersPage() {
                     <option value="">Select</option>
                     <option value="manufacturer">Manufacturer</option>
                     <option value="trader">Trader</option>
-                    <option value="agent">Agent</option>
-                    <option value="exporter">Exporter</option>
-                    <option value="wholesaler">Wholesaler</option>
-                    <option value="distributor">Distributor</option>
+                    <option value="dealer">Dealer</option>
                   </SelectField>
-                  <TextAreaField id="brand_description" label="Brand of Supplier's Products" placeholder="Description..." value={form.brand_description} onChange={(v) => setField("brand_description", v)} />
+                  <div className="field" style={{ gridColumn: "span 3" }}>
+                    <TextAreaField id="brand_description" label="Brand of Supplier's Products" rows={2} placeholder="Description..." value={form.brand_description} onChange={(v) => setField("brand_description", v)} />
+                  </div>
                   <div className="field">
                     <label>Country *</label>
                     <SearchableDropdown
@@ -1374,16 +1133,37 @@ export function SuppliersPage() {
                   </div>
                 </div>
 
-                <div className="section-title">Primary Contact</div>
-                <div className="form-grid">
-                  <SelectField id="contact_salutation" label="Salutation" value={form.contact_salutation} onChange={(v) => setField("contact_salutation", v)}>
-                    <option value="">—</option>
-                    <option value="Mr.">Mr.</option>
-                    <option value="Mrs.">Mrs.</option>
-                    <option value="Ms.">Ms.</option>
-                  </SelectField>
-                  <TextField id="contact_full_name" label="Full Name" maxLength={150} value={form.contact_full_name} onChange={(v) => setField("contact_full_name", v)} />
-                  <TextField id="contact_designation" label="Designation" maxLength={150} value={form.contact_designation} onChange={(v) => setField("contact_designation", v)} />
+                <div style={{ marginTop: "28px", marginBottom: "18px", borderTop: "1px solid #e2e8f0", paddingTop: "20px" }}>
+                  <h3 style={{ fontSize: "16px", fontWeight: 700, margin: 0, color: "#0f172a" }}>
+                    Primary Contact Information
+                  </h3>
+                </div>
+
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "18px" }}>
+                  <div className="field">
+                    <label>Mr. / Mrs / Ms - Full Name</label>
+                    <div style={{ display: "flex", gap: "8px" }}>
+                      <select
+                        value={form.contact_salutation}
+                        onChange={(e) => setField("contact_salutation", e.target.value)}
+                        style={{ width: "85px", padding: "9px 8px", borderRadius: "6px", border: "1px solid #cbd5e1" }}
+                      >
+                        <option value="">—</option>
+                        <option value="Mr.">Mr.</option>
+                        <option value="Mrs.">Mrs.</option>
+                        <option value="Ms.">Ms.</option>
+                      </select>
+                      <input
+                        type="text"
+                        className="input"
+                        placeholder="Full Name"
+                        value={form.contact_full_name}
+                        onChange={(e) => setField("contact_full_name", e.target.value)}
+                        style={{ flex: 1 }}
+                      />
+                    </div>
+                  </div>
+                  <TextField id="contact_designation" label="Designation" placeholder="e.g. Sales Manager" maxLength={150} value={form.contact_designation} onChange={(v) => setField("contact_designation", v)} />
 
                   <div className="field">
                     <label htmlFor="contact_calling_number">Calling Number</label>
@@ -1468,40 +1248,10 @@ export function SuppliersPage() {
                     />
                   </div>
 
-                  <TextField id="emails_input" label="Email ID(s)" placeholder="comma-separated for multiple" hint="Separate multiple emails with commas." value={form.emails_input} onChange={(v) => setField("emails_input", v)} />
-                  {modalMode === "quick" && (
-                    <div className="field" style={{ gridColumn: "span 2", display: "flex", alignItems: "flex-start", paddingTop: "24px" }}>
-                      <button
-                        type="submit"
-                        className="btn btn-primary"
-                        style={{ minWidth: "180px", padding: "10px 24px", justifyContent: "center" }}
-                      >
-                        Save
-                      </button>
-                    </div>
-                  )}
-                </div>
-
-                {modalMode === "full" && (
-                  <div className="form-actions" style={{ borderTop: "none", display: "flex", gap: "12px", width: "100%" }}>
-                    <button
-                      type="button"
-                      className="btn btn-add-new"
-                      style={{ flex: 1, justifyContent: "center" }}
-                      onClick={(e) => handleSaveAndContinue(e, "second")}
-                    >
-                      Save &amp; Continue
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-quick-add"
-                      style={{ flex: 1, justifyContent: "center" }}
-                      onClick={handleSaveAndExit}
-                    >
-                      Save &amp; Exit
-                    </button>
+                  <div className="field">
+                    <TextField id="emails_input" label="Email ID (multiple emails)" placeholder="comma-separated for multiple" hint="Separate multiple emails with commas." value={form.emails_input} onChange={(v) => setField("emails_input", v)} />
                   </div>
-                )}
+                </div>
               </div>
 
               {/* TAB 2 */}
@@ -1572,7 +1322,6 @@ export function SuppliersPage() {
                     value={form.visited_factory_office}
                     onChange={(v) => {
                       setField("visited_factory_office", v);
-                      // Remarks only make sense for a visit that happened.
                       if (v !== "true") setField("visit_remarks", "");
                     }}
                   >
@@ -1583,163 +1332,876 @@ export function SuppliersPage() {
                 {visited && (
                   <TextAreaField id="visit_remarks" label="Visit Remarks" value={form.visit_remarks} onChange={(v) => setField("visit_remarks", v)} />
                 )}
-                <TextField id="visit_media_input" label="Visit Photos / Videos (URLs)" placeholder="comma-separated URLs" value={form.visit_media_input} onChange={(v) => setField("visit_media_input", v)} />
+
+                {/* Visit Photos / Videos Upload & Supabase Storage Gallery */}
+                <div className="field" style={{ marginTop: "16px", marginBottom: "16px" }}>
+                  <label style={{ fontSize: "13px", fontWeight: 600, color: "#0f172a", marginBottom: "6px", display: "block" }}>
+                    Visit Photos &amp; Videos (Supabase Storage)
+                  </label>
+                  
+                  <div style={{ display: "flex", gap: "12px", alignItems: "center", marginBottom: "12px" }}>
+                    <input
+                      type="file"
+                      accept="image/*,video/*"
+                      multiple
+                      id="supplier_media_upload_input"
+                      style={{ display: "none" }}
+                      onChange={(e) => {
+                        void handleMediaFileUpload(e.target.files);
+                        e.target.value = "";
+                      }}
+                    />
+                    <label
+                      htmlFor="supplier_media_upload_input"
+                      className="btn btn-secondary"
+                      style={{
+                        padding: "9px 18px",
+                        cursor: uploadingMedia ? "not-allowed" : "pointer",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "8px",
+                        fontWeight: 600,
+                        fontSize: "13px",
+                        background: "#f1f5f9",
+                        border: "1px solid #cbd5e1",
+                        color: "#0f172a",
+                        borderRadius: "6px",
+                        opacity: uploadingMedia ? 0.7 : 1,
+                      }}
+                    >
+                      {uploadingMedia ? "Uploading to Supabase..." : "📁 Select Photos / Videos"}
+                    </label>
+                    <span style={{ fontSize: "12px", color: "#64748b" }}>
+                      Upload images or videos directly to Supabase storage.
+                    </span>
+                  </div>
+
+                  {/* Media Gallery Thumbnails Grid */}
+                  {mediaList.length > 0 && (
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "repeat(auto-fill, minmax(110px, 1fr))",
+                        gap: "12px",
+                        padding: "12px",
+                        background: "#f8fafc",
+                        border: "1px solid #e2e8f0",
+                        borderRadius: "8px",
+                        marginBottom: "12px",
+                      }}
+                    >
+                      {mediaList.map((url, idx) => {
+                        const isVideo = url.match(/\.(mp4|webm|ogg|mov)$/i) || url.startsWith("data:video");
+                        return (
+                          <div
+                            key={`${url}-${idx}`}
+                            style={{
+                              position: "relative",
+                              width: "110px",
+                              height: "110px",
+                              borderRadius: "8px",
+                              overflow: "hidden",
+                              border: "1px solid #cbd5e1",
+                              background: "#ffffff",
+                              boxShadow: "0 2px 4px rgba(0,0,0,0.05)",
+                            }}
+                          >
+                            {isVideo ? (
+                              <div style={{ width: "100%", height: "100%", position: "relative", background: "#0f172a" }}>
+                                <video src={url} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                                <div
+                                  style={{
+                                    position: "absolute",
+                                    inset: 0,
+                                    display: "flex",
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                    background: "rgba(0,0,0,0.3)",
+                                    color: "#ffffff",
+                                    fontSize: "20px",
+                                  }}
+                                >
+                                  🎬
+                                </div>
+                              </div>
+                            ) : (
+                              <img src={url} alt={`Media ${idx + 1}`} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => removeMediaUrl(url)}
+                              title="Delete media"
+                              style={{
+                                position: "absolute",
+                                top: "4px",
+                                right: "4px",
+                                width: "22px",
+                                height: "22px",
+                                borderRadius: "50%",
+                                background: "rgba(239, 68, 68, 0.9)",
+                                color: "#ffffff",
+                                border: "none",
+                                cursor: "pointer",
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                fontSize: "12px",
+                                fontWeight: 700,
+                              }}
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  <TextField
+                    id="visit_media_input"
+                    label="Media URLs (comma-separated URLs)"
+                    placeholder="https://... (Auto-filled on upload or paste manually)"
+                    value={form.visit_media_input}
+                    onChange={(v) => setField("visit_media_input", v)}
+                  />
+                </div>
                 <TextAreaField id="overall_remarks" label="Overall Remarks / Key Strengths" value={form.overall_remarks} onChange={(v) => setField("overall_remarks", v)} />
                 <SelectField id="is_active" label="Status" value={form.is_active} onChange={(v) => setField("is_active", v)}>
                   <option value="true">Active</option>
                   <option value="false">Inactive</option>
                 </SelectField>
+              </div>
 
-                <div className="form-actions" style={{ display: "flex", gap: "12px", width: "100%" }}>
+              {/* TAB 3: Contacts (only once the supplier exists) */}
+              <div style={{ display: modalTab === "contacts" ? "block" : "none" }}>
+                <div className="card-header">
+                  <div className="section-title" style={{ margin: 0 }}>
+                    Contact Persons
+                  </div>
                   <button
                     type="button"
-                    className="btn btn-add-new"
-                    style={{ flex: 1, justifyContent: "center" }}
-                    onClick={(e) => handleSaveAndContinue(e, "contacts")}
+                    className="btn btn-small btn-primary"
+                    onClick={() => openContactForm(null)}
                   >
-                    Save &amp; Continue
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-quick-add"
-                    style={{ flex: 1, justifyContent: "center" }}
-                    onClick={handleSaveAndExit}
-                  >
-                    Save &amp; Exit
+                    + Add Contact
                   </button>
                 </div>
+                {contactFormOpen && (
+                  <div
+                    style={{
+                      border: "1px solid var(--color-border)",
+                      borderRadius: "var(--radius-sm)",
+                      padding: "var(--space-3)",
+                      marginBottom: "var(--space-3)",
+                    }}
+                  >
+                    <form onSubmit={handleContactSubmit}>
+                      <div className="form-grid">
+                        <SelectField id="c_salutation" label="Salutation" value={contactForm.salutation} onChange={(v) => setContactForm((f) => ({ ...f, salutation: v }))}>
+                          <option value="">—</option>
+                          <option value="Mr.">Mr.</option>
+                          <option value="Mrs.">Mrs.</option>
+                          <option value="Ms.">Ms.</option>
+                        </SelectField>
+                        <TextField id="c_person_name" label="Person Name *" required maxLength={150} value={contactForm.person_name} onChange={(v) => setContactForm((f) => ({ ...f, person_name: v }))} />
+                        <TextField id="c_designation" label="Designation" maxLength={150} value={contactForm.designation} onChange={(v) => setContactForm((f) => ({ ...f, designation: v }))} />
+                        <TextField id="c_handling_territory" label="Handling Territory" maxLength={150} placeholder="local, Export India, Export Africa..." value={contactForm.handling_territory} onChange={(v) => setContactForm((f) => ({ ...f, handling_territory: v }))} />
+                        <div className="field">
+                          <label>Country</label>
+                          <SearchableDropdown
+                            value={contactCountryId}
+                            onChange={setContactCountryId}
+                            placeholder="Search country..."
+                            fetchOptions={searchFetcher("/masters/countries")}
+                            fetchLabelForValue={fetchNameLabel("/masters/countries")}
+                          />
+                        </div>
+                        <TextField id="c_calling_number" label="Calling Number" maxLength={20} value={contactForm.calling_number} onChange={(v) => setContactForm((f) => ({ ...f, calling_number: v }))} />
+                        <TextField id="c_whatsapp_number" label="WhatsApp Number" maxLength={20} value={contactForm.whatsapp_number} onChange={(v) => setContactForm((f) => ({ ...f, whatsapp_number: v }))} />
+                        <TextField id="c_wechat_number" label="WeChat Number" maxLength={20} value={contactForm.wechat_number} onChange={(v) => setContactForm((f) => ({ ...f, wechat_number: v }))} />
+                        <TextField id="c_email" label="Email" type="email" maxLength={255} value={contactForm.email} onChange={(v) => setContactForm((f) => ({ ...f, email: v }))} />
+                      </div>
+                      <div className="form-actions">
+                        <button type="submit" className="btn btn-primary btn-small">
+                          Save Contact
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-small"
+                          onClick={() => setContactFormOpen(false)}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </form>
+                  </div>
+                )}
+                <div className="table-scroll">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Name / Designation</th>
+                        <th>Calling / WhatsApp</th>
+                        <th>WeChat / Email</th>
+                        <th>Handling Territory</th>
+                        <th>Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {contacts.length === 0 ? (
+                        <TableMessageRow colSpan={5}>No contacts yet.</TableMessageRow>
+                      ) : (
+                        contacts.map((c) => (
+                          <tr key={c.id}>
+                            <td>
+                              {c.salutation || ""} {c.person_name}
+                              {c.designation && (
+                                <>
+                                  <br />
+                                  <span className="cell-secondary">{c.designation}</span>
+                                </>
+                              )}
+                              {c.is_primary && (
+                                <span className="badge badge-neutral"> Primary</span>
+                              )}
+                            </td>
+                            <td>
+                              {[c.calling_number, c.whatsapp_number].filter(Boolean).join(" / ") ||
+                                "—"}
+                            </td>
+                            <td>
+                              {[c.wechat_number, c.email].filter(Boolean).join(" / ") || "—"}
+                            </td>
+                            <td>{c.handling_territory || "—"}</td>
+                            <td className="actions">
+                              <button
+                                className="btn btn-small"
+                                onClick={() => openContactForm(c)}
+                              >
+                                Edit
+                              </button>
+                              {!c.is_primary && (
+                                <button
+                                  className="btn btn-small btn-danger"
+                                  onClick={() => handleContactDelete(c.id)}
+                                >
+                                  Delete
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {Boolean(error) && (
+                <div style={{ marginTop: "20px" }}>
+                  <Banner error={error} />
+                </div>
+              )}
+
+              {/* FULL PAGE FORM FOOTER ACTION BUTTONS */}
+              <div
+                style={{
+                  paddingTop: "24px",
+                  marginTop: "28px",
+                  borderTop: "1px solid #e2e8f0",
+                  display: "flex",
+                  gap: "14px",
+                }}
+              >
+                {modalTab === "first" && (
+                  <>
+                    <button
+                      type="button"
+                      className="btn btn-add-new"
+                      disabled={saving}
+                      style={{ flex: 1, justifyContent: "center", background: "#0061f2", color: "#ffffff", padding: "12px", borderRadius: "6px", fontWeight: 600, fontSize: "14px", border: "none", opacity: saving ? 0.7 : 1 }}
+                      onClick={(e) => handleSaveAndContinue(e, "second")}
+                    >
+                      {saving ? "Saving..." : "Save & Continue"}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-quick-add"
+                      disabled={saving}
+                      style={{ flex: 1, justifyContent: "center", background: "#eab308", color: "#ffffff", padding: "12px", borderRadius: "6px", fontWeight: 600, fontSize: "14px", border: "none", opacity: saving ? 0.7 : 1 }}
+                      onClick={handleSaveAndExit}
+                    >
+                      {saving ? "Saving..." : "Save & Exit"}
+                    </button>
+                  </>
+                )}
+
+                {modalTab === "second" && (
+                  <>
+                    <button
+                      type="button"
+                      className="btn btn-add-new"
+                      disabled={saving}
+                      style={{ flex: 1, justifyContent: "center", background: "#0061f2", color: "#ffffff", padding: "12px", borderRadius: "6px", fontWeight: 600, fontSize: "14px", border: "none", opacity: saving ? 0.7 : 1 }}
+                      onClick={(e) => handleSaveAndContinue(e, "contacts")}
+                    >
+                      {saving ? "Saving..." : "Save & Continue"}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-quick-add"
+                      disabled={saving}
+                      style={{ flex: 1, justifyContent: "center", background: "#eab308", color: "#ffffff", padding: "12px", borderRadius: "6px", fontWeight: 600, fontSize: "14px", border: "none", opacity: saving ? 0.7 : 1 }}
+                      onClick={handleSaveAndExit}
+                    >
+                      {saving ? "Saving..." : "Save & Exit"}
+                    </button>
+                  </>
+                )}
+
+                {modalTab === "contacts" && (
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    style={{ flex: 1, justifyContent: "center", padding: "12px", fontSize: "14px" }}
+                    onClick={closeModal}
+                  >
+                    Done
+                  </button>
+                )}
               </div>
             </form>
+          </div>
+        </main>
+      ) : (
+        <main className="page">
+          <Breadcrumb trail={["Supplier Profiles"]} />
+          <div className="page-header">
+            <div>
+              <h1>Supplier Profiles</h1>
+              <div className="page-subtitle">
+                Supplier directory, contacts, product categories, and sourcing status.
+              </div>
+            </div>
+            <div className="page-header-actions" style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+              <button
+                type="button"
+                className="btn"
+                style={{
+                  background: filterOpen ? "#0061f2" : "#475569",
+                  color: "#ffffff",
+                  padding: "8px 14px",
+                  borderRadius: "6px",
+                  border: "none",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  cursor: "pointer",
+                  boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
+                }}
+                onClick={() => setFilterOpen((v) => !v)}
+                title="Toggle Filter Options"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
+                </svg>
+              </button>
+              {canCreate && (
+                <button className="btn btn-quick-add" onClick={() => openModal(null, "quick")}>
+                  + QUICK ADD
+                </button>
+              )}
+              {canCreate && (
+                <button className="btn btn-add-new" onClick={() => openModal(null, "full")}>
+                  + ADD NEW
+                </button>
+              )}
+              <Can permission="supplier.import">
+                <ImpExpDropdown
+                  apiBase="/suppliers"
+                  entityName="supplier"
+                  importHeaders={SUPPLIER_IMPORT_HEADERS}
+                  onSummary={setImportSummary}
+                  onError={setImportError}
+                  onComplete={() => reload()}
+                  onExportCsv={() => handleExport("csv")}
+                />
+              </Can>
+              <BulkActionsDropdown
+                selectedCount={selectedIds.length}
+                onBulkDelete={canDelete ? handleBulkDelete : undefined}
+              />
+            </div>
+          </div>
+          <Banner error={error} />
+          <ImportSummaryPanel summary={importSummary} error={importError} />
 
-            {/* TAB 3: Contacts (only once the supplier exists) */}
-            <div style={{ display: modalTab === "contacts" ? "block" : "none" }}>
-              <div className="card-header">
-                <div className="section-title" style={{ margin: 0 }}>
-                  Contact Persons
+          {/* TOGGLABLE TOP FILTER PANEL */}
+          {filterOpen && (
+            <div
+              className="card"
+              style={{
+                background: "#ffffff",
+                padding: "20px",
+                borderRadius: "10px",
+                border: "1px solid #cbd5e1",
+                marginBottom: "16px",
+                boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.05)",
+              }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px" }}>
+                <div style={{ fontWeight: 600, fontSize: "14px", color: "#0f172a", display: "flex", alignItems: "center", gap: "6px" }}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
+                  </svg>
+                  Filter Options
                 </div>
                 <button
                   type="button"
-                  className="btn btn-small btn-primary"
-                  onClick={() => openContactForm(null)}
+                  className="btn btn-small"
+                  style={{ background: "#f1f5f9", color: "#475569", border: "1px solid #cbd5e1", borderRadius: "6px", cursor: "pointer", fontWeight: 600 }}
+                  onClick={handleResetFilters}
                 >
-                  + Add Contact
+                  Reset Filters
                 </button>
               </div>
-              {contactFormOpen && (
-                <div
-                  style={{
-                    border: "1px solid var(--color-border)",
-                    borderRadius: "var(--radius-sm)",
-                    padding: "var(--space-3)",
-                    marginBottom: "var(--space-3)",
-                  }}
-                >
-                  <form onSubmit={handleContactSubmit}>
-                    <div className="form-grid">
-                      <SelectField id="c_salutation" label="Salutation" value={contactForm.salutation} onChange={(v) => setContactForm((f) => ({ ...f, salutation: v }))}>
-                        <option value="">—</option>
-                        <option value="Mr.">Mr.</option>
-                        <option value="Mrs.">Mrs.</option>
-                        <option value="Ms.">Ms.</option>
-                      </SelectField>
-                      <TextField id="c_person_name" label="Person Name *" required maxLength={150} value={contactForm.person_name} onChange={(v) => setContactForm((f) => ({ ...f, person_name: v }))} />
-                      <TextField id="c_designation" label="Designation" maxLength={150} value={contactForm.designation} onChange={(v) => setContactForm((f) => ({ ...f, designation: v }))} />
-                      <TextField id="c_handling_territory" label="Handling Territory" maxLength={150} placeholder="local, Export India, Export Africa..." value={contactForm.handling_territory} onChange={(v) => setContactForm((f) => ({ ...f, handling_territory: v }))} />
-                      <div className="field">
-                        <label>Country</label>
-                        <SearchableDropdown
-                          value={contactCountryId}
-                          onChange={setContactCountryId}
-                          placeholder="Search country..."
-                          fetchOptions={searchFetcher("/masters/countries")}
-                          fetchLabelForValue={fetchNameLabel("/masters/countries")}
-                        />
-                      </div>
-                      <TextField id="c_calling_number" label="Calling Number" maxLength={20} value={contactForm.calling_number} onChange={(v) => setContactForm((f) => ({ ...f, calling_number: v }))} />
-                      <TextField id="c_whatsapp_number" label="WhatsApp Number" maxLength={20} value={contactForm.whatsapp_number} onChange={(v) => setContactForm((f) => ({ ...f, whatsapp_number: v }))} />
-                      <TextField id="c_wechat_number" label="WeChat Number" maxLength={20} value={contactForm.wechat_number} onChange={(v) => setContactForm((f) => ({ ...f, wechat_number: v }))} />
-                      <TextField id="c_email" label="Email" type="email" maxLength={255} value={contactForm.email} onChange={(v) => setContactForm((f) => ({ ...f, email: v }))} />
-                    </div>
-                    <div className="form-actions">
-                      <button type="submit" className="btn btn-primary btn-small">
-                        Save Contact
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn-small"
-                        onClick={() => setContactFormOpen(false)}
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  </form>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: "14px" }}>
+                <div>
+                  <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>Product Category</label>
+                  <SearchableDropdown
+                    value={categoryFilter}
+                    onChange={(v) => {
+                      setCurrentPage(1);
+                      setCategoryFilter(v);
+                    }}
+                    placeholder="Filter: Product Category"
+                    fetchOptions={searchFetcher("/masters/product-categories")}
+                    fetchLabelForValue={fetchNameLabel("/masters/product-categories")}
+                  />
                 </div>
-              )}
-              <div className="table-scroll">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Name / Designation</th>
-                      <th>Calling / WhatsApp</th>
-                      <th>WeChat / Email</th>
-                      <th>Handling Territory</th>
-                      <th>Action</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {contacts.length === 0 ? (
-                      <TableMessageRow colSpan={5}>No contacts yet.</TableMessageRow>
-                    ) : (
-                      contacts.map((c) => (
-                        <tr key={c.id}>
-                          <td>
-                            {c.salutation || ""} {c.person_name}
-                            {c.designation && (
-                              <>
-                                <br />
-                                <span className="cell-secondary">{c.designation}</span>
-                              </>
-                            )}
-                            {c.is_primary && (
-                              <span className="badge badge-neutral"> Primary</span>
-                            )}
-                          </td>
-                          <td>
-                            {[c.calling_number, c.whatsapp_number].filter(Boolean).join(" / ") ||
-                              "—"}
-                          </td>
-                          <td>
-                            {[c.wechat_number, c.email].filter(Boolean).join(" / ") || "—"}
-                          </td>
-                          <td>{c.handling_territory || "—"}</td>
-                          <td className="actions">
-                            <button
-                              className="btn btn-small"
-                              onClick={() => openContactForm(c)}
-                            >
-                              Edit
-                            </button>
-                            {!c.is_primary && (
-                              <button
-                                className="btn btn-small btn-danger"
-                                onClick={() => handleContactDelete(c.id)}
-                              >
-                                Delete
-                              </button>
-                            )}
-                          </td>
-                        </tr>
-                      ))
+                <div>
+                  <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>Key Strength Sub Category</label>
+                  <SearchableDropdown
+                    value={subCategoryFilter}
+                    onChange={(v) => {
+                      setCurrentPage(1);
+                      setSubCategoryFilter(v);
+                    }}
+                    placeholder="Filter: Sub Category"
+                    fetchOptions={searchFetcher("/masters/product-sub-categories")}
+                    fetchLabelForValue={fetchNameLabel("/masters/product-sub-categories")}
+                  />
+                </div>
+                <div>
+                  <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>Product Supplied</label>
+                  <SearchableDropdown
+                    value={productFilter}
+                    onChange={(v) => {
+                      setCurrentPage(1);
+                      setProductFilter(v);
+                    }}
+                    placeholder="Filter: Product"
+                    fetchOptions={productFetcher}
+                    fetchLabelForValue={fetchProductLabel}
+                  />
+                </div>
+                <div>
+                  <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>Country</label>
+                  <SearchableDropdown
+                    value={countryFilter}
+                    onChange={(v) => {
+                      setCountryFilter(v);
+                      setStateFilter(null);
+                      setCityFilter(null);
+                      setCurrentPage(1);
+                    }}
+                    placeholder="Filter: Country"
+                    fetchOptions={searchFetcher("/masters/countries")}
+                    fetchLabelForValue={fetchNameLabel("/masters/countries")}
+                  />
+                </div>
+                <div>
+                  <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>Province / State</label>
+                  <SearchableDropdown
+                    value={stateFilter}
+                    onChange={(v) => {
+                      setStateFilter(v);
+                      setCityFilter(null);
+                      setCurrentPage(1);
+                    }}
+                    placeholder="Filter: Province"
+                    fetchOptions={searchFetcher("/masters/states", (): Record<string, string> =>
+                      countryFilter ? { country_id: countryFilter } : {}
                     )}
-                  </tbody>
-                </table>
-              </div>
-              <div className="form-actions">
-                <button type="button" className="btn btn-primary" onClick={closeModal}>
-                  Done
-                </button>
+                    fetchLabelForValue={fetchNameLabel("/masters/states")}
+                  />
+                </div>
+                <div>
+                  <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>City</label>
+                  <SearchableDropdown
+                    value={cityFilter}
+                    onChange={(v) => {
+                      setCityFilter(v);
+                      setCurrentPage(1);
+                    }}
+                    placeholder="Filter: City"
+                    fetchOptions={searchFetcher("/masters/cities", (): Record<string, string> =>
+                      stateFilter ? { state_id: stateFilter } : {}
+                    )}
+                    fetchLabelForValue={fetchNameLabel("/masters/cities")}
+                  />
+                </div>
+                <div>
+                  <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>Supplier Type</label>
+                  <select
+                    value={supplierTypeFilter}
+                    onChange={(e) => {
+                      setCurrentPage(1);
+                      setSupplierTypeFilter(e.target.value);
+                    }}
+                    style={{ width: "100%", padding: "8px 10px", borderRadius: "6px", border: "1px solid #cbd5e1" }}
+                  >
+                    <option value="">Supplier Type: All</option>
+                    <option value="manufacturer">Manufacturer</option>
+                    <option value="trader">Trader</option>
+                    <option value="dealer">Dealer</option>
+                  </select>
+                </div>
+                <div>
+                  <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>Supplier's Grade</label>
+                  <select
+                    value={gradeFilter}
+                    onChange={(e) => {
+                      setCurrentPage(1);
+                      setGradeFilter(e.target.value);
+                    }}
+                    style={{ width: "100%", padding: "8px 10px", borderRadius: "6px", border: "1px solid #cbd5e1" }}
+                  >
+                    <option value="">Grade: All</option>
+                    <option value="A">Grade A</option>
+                    <option value="B">Grade B</option>
+                    <option value="C">Grade C</option>
+                  </select>
+                </div>
+                <div>
+                  <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>Current Status</label>
+                  <select
+                    value={statusFilter}
+                    onChange={(e) => {
+                      setCurrentPage(1);
+                      setStatusFilter(e.target.value);
+                    }}
+                    style={{ width: "100%", padding: "8px 10px", borderRadius: "6px", border: "1px solid #cbd5e1" }}
+                  >
+                    <option value="">Current Status: All</option>
+                    <option value="new">New</option>
+                    <option value="existing">Existing</option>
+                  </select>
+                </div>
+                <div>
+                  <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>Potential</label>
+                  <select
+                    value={potentialFilter}
+                    onChange={(e) => {
+                      setCurrentPage(1);
+                      setPotentialFilter(e.target.value);
+                    }}
+                    style={{ width: "100%", padding: "8px 10px", borderRadius: "6px", border: "1px solid #cbd5e1" }}
+                  >
+                    <option value="">Potential: All</option>
+                    <option value="yes">Yes</option>
+                    <option value="no">No</option>
+                  </select>
+                </div>
+                <div>
+                  <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>Visited Factory/Office?</label>
+                  <select
+                    value={visitedFilter}
+                    onChange={(e) => {
+                      setCurrentPage(1);
+                      setVisitedFilter(e.target.value);
+                    }}
+                    style={{ width: "100%", padding: "8px 10px", borderRadius: "6px", border: "1px solid #cbd5e1" }}
+                  >
+                    <option value="">Visited Factory/Office: All</option>
+                    <option value="true">Yes</option>
+                    <option value="false">No</option>
+                  </select>
+                </div>
               </div>
             </div>
+          )}
+
+          <div className="card">
+            <div className="toolbar" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <select
+                  value={pageSize}
+                  onChange={(e) => {
+                    setPageSize(Number(e.target.value));
+                    setCurrentPage(1);
+                  }}
+                  style={{ padding: "6px 12px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px" }}
+                >
+                  <option value={10}>10</option>
+                  <option value={20}>20</option>
+                  <option value={50}>50</option>
+                  <option value={100}>100</option>
+                </select>
+                <span style={{ fontSize: "13px", color: "#64748b" }}>Items/Page</span>
+              </div>
+              <input
+                type="text"
+                placeholder="Search company name or Sr. No..."
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+                style={{ width: "320px", padding: "8px 14px", borderRadius: "6px", border: "1px solid #cbd5e1" }}
+              />
+            </div>
+
+            <div className="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th>
+                      <input
+                        type="checkbox"
+                        checked={rows.length > 0 && rows.every((r) => selectedIds.includes(r.id))}
+                        onChange={(e) => {
+                          if (e.target.checked) setSelectedIds(rows.map((r) => r.id));
+                          else setSelectedIds([]);
+                        }}
+                        style={{ cursor: "pointer", width: "16px", height: "16px" }}
+                      />
+                    </th>
+                    <th>Sr. No.</th>
+                    <th>Company Name</th>
+                    <th>Product Category</th>
+                    <th>Key Strength Sub-Category</th>
+                    <th>Products Supplied</th>
+                    <th>Secondary Products</th>
+                    <th>Country</th>
+                    <th>City, Province</th>
+                    <th>Brand</th>
+                    <th>Supplier Type</th>
+                    <th>Current Status</th>
+                    <th>Grade</th>
+                    <th>Potential</th>
+                    <th style={{ textAlign: "center" }}>ACTION</th>
+                  </tr>
+                </thead>
+                <tbody ref={tableBodyRef} data-names-version={namesVersion}>
+                  {loading ? (
+                    <TableMessageRow colSpan={15}>Loading...</TableMessageRow>
+                  ) : rows.length === 0 ? (
+                    <TableMessageRow colSpan={15}>No suppliers found.</TableMessageRow>
+                  ) : (
+                    rows.map((s, index) => (
+                      <tr key={s.id}>
+                        <td>
+                          <input
+                            type="checkbox"
+                            className="row-select"
+                            checked={selectedIds.includes(s.id)}
+                            onChange={(e) => {
+                              if (e.target.checked) setSelectedIds((prev) => [...prev, s.id]);
+                              else setSelectedIds((prev) => prev.filter((i) => i !== s.id));
+                            }}
+                            style={{ cursor: "pointer", width: "16px", height: "16px" }}
+                          />
+                        </td>
+                        <td className="cell-srno">{startSrNo + index}</td>
+                        <td>
+                          <a
+                            href="#"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              void handleRowEdit(s.id);
+                            }}
+                          >
+                            {s.company_name}
+                          </a>
+                        </td>
+                        <td>{chipList(s.category_ids, "categories")}</td>
+                        <td>{chipList(s.sub_category_ids, "subCategories")}</td>
+                        <td>{chipList(s.product_ids, "products")}</td>
+                        <td>
+                          {s.secondary_products_description ? (
+                            s.secondary_products_description.slice(0, 60)
+                          ) : (
+                            <span className="muted">—</span>
+                          )}
+                        </td>
+                        <td>{resolver.get("countries", s.country_id) || "…"}</td>
+                        <td>
+                          {resolver.get("cities", s.city_id) || "…"},{" "}
+                          {resolver.get("states", s.state_id) || "…"}
+                        </td>
+                        <td>
+                          {s.brand_description ? (
+                            s.brand_description
+                          ) : (
+                            <span className="muted">—</span>
+                          )}
+                        </td>
+                        <td>
+                          {s.supplier_type ? s.supplier_type : <span className="muted">—</span>}
+                        </td>
+                        <td>
+                          <StatusPill value={s.current_status} />
+                        </td>
+                        <td>
+                          {canUpdate ? (
+                            <select
+                              className="inline-select"
+                              defaultValue={s.supplier_grade || ""}
+                              onChange={(e) =>
+                                handleInlineUpdate(`/suppliers/${s.id}/grade`, {
+                                  supplier_grade: e.target.value || null,
+                                })
+                              }
+                            >
+                              <option value="">Select</option>
+                              <option value="A">A</option>
+                              <option value="B">B</option>
+                              <option value="C">C</option>
+                            </select>
+                          ) : (
+                            <span>{s.supplier_grade || "—"}</span>
+                          )}
+                        </td>
+                        <td>
+                          {canUpdate ? (
+                            <select
+                              className="inline-select"
+                              defaultValue={s.potential || ""}
+                              onChange={(e) =>
+                                handleInlineUpdate(`/suppliers/${s.id}/potential`, {
+                                  potential: e.target.value || null,
+                                })
+                              }
+                            >
+                              <option value="">Select</option>
+                              <option value="yes">Yes</option>
+                              <option value="no">No</option>
+                            </select>
+                          ) : (
+                            <span>{s.potential ? s.potential.toUpperCase() : "—"}</span>
+                          )}
+                        </td>
+                        <td className="actions" style={{ textAlign: "center" }}>
+                          <div style={{ display: "flex", gap: "6px", justifyContent: "center", alignItems: "center" }}>
+                            {canUpdate && (
+                              <button
+                                type="button"
+                                className="btn"
+                                style={{
+                                  background: "#0061f2",
+                                  color: "#ffffff",
+                                  padding: "6px 9px",
+                                  borderRadius: "4px",
+                                  border: "none",
+                                  cursor: "pointer",
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  justifyContent: "center",
+                                }}
+                                onClick={() => handleRowEdit(s.id)}
+                                title="Edit Supplier"
+                              >
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                                  <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                                </svg>
+                              </button>
+                            )}
+                            {canDelete && (
+                              <button
+                                type="button"
+                                className="btn"
+                                style={{
+                                  background: "#ef4444",
+                                  color: "#ffffff",
+                                  padding: "6px 9px",
+                                  borderRadius: "4px",
+                                  border: "none",
+                                  cursor: "pointer",
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  justifyContent: "center",
+                                }}
+                                onClick={() => handleRowDelete(s.id)}
+                                title="Delete Supplier"
+                              >
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                  <polyline points="3 6 5 6 21 6" />
+                                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                                  <line x1="10" y1="11" x2="10" y2="17" />
+                                  <line x1="14" y1="11" x2="14" y2="17" />
+                                </svg>
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+            <div className="pagination">
+              <Pagination
+                pagination={pagination}
+                pageSize={pageSize}
+                onPageChange={setCurrentPage}
+                onPageSizeChange={(size) => {
+                  setPageSize(size);
+                  setCurrentPage(1);
+                }}
+              />
+            </div>
+          </div>
+        </main>
+      )}
+      {/* ============ CREATE / EDIT SUPPLIER MODAL (Quick Add) ============ */}
+      {modalOpen && modalMode === "quick" && (
+        <div
+          className="modal-backdrop"
+          style={{ display: "flex" }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) closeModal();
+          }}
+        >
+          <div className="modal-card" style={{ maxWidth: "600px", padding: "20px" }}>
+            <div className="modal-header">
+              <h2>Quick Add Supplier</h2>
+              <button className="modal-close" onClick={closeModal}>&times;</button>
+            </div>
+            <form onSubmit={handleSubmit}>
+              <div className="field">
+                <label>Name of Company *</label>
+                <input
+                  type="text"
+                  className="input"
+                  value={form.company_name}
+                  onChange={(e) => setField("company_name", e.target.value)}
+                />
+              </div>
+              <div className="field">
+                <label>Country *</label>
+                <SearchableDropdown
+                  value={formCountryId}
+                  onChange={setFormCountryId}
+                  fetchOptions={searchFetcher("/masters/countries")}
+                />
+              </div>
+              <Banner error={error} />
+              <div className="form-actions" style={{ marginTop: "20px" }}>
+                <button type="submit" className="btn btn-primary" disabled={saving}>
+                  {saving ? "Saving..." : "Save"}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

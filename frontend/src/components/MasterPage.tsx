@@ -712,8 +712,8 @@ export function MasterPage<T extends MasterRecord>({
                           )}
                         </td>
                       ))}
-                      <td className="actions">
-                        <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                      <td className="actions" style={{ textAlign: "center" }}>
+                        <div style={{ display: "flex", gap: "6px", alignItems: "center", justifyContent: "center" }}>
                           {canUpdate && (
                             <button
                               type="button"

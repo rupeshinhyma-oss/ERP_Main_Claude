@@ -35,7 +35,7 @@ export function SubCategoriesPage() {
       breadcrumbTrail={["Master Data", "Sub-Categories"]}
       newButtonLabel="+ New Sub-Category"
       hideQuickAdd
-      searchPlaceholder="Search name or code or Sr. No..."
+      searchPlaceholder="Search name or Sr. No..."
       reloadToken={categories.loaded}
       extraFilters={categoryFilter ? { category_id: categoryFilter } : undefined}
       toolbarExtras={
@@ -48,12 +48,10 @@ export function SubCategoriesPage() {
           ))}
         </select>
       }
-      columnHeaders={["Name", "Code", "Category", "Description", "Status"]}
+      columnHeaders={["Name", "Category", "Status"]}
       columns={[
         { header: "Name", render: (s) => <span className="cell-primary">{s.name}</span> },
-        { header: "Code", render: (s) => s.code },
         { header: "Category", render: (s) => categoryName(s.category_id) },
-        { header: "Description", render: (s) => dash(s.description) },
         { header: "Status", render: (s) => <StatusBadge status={s.status} /> },
       ]}
       importHeaders={[

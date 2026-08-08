@@ -38,7 +38,7 @@ from __future__ import annotations
 import uuid
 from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
-from sqlalchemy import Select, func, or_, select
+from sqlalchemy import Select, String, Text, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import BadRequestException
@@ -133,7 +133,22 @@ class BaseRepository(Generic[ModelT]):
             return stmt
         for column_name, value in filters.items():
             column = getattr(self.model, column_name)
-            stmt = stmt.where(column == value)
+            is_uuid_col = False
+            try:
+                if hasattr(column.type, "python_type") and column.type.python_type is uuid.UUID:
+                    is_uuid_col = True
+            except (NotImplementedError, AttributeError):
+                is_uuid_col = False
+
+            if isinstance(value, str) and isinstance(column.type, (String, Text)):
+                stmt = stmt.where(func.lower(column) == value.lower())
+            elif isinstance(value, str) and is_uuid_col:
+                try:
+                    stmt = stmt.where(column == uuid.UUID(value))
+                except ValueError:
+                    stmt = stmt.where(column == value)
+            else:
+                stmt = stmt.where(column == value)
         return stmt
 
     async def paginated_list(self, query: "ListQueryParams") -> tuple[list[ModelT], int]:
@@ -185,7 +200,23 @@ class BaseRepository(Generic[ModelT]):
         for column_name, value in filters.exact.items():
             if column_name not in self.filterable_fields or not hasattr(self.model, column_name):
                 continue
-            stmt = stmt.where(getattr(self.model, column_name) == value)
+            column = getattr(self.model, column_name)
+            is_uuid_col = False
+            try:
+                if hasattr(column.type, "python_type") and column.type.python_type is uuid.UUID:
+                    is_uuid_col = True
+            except (NotImplementedError, AttributeError):
+                is_uuid_col = False
+
+            if isinstance(value, str) and isinstance(column.type, (String, Text)):
+                stmt = stmt.where(func.lower(column) == value.lower())
+            elif isinstance(value, str) and is_uuid_col:
+                try:
+                    stmt = stmt.where(column == uuid.UUID(value))
+                except ValueError:
+                    stmt = stmt.where(column == value)
+            else:
+                stmt = stmt.where(column == value)
 
         for column_name, bounds in filters.ranges.items():
             if not hasattr(self.model, column_name):

@@ -74,7 +74,7 @@ export function SearchableDropdown({
       }
       return;
     }
-    if (resolvedFor.current === value) return;
+    if (resolvedFor.current === value && label) return;
     resolvedFor.current = value;
 
     let cancelled = false;
@@ -264,6 +264,7 @@ export function SearchableDropdownMulti({
   const [activeIndex, setActiveIndex] = useState(-1);
   const search = useSearchController();
   const blurTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   // Keep chips in sync with the ids owned by the parent, resolving labels for
   // any id we don't already have one for (the setValuesByIds() equivalent).
@@ -392,31 +393,128 @@ export function SearchableDropdownMulti({
     !selected.some((s) => s.label.toLowerCase() === inputValue.trim().toLowerCase());
 
   return (
-    <div className="sd-wrap">
-      <input
-        type="text"
-        className="sd-input"
-        placeholder={placeholder || "Search..."}
-        autoComplete="off"
-        value={inputValue}
-        onChange={(e) => handleInput(e.target.value)}
-        onFocus={handleFocus}
-        onKeyDown={handleKeyDown}
-        onBlur={handleBlur}
-      />
+    <div className="sd-wrap" style={{ position: "relative" }}>
+      <div
+        className="sd-multi-box"
+        style={{
+          border: "1px solid var(--color-border-strong, #cbd5e1)",
+          borderRadius: "var(--radius-sm, 6px)",
+          padding: "5px 8px",
+          minHeight: "42px",
+          background: "#ffffff",
+          display: "flex",
+          flexWrap: "wrap",
+          alignItems: "center",
+          gap: "6px",
+          cursor: "text",
+        }}
+        onClick={() => inputRef.current?.focus()}
+      >
+        {selected.map((s, i) => (
+          <span
+            key={s.value}
+            style={{
+              background: "#0061f2",
+              color: "#ffffff",
+              fontSize: "12.5px",
+              fontWeight: 500,
+              padding: "4px 8px",
+              borderRadius: "4px",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "6px",
+              userSelect: "none",
+            }}
+          >
+            <button
+              type="button"
+              aria-label="Remove"
+              onClick={(e) => {
+                e.stopPropagation();
+                removeSelection(i);
+              }}
+              style={{
+                background: "transparent",
+                border: "none",
+                color: "#ffffff",
+                fontSize: "12px",
+                fontWeight: "bold",
+                cursor: "pointer",
+                padding: 0,
+                lineHeight: 1,
+              }}
+            >
+              ✕
+            </button>
+            {s.label}
+          </span>
+        ))}
+        <input
+          ref={inputRef}
+          type="text"
+          style={{
+            border: "none",
+            outline: "none",
+            fontSize: "13.5px",
+            background: "transparent",
+            flex: "1 1 120px",
+            minWidth: "80px",
+            padding: "4px 0",
+          }}
+          placeholder={selected.length === 0 ? (placeholder || "Click to select...") : ""}
+          autoComplete="off"
+          value={inputValue}
+          onChange={(e) => handleInput(e.target.value)}
+          onFocus={handleFocus}
+          onKeyDown={handleKeyDown}
+          onBlur={handleBlur}
+        />
+      </div>
+
       {open && (
-        <div className="sd-results">
+        <div
+          className="sd-results"
+          style={{
+            position: "absolute",
+            top: "calc(100% + 2px)",
+            left: 0,
+            right: 0,
+            zIndex: 9999,
+            background: "#ffffff",
+            border: "1px solid #cbd5e0",
+            borderRadius: "6px",
+            boxShadow: "0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)",
+            maxHeight: "220px",
+            overflowY: "auto",
+            padding: "4px 0",
+          }}
+        >
           {options.length === 0 && !showCustomOption ? (
-            <div className="sd-empty">No matches.</div>
+            <div className="sd-empty" style={{ padding: "8px 12px", fontSize: "13px", color: "#94a3b8" }}>
+              No matches.
+            </div>
           ) : (
             <>
               {options.map((opt, i) => (
                 <div
                   key={opt.value}
                   className={`sd-option ${i === activeIndex ? "sd-active" : ""}`.trim()}
+                  style={{
+                    padding: "8px 12px",
+                    fontSize: "13.5px",
+                    cursor: "pointer",
+                    background: i === activeIndex ? "#0061f2" : "transparent",
+                    color: i === activeIndex ? "#ffffff" : "#1e293b",
+                  }}
                   onMouseDown={(e) => {
                     e.preventDefault();
                     addSelection(opt);
+                  }}
+                  onMouseOver={(e) => {
+                    if (i !== activeIndex) e.currentTarget.style.background = "#f1f5f9";
+                  }}
+                  onMouseOut={(e) => {
+                    if (i !== activeIndex) e.currentTarget.style.background = "transparent";
                   }}
                 >
                   {opt.label}
@@ -425,7 +523,7 @@ export function SearchableDropdownMulti({
               {showCustomOption && (
                 <div
                   className="sd-option"
-                  style={{ fontStyle: "italic", color: "var(--color-primary, #0284c7)" }}
+                  style={{ fontStyle: "italic", color: "#0061f2", padding: "8px 12px", cursor: "pointer" }}
                   onMouseDown={(e) => {
                     e.preventDefault();
                     addSelection({ value: inputValue.trim(), label: inputValue.trim() });
@@ -438,16 +536,6 @@ export function SearchableDropdownMulti({
           )}
         </div>
       )}
-      <div className="sd-chip-area">
-        {selected.map((s, i) => (
-          <span className="sd-chip" key={s.value}>
-            {s.label}
-            <button type="button" aria-label="Remove" onClick={() => removeSelection(i)}>
-              &times;
-            </button>
-          </span>
-        ))}
-      </div>
     </div>
   );
 }

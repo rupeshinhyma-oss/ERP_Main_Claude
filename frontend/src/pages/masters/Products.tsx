@@ -547,12 +547,11 @@ export function ProductsPage() {
               <TextField id="height_cm" label="Height (cm)" type="number" step="0.001" min={0} className="cbm-calc" value={f.height_cm} onChange={(v) => setDimension("height_cm", v)} />
               <TextField
                 id="packaging_unit_cbm"
-                label="Packaging Unit CBM (auto)"
+                label="Packaging Unit CBM"
                 type="number"
                 step="0.000001"
-                readOnly
-                inputStyle={{ backgroundColor: "var(--color-surface-hover)" }}
-                placeholder="Auto-calculated (L*W*H / 1,000,000)"
+                min={0}
+                placeholder="Auto-calculated or enter directly"
                 value={f.packaging_unit_cbm}
                 onChange={(v) => set("packaging_unit_cbm", v)}
               />

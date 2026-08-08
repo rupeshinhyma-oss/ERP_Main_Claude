@@ -418,6 +418,7 @@ export interface Supplier {
   visit_media?: string[] | null;
   overall_remarks?: string | null;
   is_active?: boolean;
+  dealing_officer_id?: string | null;
   contacts?: SupplierContact[];
 }
 

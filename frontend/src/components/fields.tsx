@@ -119,7 +119,9 @@ export function SelectField({
   children: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
   const containerRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -131,19 +133,39 @@ export function SelectField({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const options: { value: string; label: ReactNode }[] = [];
+  const options: { value: string; label: string; element: ReactNode }[] = [];
   React.Children.forEach(children, (child) => {
     if (React.isValidElement(child) && child.type === "option") {
       const childProps = child.props as { value?: string | number; children?: ReactNode };
+      const valStr = String(childProps.value ?? "");
+      const labelText =
+        typeof childProps.children === "string" || typeof childProps.children === "number"
+          ? String(childProps.children)
+          : valStr;
       options.push({
-        value: String(childProps.value ?? ""),
-        label: childProps.children ?? childProps.value ?? "",
+        value: valStr,
+        label: labelText,
+        element: childProps.children ?? valStr,
       });
     }
   });
 
   const selectedOption = options.find((opt) => opt.value === value);
-  const displayLabel = selectedOption ? selectedOption.label : (options[0]?.label || "-- Select --");
+  const displayLabel = selectedOption ? selectedOption.element : (options[0]?.element || "-- Select --");
+
+  const filteredOptions = options.filter((opt) => {
+    if (!searchTerm.trim()) return true;
+    return opt.label.toLowerCase().includes(searchTerm.toLowerCase());
+  });
+
+  function toggleOpen() {
+    const nextState = !open;
+    setOpen(nextState);
+    if (nextState) {
+      setSearchTerm("");
+      setTimeout(() => searchInputRef.current?.focus(), 50);
+    }
+  }
 
   return (
     <div className="field" style={{ ...style, position: "relative" }} ref={containerRef}>
@@ -152,11 +174,11 @@ export function SelectField({
       <div
         id={id}
         tabIndex={0}
-        onClick={() => setOpen(!open)}
+        onClick={toggleOpen}
         onKeyDown={(e) => {
           if (e.key === "Enter" || e.key === " ") {
             e.preventDefault();
-            setOpen(!open);
+            toggleOpen();
           }
         }}
         style={{
@@ -193,39 +215,76 @@ export function SelectField({
             border: "1px solid #cbd5e0",
             borderRadius: "6px",
             boxShadow: "0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)",
-            maxHeight: "220px",
-            overflowY: "auto",
-            padding: "4px 0",
+            maxHeight: "260px",
+            display: "flex",
+            flexDirection: "column",
+            overflow: "hidden",
           }}
         >
-          {options.map((opt, idx) => {
-            const isSelected = opt.value === value;
-            return (
-              <div
-                key={idx}
-                onClick={() => {
-                  onChange(opt.value);
+          {/* Search Bar at Top */}
+          <div style={{ padding: "8px", borderBottom: "1px solid #f1f5f9", background: "#f8fafc" }}>
+            <input
+              ref={searchInputRef}
+              type="text"
+              placeholder="Search / Type here..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && filteredOptions.length > 0) {
+                  e.preventDefault();
+                  onChange(filteredOptions[0].value);
                   setOpen(false);
-                }}
-                style={{
-                  padding: "8px 12px",
-                  fontSize: "13.5px",
-                  cursor: "pointer",
-                  background: isSelected ? "#0061f2" : "transparent",
-                  color: isSelected ? "#ffffff" : "#1e293b",
-                  fontWeight: isSelected ? 600 : 400,
-                }}
-                onMouseOver={(e) => {
-                  if (!isSelected) e.currentTarget.style.background = "#f1f5f9";
-                }}
-                onMouseOut={(e) => {
-                  if (!isSelected) e.currentTarget.style.background = "transparent";
-                }}
-              >
-                {opt.label}
+                }
+              }}
+              style={{
+                width: "100%",
+                padding: "6px 10px",
+                fontSize: "13px",
+                border: "1px solid #cbd5e0",
+                borderRadius: "4px",
+                outline: "none",
+                background: "#ffffff",
+              }}
+            />
+          </div>
+
+          {/* Options List */}
+          <div style={{ overflowY: "auto", flex: 1, maxHeight: "200px", padding: "4px 0" }}>
+            {filteredOptions.length === 0 ? (
+              <div style={{ padding: "10px 12px", fontSize: "13px", color: "#94a3b8", textAlign: "center" }}>
+                No matching results
               </div>
-            );
-          })}
+            ) : (
+              filteredOptions.map((opt, idx) => {
+                const isSelected = opt.value === value;
+                return (
+                  <div
+                    key={idx}
+                    onClick={() => {
+                      onChange(opt.value);
+                      setOpen(false);
+                    }}
+                    style={{
+                      padding: "8px 12px",
+                      fontSize: "13.5px",
+                      cursor: "pointer",
+                      background: isSelected ? "#0061f2" : "transparent",
+                      color: isSelected ? "#ffffff" : "#1e293b",
+                      fontWeight: isSelected ? 600 : 400,
+                    }}
+                    onMouseOver={(e) => {
+                      if (!isSelected) e.currentTarget.style.background = "#f1f5f9";
+                    }}
+                    onMouseOut={(e) => {
+                      if (!isSelected) e.currentTarget.style.background = "transparent";
+                    }}
+                  >
+                    {opt.element}
+                  </div>
+                );
+              })
+            )}
+          </div>
         </div>
       )}
 

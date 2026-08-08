@@ -28,7 +28,7 @@ import uuid
 from datetime import datetime, timezone
 from enum import Enum
 
-from sqlalchemy import JSON, Boolean, ForeignKey, String, Text, UniqueConstraint
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -41,10 +41,15 @@ def _utcnow() -> datetime:
 
 
 class SupplierType(str, Enum):
-    """Document: "Supplier Type -- Manufacturer / Trader / Select"."""
+    """Document: "Supplier Type -- Manufacturer / Trader / Dealer / Select"."""
 
     MANUFACTURER = "manufacturer"
     TRADER = "trader"
+    DEALER = "dealer"
+    AGENT = "agent"
+    EXPORTER = "exporter"
+    WHOLESALER = "wholesaler"
+    DISTRIBUTOR = "distributor"
 
 
 class SupplierGrade(str, Enum):
@@ -258,7 +263,7 @@ class SupplierCategoryLink(Base, UUIDPrimaryKeyMixin):
     category_id: Mapped[uuid.UUID] = mapped_column(
         GUID(), ForeignKey("product_categories.id", ondelete="RESTRICT"), nullable=False, index=True
     )
-    created_at: Mapped[datetime] = mapped_column(default=_utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False)
 
     supplier: Mapped[Supplier] = relationship(back_populates="category_links")
 
@@ -284,7 +289,7 @@ class SupplierSubCategoryLink(Base, UUIDPrimaryKeyMixin):
     sub_category_id: Mapped[uuid.UUID] = mapped_column(
         GUID(), ForeignKey("product_sub_categories.id", ondelete="RESTRICT"), nullable=False, index=True
     )
-    created_at: Mapped[datetime] = mapped_column(default=_utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False)
 
     supplier: Mapped[Supplier] = relationship(back_populates="sub_category_links")
 
@@ -318,7 +323,7 @@ class SupplierProductLink(Base, UUIDPrimaryKeyMixin):
     product_id: Mapped[uuid.UUID] = mapped_column(
         GUID(), ForeignKey("products.id", ondelete="RESTRICT"), nullable=False, index=True
     )
-    created_at: Mapped[datetime] = mapped_column(default=_utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False)
 
     supplier: Mapped[Supplier] = relationship(back_populates="product_links")
 

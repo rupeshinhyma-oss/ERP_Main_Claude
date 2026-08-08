@@ -1,0 +1,98 @@
+First data form (Supplier) - Yinglima 
+Name of Company* (keyword suggestion - any part of the word)
+Product Category (drop down menu) (multiple)
+Supplier Type – Manufacturer / Trader / Select
+Brand of Suppliers Products (description)
+Country* (default China but editable)
+Province* (dropdown menu)
+City* (dropdown menu)
+Mr. / Mrs / Ms - Full Name
+Designation
+Calling Number (with Country Code & number of Digits based on country selected) - Also, maximum 11 digit restriction to give. (7 to 11 digit allowed) If not correct number of digits, it is showing error when trying to save, but it should show when going to next field.
+Whatsapp Number (same as above)
+Wechat Number (same as above)
+Email ID (multiple emails)	
+
+Second Form (main data profile form) (supplier)
+Tax ID Number
+Address
+Town
+Primary Website (hyperlink) 
+Secondary Website (hyperlink) 
+Suppliers Key Strength Product Sub Category (dropdown menu) (multiple) 
+Supplier’s Grade – A, B, C, Select
+Current Status - Existing/New/Select (by default Select)
+Potential - Yes / No / Select (by default Select)
+Key Reason for Potential / Not potential
+Suppliers/Manufacturer’s Secondary Products they can supply (This field will be description). 
+Visited their Factory/Office? Yes / No (by default No)
+Visit Remarks (if in above yes, then only this field opens)
+Visit Photos / Videos (provision to attach multiple factory Videos / Photos)
+Overall Remarks / Key Strengths
+______________________________________________________________________________
+
+
+
+Add Contacts Form
+Mr. / Mrs / Ms -Person Name
+Designation
+Handling Territory (local, Export India, Export Africa etc.) 
+Country (dropdown menu) (by default China)
+Calling Number (country code based on country selected)
+Whatsapp Number (country code based on country selected) same as calling
+Wechat Number (country code based on country selected) same as calling
+Email 
+
+Add Contacts List
+Mr. / Mrs / Ms -Person Name / Designation (combined)
+Calling Number / Whatsapp Number (combined) hyperlink (with country code)
+Wechat Number (with country code) / Email (combined) hyperlink - In heading, to add email “Wechat / Email”  :- Done
+Handling Territory
+Action - Edit / Delete
+
+
+Top Filter Fields 
+Product Category
+Key Strength Product Sub Category
+Country 
+Province
+City
+Supplier Type (manufacturer/trader/All / Blank
+Supplier’s Grade (A,B,C, All, Blank
+Current Status (Existing / New / All / Blank)
+Potential (Yes / No / All / Blank)
+Visited Factory/Office?
+
+
+Fields in List
+Select (check box)
+Company Name (hyperlink to open View Details)
+Product Category (5 items to show in list, if more then that to view by eye button)
+Key Strength Product Sub Category - same as above 
+Secondary Products  - same as above 
+Country
+City, Province (combined)
+Brand of Suppliers Products (if any) (description)
+Supplier Type (manufacturer/trader)
+Current Status (Existing / New)
+Supplier’s Grade (editable dropdown in list)
+Potential (editable dropdown in list)
+Action (Edit)
+
+
+
+
+
+Definition of Product Category, Sub Category and Item
+For F&B – Category “food Ingredients”, Sub Category “Citric Acid” & Item “Citric Acid Anhydrous 30-100 mesh”
+For One Stop - Category “Chemicals”, Sub Category “Caustic Soda” & Item “Caustic Soda Flakes”
+For Inhyma - Category “Machines”, Sub Category “Band Sealer” & Item “FR900 MSH Band Sealer”
+Product Category  – food Ingredients, chemicals, tech/feed grade Ingredients, Machines, Filteration, Pumps, etc
+______________________________________________________________________________
+
+Notes
+Key strength product may not be necessarily product of our current portfolio. Could be others also, so that in future, if we want to add new products, we can search in data.
+In Current Status, once changed from “New” to “Existing”, then cannot edit back to “New” (only 1 way can change – new to existing)
+If Current Status is “New or Select” and Potential is “No or Select”, then only to allow Delete. If Current Status is “Existing” or Potential is “Yes” (any one), cannot DELETE that data. However, can make it “Inactive”
+First Form contact details should appear in the Contact list also.
+ To avoid duplication while bulk data excel import, criteria is if matches with “Name of Company” & “City”, then to consider as duplicate and should not save or import in data base) - or to give Calling number / Whatsapp or Wechat to detect duplicate?? This to keep pending to decide. (in company name issue of Co or company, ltd or limited etc will come) 

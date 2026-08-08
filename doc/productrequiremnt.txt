@@ -1,0 +1,71 @@
+Fields in Product Master Form (Add Products)
+Product Name (As per Tally)
+Product Name (As per Invoice)
+Product Code
+Product Sub Category (dropdown)
+Product Category (dropdown) (as for example, Machines, Spares)
+Brand (dropdown)
+HSN CODE (Tax % to remove) (dropdown)
+Refund VAT % (auto based on HSN Code) (Import Duty field to remove and add this) :-Done
+Any License / Certificate (if needed) - this is description field. (when this product selected in Inquiry, it should highlight in RED colour and show it in Remark)
+UOM (Unit of Measure) like KG, Ltrs, Mtr, Ft. etc. (dropdown)
+Packaging Quantity (unit)
+Packaging Net Weight (unit)
+Packaging Gross Weight (unit)
+Dimensions in CM (L X W X H)
+Packaging Unit CBM (auto computed)
+Specifications (Description)
+Image (photo) of product	
+(As compared to Inhyma Product Master, only Import Duty Field replaced with Refund VAT, Rest Same)
+
+
+Top Filter in Product Master
+Product Sub Category, Product Category, Brand (this 3 only)
+
+
+Fields in Product List
+Select (check box)
+Product Name (As per Tally)
+Product Code 
+Brand
+Product Sub Category
+HSN code
+UOM (Unit of Measure) 
+Packaging Quantity (unit)
+Packaging Gross Weight (unit)
+Packaging Unit CBM
+Status - Active / Inactive Button  (enabled ONLY at admin user rights level) - to give here or in product stock list ??? (inactive to do only if stock is Zero, positive or negative should not do)
+Action –Edit / Delete Buttons. Delete option only if status is Inactive. Inactive can be done only if stock is Zero. Also, Delete option enabled only at admin level. Also, confusion is whether to give this in product stock list or here?? Either we can give Edit option here and delete option in product stock list, because we cannot delete here without knowing stock is zero and there is nothing to Edit in product stock list. 
+
+(SAME AS INHYMA PRODUCT MASTER LIST)
+
+
+Fields in Add Product Category, Sub Category or Brand Form
+Name (only name field)
+In Add Sub Category form, Product Category (dropdown) field to give. This to be added new.
+
+Add Product Category, Sub Category or Brand List
+Select (check box) – not needed as there will be few data only.
+Name 
+In Sub Category list, Product Category column to add.
+Status - Active / Inactive Button
+Action –Edit / Delete Buttons. (Delete option only if status is Inactive.)
+(SAME AS INHYMA PRODUCT MASTER LIST)
+
+
+Notes
+Status – By Default it should be Active.
+Active / Inactive list View Buttons to show separate below Product Master top panel. Same like in companies in Inhyma. But, this not needed in Category, Sub Category or Brand.
+As for example – Product Category “Machines, Spares”, Product Sub Category “Band Sealer, Spares for Band Sealer” & Product (as per tally) “FR900 MSH Band Sealer”, Teflon Belt 750mm.
+Product Name Clickable link to open “View Details” and it should have all info.
+Delete Button for bulk delete (next to Add New Button) to keep as it is, but not required in Product Category, Product Sub Category and Brands.
+Product Master Delete Rights only at admin. level.
+Product Sub Category – Master to add in Panel (Total 4 masters to give – Product, Product Category, Product Sub Category and Brands.)
+If we do Brands, Product Category or Product Sub Category “Inactive” from the list, what happens to Products under that? All becomes Inactive?? What happens to the existing products having stock?
+To Avoid Duplication (1) For Manual Entry, name keyword suggestion to show (any part of the name (not the starting only) same like tally. If Product ID duplicate, it shows “already exists”. Does not allow to save if matches with name and product code (2) For bulk import it detects as Duplication and does not allow to save, if it matches with name and product code. (to ensure that same product with slightly different name is not created as new product by accounts like it happens in Tally)
+
+Definition of Product Category, Sub Category and Item
+For F&B – Category “food Ingredients”, Sub Category “Citric Acid” & Item “Citric Acid Anhydrous 30-100 mesh”
+For One Stop - Category “Chemicals”, Sub Category “Caustic Soda” & Item “Caustic Soda Flakes”
+For Inhyma - Category “Machines”, Sub Category “Band Sealer” & Item “FR900 MSH Band Sealer”
+

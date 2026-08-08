@@ -32,9 +32,9 @@ export const NAV_SECTIONS: NavSection[] = [
   {
     label: "CONTACT",
     items: [
-      { key: "suppliers", label: "Companies", path: "/suppliers", icon: "users", permission: "supplier.view" },
+      { key: "suppliers", label: "Suppliers", path: "/suppliers", icon: "users", permission: "supplier.view" },
       { key: "buyers", label: "Agents", path: "/buyers", icon: "user", permission: "crm.view" },
-      { key: "industrial-zones", label: "Prefectures & Counties", path: "/masters/cities", icon: "sliders", permission: "city.view" },
+      { key: "industrial-zones", label: "City", path: "/masters/cities", icon: "sliders", permission: "city.view" },
     ],
   },
   {
@@ -75,7 +75,7 @@ export const NAV_SECTIONS: NavSection[] = [
       { key: "masters-hsn", label: "HSN Codes", path: "/masters/hsn", icon: "tag", permission: "hsn.view" },
       { key: "masters-countries", label: "Countries", path: "/masters/countries", icon: "globe", permission: "country.view" },
       { key: "masters-states", label: "Provinces", path: "/masters/states", icon: "map", permission: "state.view" },
-      { key: "masters-cities", label: "Prefectures & Counties", path: "/masters/cities", icon: "pin", permission: "city.view" },
+      { key: "masters-cities", label: "City", path: "/masters/cities", icon: "pin", permission: "city.view" },
       { key: "masters-currencies", label: "Currencies", path: "/masters/currencies", icon: "coins", permission: "currency.view" },
       { key: "masters-uom", label: "Units of Measurement", path: "/masters/uom", icon: "ruler", permission: "uom.view" },
       { key: "organization", label: "Organization Settings", path: "/organization", icon: "building", permission: "organization.manage", superAdminOnly: true },
@@ -112,7 +112,7 @@ export const PAGE_TITLES: Record<string, string> = {
   "masters-categories": "Categories",
   "masters-subcategories": "Sub Categories",
   "masters-products": "Product Master",
-  suppliers: "Companies",
+  suppliers: "Suppliers",
   audit: "Audit Log",
   rbac: "Roles & Permissions",
   "effective-permissions": "Effective Permissions Inspector",

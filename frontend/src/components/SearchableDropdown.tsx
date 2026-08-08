@@ -41,6 +41,8 @@ interface SharedProps {
 export interface SearchableDropdownProps extends SharedProps {
   value: string | null;
   onChange: (value: string | null, label: string) => void;
+  allowCustomText?: boolean;
+  onTextChange?: (text: string) => void;
 }
 
 export function SearchableDropdown({
@@ -49,6 +51,8 @@ export function SearchableDropdown({
   placeholder,
   fetchOptions,
   fetchLabelForValue,
+  allowCustomText = false,
+  onTextChange,
 }: SearchableDropdownProps) {
   const [inputValue, setInputValue] = useState("");
   const [label, setLabel] = useState("");
@@ -65,7 +69,9 @@ export function SearchableDropdown({
     if (!value) {
       resolvedFor.current = null;
       setLabel("");
-      setInputValue("");
+      if (!allowCustomText) {
+        setInputValue("");
+      }
       return;
     }
     if (resolvedFor.current === value) return;
@@ -73,23 +79,23 @@ export function SearchableDropdown({
 
     let cancelled = false;
     if (!fetchLabelForValue) {
-      setLabel("");
-      setInputValue("");
+      setLabel(value);
+      setInputValue(value);
       return;
     }
     fetchLabelForValue(value)
       .then((resolved) => {
         if (cancelled) return;
-        setLabel(resolved || "");
-        setInputValue(resolved || "");
+        setLabel(resolved || value);
+        setInputValue(resolved || value);
       })
       .catch(() => {
-        /* leave the box blank if the label can't be resolved */
+        /* leave as-is if the label can't be resolved */
       });
     return () => {
       cancelled = true;
     };
-  }, [value, fetchLabelForValue]);
+  }, [value, fetchLabelForValue, allowCustomText]);
 
   useEffect(
     () => () => {
@@ -110,22 +116,19 @@ export function SearchableDropdown({
     setInputValue(opt.label);
     closeResults();
     onChange(opt.value, opt.label);
+    if (onTextChange) onTextChange(opt.label);
   }
 
   function handleInput(next: string) {
     setInputValue(next);
     const term = next.trim();
+    if (onTextChange) onTextChange(next);
 
     // Typing again after a value was selected clears the stale selection, so
     // the parent never holds an id that no longer matches what's on screen.
     if (value !== null) {
       resolvedFor.current = null;
-      onChange(null, "");
-    }
-
-    if (!term) {
-      closeResults();
-      return;
+      onChange(null, next);
     }
 
     void search.run(async (signal) => {
@@ -133,10 +136,25 @@ export function SearchableDropdown({
       setOptions(found || []);
       setActiveIndex(-1);
       setOpen(true);
-    }, 250);
+    }, 150);
+  }
+
+  function handleFocus() {
+    void search.run(async (signal) => {
+      const found = await fetchOptions(inputValue.trim(), signal);
+      setOptions(found || []);
+      setActiveIndex(-1);
+      setOpen(true);
+    }, 100);
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "Enter" && allowCustomText && activeIndex < 0 && inputValue.trim()) {
+      e.preventDefault();
+      closeResults();
+      selectOption({ value: inputValue.trim(), label: inputValue.trim() });
+      return;
+    }
     if (!open) return;
     if (e.key === "ArrowDown") {
       e.preventDefault();
@@ -156,12 +174,18 @@ export function SearchableDropdown({
     // Slight delay so a mousedown-selection in the list can complete first.
     blurTimer.current = setTimeout(() => {
       closeResults();
-      // If the user typed something but never picked a match, revert the
-      // visible text to the last real selection (or blank) rather than leaving
-      // an ambiguous free-text value in the box.
-      setInputValue(value === null ? "" : label);
+      if (allowCustomText) {
+        if (onTextChange) onTextChange(inputValue);
+      } else {
+        setInputValue(value === null ? "" : label);
+      }
     }, 150);
   }
+
+  const showCustomOption =
+    allowCustomText &&
+    inputValue.trim() !== "" &&
+    !options.some((o) => o.label.toLowerCase() === inputValue.trim().toLowerCase());
 
   return (
     <div className="sd-wrap">
@@ -172,27 +196,41 @@ export function SearchableDropdown({
         autoComplete="off"
         value={inputValue}
         onChange={(e) => handleInput(e.target.value)}
+        onFocus={handleFocus}
         onKeyDown={handleKeyDown}
         onBlur={handleBlur}
       />
       {open && (
         <div className="sd-results">
-          {options.length === 0 ? (
+          {options.length === 0 && !showCustomOption ? (
             <div className="sd-empty">No matches.</div>
           ) : (
-            options.map((opt, i) => (
-              <div
-                key={opt.value}
-                className={`sd-option ${i === activeIndex ? "sd-active" : ""}`.trim()}
-                // mousedown (not click) so this fires before the input's blur.
-                onMouseDown={(e) => {
-                  e.preventDefault();
-                  selectOption(opt);
-                }}
-              >
-                {opt.label}
-              </div>
-            ))
+            <>
+              {options.map((opt, i) => (
+                <div
+                  key={opt.value}
+                  className={`sd-option ${i === activeIndex ? "sd-active" : ""}`.trim()}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    selectOption(opt);
+                  }}
+                >
+                  {opt.label}
+                </div>
+              ))}
+              {showCustomOption && (
+                <div
+                  className="sd-option"
+                  style={{ fontStyle: "italic", color: "var(--color-primary, #0284c7)" }}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    selectOption({ value: inputValue.trim(), label: inputValue.trim() });
+                  }}
+                >
+                  + Use "{inputValue.trim()}"
+                </div>
+              )}
+            </>
           )}
         </div>
       )}
@@ -207,6 +245,7 @@ export function SearchableDropdown({
 export interface SearchableDropdownMultiProps extends SharedProps {
   values: string[];
   onChange: (values: string[]) => void;
+  allowCustomText?: boolean;
 }
 
 /** Multi-select variant: selections render as removable chips. */
@@ -216,6 +255,7 @@ export function SearchableDropdownMulti({
   placeholder,
   fetchOptions,
   fetchLabelForValue,
+  allowCustomText = false,
 }: SearchableDropdownMultiProps) {
   const [inputValue, setInputValue] = useState("");
   const [selected, setSelected] = useState<DropdownOption[]>([]);
@@ -296,10 +336,6 @@ export function SearchableDropdownMulti({
   function handleInput(nextValue: string) {
     setInputValue(nextValue);
     const term = nextValue.trim();
-    if (!term) {
-      closeResults();
-      return;
-    }
     void search.run(async (signal) => {
       const found = (await fetchOptions(term, signal)) || [];
       // Already-selected entries are filtered out of the list.
@@ -307,10 +343,25 @@ export function SearchableDropdownMulti({
       setOptions(found.filter((o) => !selectedValues.has(o.value)));
       setActiveIndex(-1);
       setOpen(true);
-    }, 250);
+    }, 150);
+  }
+
+  function handleFocus() {
+    void search.run(async (signal) => {
+      const found = (await fetchOptions(inputValue.trim(), signal)) || [];
+      const selectedValues = new Set(selected.map((s) => s.value));
+      setOptions(found.filter((o) => !selectedValues.has(o.value)));
+      setActiveIndex(-1);
+      setOpen(true);
+    }, 100);
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if ((e.key === "Enter" || e.key === ",") && allowCustomText && activeIndex < 0 && inputValue.trim()) {
+      e.preventDefault();
+      addSelection({ value: inputValue.trim(), label: inputValue.trim() });
+      return;
+    }
     if (!open) return;
     if (e.key === "ArrowDown") {
       e.preventDefault();
@@ -321,6 +372,7 @@ export function SearchableDropdownMulti({
     } else if (e.key === "Enter") {
       e.preventDefault();
       if (activeIndex >= 0 && options[activeIndex]) addSelection(options[activeIndex]);
+      else if (allowCustomText && inputValue.trim()) addSelection({ value: inputValue.trim(), label: inputValue.trim() });
     } else if (e.key === "Escape") {
       closeResults();
     }
@@ -333,6 +385,12 @@ export function SearchableDropdownMulti({
     }, 150);
   }
 
+  const showCustomOption =
+    allowCustomText &&
+    inputValue.trim() !== "" &&
+    !options.some((o) => o.label.toLowerCase() === inputValue.trim().toLowerCase()) &&
+    !selected.some((s) => s.label.toLowerCase() === inputValue.trim().toLowerCase());
+
   return (
     <div className="sd-wrap">
       <input
@@ -342,26 +400,41 @@ export function SearchableDropdownMulti({
         autoComplete="off"
         value={inputValue}
         onChange={(e) => handleInput(e.target.value)}
+        onFocus={handleFocus}
         onKeyDown={handleKeyDown}
         onBlur={handleBlur}
       />
       {open && (
         <div className="sd-results">
-          {options.length === 0 ? (
+          {options.length === 0 && !showCustomOption ? (
             <div className="sd-empty">No matches.</div>
           ) : (
-            options.map((opt, i) => (
-              <div
-                key={opt.value}
-                className={`sd-option ${i === activeIndex ? "sd-active" : ""}`.trim()}
-                onMouseDown={(e) => {
-                  e.preventDefault();
-                  addSelection(opt);
-                }}
-              >
-                {opt.label}
-              </div>
-            ))
+            <>
+              {options.map((opt, i) => (
+                <div
+                  key={opt.value}
+                  className={`sd-option ${i === activeIndex ? "sd-active" : ""}`.trim()}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    addSelection(opt);
+                  }}
+                >
+                  {opt.label}
+                </div>
+              ))}
+              {showCustomOption && (
+                <div
+                  className="sd-option"
+                  style={{ fontStyle: "italic", color: "var(--color-primary, #0284c7)" }}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    addSelection({ value: inputValue.trim(), label: inputValue.trim() });
+                  }}
+                >
+                  + Add "{inputValue.trim()}"
+                </div>
+              )}
+            </>
           )}
         </div>
       )}

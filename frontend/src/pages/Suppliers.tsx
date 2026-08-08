@@ -177,6 +177,7 @@ export function SuppliersPage() {
 
   /* Modal state */
   const [modalOpen, setModalOpen] = useState(false);
+  const [modalMode, setModalMode] = useState<"quick" | "full">("full");
   const [modalTab, setModalTab] = useState<ModalTab>("first");
   const [currentSupplierId, setCurrentSupplierId] = useState<string | null>(null);
   const [form, setForm] = useState(EMPTY_SUPPLIER_FORM);
@@ -187,6 +188,49 @@ export function SuppliersPage() {
   const [formSubCategoryIds, setFormSubCategoryIds] = useState<string[]>([]);
   const [formProductIds, setFormProductIds] = useState<string[]>([]);
   const [lockNewStatus, setLockNewStatus] = useState(false);
+  const [formStateCustomText, setFormStateCustomText] = useState("");
+  const [formCityCustomText, setFormCityCustomText] = useState("");
+  const [whatsappSameAsCalling, setWhatsappSameAsCalling] = useState(false);
+  const [wechatSameAsCalling, setWechatSameAsCalling] = useState(false);
+  const [callingNumberError, setCallingNumberError] = useState<string | null>(null);
+  const [defaultChinaId, setDefaultChinaId] = useState<string | null>(null);
+
+  const fetchChinaId = useCallback(async (): Promise<string | null> => {
+    try {
+      const { data } = await apiGet<{ id: string; name: string }[]>(
+        "/masters/countries" +
+          toQueryString({
+            search: "China",
+            page: 1,
+            page_size: 20,
+            sort_order: "asc",
+            status: "active",
+          })
+      );
+      const china = (data || []).find((c) => c.name.toLowerCase().includes("china"));
+      if (china) return china.id;
+
+      // Fallback: list all countries
+      const { data: allData } = await apiGet<{ id: string; name: string }[]>(
+        "/masters/countries" + toQueryString({ page: 1, page_size: 250, sort_order: "asc", status: "active" })
+      );
+      const foundInAll = (allData || []).find((c) => c.name.toLowerCase().includes("china"));
+      if (foundInAll) return foundInAll.id;
+    } catch (err) {
+      console.error("Failed to fetch China ID:", err);
+    }
+    return null;
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchChinaId().then((id) => {
+      if (!cancelled && id) setDefaultChinaId(id);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [fetchChinaId]);
 
   /* Contacts */
   const [contacts, setContacts] = useState<SupplierContact[]>([]);
@@ -249,6 +293,31 @@ export function SuppliersPage() {
       },
     []
   );
+
+  const companyNameFetcher = useCallback(
+    async (term: string, signal: AbortSignal): Promise<DropdownOption[]> => {
+      const { data } = await apiGet<Supplier[]>(
+        "/suppliers" + toQueryString({ search: term, page: 1, page_size: 20 }),
+        { signal }
+      );
+      return data.map((d) => ({ value: d.company_name, label: d.company_name }));
+    },
+    []
+  );
+
+  function validateCallingNumber(val: string) {
+    if (!val || !val.trim()) {
+      setCallingNumberError(null);
+      return true;
+    }
+    const digitsOnly = val.replace(/\D/g, "");
+    if (digitsOnly.length < 7 || digitsOnly.length > 11) {
+      setCallingNumberError("Calling number must be between 7 and 11 digits.");
+      return false;
+    }
+    setCallingNumberError(null);
+    return true;
+  }
 
   const productFetcher = useCallback(
     async (term: string, signal: AbortSignal): Promise<DropdownOption[]> => {
@@ -411,9 +480,17 @@ export function SuppliersPage() {
   }
 
   /* --- Modal --- */
-  async function openModal(supplier: Supplier | null) {
+  async function openModal(supplier: Supplier | null, mode: "quick" | "full" = "full") {
     setCurrentSupplierId(supplier ? supplier.id : null);
+    setModalMode(mode);
     setModalTab("first");
+    setError(null);
+    setContactFormOpen(false);
+    setWhatsappSameAsCalling(false);
+    setWechatSameAsCalling(false);
+    setCallingNumberError(null);
+    setFormStateCustomText("");
+    setFormCityCustomText("");
 
     if (supplier) {
       setForm({
@@ -451,9 +528,14 @@ export function SuppliersPage() {
       // Once a supplier is Existing it cannot be reverted to New.
       setLockNewStatus(supplier.current_status === "existing");
       setContacts(supplier.contacts || []);
+      if (supplier.contact_calling_number && supplier.contact_whatsapp_number === supplier.contact_calling_number) {
+        setWhatsappSameAsCalling(true);
+      }
+      if (supplier.contact_calling_number && supplier.contact_wechat_number === supplier.contact_calling_number) {
+        setWechatSameAsCalling(true);
+      }
     } else {
       setForm(EMPTY_SUPPLIER_FORM);
-      setFormCountryId(null);
       setFormStateId(null);
       setFormCityId(null);
       setFormCategoryIds([]);
@@ -461,9 +543,15 @@ export function SuppliersPage() {
       setFormProductIds([]);
       setLockNewStatus(false);
       setContacts([]);
+
+      let chinaId = defaultChinaId;
+      if (!chinaId) {
+        chinaId = await fetchChinaId();
+        if (chinaId) setDefaultChinaId(chinaId);
+      }
+      setFormCountryId(chinaId);
     }
 
-    setContactFormOpen(false);
     setModalOpen(true);
   }
 
@@ -516,21 +604,164 @@ export function SuppliersPage() {
     };
   }
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
+  async function resolveCustomGeography(countryId: string | null) {
+    let stateId = formStateId;
+    let cityId = formCityId;
+
+    if (!stateId && formStateCustomText.trim() && countryId) {
+      try {
+        const { data: searchStates } = await apiGet<{ id: string; name: string }[]>(
+          `/masters/states${toQueryString({ search: formStateCustomText.trim(), country_id: countryId, page: 1, page_size: 5 })}`
+        );
+        const match = searchStates.find((s) => s.name.toLowerCase() === formStateCustomText.trim().toLowerCase());
+        if (match) {
+          stateId = match.id;
+        } else {
+          const { data: newState } = await apiPost<{ id: string }>("/masters/states", {
+            name: formStateCustomText.trim(),
+            country_id: countryId,
+            code: formStateCustomText.trim().slice(0, 3).toUpperCase(),
+          });
+          stateId = newState.id;
+        }
+        setFormStateId(stateId);
+      } catch (err) {
+        console.error("Failed to resolve custom state:", err);
+      }
+    }
+
+    if (!cityId && formCityCustomText.trim() && stateId) {
+      try {
+        const { data: searchCities } = await apiGet<{ id: string; name: string }[]>(
+          `/masters/cities${toQueryString({ search: formCityCustomText.trim(), state_id: stateId, page: 1, page_size: 5 })}`
+        );
+        const match = searchCities.find((c) => c.name.toLowerCase() === formCityCustomText.trim().toLowerCase());
+        if (match) {
+          cityId = match.id;
+        } else {
+          const { data: newCity } = await apiPost<{ id: string }>("/masters/cities", {
+            name: formCityCustomText.trim(),
+            state_id: stateId,
+            code: formCityCustomText.trim().slice(0, 3).toUpperCase(),
+          });
+          cityId = newCity.id;
+        }
+        setFormCityId(cityId);
+      } catch (err) {
+        console.error("Failed to resolve custom city:", err);
+      }
+    }
+
+    return { stateId, cityId };
+  }
+
+  async function resolveCustomCategories(): Promise<string[]> {
+    const isUUID = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
+    const resolvedIds: string[] = [];
+
+    for (const cat of formCategoryIds) {
+      if (isUUID(cat)) {
+        resolvedIds.push(cat);
+      } else {
+        try {
+          const { data: searchCats } = await apiGet<{ id: string; name: string }[]>(
+            `/masters/product-categories${toQueryString({ search: cat.trim(), page: 1, page_size: 5 })}`
+          );
+          const match = searchCats.find((c) => c.name.toLowerCase() === cat.trim().toLowerCase());
+          if (match) {
+            resolvedIds.push(match.id);
+          } else {
+            const { data: newCat } = await apiPost<{ id: string }>("/masters/product-categories", {
+              name: cat.trim(),
+              code: cat.trim().slice(0, 3).toUpperCase(),
+            });
+            resolvedIds.push(newCat.id);
+          }
+        } catch {
+          // If creation fails, skip
+        }
+      }
+    }
+    return resolvedIds;
+  }
+
+  async function saveSupplierData(nextAction?: ModalTab | "exit") {
+    if (!form.company_name.trim()) {
+      setError("Company Name is required.");
+      return false;
+    }
+    if (!formCountryId) {
+      setError("Country is required.");
+      return false;
+    }
+    if (form.contact_calling_number && validateCallingNumber(form.contact_calling_number) === false) {
+      if (callingNumberError) {
+        setError(callingNumberError);
+        return false;
+      }
+    }
+
     setError(null);
     try {
-      const payload = buildPayload();
+      const { stateId, cityId } = await resolveCustomGeography(formCountryId);
+      if (!stateId && !formStateCustomText.trim()) {
+        setError("Province is required.");
+        return false;
+      }
+      if (!cityId && !formCityCustomText.trim()) {
+        setError("City is required.");
+        return false;
+      }
+      const categoryIds = await resolveCustomCategories();
+
+      const basePayload = buildPayload();
+      const payload = {
+        ...basePayload,
+        state_id: stateId || formStateId,
+        city_id: cityId || formCityId,
+        category_ids: categoryIds,
+      };
+
       const { data: supplier } = currentSupplierId
         ? await apiPatch<Supplier>(`/suppliers/${currentSupplierId}`, payload)
         : await apiPost<Supplier>("/suppliers", payload);
       setCurrentSupplierId(supplier.id);
       setContacts(supplier.contacts || []);
       reload();
-      setModalTab("contacts");
+
+      if (nextAction === "exit") {
+        closeModal();
+      } else if (nextAction) {
+        setModalTab(nextAction);
+      }
+      return true;
     } catch (err) {
       setError(err);
+      return false;
     }
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (modalMode === "quick") {
+      await saveSupplierData("exit");
+    } else {
+      if (modalTab === "first") {
+        await saveSupplierData("second");
+      } else if (modalTab === "second") {
+        await saveSupplierData("contacts");
+      }
+    }
+  }
+
+  async function handleSaveAndContinue(e: React.MouseEvent, nextTab: ModalTab) {
+    e.preventDefault();
+    await saveSupplierData(nextTab);
+  }
+
+  async function handleSaveAndExit(e: React.MouseEvent) {
+    e.preventDefault();
+    await saveSupplierData("exit");
   }
 
   async function refreshContacts() {
@@ -675,12 +906,12 @@ export function SuppliersPage() {
               onBulkDelete={canDelete ? handleBulkDelete : undefined}
             />
             {canCreate && (
-              <button className="btn btn-quick-add" onClick={() => openModal(null)}>
+              <button className="btn btn-quick-add" onClick={() => openModal(null, "quick")}>
                 + QUICK ADD
               </button>
             )}
             {canCreate && (
-              <button className="btn btn-add-new" onClick={() => openModal(null)}>
+              <button className="btn btn-add-new" onClick={() => openModal(null, "full")}>
                 + ADD NEW
               </button>
             )}
@@ -1006,53 +1237,69 @@ export function SuppliersPage() {
           <div className="modal-card" style={{ maxWidth: "820px" }}>
             <div className="modal-header">
               <h2>
-                {currentSupplierId && form.company_name
-                  ? `Edit ${form.company_name}`
-                  : "New Supplier"}
+                {modalMode === "quick"
+                  ? "Quick Add Supplier"
+                  : currentSupplierId && form.company_name
+                    ? `Edit ${form.company_name}`
+                    : "New Supplier"}
               </h2>
               <button className="modal-close" onClick={closeModal}>
                 &times;
               </button>
             </div>
 
-            <div className="toolbar" style={{ marginBottom: "var(--space-3)" }}>
-              <button
-                type="button"
-                className="btn btn-small"
-                onClick={() => setModalTab("first")}
-              >
-                1. First Data Form
-              </button>
-              <button
-                type="button"
-                className="btn btn-small"
-                onClick={() => setModalTab("second")}
-              >
-                2. Main Profile
-              </button>
-              {currentSupplierId && (
+            {modalMode === "full" && (
+              <div className="toolbar" style={{ marginBottom: "var(--space-3)" }}>
                 <button
                   type="button"
-                  className="btn btn-small"
-                  style={{ display: "inline-flex" }}
-                  onClick={() => setModalTab("contacts")}
+                  className={`btn btn-small ${modalTab === "first" ? "btn-primary" : ""}`}
+                  onClick={() => setModalTab("first")}
                 >
-                  3. Contacts
+                  1. First Data Form
                 </button>
-              )}
-            </div>
+                <button
+                  type="button"
+                  className={`btn btn-small ${modalTab === "second" ? "btn-primary" : ""}`}
+                  onClick={() => setModalTab("second")}
+                >
+                  2. Main Profile
+                </button>
+                {currentSupplierId && (
+                  <button
+                    type="button"
+                    className={`btn btn-small ${modalTab === "contacts" ? "btn-primary" : ""}`}
+                    style={{ display: "inline-flex" }}
+                    onClick={() => setModalTab("contacts")}
+                  >
+                    3. Contacts
+                  </button>
+                )}
+              </div>
+            )}
 
             <form onSubmit={handleSubmit}>
               {/* TAB 1 */}
               <div style={{ display: modalTab === "first" ? "block" : "none" }}>
                 <div className="form-grid">
-                  <TextField id="company_name" label="Name of Company *" required maxLength={255} value={form.company_name} onChange={(v) => setField("company_name", v)} />
+                  <div className="field">
+                    <label>Name of Company *</label>
+                    <SearchableDropdown
+                      value={form.company_name}
+                      onChange={(_, label) => setField("company_name", label)}
+                      allowCustomText={true}
+                      onTextChange={(v) => setField("company_name", v)}
+                      placeholder="Search existing or type company name..."
+                      fetchOptions={companyNameFetcher}
+                      fetchLabelForValue={async (v) => v}
+                    />
+                  </div>
                   <div className="field">
                     <label>Product Category (multiple)</label>
                     <SearchableDropdownMulti
                       values={formCategoryIds}
                       onChange={setFormCategoryIds}
-                      placeholder="Search and add a category..."
+                      allowCustomText={false}
+                      placeholder="Click to select product categories..."
                       fetchOptions={searchFetcher("/masters/product-categories")}
                       fetchLabelForValue={fetchNameLabel("/masters/product-categories")}
                     />
@@ -1061,8 +1308,12 @@ export function SuppliersPage() {
                     <option value="">Select</option>
                     <option value="manufacturer">Manufacturer</option>
                     <option value="trader">Trader</option>
+                    <option value="agent">Agent</option>
+                    <option value="exporter">Exporter</option>
+                    <option value="wholesaler">Wholesaler</option>
+                    <option value="distributor">Distributor</option>
                   </SelectField>
-                  <TextField id="brand_description" label="Brand of Supplier's Products" maxLength={255} placeholder="Description" value={form.brand_description} onChange={(v) => setField("brand_description", v)} />
+                  <TextAreaField id="brand_description" label="Brand of Supplier's Products" placeholder="Description..." value={form.brand_description} onChange={(v) => setField("brand_description", v)} />
                   <div className="field">
                     <label>Country *</label>
                     <SearchableDropdown
@@ -1071,6 +1322,8 @@ export function SuppliersPage() {
                         setFormCountryId(v);
                         setFormStateId(null);
                         setFormCityId(null);
+                        setFormStateCustomText("");
+                        setFormCityCustomText("");
                       }}
                       placeholder="Search country..."
                       fetchOptions={searchFetcher("/masters/countries")}
@@ -1081,11 +1334,18 @@ export function SuppliersPage() {
                     <label>Province *</label>
                     <SearchableDropdown
                       value={formStateId}
-                      onChange={(v) => {
+                      onChange={(v, label) => {
                         setFormStateId(v);
+                        setFormStateCustomText(v ? label : "");
                         setFormCityId(null);
+                        setFormCityCustomText("");
                       }}
-                      placeholder="Search province..."
+                      allowCustomText={true}
+                      onTextChange={(text) => {
+                        setFormStateCustomText(text);
+                        if (!formStateId) setFormStateId(null);
+                      }}
+                      placeholder="Search or type province..."
                       fetchOptions={searchFetcher("/masters/states", (): Record<string, string> =>
                         formCountryId ? { country_id: formCountryId } : {}
                       )}
@@ -1096,8 +1356,16 @@ export function SuppliersPage() {
                     <label>City *</label>
                     <SearchableDropdown
                       value={formCityId}
-                      onChange={setFormCityId}
-                      placeholder="Search city..."
+                      onChange={(v, label) => {
+                        setFormCityId(v);
+                        setFormCityCustomText(v ? label : "");
+                      }}
+                      allowCustomText={true}
+                      onTextChange={(text) => {
+                        setFormCityCustomText(text);
+                        if (!formCityId) setFormCityId(null);
+                      }}
+                      placeholder="Search or type city..."
                       fetchOptions={searchFetcher("/masters/cities", (): Record<string, string> =>
                         formStateId ? { state_id: formStateId } : {}
                       )}
@@ -1116,30 +1384,124 @@ export function SuppliersPage() {
                   </SelectField>
                   <TextField id="contact_full_name" label="Full Name" maxLength={150} value={form.contact_full_name} onChange={(v) => setField("contact_full_name", v)} />
                   <TextField id="contact_designation" label="Designation" maxLength={150} value={form.contact_designation} onChange={(v) => setField("contact_designation", v)} />
-                  <TextField id="contact_calling_number" label="Calling Number" maxLength={20} placeholder="With country code, 7-11 digits" value={form.contact_calling_number} onChange={(v) => setField("contact_calling_number", v)} />
-                  <TextField id="contact_whatsapp_number" label="WhatsApp Number" maxLength={20} value={form.contact_whatsapp_number} onChange={(v) => setField("contact_whatsapp_number", v)} />
-                  <TextField id="contact_wechat_number" label="WeChat Number" maxLength={20} value={form.contact_wechat_number} onChange={(v) => setField("contact_wechat_number", v)} />
+
+                  <div className="field">
+                    <label htmlFor="contact_calling_number">Calling Number</label>
+                    <input
+                      type="text"
+                      id="contact_calling_number"
+                      className="input"
+                      maxLength={11}
+                      placeholder="With country code, 7-11 digits"
+                      value={form.contact_calling_number}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setField("contact_calling_number", v);
+                        if (whatsappSameAsCalling) setField("contact_whatsapp_number", v);
+                        if (wechatSameAsCalling) setField("contact_wechat_number", v);
+                        if (callingNumberError) validateCallingNumber(v);
+                      }}
+                      onBlur={(e) => validateCallingNumber(e.target.value)}
+                    />
+                    {callingNumberError && (
+                      <span className="hint" style={{ color: "var(--color-danger, #ef4444)", display: "block", marginTop: "4px" }}>
+                        {callingNumberError}
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="field">
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
+                      <label htmlFor="contact_whatsapp_number" style={{ margin: 0 }}>WhatsApp Number</label>
+                      <label style={{ fontSize: "11px", display: "flex", alignItems: "center", gap: "4px", cursor: "pointer", fontWeight: "normal", color: "var(--color-text-secondary, #64748b)" }}>
+                        <input
+                          type="checkbox"
+                          checked={whatsappSameAsCalling}
+                          onChange={(e) => {
+                            const checked = e.target.checked;
+                            setWhatsappSameAsCalling(checked);
+                            if (checked) {
+                              setField("contact_whatsapp_number", form.contact_calling_number);
+                            }
+                          }}
+                        />
+                        Same as calling
+                      </label>
+                    </div>
+                    <input
+                      type="text"
+                      id="contact_whatsapp_number"
+                      className="input"
+                      maxLength={11}
+                      value={form.contact_whatsapp_number}
+                      disabled={whatsappSameAsCalling}
+                      onChange={(e) => setField("contact_whatsapp_number", e.target.value)}
+                    />
+                  </div>
+
+                  <div className="field">
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
+                      <label htmlFor="contact_wechat_number" style={{ margin: 0 }}>WeChat Number</label>
+                      <label style={{ fontSize: "11px", display: "flex", alignItems: "center", gap: "4px", cursor: "pointer", fontWeight: "normal", color: "var(--color-text-secondary, #64748b)" }}>
+                        <input
+                          type="checkbox"
+                          checked={wechatSameAsCalling}
+                          onChange={(e) => {
+                            const checked = e.target.checked;
+                            setWechatSameAsCalling(checked);
+                            if (checked) {
+                              setField("contact_wechat_number", form.contact_calling_number);
+                            }
+                          }}
+                        />
+                        Same as calling
+                      </label>
+                    </div>
+                    <input
+                      type="text"
+                      id="contact_wechat_number"
+                      className="input"
+                      maxLength={20}
+                      value={form.contact_wechat_number}
+                      disabled={wechatSameAsCalling}
+                      onChange={(e) => setField("contact_wechat_number", e.target.value)}
+                    />
+                  </div>
+
                   <TextField id="emails_input" label="Email ID(s)" placeholder="comma-separated for multiple" hint="Separate multiple emails with commas." value={form.emails_input} onChange={(v) => setField("emails_input", v)} />
+                  {modalMode === "quick" && (
+                    <div className="field" style={{ gridColumn: "span 2", display: "flex", alignItems: "flex-start", paddingTop: "24px" }}>
+                      <button
+                        type="submit"
+                        className="btn btn-primary"
+                        style={{ minWidth: "180px", padding: "10px 24px", justifyContent: "center" }}
+                      >
+                        Save
+                      </button>
+                    </div>
+                  )}
                 </div>
 
-                <div className="form-actions" style={{ borderTop: "none", display: "flex", gap: "12px", width: "100%" }}>
-                  <button
-                    type="button"
-                    className="btn btn-add-new"
-                    style={{ flex: 1, justifyContent: "center" }}
-                    onClick={() => setModalTab("second")}
-                  >
-                    Save &amp; Continue
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-quick-add"
-                    style={{ flex: 1, justifyContent: "center" }}
-                    onClick={closeModal}
-                  >
-                    Save &amp; Exit
-                  </button>
-                </div>
+                {modalMode === "full" && (
+                  <div className="form-actions" style={{ borderTop: "none", display: "flex", gap: "12px", width: "100%" }}>
+                    <button
+                      type="button"
+                      className="btn btn-add-new"
+                      style={{ flex: 1, justifyContent: "center" }}
+                      onClick={(e) => handleSaveAndContinue(e, "second")}
+                    >
+                      Save &amp; Continue
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-quick-add"
+                      style={{ flex: 1, justifyContent: "center" }}
+                      onClick={handleSaveAndExit}
+                    >
+                      Save &amp; Exit
+                    </button>
+                  </div>
+                )}
               </div>
 
               {/* TAB 2 */}
@@ -1229,10 +1591,20 @@ export function SuppliersPage() {
                 </SelectField>
 
                 <div className="form-actions" style={{ display: "flex", gap: "12px", width: "100%" }}>
-                  <button type="submit" className="btn btn-add-new" style={{ flex: 1, justifyContent: "center" }}>
+                  <button
+                    type="button"
+                    className="btn btn-add-new"
+                    style={{ flex: 1, justifyContent: "center" }}
+                    onClick={(e) => handleSaveAndContinue(e, "contacts")}
+                  >
                     Save &amp; Continue
                   </button>
-                  <button type="button" className="btn btn-quick-add" style={{ flex: 1, justifyContent: "center" }} onClick={closeModal}>
+                  <button
+                    type="button"
+                    className="btn btn-quick-add"
+                    style={{ flex: 1, justifyContent: "center" }}
+                    onClick={handleSaveAndExit}
+                  >
                     Save &amp; Exit
                   </button>
                 </div>

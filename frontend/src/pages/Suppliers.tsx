@@ -31,6 +31,7 @@ import {
   apiGet,
   apiPatch,
   apiPost,
+  apiPostMultipart,
   downloadExport,
   toQueryString,
 } from "@/lib/api";
@@ -211,6 +212,50 @@ export function SuppliersPage() {
   const [callingNumberError, setCallingNumberError] = useState<string | null>(null);
   const [defaultChinaId, setDefaultChinaId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [uploadingMedia, setUploadingMedia] = useState(false);
+
+  const mediaList = useMemo(() => {
+    return form.visit_media_input
+      .split(",")
+      .map((u) => u.trim())
+      .filter(Boolean);
+  }, [form.visit_media_input]);
+
+  const addMediaUrls = (newUrls: string[]) => {
+    const combined = [...mediaList, ...newUrls];
+    const unique = Array.from(new Set(combined));
+    setField("visit_media_input", unique.join(", "));
+  };
+
+  const removeMediaUrl = (urlToRemove: string) => {
+    const filtered = mediaList.filter((u) => u !== urlToRemove);
+    setField("visit_media_input", filtered.join(", "));
+  };
+
+  const handleMediaFileUpload = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    setUploadingMedia(true);
+    const uploadedUrls: string[] = [];
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      try {
+        const formData = new FormData();
+        formData.append("file", file);
+        const res = await apiPostMultipart<{ url: string }>("/suppliers/upload-media", formData);
+        if (res.data?.url) {
+          uploadedUrls.push(res.data.url);
+        }
+      } catch (err) {
+        console.warn("Failed to upload media to Supabase storage:", err);
+      }
+    }
+
+    if (uploadedUrls.length > 0) {
+      addMediaUrls(uploadedUrls);
+    }
+    setUploadingMedia(false);
+  };
 
   const fetchChinaId = useCallback(async (): Promise<string | null> => {
     try {
@@ -1287,7 +1332,139 @@ export function SuppliersPage() {
                 {visited && (
                   <TextAreaField id="visit_remarks" label="Visit Remarks" value={form.visit_remarks} onChange={(v) => setField("visit_remarks", v)} />
                 )}
-                <TextField id="visit_media_input" label="Visit Photos / Videos (URLs)" placeholder="comma-separated URLs" value={form.visit_media_input} onChange={(v) => setField("visit_media_input", v)} />
+
+                {/* Visit Photos / Videos Upload & Supabase Storage Gallery */}
+                <div className="field" style={{ marginTop: "16px", marginBottom: "16px" }}>
+                  <label style={{ fontSize: "13px", fontWeight: 600, color: "#0f172a", marginBottom: "6px", display: "block" }}>
+                    Visit Photos &amp; Videos (Supabase Storage)
+                  </label>
+                  
+                  <div style={{ display: "flex", gap: "12px", alignItems: "center", marginBottom: "12px" }}>
+                    <input
+                      type="file"
+                      accept="image/*,video/*"
+                      multiple
+                      id="supplier_media_upload_input"
+                      style={{ display: "none" }}
+                      onChange={(e) => {
+                        void handleMediaFileUpload(e.target.files);
+                        e.target.value = "";
+                      }}
+                    />
+                    <label
+                      htmlFor="supplier_media_upload_input"
+                      className="btn btn-secondary"
+                      style={{
+                        padding: "9px 18px",
+                        cursor: uploadingMedia ? "not-allowed" : "pointer",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "8px",
+                        fontWeight: 600,
+                        fontSize: "13px",
+                        background: "#f1f5f9",
+                        border: "1px solid #cbd5e1",
+                        color: "#0f172a",
+                        borderRadius: "6px",
+                        opacity: uploadingMedia ? 0.7 : 1,
+                      }}
+                    >
+                      {uploadingMedia ? "Uploading to Supabase..." : "📁 Select Photos / Videos"}
+                    </label>
+                    <span style={{ fontSize: "12px", color: "#64748b" }}>
+                      Upload images or videos directly to Supabase storage.
+                    </span>
+                  </div>
+
+                  {/* Media Gallery Thumbnails Grid */}
+                  {mediaList.length > 0 && (
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "repeat(auto-fill, minmax(110px, 1fr))",
+                        gap: "12px",
+                        padding: "12px",
+                        background: "#f8fafc",
+                        border: "1px solid #e2e8f0",
+                        borderRadius: "8px",
+                        marginBottom: "12px",
+                      }}
+                    >
+                      {mediaList.map((url, idx) => {
+                        const isVideo = url.match(/\.(mp4|webm|ogg|mov)$/i) || url.startsWith("data:video");
+                        return (
+                          <div
+                            key={`${url}-${idx}`}
+                            style={{
+                              position: "relative",
+                              width: "110px",
+                              height: "110px",
+                              borderRadius: "8px",
+                              overflow: "hidden",
+                              border: "1px solid #cbd5e1",
+                              background: "#ffffff",
+                              boxShadow: "0 2px 4px rgba(0,0,0,0.05)",
+                            }}
+                          >
+                            {isVideo ? (
+                              <div style={{ width: "100%", height: "100%", position: "relative", background: "#0f172a" }}>
+                                <video src={url} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                                <div
+                                  style={{
+                                    position: "absolute",
+                                    inset: 0,
+                                    display: "flex",
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                    background: "rgba(0,0,0,0.3)",
+                                    color: "#ffffff",
+                                    fontSize: "20px",
+                                  }}
+                                >
+                                  🎬
+                                </div>
+                              </div>
+                            ) : (
+                              <img src={url} alt={`Media ${idx + 1}`} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => removeMediaUrl(url)}
+                              title="Delete media"
+                              style={{
+                                position: "absolute",
+                                top: "4px",
+                                right: "4px",
+                                width: "22px",
+                                height: "22px",
+                                borderRadius: "50%",
+                                background: "rgba(239, 68, 68, 0.9)",
+                                color: "#ffffff",
+                                border: "none",
+                                cursor: "pointer",
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                fontSize: "12px",
+                                fontWeight: 700,
+                              }}
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  <TextField
+                    id="visit_media_input"
+                    label="Media URLs (comma-separated URLs)"
+                    placeholder="https://... (Auto-filled on upload or paste manually)"
+                    value={form.visit_media_input}
+                    onChange={(v) => setField("visit_media_input", v)}
+                  />
+                </div>
                 <TextAreaField id="overall_remarks" label="Overall Remarks / Key Strengths" value={form.overall_remarks} onChange={(v) => setField("overall_remarks", v)} />
                 <SelectField id="is_active" label="Status" value={form.is_active} onChange={(v) => setField("is_active", v)}>
                   <option value="true">Active</option>
@@ -1810,7 +1987,7 @@ export function SuppliersPage() {
                     <th>Current Status</th>
                     <th>Grade</th>
                     <th>Potential</th>
-                    <th />
+                    <th style={{ textAlign: "center" }}>ACTION</th>
                   </tr>
                 </thead>
                 <tbody ref={tableBodyRef} data-names-version={namesVersion}>
@@ -1912,20 +2089,59 @@ export function SuppliersPage() {
                             <span>{s.potential ? s.potential.toUpperCase() : "—"}</span>
                           )}
                         </td>
-                        <td className="actions">
-                          {canUpdate && (
-                            <button className="btn btn-small" onClick={() => handleRowEdit(s.id)}>
-                              Edit
-                            </button>
-                          )}
-                          {canDelete && (
-                            <button
-                              className="btn btn-small btn-danger"
-                              onClick={() => handleRowDelete(s.id)}
-                            >
-                              Delete
-                            </button>
-                          )}
+                        <td className="actions" style={{ textAlign: "center" }}>
+                          <div style={{ display: "flex", gap: "6px", justifyContent: "center", alignItems: "center" }}>
+                            {canUpdate && (
+                              <button
+                                type="button"
+                                className="btn"
+                                style={{
+                                  background: "#0061f2",
+                                  color: "#ffffff",
+                                  padding: "6px 9px",
+                                  borderRadius: "4px",
+                                  border: "none",
+                                  cursor: "pointer",
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  justifyContent: "center",
+                                }}
+                                onClick={() => handleRowEdit(s.id)}
+                                title="Edit Supplier"
+                              >
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                                  <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                                </svg>
+                              </button>
+                            )}
+                            {canDelete && (
+                              <button
+                                type="button"
+                                className="btn"
+                                style={{
+                                  background: "#ef4444",
+                                  color: "#ffffff",
+                                  padding: "6px 9px",
+                                  borderRadius: "4px",
+                                  border: "none",
+                                  cursor: "pointer",
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  justifyContent: "center",
+                                }}
+                                onClick={() => handleRowDelete(s.id)}
+                                title="Delete Supplier"
+                              >
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                  <polyline points="3 6 5 6 21 6" />
+                                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                                  <line x1="10" y1="11" x2="10" y2="17" />
+                                  <line x1="14" y1="11" x2="14" y2="17" />
+                                </svg>
+                              </button>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     ))

@@ -239,6 +239,51 @@ async def import_suppliers(
     return build_success_response(data=data, request_id=request.state.request_id)
 
 
+@router.post("/upload-media", summary="Upload visit photo or video to Supabase Storage")
+async def upload_supplier_media(
+    file: UploadFile = File(...),
+    _current_user: CurrentUser = Depends(require_permission("supplier.create")),
+) -> dict:
+    from pathlib import Path
+    import urllib.request
+    import os
+
+    content = await file.read()
+    filename = f"{uuid.uuid4().hex}_{file.filename}"
+    supabase_project_id = os.getenv("SUPABASE_PROJECT_ID", "mpvzjzunkiqchhhvxrza")
+    supabase_key = os.getenv("SUPABASE_SERVICE_KEY") or os.getenv("SUPABASE_ANON_KEY", "")
+
+    # Try direct upload to Supabase Storage Buckets
+    if supabase_key:
+        for bucket in ("supplier-media", "product-images"):
+            try:
+                supabase_upload_url = f"https://{supabase_project_id}.supabase.co/storage/v1/object/{bucket}/{filename}"
+                req = urllib.request.Request(
+                    supabase_upload_url,
+                    data=content,
+                    headers={
+                        "Authorization": f"Bearer {supabase_key}",
+                        "Content-Type": file.content_type or "application/octet-stream",
+                        "x-upsert": "true",
+                    },
+                    method="POST"
+                )
+                with urllib.request.urlopen(req) as resp:
+                    if resp.status in (200, 201):
+                        public_url = f"https://{supabase_project_id}.supabase.co/storage/v1/object/public/{bucket}/{filename}"
+                        return {"success": True, "data": {"url": public_url}}
+            except Exception:
+                pass
+
+    # Fallback to local server static storage
+    upload_dir = Path("uploads/suppliers")
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    file_path = upload_dir / filename
+    file_path.write_bytes(content)
+    public_url = f"/static/uploads/suppliers/{filename}"
+    return {"success": True, "data": {"url": public_url}}
+
+
 @router.get("/{supplier_id}", summary="Get a supplier")
 async def get_supplier(
     supplier_id: uuid.UUID,

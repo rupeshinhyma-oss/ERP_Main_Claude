@@ -161,7 +161,7 @@ async def create_user(
         emergency_contact=payload.emergency_contact,
         notes=payload.notes,
         role_ids=payload.role_ids,
-        initial_password=payload.initial_password,
+        password=payload.password,
         individual_permission_ids=payload.individual_permission_ids,
         created_by=current_user.id,
     )

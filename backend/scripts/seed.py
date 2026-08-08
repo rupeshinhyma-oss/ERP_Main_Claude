@@ -76,6 +76,20 @@ BOOTSTRAP_PERMISSIONS: list[tuple[str, str, str, str, str, str]] = [
     ("supplier.delete", "supplier", "suppliers", "delete", "ALL", "Delete suppliers and remove supplier contacts."),
     ("supplier.export", "supplier", "suppliers", "export", "ALL", "Export supplier data."),
     ("supplier.import", "supplier", "suppliers", "import", "ALL", "Import supplier data."),
+    # Buyers (Clients)
+    ("buyer.create", "buyer", "buyers", "create", "ALL", "Create buyers and add buyer contacts."),
+    ("buyer.read", "buyer", "buyers", "view", "ALL", "View buyers and their contacts."),
+    ("buyer.view", "buyer", "buyers", "view", "ALL", "View buyers and their contacts."),
+    ("buyer.update", "buyer", "buyers", "update", "ALL", "Update, activate/deactivate buyers; update grade/potential; edit contacts."),
+    ("buyer.delete", "buyer", "buyers", "delete", "ALL", "Delete buyers and remove buyer contacts."),
+    # Inquiries (Requirement workflow)
+    ("inquiry.create", "inquiry", "inquiries", "create", "ALL", "Add inquiry items and create consignments."),
+    ("inquiry.read", "inquiry", "inquiries", "view", "ALL", "View inquiries, consignments, and their items."),
+    ("inquiry.view", "inquiry", "inquiries", "view", "ALL", "View inquiries, consignments, and their items."),
+    ("inquiry.update", "inquiry", "inquiries", "update", "ALL", "Update inquiry items, shift between consignments, mark Tally Entry Posted."),
+    ("inquiry.approve", "inquiry", "inquiries", "approve", "ALL", "Approve or revert inquiry items."),
+    ("inquiry.delete", "inquiry", "inquiries", "delete", "ALL", "Delete inquiry items and consignments."),
+    ("inquiry.consignment_code.manage", "inquiry", "inquiries", "manage", "ALL", "Create and deactivate consignment codes (FB1, FB2, ING1, ...)."),
     # Master Data Configurations
     ("country.create", "country", "masters-countries", "create", "ALL", "Create countries."),
     ("country.read", "country", "masters-countries", "view", "ALL", "View countries."),
@@ -166,6 +180,12 @@ BOOTSTRAP_PERMISSIONS: list[tuple[str, str, str, str, str, str]] = [
     ("queue.manage", "queue", "queue", "manage", "ALL", "Manage background job queues."),
     ("cache.read", "cache", "cache", "view", "ALL", "View cache status."),
     ("cache.manage", "cache", "cache", "manage", "ALL", "Manage system cache."),
+    # Shipment Planning (dynamic branch-sheet grid: Mum Branch, MP Branch, ...)
+    ("planning.read", "planning", "planning", "view", "ALL", "View planning sheets, grids, and change history."),
+    ("planning.sheet.manage", "planning", "planning", "manage", "ALL", "Create, rename, and delete planning sheets (branch tabs); create custom status tags."),
+    ("planning.column.manage", "planning", "planning", "manage", "ALL", "Add, rename, move, and delete planning columns (unlimited, admin-named)."),
+    ("planning.row.manage", "planning", "planning", "manage", "ALL", "Add, rename, move, and delete planning rows (unlimited)."),
+    ("planning.cell.edit", "planning", "planning", "update", "ALL", "Edit planning cell values and CRM-style status tags."),
 ]
 
 SUPER_ADMIN_ROLE_NAME = "super_admin"
@@ -173,7 +193,7 @@ EMPLOYEE_ROLE_NAME = "employee"
 
 DEFAULT_BUSINESS_ROLES = [
     ("sales", "Sales Department Role for Managing Clients, Inquiries, and Suppliers.", [
-        "supplier.view", "supplier.create", "product.view", "brand.view", "category.view", "subcategory.view"
+        "supplier.view", "supplier.create", "buyer.view", "buyer.create", "buyer.update", "inquiry.view", "inquiry.create", "inquiry.update", "inquiry.approve", "product.view", "brand.view", "category.view", "subcategory.view"
     ]),
     ("purchase", "Purchase Department Role for Supplier Management and Procurement.", [
         "supplier.view", "supplier.create", "supplier.update", "supplier.export", "supplier.import", "product.view", "uom.view", "hsn.view"
@@ -186,6 +206,9 @@ DEFAULT_BUSINESS_ROLES = [
     ]),
     ("inventory", "Inventory & Warehouse Management Role.", [
         "inventory.view", "inventory.create", "inventory.update", "inventory.approve", "inventory.export", "inventory.import", "product.view", "product.create", "product.update", "uom.view", "category.view", "subcategory.view"
+    ]),
+    ("logistics", "Logistics & Shipment Planning Role for Managing Branch Sheets, Rows, and Columns.", [
+        "planning.read", "planning.sheet.manage", "planning.column.manage", "planning.row.manage", "planning.cell.edit", "supplier.view"
     ]),
 ]
 
@@ -218,10 +241,15 @@ EMPLOYEE_ROLE_PERMISSION_CODES: list[str] = [
     "product.view",
     "supplier.read",
     "supplier.view",
+    "buyer.read",
+    "buyer.view",
+    "inquiry.read",
+    "inquiry.view",
     "task.read",
     "task.view",
     "task.create",
     "task.update",
+    "planning.read",
 ]
 
 

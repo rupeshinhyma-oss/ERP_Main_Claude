@@ -8,6 +8,8 @@ email, or either (used at login, where the client submits a single
 
 from __future__ import annotations
 
+import uuid
+
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -34,17 +36,39 @@ class UserRepository(BaseRepository[User]):
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
-    async def get_by_username_or_email(self, identifier: str) -> User | None:
-        """
-        Fetch a user whose username OR email matches ``identifier``.
-
-        Used at login time, where the client submits a single field that
-        may be either -- this lets users authenticate with whichever they
-        remember.
-        """
-        stmt = select(User).where(or_(User.username == identifier, User.email == identifier))
+    async def get_by_phone(self, phone: str) -> User | None:
+        """Fetch a user by their exact phone number."""
+        stmt = select(User).where(User.phone == phone)
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
+
+    async def get_by_identifier(self, identifier: str) -> User | None:
+        """
+        Fetch a user whose username, email, OR phone number matches ``identifier``.
+
+        Used at login time, where the client submits a single field that
+        may be any of the three -- this lets users authenticate with
+        whichever they remember (username, email address, or phone number).
+        """
+        stmt = select(User).where(
+            or_(
+                User.username == identifier,
+                User.email == identifier,
+                User.phone == identifier,
+            )
+        )
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def get_by_username_or_email(self, identifier: str) -> User | None:
+        """
+        Deprecated alias for :meth:`get_by_identifier`.
+
+        Kept so any existing callers (or in-flight branches) that still
+        reference the old name keep working; also now matches on phone,
+        despite the name, since login should accept all three.
+        """
+        return await self.get_by_identifier(identifier)
 
     async def get_by_employee_code(self, employee_code: str) -> User | None:
         """Fetch a user by their exact employee_code."""
@@ -69,6 +93,14 @@ class UserRepository(BaseRepository[User]):
     async def email_exists(self, email: str, *, exclude_user_id: uuid.UUID | None = None) -> bool:
         """Return True if email is taken by any user other than exclude_user_id."""
         stmt = select(User.id).where(User.email == email)
+        if exclude_user_id is not None:
+            stmt = stmt.where(User.id != exclude_user_id)
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none() is not None
+
+    async def phone_exists(self, phone: str, *, exclude_user_id: uuid.UUID | None = None) -> bool:
+        """Return True if phone number is taken by any user other than exclude_user_id."""
+        stmt = select(User.id).where(User.phone == phone)
         if exclude_user_id is not None:
             stmt = stmt.where(User.id != exclude_user_id)
         result = await self.session.execute(stmt)

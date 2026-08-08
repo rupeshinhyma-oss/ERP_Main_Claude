@@ -14,9 +14,11 @@ from fastapi import APIRouter
 from app.api.v1.health import router as health_router
 from app.audit.routes import router as audit_router
 from app.auth.routes import router as auth_router
+from app.buyers.routes import router as buyers_router
 from app.cache.routes import router as cache_router
 from app.departments.routes import router as departments_router
 from app.designations.routes import router as designations_router
+from app.inquiries.routes import router as inquiries_router
 from app.masters.brands.routes import router as brands_router
 from app.masters.cities.routes import router as cities_router
 from app.masters.countries.routes import router as countries_router
@@ -28,6 +30,7 @@ from app.masters.products.routes import router as products_router
 from app.masters.states.routes import router as states_router
 from app.masters.uom.routes import router as uom_router
 from app.organizations.routes import router as organizations_router
+from app.planning.routes import router as planning_router
 from app.queue.routes import router as queue_router
 from app.rbac.routes import router as rbac_router
 from app.suppliers.routes import router as suppliers_router
@@ -66,5 +69,14 @@ api_router.include_router(products_router)
 # Phase 8: Supplier Management.
 api_router.include_router(suppliers_router)
 
+# Buyers (Client) Management.
+api_router.include_router(buyers_router)
+
+# Inquiries (Requirement) workflow -- two-layer consignment planning.
+api_router.include_router(inquiries_router)
+
 # Tasks: Task management flow.
 api_router.include_router(tasks_router)
+
+# Shipment Planning: dynamic branch-sheet grid (Mum Branch, MP Branch, ...).
+api_router.include_router(planning_router)

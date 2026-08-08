@@ -21,6 +21,8 @@ class UserSimpleRead(BaseModel):
     id: uuid.UUID
     username: str
     email: str
+    display_name: str | None = None
+    full_name: str | None = None
 
 
 class TaskCreate(BaseModel):

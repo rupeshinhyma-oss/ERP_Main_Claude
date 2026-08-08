@@ -136,13 +136,14 @@ export function LoginPage() {
             <form onSubmit={handleSubmit}>
               <div style={{ marginBottom: "18px" }}>
                 <label htmlFor="identifier" style={{ display: "block", fontSize: "13px", fontWeight: "600", color: "#334155", marginBottom: "6px" }}>
-                  Mobile Number
+                  Username, Email or Mobile Number
                 </label>
                 <input
                   ref={identifierRef}
                   id="identifier"
                   type="text"
-                  placeholder="9999999999"
+                  placeholder="Username, email, or mobile number"
+                  autoComplete="username"
                   required
                   style={{ width: "100%", padding: "10px 14px", fontSize: "14px", borderRadius: "6px", border: "1px solid #cbd5e1", outline: "none" }}
                   value={identifier}

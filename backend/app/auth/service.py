@@ -118,10 +118,10 @@ class AuthService:
         """
         await self._check_rate_limit(identifier)
 
-        user = await self.user_repository.get_by_username_or_email(identifier)
+        user = await self.user_repository.get_by_identifier(identifier)
         if user is None:
             await self._record_rate_limit_attempt(identifier)
-            raise UnauthorizedException("Invalid username/email or password.")
+            raise UnauthorizedException("Invalid username/email/phone number or password.")
 
         if user.locked_until is not None and not user.is_locked:
             # Temporary lock duration has expired; clear lockout state
@@ -140,7 +140,7 @@ class AuthService:
         if not verify_password(password, user.password_hash):
             await self._record_rate_limit_attempt(identifier)
             await self._register_failed_attempt(user)
-            raise UnauthorizedException("Invalid username/email or password.")
+            raise UnauthorizedException("Invalid username/email/phone number or password.")
 
         if not user.can_login:
             raise UnauthorizedException("This account is not active. Please contact an administrator.")
@@ -297,7 +297,7 @@ class AuthService:
 
     async def forgot_password(self, identifier: str) -> None:
         """Record a self-service password-reset request."""
-        user = await self.user_repository.get_by_username_or_email(identifier)
+        user = await self.user_repository.get_by_identifier(identifier)
         if user is None:
             return
         user.must_change_password = True

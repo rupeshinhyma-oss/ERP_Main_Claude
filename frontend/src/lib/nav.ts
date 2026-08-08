@@ -33,7 +33,7 @@ export const NAV_SECTIONS: NavSection[] = [
     label: "CONTACT",
     items: [
       { key: "suppliers", label: "Suppliers", path: "/suppliers", icon: "users", permission: "supplier.view" },
-      { key: "buyers", label: "Agents", path: "/buyers", icon: "user", permission: "crm.view" },
+      { key: "buyers", label: "Buyers", path: "/buyers", icon: "user", permission: "buyer.view" },
       { key: "industrial-zones", label: "City", path: "/masters/cities", icon: "sliders", permission: "city.view" },
     ],
   },
@@ -57,8 +57,13 @@ export const NAV_SECTIONS: NavSection[] = [
   {
     label: "SALE",
     items: [
-      { key: "proforma", label: "Proforma", path: "/inquiries", icon: "fileText", permission: "crm.view" },
-      { key: "sales-process", label: "Sales Process", path: "/inquiries", icon: "truck", permission: "crm.view" },
+      { key: "proforma", label: "Inquiries", path: "/inquiries", icon: "fileText", permission: "inquiry.view" },
+    ],
+  },
+  {
+    label: "PLANNING",
+    items: [
+      { key: "planning", label: "Shipment Planning", path: "/planning", icon: "grid", permission: "planning.read" },
     ],
   },
   {
@@ -92,6 +97,7 @@ export const PAGE_TITLES: Record<string, string> = {
   reports: "Reports & Analytics",
   buyers: "Agents & Buyers",
   inquiries: "Proforma & Sales",
+  planning: "Shipment Planning",
   crm: "Customer Relationship Management",
   sales: "Sales Process",
   purchase: "Purchasing",

@@ -27,6 +27,7 @@ import { SuppliersPage } from "@/pages/Suppliers";
 import { TasksPage } from "@/pages/Tasks";
 import { BuyersPage } from "@/pages/Buyers";
 import { InquiriesPage } from "@/pages/Inquiries";
+import { PlanningPage } from "@/pages/Planning";
 
 import { CountriesPage } from "@/pages/masters/Countries";
 import { StatesPage } from "@/pages/masters/States";
@@ -72,6 +73,7 @@ export function App() {
       <Route path="/tasks" element={<TasksPage />} />
       <Route path="/buyers" element={<BuyersPage />} />
       <Route path="/inquiries" element={<InquiriesPage />} />
+      <Route path="/planning" element={<PlanningPage />} />
 
       <Route path="/masters/countries" element={<CountriesPage />} />
       <Route path="/masters/states" element={<StatesPage />} />

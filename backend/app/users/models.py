@@ -77,7 +77,7 @@ class User(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
     employee_code: Mapped[str | None] = mapped_column(String(50), unique=True, nullable=True, index=True)
     username: Mapped[str] = mapped_column(String(100), unique=True, nullable=False, index=True)
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
-    phone: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    phone: Mapped[str] = mapped_column(String(30), unique=True, nullable=False, index=True)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
 
     # Department, Designation & Manager

@@ -58,10 +58,12 @@ function StatusBadge({ status, isActive }: { status?: string; isActive?: boolean
 const EMPTY_CREATE = {
   first_name: "",
   last_name: "",
+  display_name: "",
   username: "",
   email: "",
   employee_code: "",
   phone: "",
+  password: "",
   department_id: "",
   designation_id: "",
   role_id: "",
@@ -277,10 +279,12 @@ export function UsersPage() {
       const { data } = await apiPost<User>("/users", {
         first_name: createForm.first_name.trim(),
         last_name: createForm.last_name.trim(),
-        username: createForm.username.trim(),
+        display_name: createForm.display_name.trim(),
+        username: createForm.username.trim() || null,
         email: createForm.email.trim(),
         employee_code: createForm.employee_code.trim() || null,
-        phone: createForm.phone.trim() || null,
+        phone: createForm.phone.trim(),
+        password: createForm.password,
         department_id: createForm.department_id || null,
         designation_id: createForm.designation_id || null,
         role_ids: createForm.role_id ? [createForm.role_id] : [],
@@ -691,12 +695,60 @@ export function UsersPage() {
       >
         <form onSubmit={handleCreateSubmit}>
           <div className="form-grid">
-            <TextField id="first_name" label="First Name *" required maxLength={100} placeholder="e.g. John" value={createForm.first_name} onChange={(v) => setCreateForm((f) => ({ ...f, first_name: v }))} />
-            <TextField id="last_name" label="Last Name *" required maxLength={100} placeholder="e.g. Doe" value={createForm.last_name} onChange={(v) => setCreateForm((f) => ({ ...f, last_name: v }))} />
-            <TextField id="username" label="Username *" required minLength={3} maxLength={100} placeholder="e.g. john.doe" value={createForm.username} onChange={(v) => setCreateForm((f) => ({ ...f, username: v }))} />
+            <TextField
+              id="first_name"
+              label="First Name *"
+              required
+              maxLength={100}
+              placeholder="e.g. John"
+              value={createForm.first_name}
+              onChange={(v) =>
+                setCreateForm((f) => {
+                  const autoDisplay = `${f.first_name} ${f.last_name}`.trim();
+                  const displayFollowsAuto = !f.display_name || f.display_name === autoDisplay;
+                  const nextAutoDisplay = `${v} ${f.last_name}`.trim();
+                  return {
+                    ...f,
+                    first_name: v,
+                    display_name: displayFollowsAuto ? nextAutoDisplay : f.display_name,
+                  };
+                })
+              }
+            />
+            <TextField
+              id="last_name"
+              label="Last Name *"
+              required
+              maxLength={100}
+              placeholder="e.g. Doe"
+              value={createForm.last_name}
+              onChange={(v) =>
+                setCreateForm((f) => {
+                  const autoDisplay = `${f.first_name} ${f.last_name}`.trim();
+                  const displayFollowsAuto = !f.display_name || f.display_name === autoDisplay;
+                  const nextAutoDisplay = `${f.first_name} ${v}`.trim();
+                  return {
+                    ...f,
+                    last_name: v,
+                    display_name: displayFollowsAuto ? nextAutoDisplay : f.display_name,
+                  };
+                })
+              }
+            />
+            <TextField
+              id="display_name"
+              label="Display Name *"
+              required
+              maxLength={200}
+              placeholder="Shown everywhere in the system (e.g. John Doe)"
+              value={createForm.display_name}
+              onChange={(v) => setCreateForm((f) => ({ ...f, display_name: v }))}
+            />
+            <TextField id="username" label="Username (optional)" minLength={3} maxLength={100} placeholder="Leave blank to auto-generate" value={createForm.username} onChange={(v) => setCreateForm((f) => ({ ...f, username: v }))} />
             <TextField id="email" label="Work Email *" type="email" required placeholder="e.g. john@inhyma.com" value={createForm.email} onChange={(v) => setCreateForm((f) => ({ ...f, email: v }))} />
             <TextField id="employee_code" label="Employee Code" placeholder="e.g. EMP-001" value={createForm.employee_code} onChange={(v) => setCreateForm((f) => ({ ...f, employee_code: v }))} />
-            <TextField id="phone" label="Mobile Number" placeholder="+256..." value={createForm.phone} onChange={(v) => setCreateForm((f) => ({ ...f, phone: v }))} />
+            <TextField id="phone" label="Mobile Number *" required placeholder="+256..." value={createForm.phone} onChange={(v) => setCreateForm((f) => ({ ...f, phone: v }))} />
+            <TextField id="password" label="Password *" type="password" required minLength={1} placeholder="Set the user's initial password" value={createForm.password} onChange={(v) => setCreateForm((f) => ({ ...f, password: v }))} />
             <SelectField id="department_id" label="Department" value={createForm.department_id} onChange={(v) => setCreateForm((f) => ({ ...f, department_id: v }))}>
               <option value="">-- Select Department --</option>
               {departmentOptions}

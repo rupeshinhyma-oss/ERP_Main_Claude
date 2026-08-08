@@ -232,6 +232,7 @@ export interface User {
   id: string;
   username: string;
   email: string;
+  phone: string;
   status?: string;
   is_active?: boolean;
   roles?: string[];
@@ -241,7 +242,6 @@ export interface User {
   display_name?: string | null;
   employee_name?: string | null;
   employee_code?: string | null;
-  phone?: string | null;
   department_id?: string | null;
   designation_id?: string | null;
   department_name?: string | null;
@@ -441,6 +441,8 @@ export interface TaskUserRef {
   id?: string;
   username: string;
   email?: string;
+  display_name?: string | null;
+  full_name?: string | null;
 }
 
 export interface Task {

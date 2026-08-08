@@ -150,7 +150,9 @@ export function TasksPage() {
   const showToast = useToast();
 
   const [tasks, setTasks] = useState<Task[]>([]);
-  const [users, setUsers] = useState<{ id: string; username: string; email: string }[]>([]);
+  const [users, setUsers] = useState<
+    { id: string; username: string; email: string; display_name?: string | null; full_name?: string | null }[]
+  >([]);
   const [view, setView] = useState<ViewMode>("list");
   const [preset, setPreset] = useState<Preset>("all");
   const [loading, setLoading] = useState(true);
@@ -212,7 +214,7 @@ export function TasksPage() {
   useEffect(() => {
     (async () => {
       try {
-        const res = await apiGet<ItemsPage<{ id: string; username: string; email: string }>>(
+        const res = await apiGet<ItemsPage<{ id: string; username: string; email: string; display_name?: string | null; full_name?: string | null }>>(
           "/users?limit=100"
         );
         if (res?.data && Array.isArray(res.data.items)) {
@@ -222,7 +224,14 @@ export function TasksPage() {
         console.warn("Could not load users list for assignment (permission or offline):", err);
         // Fall back to just the current user, so a task can still be self-assigned.
         if (profile?.id) {
-          setUsers([{ id: profile.id, username: `${profile.username} (Me)`, email: "" }]);
+          setUsers([
+            {
+              id: profile.id,
+              username: profile.username,
+              email: "",
+              display_name: `${profile.full_name || profile.username} (Me)`,
+            },
+          ]);
         }
       }
     })();
@@ -251,7 +260,9 @@ export function TasksPage() {
       if (q) {
         const matchTitle = (t.title || "").toLowerCase().includes(q);
         const matchDesc = (t.description || "").toLowerCase().includes(q);
-        const matchAssignee = (t.assigned_to?.username || "").toLowerCase().includes(q);
+        const assignee = t.assigned_to;
+        const matchAssignee = [assignee?.username, assignee?.display_name, assignee?.full_name]
+          .some((v) => (v || "").toLowerCase().includes(q));
         if (!matchTitle && !matchDesc && !matchAssignee) return false;
       }
       if (statusFilter && t.status !== statusFilter) return false;
@@ -553,8 +564,12 @@ export function TasksPage() {
                     </tr>
                   ) : (
                     filtered.map((t) => {
-                      const assigneeName = t.assigned_to ? t.assigned_to.username : "Unassigned";
-                      const creatorName = t.created_by ? t.created_by.username : "System";
+                      const assigneeName = t.assigned_to
+                        ? t.assigned_to.display_name || t.assigned_to.full_name || t.assigned_to.username
+                        : "Unassigned";
+                      const creatorName = t.created_by
+                        ? t.created_by.display_name || t.created_by.full_name || t.created_by.username
+                        : "System";
                       return (
                         <tr key={t.id}>
                           <td onClick={(e) => e.stopPropagation()}>
@@ -698,7 +713,7 @@ export function TasksPage() {
                       ) : (
                         stageTasks.map((t) => {
                           const assigneeName = t.assigned_to
-                            ? t.assigned_to.username
+                            ? t.assigned_to.display_name || t.assigned_to.full_name || t.assigned_to.username
                             : "Unassigned";
                           return (
                             <div
@@ -851,11 +866,14 @@ export function TasksPage() {
                     onChange={(e) => setField("assigned_to_id", e.target.value)}
                   >
                     <option value="">-- Select Assignee --</option>
-                    {users.map((u) => (
-                      <option key={u.id} value={u.id}>
-                        {u.email ? `${u.username} (${u.email})` : u.username}
-                      </option>
-                    ))}
+                    {users.map((u) => {
+                      const label = u.display_name || u.full_name || u.username;
+                      return (
+                        <option key={u.id} value={u.id}>
+                          {label !== u.username ? `${label} (${u.username})` : label}
+                        </option>
+                      );
+                    })}
                   </select>
                 </div>
               </div>
@@ -968,7 +986,7 @@ export function TasksPage() {
                     <div className="detail-label">Assignee</div>
                     <div className="detail-val" style={{ fontWeight: 600 }}>
                       {selectedTask.assigned_to
-                        ? `${selectedTask.assigned_to.username} (${selectedTask.assigned_to.email})`
+                        ? `${selectedTask.assigned_to.display_name || selectedTask.assigned_to.full_name || selectedTask.assigned_to.username} (${selectedTask.assigned_to.email})`
                         : "Unassigned"}
                     </div>
                   </div>
@@ -982,7 +1000,9 @@ export function TasksPage() {
                   <div className="detail-section">
                     <div className="detail-label">Created By</div>
                     <div className="detail-val">
-                      {selectedTask.created_by ? selectedTask.created_by.username : "System"}
+                      {selectedTask.created_by
+                        ? selectedTask.created_by.display_name || selectedTask.created_by.full_name || selectedTask.created_by.username
+                        : "System"}
                     </div>
                   </div>
                   <div className="detail-section">

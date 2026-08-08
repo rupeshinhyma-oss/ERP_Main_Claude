@@ -11,7 +11,9 @@ from pydantic import BaseModel, ConfigDict, Field
 class LoginRequest(BaseModel):
     """Payload for ``POST /auth/login``."""
 
-    identifier: str = Field(..., description="Username or email address.", min_length=1)
+    identifier: str = Field(
+        ..., description="Username, email address, or phone number.", min_length=1
+    )
     password: str = Field(..., min_length=1)
 
 
@@ -37,7 +39,9 @@ class ChangePasswordRequest(BaseModel):
 class ForgotPasswordRequest(BaseModel):
     """Payload for ``POST /auth/forgot-password``."""
 
-    identifier: str = Field(..., description="Username or email address.", min_length=1)
+    identifier: str = Field(
+        ..., description="Username, email address, or phone number.", min_length=1
+    )
 
 
 class TokenResponse(BaseModel):

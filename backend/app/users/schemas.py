@@ -13,15 +13,22 @@ from app.users.models import EmploymentStatus, EmploymentType, Gender
 class UserCreate(BaseModel):
     """Payload for an admin creating a new user account + profile."""
 
-    first_name: str | None = Field(default=None, max_length=100)
+    first_name: str = Field(..., min_length=1, max_length=100)
     middle_name: str | None = Field(default=None, max_length=100)
-    last_name: str | None = Field(default=None, max_length=100)
-    display_name: str | None = Field(default=None, max_length=200)
+    last_name: str = Field(..., min_length=1, max_length=100)
+    display_name: str = Field(
+        ..., min_length=1, max_length=200, description="Required. Shown throughout the system in place of the username."
+    )
 
     employee_code: str | None = Field(default=None, max_length=50)
-    username: str = Field(..., min_length=3, max_length=100)
+    username: str | None = Field(
+        default=None,
+        min_length=3,
+        max_length=100,
+        description="Optional. If omitted, the system generates a unique username automatically.",
+    )
     email: EmailStr
-    phone: str | None = Field(default=None, max_length=30)
+    phone: str = Field(..., min_length=6, max_length=30, description="Required. Used as a login identifier.")
     
     department_id: uuid.UUID | None = None
     designation_id: uuid.UUID | None = None
@@ -41,9 +48,8 @@ class UserCreate(BaseModel):
     emergency_contact: str | None = Field(default=None, max_length=255)
     notes: str | None = None
 
-    initial_password: str | None = Field(
-        default=None,
-        description="Optional custom initial password. If omitted, a temporary password is generated."
+    password: str = Field(
+        ..., min_length=1, description="Required. The initial password for the new account."
     )
     role_ids: list[uuid.UUID] = Field(default_factory=list)
     individual_permission_ids: list[uuid.UUID] = Field(
@@ -66,7 +72,7 @@ class UserRead(BaseModel):
     employee_code: str | None = None
     username: str
     email: str
-    phone: str | None = None
+    phone: str
 
     department_id: uuid.UUID | None = None
     designation_id: uuid.UUID | None = None

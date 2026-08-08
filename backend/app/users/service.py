@@ -10,10 +10,12 @@ session" has exactly one implementation.
 
 from __future__ import annotations
 
+import re
+import secrets
 import uuid
 from datetime import datetime, timezone
 
-from app.auth.security import generate_temporary_password, hash_password
+from app.auth.security import hash_password
 from app.auth.service import AuthService
 from app.core.exceptions import ConflictException, NotFoundException
 from app.rbac.repository import UserRoleRepository
@@ -39,6 +41,37 @@ class UserService:
         self.user_role_repository = user_role_repository
         self.rbac_service = rbac_service
         self.auth_service = auth_service
+
+    @staticmethod
+    def _username_base_from(email: str, phone: str) -> str:
+        """Derive a readable username stem from the email's local part, falling back to phone."""
+        local_part = email.split("@", 1)[0] if "@" in email else ""
+        stem = re.sub(r"[^a-zA-Z0-9._-]", "", local_part).strip(".-_")
+        if len(stem) >= 3:
+            return stem.lower()
+        digits_only = re.sub(r"\D", "", phone)
+        return f"user{digits_only[-6:]}" if digits_only else "user"
+
+    async def _generate_unique_username(self, *, email: str, phone: str) -> str:
+        """
+        Generate a unique, system-assigned username.
+
+        Used when an admin creates a user without specifying a username.
+        Tries a clean stem derived from the email first (e.g. ``john.doe``);
+        if that's taken, appends a short random numeric suffix and retries
+        a bounded number of times before falling back to a fully random tag.
+        """
+        base = self._username_base_from(email, phone)[:90]
+        if not await self.user_repository.username_exists(base):
+            return base
+
+        for _ in range(20):
+            candidate = f"{base}{secrets.randbelow(90000) + 10000}"[:100]
+            if not await self.user_repository.username_exists(candidate):
+                return candidate
+
+        # Extremely unlikely fallback: fully random suffix, effectively collision-free.
+        return f"{base[:80]}{secrets.token_hex(8)}"[:100]
 
     async def get_by_id_or_raise(self, user_id: uuid.UUID) -> User:
         """Fetch a user by ID or raise :class:`NotFoundException`."""
@@ -92,15 +125,16 @@ class UserService:
     async def create_user(
         self,
         *,
-        username: str,
         email: str,
+        phone: str,
+        password: str,
+        first_name: str,
+        last_name: str,
+        display_name: str,
         created_by: uuid.UUID,
-        first_name: str | None = None,
+        username: str | None = None,
         middle_name: str | None = None,
-        last_name: str | None = None,
-        display_name: str | None = None,
         employee_code: str | None = None,
-        phone: str | None = None,
         department_id: uuid.UUID | None = None,
         designation_id: uuid.UUID | None = None,
         manager_id: uuid.UUID | None = None,
@@ -117,34 +151,53 @@ class UserService:
         emergency_contact: str | None = None,
         notes: str | None = None,
         role_ids: list[uuid.UUID] | None = None,
-        initial_password: str | None = None,
         individual_permission_ids: list[uuid.UUID] | None = None,
     ) -> tuple[User, str]:
         """
-        Create a new user account with a manual or generated temporary password.
+        Create a new user account.
+
+        ``email``, ``phone``, ``password``, ``first_name``, ``last_name``, and
+        ``display_name`` are always required. ``username`` is optional: if the
+        admin doesn't supply one, the system generates a unique username
+        automatically (derived from the email, falling back to the phone
+        number). Any of username / email / phone can later be used to log in.
+        ``display_name`` is what's shown throughout the rest of the system
+        (task lists, dropdowns, audit views) in place of the raw username.
 
         Returns ``(user, password_set)`` -- the plaintext password is returned
         once so the caller can relay it to the admin; only its hash is persisted.
         """
-        if await self.user_repository.username_exists(username):
+        if not first_name or not first_name.strip():
+            raise ConflictException("First name is required.")
+        if not last_name or not last_name.strip():
+            raise ConflictException("Last name is required.")
+        if not display_name or not display_name.strip():
+            raise ConflictException("Display name is required.")
+
+        if username and await self.user_repository.username_exists(username):
             raise ConflictException("A user with that username already exists.")
         if await self.user_repository.email_exists(email):
             raise ConflictException("A user with that email already exists.")
+        if await self.user_repository.phone_exists(phone):
+            raise ConflictException("A user with that phone number already exists.")
         if employee_code and await self.user_repository.employee_code_exists(employee_code):
             raise ConflictException("An account is already linked to that employee code.")
 
-        if initial_password and initial_password.strip():
-            password_to_set = initial_password.strip()
-        else:
-            password_to_set = generate_temporary_password()
+        if not password or not password.strip():
+            raise ConflictException("A password is required to create a user.")
+        password_to_set = password.strip()
+
+        resolved_username = username.strip() if username and username.strip() else (
+            await self._generate_unique_username(email=email, phone=phone)
+        )
 
         user = await self.user_repository.create(
-            first_name=first_name,
+            first_name=first_name.strip(),
             middle_name=middle_name,
-            last_name=last_name,
-            display_name=display_name or (f"{first_name} {last_name}".strip() if (first_name or last_name) else username),
+            last_name=last_name.strip(),
+            display_name=display_name.strip(),
             employee_code=employee_code,
-            username=username,
+            username=resolved_username,
             email=email,
             phone=phone,
             department_id=department_id,

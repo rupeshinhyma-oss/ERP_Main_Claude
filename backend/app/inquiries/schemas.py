@@ -1,0 +1,152 @@
+"""Inquiry Pydantic Schemas (request/response contracts)."""
+
+from __future__ import annotations
+
+import uuid
+from datetime import datetime
+
+from pydantic import BaseModel, ConfigDict, Field
+
+from app.inquiries.models import InquiryConsignmentStatus, InquiryItemStatus
+
+# ---------------------------------------------------------------------------
+# Consignment Codes (admin-managed master)
+# ---------------------------------------------------------------------------
+
+
+class ConsignmentCodeCreate(BaseModel):
+    """Document: "Master to create and choose from dropdown menu"."""
+
+    code: str = Field(..., min_length=1, max_length=20, description='e.g. "FB1", "ING1".')
+    label: str | None = Field(default=None, max_length=150)
+    buyer_id: uuid.UUID
+
+
+class ConsignmentCodeRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    code: str
+    label: str | None
+    buyer_id: uuid.UUID
+    status: str
+    created_at: datetime
+
+
+# ---------------------------------------------------------------------------
+# Items (Layer 2: one product line within a consignment)
+# ---------------------------------------------------------------------------
+
+
+class InquiryItemCreate(BaseModel):
+    """
+    Payload for "Quick Access & Add New" -- both forms share this shape.
+
+    Document: "From above fields, 'Brand Preference and Product Specs/
+    Remarks' -- these 2 fields Optional, Rest all Mandatory fields in
+    both forms."
+    """
+
+    buyer_id: uuid.UUID = Field(..., description="Inquiry by (buyer company name).")
+    consignment_code_id: uuid.UUID
+    product_id: uuid.UUID
+    quantity: float = Field(..., gt=0)
+    brand_preference: str | None = None
+    product_specs_remarks: str | None = None
+    status: InquiryItemStatus = Field(default=InquiryItemStatus.PROPOSED)
+
+
+class InquiryItemUpdate(BaseModel):
+    """Partial update. Quantity is editable; UOM/weight/CBM are not (see service docstring)."""
+
+    quantity: float | None = Field(default=None, gt=0)
+    brand_preference: str | None = None
+    product_specs_remarks: str | None = None
+
+
+class InquiryItemShift(BaseModel):
+    """Document (Process Flow): "shifting between FB1 & FB2"."""
+
+    to_consignment_code_id: uuid.UUID
+
+
+class InquiryItemProcurementRemarksUpdate(BaseModel):
+    """Document: "Remarks (by Yinglima China Procurement Team) ... added or edited from 'Action' Panel"."""
+
+    remarks: str | None = None
+
+
+class BulkTallyPostRequest(BaseModel):
+    """Document: "some easy way to select and change multiple items to 'Posted'"."""
+
+    item_ids: list[uuid.UUID] = Field(..., min_length=1)
+
+
+class InquiryItemRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    inquiry_id: uuid.UUID
+    product_id: uuid.UUID
+    uom_id: uuid.UUID
+    quantity: float
+    brand_preference: str | None
+    product_specs_remarks: str | None
+    status: InquiryItemStatus
+    proposed_at: datetime
+    proposed_by: uuid.UUID
+    approved_at: datetime | None
+    approved_by: uuid.UUID | None
+    tally_entry_posted: bool
+    tally_posted_at: datetime | None
+    tally_posted_by: uuid.UUID | None
+    procurement_remarks: str | None
+    requires_license: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+# ---------------------------------------------------------------------------
+# Inquiries / Consignments (Layer 1)
+# ---------------------------------------------------------------------------
+
+
+class InquiryRead(BaseModel):
+    """A consignment header, as returned by the API (Layer 1 detail view: "inside consignment layer")."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    buyer_id: uuid.UUID
+    consignment_code_id: uuid.UUID
+    consignment_status: InquiryConsignmentStatus
+    total_cbm: float
+    total_weight: float
+    created_by: uuid.UUID
+    created_at: datetime
+    updated_at: datetime
+    items: list[InquiryItemRead] = Field(default_factory=list)
+
+
+class InquiryListItemRead(BaseModel):
+    """One row in the Layer-1 "inside a company" list (document: "Columns in List (1st Layer)")."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    buyer_id: uuid.UUID
+    consignment_code_id: uuid.UUID
+    consignment_status: InquiryConsignmentStatus
+    total_cbm: float
+    total_weight: float
+    created_at: datetime
+    updated_at: datetime
+
+
+class CompanySummaryRead(BaseModel):
+    """One row in the Layer-1 "company wise" summary (document: "1st layer summary is company wise")."""
+
+    buyer_id: uuid.UUID
+    consignment_count: int
+    total_cbm: float
+    total_weight: float

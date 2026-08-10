@@ -294,11 +294,38 @@ export function SuppliersPage() {
     };
   }, [fetchChinaId]);
 
-  /* Contacts */
+  /* Tabs & Contacts State */
+  const [editTab, setEditTab] = useState<"profile" | "contacts">("profile");
   const [contacts, setContacts] = useState<SupplierContact[]>([]);
   const [contactFormOpen, setContactFormOpen] = useState(false);
   const [contactForm, setContactForm] = useState(EMPTY_CONTACT_FORM);
   const [contactCountryId, setContactCountryId] = useState<string | null>(null);
+  const [contactPhoneCode, setContactPhoneCode] = useState<string>("");
+  const [contactSameCallingWhatsapp, setContactSameCallingWhatsapp] = useState(false);
+  const [contactSameCallingWechat, setContactSameCallingWechat] = useState(false);
+  const [drawerError, setDrawerError] = useState<unknown>(null);
+  const [contactSubmitting, setContactSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (!contactCountryId) {
+      setContactPhoneCode("");
+      return;
+    }
+    let cancelled = false;
+    apiGet<{ phone_code?: string | null }>(`/masters/countries/${contactCountryId}`)
+      .then(({ data }) => {
+        if (!cancelled) {
+          const code = data.phone_code ? (data.phone_code.startsWith("+") ? data.phone_code : `+${data.phone_code}`) : "";
+          setContactPhoneCode(code);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setContactPhoneCode("");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [contactCountryId]);
 
   const setField = (id: keyof typeof EMPTY_SUPPLIER_FORM, value: string) =>
     setForm((prev) => ({ ...prev, [id]: value }));
@@ -546,6 +573,7 @@ export function SuppliersPage() {
     setCurrentSupplierId(supplier ? supplier.id : null);
     setModalMode(mode);
     setModalTab("first");
+    setEditTab("profile");
     setError(null);
     setContactFormOpen(false);
     setWhatsappSameAsCalling(false);
@@ -836,6 +864,8 @@ export function SuppliersPage() {
   }
 
   function openContactForm(contact: SupplierContact | null) {
+    setDrawerError(null);
+    setContactSubmitting(false);
     setContactForm(
       contact
         ? {
@@ -851,13 +881,23 @@ export function SuppliersPage() {
           }
         : EMPTY_CONTACT_FORM
     );
-    setContactCountryId(contact?.country_id || null);
+    setContactCountryId(contact?.country_id || defaultChinaId || null);
+    setContactSameCallingWhatsapp(false);
+    setContactSameCallingWechat(false);
     setContactFormOpen(true);
   }
 
   async function handleContactSubmit(e: React.FormEvent) {
     e.preventDefault();
+    setDrawerError(null);
+
     if (!currentSupplierId) return;
+
+    if (!contactForm.person_name.trim()) {
+      setDrawerError("Person Name is required. Please enter Full Name.");
+      return;
+    }
+
     const payload = {
       salutation: contactForm.salutation || null,
       person_name: contactForm.person_name.trim(),
@@ -869,6 +909,8 @@ export function SuppliersPage() {
       wechat_number: contactForm.wechat_number.trim() || null,
       email: contactForm.email.trim() || null,
     };
+
+    setContactSubmitting(true);
     try {
       if (contactForm.id) {
         await apiPatch(`/suppliers/${currentSupplierId}/contacts/${contactForm.id}`, payload);
@@ -878,7 +920,9 @@ export function SuppliersPage() {
       setContactFormOpen(false);
       await refreshContacts();
     } catch (err) {
-      setError(err);
+      setDrawerError(err);
+    } finally {
+      setContactSubmitting(false);
     }
   }
 
@@ -978,553 +1022,798 @@ export function SuppliersPage() {
               ← BACK TO SUPPLIERS
             </button>
           </div>
-
           <div className="card" style={{ background: "#ffffff", padding: "28px", borderRadius: "10px", border: "1px solid #e2e8f0" }}>
-            <form onSubmit={handleSubmit}>
-              {/* SECTION 1: General & Primary Contact Info (First Data Form) */}
-              <div style={{ marginBottom: "24px" }}>
-                <h3 style={{ fontSize: "16px", fontWeight: 700, margin: "0 0 16px 0", color: "#0f172a" }}>
-                  1. General Information
-                </h3>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "18px", marginBottom: "24px" }}>
-                  <div className="field">
-                    <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>Name of Company *</label>
-                    <SearchableDropdown
-                      value={form.company_name}
-                      onChange={(_, label) => setField("company_name", label)}
-                      allowCustomText={true}
-                      onTextChange={(v) => setField("company_name", v)}
-                      placeholder="Search existing or type company name..."
-                      fetchOptions={companyNameFetcher}
-                      fetchLabelForValue={async (v) => v}
-                    />
-                  </div>
-                  <div className="field">
-                    <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>Product Category (multiple)</label>
-                    <SearchableDropdownMulti
-                      values={formCategoryIds}
-                      onChange={setFormCategoryIds}
-                      allowCustomText={false}
-                      placeholder="Click to select product categories..."
-                      fetchOptions={searchFetcher("/masters/product-categories")}
-                      fetchLabelForValue={fetchNameLabel("/masters/product-categories")}
-                    />
-                  </div>
-                  <SelectField id="supplier_type" label="Supplier Type" value={form.supplier_type} onChange={(v) => setField("supplier_type", v)}>
-                    <option value="">Select</option>
-                    <option value="manufacturer">Manufacturer</option>
-                    <option value="trader">Trader</option>
-                    <option value="dealer">Dealer</option>
-                  </SelectField>
-                  <TextField id="brand_description" label="Brand of Supplier's Products" placeholder="Description..." value={form.brand_description} onChange={(v) => setField("brand_description", v)} />
-                  <div className="field">
-                    <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>Country *</label>
-                    <SearchableDropdown
-                      value={formCountryId}
-                      onChange={(v) => {
-                        setFormCountryId(v);
-                        setFormStateId(null);
-                        setFormCityId(null);
-                        setFormStateCustomText("");
-                        setFormCityCustomText("");
-                      }}
-                      placeholder="Search country..."
-                      fetchOptions={searchFetcher("/masters/countries")}
-                      fetchLabelForValue={fetchNameLabel("/masters/countries")}
-                    />
-                  </div>
-                  <div className="field">
-                    <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>Province *</label>
-                    <SearchableDropdown
-                      value={formStateId}
-                      onChange={(v, label) => {
-                        setFormStateId(v);
-                        setFormStateCustomText(v ? label : "");
-                        setFormCityId(null);
-                        setFormCityCustomText("");
-                      }}
-                      allowCustomText={true}
-                      onTextChange={(text) => {
-                        setFormStateCustomText(text);
-                        if (!formStateId) setFormStateId(null);
-                      }}
-                      placeholder="Search or type province..."
-                      fetchOptions={searchFetcher("/masters/states", (): Record<string, string> =>
-                        formCountryId ? { country_id: formCountryId } : {}
-                      )}
-                      fetchLabelForValue={fetchNameLabel("/masters/states")}
-                    />
-                  </div>
-                  <div className="field">
-                    <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>City *</label>
-                    <SearchableDropdown
-                      value={formCityId}
-                      onChange={(v, label) => {
-                        setFormCityId(v);
-                        setFormCityCustomText(v ? label : "");
-                      }}
-                      allowCustomText={true}
-                      onTextChange={(text) => {
-                        setFormCityCustomText(text);
-                        if (!formCityId) setFormCityId(null);
-                      }}
-                      placeholder="Search or type city..."
-                      fetchOptions={searchFetcher("/masters/cities", (): Record<string, string> =>
-                        formStateId ? { state_id: formStateId } : {}
-                      )}
-                      fetchLabelForValue={fetchNameLabel("/masters/cities")}
-                    />
-                  </div>
-                </div>
-
-                <div style={{ marginTop: "28px", marginBottom: "18px", borderTop: "1px solid #e2e8f0", paddingTop: "20px" }}>
-                  <h3 style={{ fontSize: "16px", fontWeight: 700, margin: 0, color: "#0f172a" }}>
-                    Primary Contact Information
-                  </h3>
-                </div>
-
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "18px" }}>
-                  <div className="field">
-                    <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>Mr. / Mrs / Ms - Full Name</label>
-                    <div style={{ display: "flex", gap: "8px" }}>
-                      <select
-                        value={form.contact_salutation}
-                        onChange={(e) => setField("contact_salutation", e.target.value)}
-                        style={{ width: "72px", padding: "9px 6px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px" }}
-                      >
-                        <option value="">—</option>
-                        <option value="Mr.">Mr.</option>
-                        <option value="Mrs.">Mrs.</option>
-                        <option value="Ms.">Ms.</option>
-                      </select>
-                      <input
-                        type="text"
-                        className="input"
-                        placeholder="Full Name"
-                        value={form.contact_full_name}
-                        onChange={(e) => setField("contact_full_name", e.target.value)}
-                        style={{ flex: 1 }}
-                      />
-                    </div>
-                  </div>
-                  <TextField id="contact_designation" label="Designation" placeholder="e.g. Sales Manager" maxLength={150} value={form.contact_designation} onChange={(v) => setField("contact_designation", v)} />
-
-                  <div className="field">
-                    <label htmlFor="contact_calling_number" style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>Calling Number</label>
-                    <input
-                      type="text"
-                      id="contact_calling_number"
-                      className="input"
-                      maxLength={11}
-                      placeholder="With country code, 7-11 digits"
-                      value={form.contact_calling_number}
-                      onChange={(e) => {
-                        const v = e.target.value;
-                        setField("contact_calling_number", v);
-                        if (whatsappSameAsCalling) setField("contact_whatsapp_number", v);
-                        if (wechatSameAsCalling) setField("contact_wechat_number", v);
-                        if (callingNumberError) validateCallingNumber(v);
-                      }}
-                      onBlur={(e) => validateCallingNumber(e.target.value)}
-                    />
-                    {callingNumberError && (
-                      <span className="hint" style={{ color: "var(--color-danger, #ef4444)", display: "block", marginTop: "4px" }}>
-                        {callingNumberError}
+            {/* TOP NAVIGATION TABS (PROFILE | CONTACTS) */}
+            {modalMode === "full" && (
+              <div style={{ display: "flex", gap: "24px", borderBottom: "2px solid #e2e8f0", marginBottom: "24px" }}>
+                <button
+                  type="button"
+                  onClick={() => setEditTab("profile")}
+                  style={{
+                    padding: "10px 18px",
+                    background: "none",
+                    border: "none",
+                    borderBottom: editTab === "profile" ? "3px solid #0061f2" : "3px solid transparent",
+                    color: editTab === "profile" ? "#0061f2" : "#64748b",
+                    fontWeight: editTab === "profile" ? 700 : 600,
+                    fontSize: "14.5px",
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
+                    marginBottom: "-2px",
+                    transition: "all 0.2s ease",
+                  }}
+                >
+                  <span style={{ fontSize: "16px" }}>👤</span> Profile
+                </button>
+                {currentSupplierId && (
+                  <button
+                    type="button"
+                    onClick={() => setEditTab("contacts")}
+                    style={{
+                      padding: "10px 18px",
+                      background: "none",
+                      border: "none",
+                      borderBottom: editTab === "contacts" ? "3px solid #0061f2" : "3px solid transparent",
+                      color: editTab === "contacts" ? "#0061f2" : "#64748b",
+                      fontWeight: editTab === "contacts" ? 700 : 600,
+                      fontSize: "14.5px",
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "8px",
+                      marginBottom: "-2px",
+                      transition: "all 0.2s ease",
+                    }}
+                  >
+                    <span style={{ fontSize: "16px" }}>📇</span> Contacts
+                    {contacts.length > 0 && (
+                      <span style={{
+                        background: editTab === "contacts" ? "#e0e7ff" : "#f1f5f9",
+                        color: editTab === "contacts" ? "#4338ca" : "#64748b",
+                        fontSize: "12px",
+                        fontWeight: 700,
+                        padding: "2px 8px",
+                        borderRadius: "12px",
+                      }}>
+                        {contacts.length}
                       </span>
                     )}
-                  </div>
-
-                  <div className="field">
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px", minHeight: "20px" }}>
-                      <label htmlFor="contact_whatsapp_number" style={{ margin: 0, fontSize: "12px", fontWeight: 600, color: "#475569" }}>WhatsApp Number</label>
-                      <label style={{ fontSize: "11px", display: "flex", alignItems: "center", gap: "4px", cursor: "pointer", fontWeight: "normal", color: "#64748b" }}>
-                        <input
-                          type="checkbox"
-                          checked={whatsappSameAsCalling}
-                          onChange={(e) => {
-                            const checked = e.target.checked;
-                            setWhatsappSameAsCalling(checked);
-                            if (checked) {
-                              setField("contact_whatsapp_number", form.contact_calling_number);
-                            }
-                          }}
-                        />
-                        Same as calling
-                      </label>
-                    </div>
-                    <input
-                      type="text"
-                      id="contact_whatsapp_number"
-                      className="input"
-                      maxLength={11}
-                      value={form.contact_whatsapp_number}
-                      disabled={whatsappSameAsCalling}
-                      onChange={(e) => setField("contact_whatsapp_number", e.target.value)}
-                    />
-                  </div>
-
-                  <div className="field">
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px", minHeight: "20px" }}>
-                      <label htmlFor="contact_wechat_number" style={{ margin: 0, fontSize: "12px", fontWeight: 600, color: "#475569" }}>WeChat Number</label>
-                      <label style={{ fontSize: "11px", display: "flex", alignItems: "center", gap: "4px", cursor: "pointer", fontWeight: "normal", color: "#64748b" }}>
-                        <input
-                          type="checkbox"
-                          checked={wechatSameAsCalling}
-                          onChange={(e) => {
-                            const checked = e.target.checked;
-                            setWechatSameAsCalling(checked);
-                            if (checked) {
-                              setField("contact_wechat_number", form.contact_calling_number);
-                            }
-                          }}
-                        />
-                        Same as calling
-                      </label>
-                    </div>
-                    <input
-                      type="text"
-                      id="contact_wechat_number"
-                      className="input"
-                      maxLength={20}
-                      value={form.contact_wechat_number}
-                      disabled={wechatSameAsCalling}
-                      onChange={(e) => setField("contact_wechat_number", e.target.value)}
-                    />
-                  </div>
-
-                  <div className="field">
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px", minHeight: "20px" }}>
-                      <label htmlFor="emails_input" style={{ margin: 0, fontSize: "12px", fontWeight: 600, color: "#475569" }}>Email ID (multiple emails)</label>
-                    </div>
-                    <input
-                      type="text"
-                      id="emails_input"
-                      className="input"
-                      placeholder="comma-separated for multiple"
-                      value={form.emails_input}
-                      onChange={(e) => setField("emails_input", e.target.value)}
-                    />
-                    <span className="hint" style={{ fontSize: "11px", color: "#64748b", marginTop: "4px", display: "block" }}>Separate multiple emails with commas.</span>
-                  </div>
-                </div>
+                  </button>
+                )}
               </div>
-
-              {/* SECTION 2: Other Details (Main Profile) */}
-              {modalMode === "full" && (
-                <div style={{ marginTop: "36px", marginBottom: "20px", borderTop: "2px solid #e2e8f0", paddingTop: "24px" }}>
-                  <h2 style={{ fontSize: "18px", fontWeight: 700, margin: "0 0 4px 0", color: "#0f172a" }}>
-                    Other Details
-                  </h2>
-                  <div style={{ fontSize: "13px", color: "#64748b", marginBottom: "20px" }}>
-                    Additional profile details, website URLs, factory visit, and media uploads.
-                  </div>
-
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "16px", marginBottom: "16px" }}>
-                    <TextField id="tax_id_number" label="Tax ID Number" maxLength={100} value={form.tax_id_number} onChange={(v) => setField("tax_id_number", v)} />
-                    <TextField id="town" label="Town" maxLength={150} value={form.town} onChange={(v) => setField("town", v)} />
-                    
+            )}
+            {/* TAB 1: PROFILE FORM (SAME ORIGINAL DATA & FIELDS) */}
+            {(editTab === "profile" || modalMode === "quick") && (
+              <form onSubmit={handleSubmit}>
+                {/* SECTION 1: General & Primary Contact Info (First Data Form) */}
+                <div style={{ marginBottom: "24px" }}>
+                  <h3 style={{ fontSize: "16px", fontWeight: 700, margin: "0 0 16px 0", color: "#0f172a" }}>
+                    1. General Information
+                  </h3>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "18px", marginBottom: "24px" }}>
                     <div className="field">
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
-                        <label htmlFor="primary_website" style={{ margin: 0, fontSize: "12px", fontWeight: 600, color: "#475569" }}>Primary Website</label>
-                        {form.primary_website.trim() && (
-                          <a
-                            href={form.primary_website.startsWith("http") ? form.primary_website : `https://${form.primary_website}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            style={{ fontSize: "11px", color: "#0061f2", fontWeight: 600, textDecoration: "none", display: "inline-flex", alignItems: "center", gap: "2px" }}
-                          >
-                            🌐 Visit Link
-                          </a>
-                        )}
-                      </div>
-                      <input
-                        type="text"
-                        id="primary_website"
-                        className="input"
-                        maxLength={500}
-                        placeholder="https://..."
-                        value={form.primary_website}
-                        onChange={(e) => setField("primary_website", e.target.value)}
+                      <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>Name of Company *</label>
+                      <SearchableDropdown
+                        value={form.company_name}
+                        onChange={(_, label) => setField("company_name", label)}
+                        allowCustomText={true}
+                        onTextChange={(v) => setField("company_name", v)}
+                        placeholder="Search existing or type company name..."
+                        fetchOptions={companyNameFetcher}
+                        fetchLabelForValue={async (v) => v}
                       />
                     </div>
-
                     <div className="field">
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
-                        <label htmlFor="secondary_website" style={{ margin: 0, fontSize: "12px", fontWeight: 600, color: "#475569" }}>Secondary Website</label>
-                        {form.secondary_website.trim() && (
-                          <a
-                            href={form.secondary_website.startsWith("http") ? form.secondary_website : `https://${form.secondary_website}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            style={{ fontSize: "11px", color: "#0061f2", fontWeight: 600, textDecoration: "none", display: "inline-flex", alignItems: "center", gap: "2px" }}
-                          >
-                            🌐 Visit Link
-                          </a>
-                        )}
-                      </div>
-                      <input
-                        type="text"
-                        id="secondary_website"
-                        className="input"
-                        maxLength={500}
-                        placeholder="https://..."
-                        value={form.secondary_website}
-                        onChange={(e) => setField("secondary_website", e.target.value)}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="field" style={{ marginBottom: "16px" }}>
-                    <TextAreaField id="address" label="Street / Factory Address" rows={2} placeholder="Enter full address details..." value={form.address} onChange={(v) => setField("address", v)} />
-                  </div>
-
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "16px", marginBottom: "16px" }}>
-                    <div className="field">
-                      <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>Key Strength Product Sub-Category (multiple)</label>
+                      <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>Product Category (multiple)</label>
                       <SearchableDropdownMulti
-                        values={formSubCategoryIds}
-                        onChange={setFormSubCategoryIds}
-                        placeholder="Search and add a sub-category..."
-                        fetchOptions={searchFetcher("/masters/product-sub-categories")}
-                        fetchLabelForValue={fetchNameLabel("/masters/product-sub-categories")}
+                        values={formCategoryIds}
+                        onChange={setFormCategoryIds}
+                        allowCustomText={false}
+                        placeholder="Click to select product categories..."
+                        fetchOptions={searchFetcher("/masters/product-categories")}
+                        fetchLabelForValue={fetchNameLabel("/masters/product-categories")}
                       />
                     </div>
-                    <SelectField id="supplier_grade" label="Supplier's Grade" value={form.supplier_grade} onChange={(v) => setField("supplier_grade", v)}>
+                    <SelectField id="supplier_type" label="Supplier Type" value={form.supplier_type} onChange={(v) => setField("supplier_type", v)}>
                       <option value="">Select</option>
-                      <option value="A">A</option>
-                      <option value="B">B</option>
-                      <option value="C">C</option>
+                      <option value="manufacturer">Manufacturer</option>
+                      <option value="trader">Trader</option>
+                      <option value="dealer">Dealer</option>
                     </SelectField>
+                    <TextField id="brand_description" label="Brand of Supplier's Products" placeholder="Description..." value={form.brand_description} onChange={(v) => setField("brand_description", v)} />
                     <div className="field">
-                      <label htmlFor="current_status" style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>Current Status</label>
-                      <select
-                        id="current_status"
-                        value={form.current_status}
-                        onChange={(e) => setField("current_status", e.target.value)}
-                        style={{ width: "100%", padding: "8px 10px", borderRadius: "6px", border: "1px solid #cbd5e1" }}
-                      >
-                        <option value="">Select</option>
-                        <option value="new" disabled={lockNewStatus}>
-                          New
-                        </option>
-                        <option value="existing">Existing</option>
-                      </select>
-                      {lockNewStatus && (
-                        <span className="hint" style={{ fontSize: "11px", color: "#64748b", marginTop: "2px", display: "block" }}>Cannot revert from Existing to New.</span>
-                      )}
-                    </div>
-                  </div>
-
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "16px", marginBottom: "16px" }}>
-                    <SelectField id="potential" label="Potential" value={form.potential} onChange={(v) => setField("potential", v)}>
-                      <option value="">Select</option>
-                      <option value="yes">Yes</option>
-                      <option value="no">No</option>
-                    </SelectField>
-                    <SelectField
-                      id="visited_factory_office"
-                      label="Visited Their Factory/Office?"
-                      value={form.visited_factory_office}
-                      onChange={(v) => {
-                        setField("visited_factory_office", v);
-                        if (v !== "true") setField("visit_remarks", "");
-                      }}
-                    >
-                      <option value="false">No</option>
-                      <option value="true">Yes</option>
-                    </SelectField>
-                    <SelectField id="is_active" label="Status" value={form.is_active} onChange={(v) => setField("is_active", v)}>
-                      <option value="true">Active</option>
-                      <option value="false">Inactive</option>
-                    </SelectField>
-                  </div>
-
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: "16px", marginBottom: "16px" }}>
-                    <TextAreaField id="potential_reason" label="Key Reason for Potential / Not Potential" rows={2} value={form.potential_reason} onChange={(v) => setField("potential_reason", v)} />
-                    <TextAreaField id="secondary_products_description" label="Secondary Products They Can Supply" rows={2} value={form.secondary_products_description} onChange={(v) => setField("secondary_products_description", v)} />
-                  </div>
-
-                  {visited && (
-                    <div style={{ marginBottom: "16px" }}>
-                      <TextAreaField id="visit_remarks" label="Visit Remarks" rows={2} value={form.visit_remarks} onChange={(v) => setField("visit_remarks", v)} />
-                    </div>
-                  )}
-
-                  {/* Visit Photos / Videos Upload & Supabase Storage Gallery */}
-                  <div className="field" style={{ marginTop: "16px", marginBottom: "16px" }}>
-                    <label style={{ fontSize: "13px", fontWeight: 600, color: "#0f172a", marginBottom: "6px", display: "block" }}>
-                      Visit Photos &amp; Videos (Supabase Storage)
-                    </label>
-                    
-                    <div style={{ display: "flex", gap: "12px", alignItems: "center", marginBottom: "12px" }}>
-                      <input
-                        type="file"
-                        accept="image/*,video/*"
-                        multiple
-                        id="supplier_media_upload_input"
-                        style={{ display: "none" }}
-                        onChange={(e) => {
-                          void handleMediaFileUpload(e.target.files);
-                          e.target.value = "";
+                      <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>Country *</label>
+                      <SearchableDropdown
+                        value={formCountryId}
+                        onChange={(v) => {
+                          setFormCountryId(v);
+                          setFormStateId(null);
+                          setFormCityId(null);
+                          setFormStateCustomText("");
+                          setFormCityCustomText("");
                         }}
+                        placeholder="Search country..."
+                        fetchOptions={searchFetcher("/masters/countries")}
+                        fetchLabelForValue={fetchNameLabel("/masters/countries")}
                       />
-                      <label
-                        htmlFor="supplier_media_upload_input"
-                        className="btn btn-secondary"
-                        style={{
-                          padding: "9px 18px",
-                          cursor: uploadingMedia ? "not-allowed" : "pointer",
-                          display: "inline-flex",
-                          alignItems: "center",
-                          gap: "8px",
-                          fontWeight: 600,
-                          fontSize: "13px",
-                          background: "#f1f5f9",
-                          border: "1px solid #cbd5e1",
-                          color: "#0f172a",
-                          borderRadius: "6px",
-                          opacity: uploadingMedia ? 0.7 : 1,
-                        }}
-                      >
-                        {uploadingMedia ? "Uploading to Supabase..." : "📁 Select Photos / Videos"}
-                      </label>
-                      <span style={{ fontSize: "12px", color: "#64748b" }}>
-                        Upload images or videos directly to Supabase storage.
-                      </span>
                     </div>
-
-                    {/* Media Gallery Thumbnails Grid */}
-                    {mediaList.length > 0 && (
-                      <div
-                        style={{
-                          display: "grid",
-                          gridTemplateColumns: "repeat(auto-fill, minmax(110px, 1fr))",
-                          gap: "12px",
-                          padding: "12px",
-                          background: "#f8fafc",
-                          border: "1px solid #e2e8f0",
-                          borderRadius: "8px",
-                          marginBottom: "12px",
+                    <div className="field">
+                      <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>Province *</label>
+                      <SearchableDropdown
+                        value={formStateId}
+                        onChange={(v, label) => {
+                          setFormStateId(v);
+                          setFormStateCustomText(v ? label : "");
+                          setFormCityId(null);
+                          setFormCityCustomText("");
                         }}
-                      >
-                        {mediaList.map((url, idx) => {
-                          const isVideo = url.match(/\.(mp4|webm|ogg|mov)$/i) || url.startsWith("data:video");
-                          return (
-                            <div
-                              key={`${url}-${idx}`}
-                              style={{
-                                position: "relative",
-                                width: "110px",
-                                height: "110px",
-                                borderRadius: "8px",
-                                overflow: "hidden",
-                                border: "1px solid #cbd5e1",
-                                background: "#ffffff",
-                                boxShadow: "0 2px 4px rgba(0,0,0,0.05)",
-                              }}
-                            >
-                              {isVideo ? (
-                                <div style={{ width: "100%", height: "100%", position: "relative", background: "#0f172a" }}>
-                                  <video src={url} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                                  <div
-                                    style={{
-                                      position: "absolute",
-                                      inset: 0,
-                                      display: "flex",
-                                      alignItems: "center",
-                                      justifyContent: "center",
-                                      background: "rgba(0,0,0,0.3)",
-                                      color: "#ffffff",
-                                      fontSize: "20px",
-                                    }}
-                                  >
-                                    🎬
-                                  </div>
-                                </div>
-                              ) : (
-                                <img src={url} alt={`Media ${idx + 1}`} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                              )}
-                              <button
-                                type="button"
-                                onClick={() => removeMediaUrl(url)}
-                                title="Delete media"
-                                style={{
-                                  position: "absolute",
-                                  top: "4px",
-                                  right: "4px",
-                                  width: "22px",
-                                  height: "22px",
-                                  borderRadius: "50%",
-                                  background: "rgba(239, 68, 68, 0.9)",
-                                  color: "#ffffff",
-                                  border: "none",
-                                  cursor: "pointer",
-                                  display: "flex",
-                                  alignItems: "center",
-                                  justifyContent: "center",
-                                  fontSize: "12px",
-                                  fontWeight: 700,
-                                }}
-                              >
-                                ✕
-                              </button>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-
-                    <TextField
-                      id="visit_media_input"
-                      label="Media URLs (comma-separated URLs)"
-                      placeholder="https://... (Auto-filled on upload or paste manually)"
-                      value={form.visit_media_input}
-                      onChange={(v) => setField("visit_media_input", v)}
-                    />
-                  </div>
-
-                  <div style={{ marginBottom: "16px" }}>
-                    <TextAreaField id="overall_remarks" label="Overall Remarks / Key Strengths" rows={2} value={form.overall_remarks} onChange={(v) => setField("overall_remarks", v)} />
-                  </div>
-                </div>
-              )}
-
-              {/* SECTION 3: Additional Contact Persons (only once supplier exists and in full mode) */}
-              {modalMode === "full" && currentSupplierId && (
-                <div style={{ marginTop: "36px", marginBottom: "20px", borderTop: "2px solid #e2e8f0", paddingTop: "24px" }}>
-                  <div className="card-header">
-                    <div className="section-title" style={{ margin: 0 }}>
-                      Additional Contact Persons
+                        allowCustomText={true}
+                        onTextChange={(text) => {
+                          setFormStateCustomText(text);
+                          if (!formStateId) setFormStateId(null);
+                        }}
+                        placeholder="Search or type province..."
+                        fetchOptions={searchFetcher("/masters/states", (): Record<string, string> =>
+                          formCountryId ? { country_id: formCountryId } : {}
+                        )}
+                        fetchLabelForValue={fetchNameLabel("/masters/states")}
+                      />
                     </div>
-                    <button
-                      type="button"
-                      className="btn btn-small btn-primary"
-                      onClick={() => openContactForm(null)}
-                    >
-                      + Add Contact
-                    </button>
+                    <div className="field">
+                      <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>City *</label>
+                      <SearchableDropdown
+                        value={formCityId}
+                        onChange={(v, label) => {
+                          setFormCityId(v);
+                          setFormCityCustomText(v ? label : "");
+                        }}
+                        allowCustomText={true}
+                        onTextChange={(text) => {
+                          setFormCityCustomText(text);
+                          if (!formCityId) setFormCityId(null);
+                        }}
+                        placeholder="Search or type city..."
+                        fetchOptions={searchFetcher("/masters/cities", (): Record<string, string> =>
+                          formStateId ? { state_id: formStateId } : {}
+                        )}
+                        fetchLabelForValue={fetchNameLabel("/masters/cities")}
+                      />
+                    </div>
                   </div>
-                  {contactFormOpen && (
-                    <div
-                      style={{
-                        border: "1px solid var(--color-border)",
-                        borderRadius: "var(--radius-sm)",
-                        padding: "var(--space-3)",
-                        marginBottom: "var(--space-3)",
-                      }}
-                    >
-                      <div className="form-grid">
-                        <SelectField id="c_salutation" label="Salutation" value={contactForm.salutation} onChange={(v) => setContactForm((f) => ({ ...f, salutation: v }))}>
+
+                  <h4 style={{ fontSize: "14.5px", fontWeight: 700, margin: "0 0 14px 0", color: "#0f172a" }}>
+                    Primary Contact Information
+                  </h4>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "18px" }}>
+                    <div className="field">
+                      <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>Mr. / Mrs / Ms - Full Name</label>
+                      <div style={{ display: "flex", gap: "8px" }}>
+                        <select
+                          value={form.contact_salutation}
+                          onChange={(e) => setField("contact_salutation", e.target.value)}
+                          style={{
+                            padding: "8px",
+                            fontSize: "13.5px",
+                            borderRadius: "6px",
+                            border: "1px solid #cbd5e1",
+                            background: "#ffffff",
+                            color: "#334155",
+                          }}
+                        >
                           <option value="">—</option>
                           <option value="Mr.">Mr.</option>
                           <option value="Mrs.">Mrs.</option>
                           <option value="Ms.">Ms.</option>
-                        </SelectField>
-                        <TextField id="c_person_name" label="Person Name *" required maxLength={150} value={contactForm.person_name} onChange={(v) => setContactForm((f) => ({ ...f, person_name: v }))} />
-                        <TextField id="c_designation" label="Designation" maxLength={150} value={contactForm.designation} onChange={(v) => setContactForm((f) => ({ ...f, designation: v }))} />
-                        <TextField id="c_handling_territory" label="Handling Territory" maxLength={150} placeholder="local, Export India, Export Africa..." value={contactForm.handling_territory} onChange={(v) => setContactForm((f) => ({ ...f, handling_territory: v }))} />
+                        </select>
+                        <input
+                          type="text"
+                          maxLength={150}
+                          placeholder="Full Name"
+                          value={form.contact_full_name}
+                          onChange={(e) => setField("contact_full_name", e.target.value)}
+                          style={{
+                            flex: 1,
+                            padding: "8px 11px",
+                            fontSize: "13.5px",
+                            borderRadius: "6px",
+                            border: "1px solid #cbd5e1",
+                            outline: "none",
+                          }}
+                        />
+                      </div>
+                    </div>
+
+                    <TextField id="contact_designation" label="Designation" placeholder="e.g. Sales Manager" maxLength={150} value={form.contact_designation} onChange={(v) => setField("contact_designation", v)} />
+
+                    <div className="field">
+                      <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>Calling Number</label>
+                      <input
+                        type="text"
+                        maxLength={30}
+                        placeholder="With country code, 7-11 digits"
+                        value={form.contact_calling_number}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setField("contact_calling_number", val);
+                          if (whatsappSameAsCalling) setField("contact_whatsapp_number", val);
+                          if (wechatSameAsCalling) setField("contact_wechat_number", val);
+                          setCallingNumberError(validatePhoneNumber(val));
+                        }}
+                        style={{
+                          width: "100%",
+                          padding: "8px 11px",
+                          fontSize: "13.5px",
+                          borderRadius: "6px",
+                          border: callingNumberError ? "1px solid #ef4444" : "1px solid #cbd5e1",
+                          outline: "none",
+                        }}
+                      />
+                      {callingNumberError && <span style={{ color: "#ef4444", fontSize: "11px", marginTop: "4px", display: "block" }}>{callingNumberError}</span>}
+                    </div>
+
+                    <div className="field">
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
+                        <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569" }}>WhatsApp Number</label>
+                        <label style={{ fontSize: "11px", color: "#64748b", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                          <input
+                            type="checkbox"
+                            checked={whatsappSameAsCalling}
+                            onChange={(e) => {
+                              setWhatsappSameAsCalling(e.target.checked);
+                              if (e.target.checked) setField("contact_whatsapp_number", form.contact_calling_number);
+                            }}
+                          />
+                          Same as calling
+                        </label>
+                      </div>
+                      <input
+                        type="text"
+                        maxLength={30}
+                        value={form.contact_whatsapp_number}
+                        onChange={(e) => setField("contact_whatsapp_number", e.target.value)}
+                        style={{ width: "100%", padding: "8px 11px", fontSize: "13.5px", borderRadius: "6px", border: "1px solid #cbd5e1", outline: "none" }}
+                      />
+                    </div>
+
+                    <div className="field">
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
+                        <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569" }}>WeChat Number</label>
+                        <label style={{ fontSize: "11px", color: "#64748b", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                          <input
+                            type="checkbox"
+                            checked={wechatSameAsCalling}
+                            onChange={(e) => {
+                              setWechatSameAsCalling(e.target.checked);
+                              if (e.target.checked) setField("contact_wechat_number", form.contact_calling_number);
+                            }}
+                          />
+                          Same as calling
+                        </label>
+                      </div>
+                      <input
+                        type="text"
+                        maxLength={50}
+                        value={form.contact_wechat_number}
+                        onChange={(e) => setField("contact_wechat_number", e.target.value)}
+                        style={{ width: "100%", padding: "8px 11px", fontSize: "13.5px", borderRadius: "6px", border: "1px solid #cbd5e1", outline: "none" }}
+                      />
+                    </div>
+
+                    <TextField id="emails_input" label="Email ID (multiple emails)" placeholder="test6861@supplier.com" value={form.emails_input} onChange={(v) => setField("emails_input", v)} />
+                  </div>
+                </div>
+
+                {/* SECTION 2: Supplier Profile & Verification Details */}
+                {modalMode === "full" && (
+                  <div style={{ marginBottom: "24px", borderTop: "1px solid #e2e8f0", paddingTop: "24px" }}>
+                    <h3 style={{ fontSize: "16px", fontWeight: 700, margin: "0 0 16px 0", color: "#0f172a" }}>
+                      2. Supplier Profile &amp; Verification Details
+                    </h3>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "18px", marginBottom: "18px" }}>
+                      <TextField id="tax_id_number" label="Tax ID Number" maxLength={100} value={form.tax_id_number} onChange={(v) => setField("tax_id_number", v)} />
+                      <TextField id="town" label="Town" maxLength={150} value={form.town} onChange={(v) => setField("town", v)} />
+                      <TextField id="primary_website" label="Primary Website" placeholder="https://..." value={form.primary_website} onChange={(v) => setField("primary_website", v)} />
+                      <TextField id="secondary_website" label="Secondary Website" placeholder="https://..." value={form.secondary_website} onChange={(v) => setField("secondary_website", v)} />
+                      <SelectField id="supplier_grade" label="Supplier Grade" value={form.supplier_grade} onChange={(v) => setField("supplier_grade", v)}>
+                        <option value="">Select Grade</option>
+                        <option value="A">Grade A</option>
+                        <option value="B">Grade B</option>
+                        <option value="C">Grade C</option>
+                        <option value="D">Grade D</option>
+                      </SelectField>
+                      <SelectField id="current_status" label="Current Status" value={form.current_status} onChange={(v) => setField("current_status", v)}>
+                        <option value="">Select Status</option>
+                        <option value="new">New</option>
+                        <option value="contacted">Contacted</option>
+                        <option value="sample_requested">Sample Requested</option>
+                        <option value="sample_received">Sample Received</option>
+                        <option value="sample_approved">Sample Approved</option>
+                        <option value="rejected">Rejected</option>
+                        <option value="shortlisted">Shortlisted</option>
+                        <option value="verified">Verified</option>
+                      </SelectField>
+                      <SelectField id="potential" label="Potential (Yes / No)" value={form.potential} onChange={(v) => setField("potential", v)}>
+                        <option value="">Select Potential</option>
+                        <option value="Yes">Yes</option>
+                        <option value="No">No</option>
+                      </SelectField>
+                      <div style={{ gridColumn: "span 2" }}>
+                        <TextField id="potential_reason" label="Reason for Potential Status" placeholder="Explain why..." value={form.potential_reason} onChange={(v) => setField("potential_reason", v)} />
+                      </div>
+                    </div>
+
+                    <div style={{ marginBottom: "18px" }}>
+                      <TextAreaField id="secondary_products_description" label="Secondary Products Description" rows={2} value={form.secondary_products_description} onChange={(v) => setField("secondary_products_description", v)} />
+                    </div>
+
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: "18px", marginBottom: "18px" }}>
+                      <SelectField id="visited_factory_office" label="Visited Factory / Office?" value={form.visited_factory_office} onChange={(v) => setField("visited_factory_office", v)}>
+                        <option value="false">No</option>
+                        <option value="true">Yes</option>
+                      </SelectField>
+                      <TextField id="visit_remarks" label="Visit Remarks / Summary" placeholder="Key observations..." value={form.visit_remarks} onChange={(v) => setField("visit_remarks", v)} />
+                    </div>
+
+                    <div style={{ marginBottom: "18px" }}>
+                      <div className="card-header" style={{ marginBottom: "8px" }}>
+                        <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", margin: 0 }}>
+                          Visit Photos &amp; Videos (Supabase Storage)
+                        </label>
+                        <label className="btn btn-small" style={{ background: "#f1f5f9", border: "1px solid #cbd5e1", color: "#334155", cursor: uploadingMedia ? "not-allowed" : "pointer" }}>
+                          {uploadingMedia ? "Uploading..." : "📁 Select Photos / Videos"}
+                          <input type="file" multiple accept="image/*,video/*" onChange={handleMediaFileUpload} disabled={uploadingMedia} style={{ display: "none" }} />
+                        </label>
+                      </div>
+
+                      {mediaList.length > 0 && (
+                        <div style={{ display: "flex", gap: "12px", flexWrap: "wrap", marginBottom: "12px" }}>
+                          {mediaList.map((url, idx) => {
+                            const isVideo = url.match(/\.(mp4|webm|ogg|mov)$/i);
+                            return (
+                              <div key={idx} style={{ position: "relative", width: "100px", height: "80px", borderRadius: "6px", overflow: "hidden", border: "1px solid #cbd5e1" }}>
+                                {isVideo ? (
+                                  <div style={{ width: "100%", height: "100%", background: "#0f172a", display: "flex", alignItems: "center", justifyContent: "center", color: "#ffffff" }}>
+                                    🎬
+                                  </div>
+                                ) : (
+                                  <img src={url} alt={`Media ${idx + 1}`} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={() => removeMediaUrl(url)}
+                                  style={{
+                                    position: "absolute",
+                                    top: "4px",
+                                    right: "4px",
+                                    width: "22px",
+                                    height: "22px",
+                                    borderRadius: "50%",
+                                    background: "rgba(239, 68, 68, 0.9)",
+                                    color: "#ffffff",
+                                    border: "none",
+                                    cursor: "pointer",
+                                    fontSize: "12px",
+                                    fontWeight: 700,
+                                  }}
+                                >
+                                  ✕
+                                </button>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      <TextField id="visit_media_input" label="Media URLs (comma-separated URLs)" placeholder="https://... (Auto-filled on upload or paste manually)" value={form.visit_media_input} onChange={(v) => setField("visit_media_input", v)} />
+                    </div>
+
+                    <div style={{ marginBottom: "16px" }}>
+                      <TextAreaField id="overall_remarks" label="Overall Remarks / Key Strengths" rows={2} value={form.overall_remarks} onChange={(v) => setField("overall_remarks", v)} />
+                    </div>
+                  </div>
+                )}
+
+                {Boolean(error) && (
+                  <div style={{ marginTop: "20px" }}>
+                    <Banner error={error} />
+                  </div>
+                )}
+
+                {/* FULL PAGE FORM FOOTER ACTION BUTTONS */}
+                <div style={{ paddingTop: "24px", marginTop: "28px", borderTop: "1px solid #e2e8f0", display: "flex", gap: "14px", justifyContent: "flex-end" }}>
+                  <button type="button" className="btn" onClick={closeModal} style={{ background: "#ffffff", border: "1px solid #cbd5e1", color: "#475569", padding: "10px 20px", borderRadius: "6px", fontWeight: 600, fontSize: "14px" }}>
+                    Cancel
+                  </button>
+                  <button type="button" className="btn btn-add-new" disabled={saving} style={{ background: "#0061f2", color: "#ffffff", padding: "10px 24px", borderRadius: "6px", fontWeight: 600, fontSize: "14px", border: "none", opacity: saving ? 0.7 : 1 }} onClick={handleSaveAndExit}>
+                    {saving ? "Saving..." : "Save & Exit"}
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {/* TAB 2: CONTACTS TAB VIEW */}
+            {modalMode === "full" && currentSupplierId && editTab === "contacts" && (
+              <div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
+                  <div>
+                    <h3 style={{ fontSize: "17px", fontWeight: 700, color: "#0f172a", margin: 0 }}>
+                      Supplier Contacts
+                    </h3>
+                    <div style={{ fontSize: "13px", color: "#64748b", marginTop: "3px" }}>
+                      Manage contact persons, territory assignments, numbers, WeChat, and email addresses.
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-add-new"
+                    onClick={() => openContactForm(null)}
+                    style={{
+                      background: "#0061f2",
+                      color: "#ffffff",
+                      padding: "9px 18px",
+                      borderRadius: "6px",
+                      fontWeight: 600,
+                      fontSize: "13.5px",
+                      border: "none",
+                      cursor: "pointer",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "6px",
+                    }}
+                  >
+                    + Add New
+                  </button>
+                </div>
+
+                {/* RIGHT SIDE DRAWER MODAL FOR ADD/EDIT CONTACT */}
+                {contactFormOpen && (
+                  <div style={{ position: "fixed", inset: 0, zIndex: 9999, display: "flex", justifyContent: "flex-end" }}>
+                    {/* Dark Backdrop Overlay */}
+                    <div
+                      onClick={() => setContactFormOpen(false)}
+                      style={{
+                        position: "absolute",
+                        inset: 0,
+                        background: "rgba(15, 23, 42, 0.45)",
+                        backdropFilter: "blur(2px)",
+                        transition: "opacity 0.2s ease",
+                      }}
+                    />
+
+                    {/* Side Drawer Panel */}
+                    <div
+                      style={{
+                        position: "relative",
+                        width: "460px",
+                        maxWidth: "92vw",
+                        height: "100%",
+                        background: "#ffffff",
+                        boxShadow: "-8px 0 30px rgba(0, 0, 0, 0.18)",
+                        display: "flex",
+                        flexDirection: "column",
+                        zIndex: 10000,
+                      }}
+                    >
+                      {/* Drawer Header */}
+                      <div
+                        style={{
+                          padding: "18px 24px",
+                          borderBottom: "1px solid #e2e8f0",
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                          background: "#ffffff",
+                        }}
+                      >
+                        <h3 style={{ fontSize: "17px", fontWeight: 700, color: "#0f172a", margin: 0 }}>
+                          {contactForm.id ? "Edit Contact Person" : "Add New Contact"}
+                        </h3>
+                        <button
+                          type="button"
+                          onClick={() => setContactFormOpen(false)}
+                          style={{
+                            background: "none",
+                            border: "none",
+                            fontSize: "20px",
+                            color: "#64748b",
+                            cursor: "pointer",
+                            padding: "4px 8px",
+                            borderRadius: "4px",
+                            lineHeight: 1,
+                          }}
+                        >
+                          ✕
+                        </button>
+                      </div>
+
+                      {/* Drawer Form Content (Scrollable) */}
+                      <form
+                        autoComplete="none"
+                        onSubmit={(e) => { void handleContactSubmit(e); }}
+                        style={{ flex: 1, overflowY: "auto", padding: "24px", display: "flex", flexDirection: "column", gap: "18px" }}
+                      >
+                        {Boolean(drawerError) && (
+                          <div style={{ marginBottom: "6px" }}>
+                            <Banner error={drawerError} />
+                          </div>
+                        )}
+
+                        {/* Full Name Field (Compact inline Salutation dropdown + Name input) */}
                         <div className="field">
-                          <label>Country</label>
+                          <label style={{ fontSize: "12.5px", fontWeight: 600, color: "#475569", marginBottom: "6px", display: "block" }}>
+                            Full Name <span style={{ color: "#ef4444" }}>*</span>
+                          </label>
+                          <div style={{ display: "flex", gap: "8px" }}>
+                            <select
+                              value={contactForm.salutation}
+                              onChange={(e) => setContactForm((f) => ({ ...f, salutation: e.target.value }))}
+                              style={{
+                                width: "75px",
+                                padding: "9px 8px",
+                                fontSize: "13.5px",
+                                borderRadius: "6px",
+                                border: "1px solid #cbd5e1",
+                                background: "#ffffff",
+                                color: "#334155",
+                                fontWeight: 500,
+                                outline: "none",
+                              }}
+                            >
+                              <option value="">Mr</option>
+                              <option value="Mr.">Mr.</option>
+                              <option value="Mrs.">Mrs.</option>
+                              <option value="Ms.">Ms.</option>
+                            </select>
+                            <input
+                              type="text"
+                              required
+                              autoComplete="new-password"
+                              readOnly
+                              onFocus={(e) => e.target.removeAttribute("readonly")}
+                              maxLength={150}
+                              placeholder="Full name of contact..."
+                              value={contactForm.person_name}
+                              onChange={(e) => setContactForm((f) => ({ ...f, person_name: e.target.value }))}
+                              style={{
+                                flex: 1,
+                                padding: "9px 12px",
+                                fontSize: "13.5px",
+                                borderRadius: "6px",
+                                border: "1px solid #cbd5e1",
+                                outline: "none",
+                                color: "#0f172a",
+                              }}
+                            />
+                          </div>
+                        </div>
+
+                        {/* Designation */}
+                        <div className="field">
+                          <label style={{ fontSize: "12.5px", fontWeight: 600, color: "#475569", marginBottom: "6px", display: "block" }}>
+                            Designation
+                          </label>
+                          <input
+                            type="text"
+                            autoComplete="new-password"
+                            readOnly
+                            onFocus={(e) => e.target.removeAttribute("readonly")}
+                            maxLength={150}
+                            placeholder="e.g. Sales Manager, Sourcing Lead"
+                            value={contactForm.designation}
+                            onChange={(e) => setContactForm((f) => ({ ...f, designation: e.target.value }))}
+                            style={{
+                              width: "100%",
+                              padding: "9px 12px",
+                              fontSize: "13.5px",
+                              borderRadius: "6px",
+                              border: "1px solid #cbd5e1",
+                              outline: "none",
+                              color: "#0f172a",
+                            }}
+                          />
+                        </div>
+
+                        {/* Calling Number */}
+                        <div className="field">
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
+                            <label style={{ fontSize: "12.5px", fontWeight: 600, color: "#475569", margin: 0 }}>Calling Number</label>
+                            {contactPhoneCode && (
+                              <span style={{ fontSize: "11px", fontWeight: 700, color: "#0061f2", background: "#eff6ff", padding: "1px 7px", borderRadius: "4px" }}>
+                                Code: {contactPhoneCode}
+                              </span>
+                            )}
+                          </div>
+                          <input
+                            type="text"
+                            autoComplete="new-password"
+                            readOnly
+                            onFocus={(e) => e.target.removeAttribute("readonly")}
+                            maxLength={30}
+                            placeholder={contactPhoneCode ? `${contactPhoneCode} 13800...` : "With country code..."}
+                            value={contactForm.calling_number}
+                            onChange={(e) => {
+                              const v = e.target.value;
+                              setContactForm((f) => {
+                                const updated = { ...f, calling_number: v };
+                                if (contactSameCallingWhatsapp) updated.whatsapp_number = v;
+                                if (contactSameCallingWechat) updated.wechat_number = v;
+                                return updated;
+                              });
+                            }}
+                            style={{
+                              width: "100%",
+                              padding: "9px 12px",
+                              fontSize: "13.5px",
+                              borderRadius: "6px",
+                              border: "1px solid #cbd5e1",
+                              outline: "none",
+                              color: "#0f172a",
+                            }}
+                          />
+                        </div>
+
+                        {/* WhatsApp Number */}
+                        <div className="field">
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
+                            <label style={{ fontSize: "12.5px", fontWeight: 600, color: "#475569", margin: 0 }}>Whatsapp Number</label>
+                            <label style={{ fontSize: "11.5px", color: "#0061f2", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "4px", fontWeight: 600 }}>
+                              <input
+                                type="checkbox"
+                                checked={contactSameCallingWhatsapp}
+                                onChange={(e) => {
+                                  const checked = e.target.checked;
+                                  setContactSameCallingWhatsapp(checked);
+                                  if (checked) {
+                                    setContactForm((f) => ({ ...f, whatsapp_number: f.calling_number }));
+                                  }
+                                }}
+                              />
+                              Same As Calling
+                            </label>
+                          </div>
+                          <input
+                            type="text"
+                            autoComplete="new-password"
+                            readOnly
+                            onFocus={(e) => e.target.removeAttribute("readonly")}
+                            maxLength={30}
+                            placeholder={contactPhoneCode ? `${contactPhoneCode} 13800...` : "With country code..."}
+                            value={contactForm.whatsapp_number}
+                            onChange={(e) => setContactForm((f) => ({ ...f, whatsapp_number: e.target.value }))}
+                            style={{
+                              width: "100%",
+                              padding: "9px 12px",
+                              fontSize: "13.5px",
+                              borderRadius: "6px",
+                              border: "1px solid #cbd5e1",
+                              outline: "none",
+                              color: "#0f172a",
+                            }}
+                          />
+                        </div>
+
+                        {/* WeChat Number */}
+                        <div className="field">
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
+                            <label style={{ fontSize: "12.5px", fontWeight: 600, color: "#475569", margin: 0 }}>WeChat Number</label>
+                            <label style={{ fontSize: "11.5px", color: "#0061f2", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "4px", fontWeight: 600 }}>
+                              <input
+                                type="checkbox"
+                                checked={contactSameCallingWechat}
+                                onChange={(e) => {
+                                  const checked = e.target.checked;
+                                  setContactSameCallingWechat(checked);
+                                  if (checked) {
+                                    setContactForm((f) => ({ ...f, wechat_number: f.calling_number }));
+                                  }
+                                }}
+                              />
+                              Same As Calling
+                            </label>
+                          </div>
+                          <input
+                            type="text"
+                            autoComplete="new-password"
+                            readOnly
+                            onFocus={(e) => e.target.removeAttribute("readonly")}
+                            maxLength={50}
+                            placeholder={contactPhoneCode ? `${contactPhoneCode} / ID` : "WeChat ID or Phone..."}
+                            value={contactForm.wechat_number}
+                            onChange={(e) => setContactForm((f) => ({ ...f, wechat_number: e.target.value }))}
+                            style={{
+                              width: "100%",
+                              padding: "9px 12px",
+                              fontSize: "13.5px",
+                              borderRadius: "6px",
+                              border: "1px solid #cbd5e1",
+                              outline: "none",
+                              color: "#0f172a",
+                            }}
+                          />
+                        </div>
+
+                        {/* Email ID */}
+                        <div className="field">
+                          <label style={{ fontSize: "12.5px", fontWeight: 600, color: "#475569", marginBottom: "6px", display: "block" }}>
+                            Email ID
+                          </label>
+                          <input
+                            type="text"
+                            inputMode="email"
+                            autoComplete="new-password"
+                            readOnly
+                            onFocus={(e) => e.target.removeAttribute("readonly")}
+                            maxLength={255}
+                            placeholder="contact@supplier.com"
+                            value={contactForm.email}
+                            onChange={(e) => setContactForm((f) => ({ ...f, email: e.target.value }))}
+                            style={{
+                              width: "100%",
+                              padding: "9px 12px",
+                              fontSize: "13.5px",
+                              borderRadius: "6px",
+                              border: "1px solid #cbd5e1",
+                              outline: "none",
+                              color: "#0f172a",
+                            }}
+                          />
+                        </div>
+
+                        {/* Handling Territory */}
+                        <div className="field">
+                          <label style={{ fontSize: "12.5px", fontWeight: 600, color: "#475569", marginBottom: "6px", display: "block" }}>
+                            Handling Territory
+                          </label>
+                          <input
+                            type="text"
+                            autoComplete="new-password"
+                            readOnly
+                            onFocus={(e) => e.target.removeAttribute("readonly")}
+                            maxLength={150}
+                            placeholder="e.g. local, Export India, Export Africa..."
+                            value={contactForm.handling_territory}
+                            onChange={(e) => setContactForm((f) => ({ ...f, handling_territory: e.target.value }))}
+                            style={{
+                              width: "100%",
+                              padding: "9px 12px",
+                              fontSize: "13.5px",
+                              borderRadius: "6px",
+                              border: "1px solid #cbd5e1",
+                              outline: "none",
+                              color: "#0f172a",
+                            }}
+                          />
+                          <div style={{ display: "flex", gap: "6px", marginTop: "6px", flexWrap: "wrap" }}>
+                            {["local", "Export India", "Export Africa", "Export Global"].map((t) => (
+                              <button
+                                key={t}
+                                type="button"
+                                onClick={() => setContactForm((f) => ({ ...f, handling_territory: t }))}
+                                style={{
+                                  padding: "3px 10px",
+                                  fontSize: "11.5px",
+                                  fontWeight: 600,
+                                  background: contactForm.handling_territory === t ? "#e0e7ff" : "#f8fafc",
+                                  color: contactForm.handling_territory === t ? "#4338ca" : "#475569",
+                                  border: "1px solid",
+                                  borderColor: contactForm.handling_territory === t ? "#c7d2fe" : "#cbd5e1",
+                                  borderRadius: "4px",
+                                  cursor: "pointer",
+                                }}
+                              >
+                                {t}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Country (Default China) */}
+                        <div className="field">
+                          <label style={{ fontSize: "12.5px", fontWeight: 600, color: "#475569", marginBottom: "6px", display: "block" }}>
+                            Country <span style={{ color: "#ef4444" }}>*</span>
+                          </label>
                           <SearchableDropdown
                             value={contactCountryId}
                             onChange={setContactCountryId}
@@ -1533,125 +1822,191 @@ export function SuppliersPage() {
                             fetchLabelForValue={fetchNameLabel("/masters/countries")}
                           />
                         </div>
-                        <TextField id="c_calling_number" label="Calling Number" maxLength={20} value={contactForm.calling_number} onChange={(v) => setContactForm((f) => ({ ...f, calling_number: v }))} />
-                        <TextField id="c_whatsapp_number" label="WhatsApp Number" maxLength={20} value={contactForm.whatsapp_number} onChange={(v) => setContactForm((f) => ({ ...f, whatsapp_number: v }))} />
-                        <TextField id="c_wechat_number" label="WeChat Number" maxLength={20} value={contactForm.wechat_number} onChange={(v) => setContactForm((f) => ({ ...f, wechat_number: v }))} />
-                        <TextField id="c_email" label="Email" type="email" maxLength={255} value={contactForm.email} onChange={(v) => setContactForm((f) => ({ ...f, email: v }))} />
-                      </div>
-                      <div className="form-actions" style={{ marginTop: "12px" }}>
-                        <button type="button" className="btn btn-primary btn-small" onClick={(e) => { void handleContactSubmit(e); }}>
-                          Save Contact
-                        </button>
+                      </form>
+
+                      {/* Footer Bar with Prominent Full-Width Blue Submit Button */}
+                      <div
+                        style={{
+                          padding: "16px 24px",
+                          borderTop: "1px solid #e2e8f0",
+                          background: "#ffffff",
+                          display: "flex",
+                          gap: "12px",
+                        }}
+                      >
                         <button
                           type="button"
-                          className="btn btn-small"
                           onClick={() => setContactFormOpen(false)}
+                          style={{
+                            flex: "0 0 90px",
+                            padding: "11px",
+                            background: "#ffffff",
+                            border: "1px solid #cbd5e1",
+                            color: "#475569",
+                            borderRadius: "6px",
+                            fontSize: "14px",
+                            fontWeight: 600,
+                            cursor: "pointer",
+                          }}
                         >
                           Cancel
                         </button>
+                        <button
+                          type="button"
+                          disabled={contactSubmitting}
+                          onClick={(e) => { void handleContactSubmit(e); }}
+                          style={{
+                            flex: 1,
+                            padding: "11px",
+                            background: "#0061f2",
+                            color: "#ffffff",
+                            border: "none",
+                            borderRadius: "6px",
+                            fontSize: "14px",
+                            fontWeight: 700,
+                            cursor: contactSubmitting ? "not-allowed" : "pointer",
+                            opacity: contactSubmitting ? 0.7 : 1,
+                            boxShadow: "0 2px 6px rgba(0, 97, 242, 0.3)",
+                          }}
+                        >
+                          {contactSubmitting ? "Submitting..." : "Submit"}
+                        </button>
                       </div>
                     </div>
-                  )}
-                  <div className="table-scroll">
-                    <table>
-                      <thead>
+                  </div>
+                )}
+
+                {/* CONTACTS LIST TABLE */}
+                <div className="table-scroll" style={{ border: "1px solid #e2e8f0", borderRadius: "8px", overflow: "hidden" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                    <thead>
+                      <tr style={{ background: "#f8fafc", borderBottom: "1px solid #e2e8f0" }}>
+                        <th style={{ padding: "12px 14px", textAlign: "left", fontSize: "12px", fontWeight: 700, color: "#475569", textTransform: "uppercase" }}>NAME / DESIGNATION</th>
+                        <th style={{ padding: "12px 14px", textAlign: "left", fontSize: "12px", fontWeight: 700, color: "#475569", textTransform: "uppercase" }}>CALLING / WHATSAPP</th>
+                        <th style={{ padding: "12px 14px", textAlign: "left", fontSize: "12px", fontWeight: 700, color: "#475569", textTransform: "uppercase" }}>WECHAT / EMAIL</th>
+                        <th style={{ padding: "12px 14px", textAlign: "left", fontSize: "12px", fontWeight: 700, color: "#475569", textTransform: "uppercase" }}>HANDLING TERRITORY</th>
+                        <th style={{ padding: "12px 14px", textAlign: "center", fontSize: "12px", fontWeight: 700, color: "#475569", textTransform: "uppercase", width: "140px" }}>ACTION</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {contacts.length === 0 ? (
                         <tr>
-                          <th>Name / Designation</th>
-                          <th>Calling / WhatsApp</th>
-                          <th>WeChat / Email</th>
-                          <th>Handling Territory</th>
-                          <th>Action</th>
+                          <td colSpan={5} style={{ padding: "24px", textAlign: "center", color: "#94a3b8", fontSize: "13.5px" }}>
+                            No contact persons added yet. Click "+ Add New" above to add contacts.
+                          </td>
                         </tr>
-                      </thead>
-                      <tbody>
-                        {contacts.length === 0 ? (
-                          <TableMessageRow colSpan={5}>No contacts yet.</TableMessageRow>
-                        ) : (
-                          contacts.map((c) => (
-                            <tr key={c.id}>
-                              <td>
-                                {c.salutation || ""} {c.person_name}
-                                {c.designation && (
-                                  <>
-                                    <br />
-                                    <span className="cell-secondary">{c.designation}</span>
-                                  </>
-                                )}
+                      ) : (
+                        contacts.map((c) => (
+                          <tr key={c.id} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                            {/* NAME / DESIGNATION */}
+                            <td style={{ padding: "12px 14px", verticalAlign: "top" }}>
+                              <div style={{ fontWeight: 700, color: "#0f172a", fontSize: "13.5px" }}>
+                                {c.salutation ? `${c.salutation} ` : ""}{c.person_name}
                                 {c.is_primary && (
-                                  <span className="badge badge-neutral"> Primary</span>
+                                  <span style={{ marginLeft: "6px", background: "#e2e8f0", color: "#334155", fontSize: "11px", fontWeight: 600, padding: "1px 6px", borderRadius: "4px" }}>
+                                    Primary
+                                  </span>
                                 )}
-                              </td>
-                              <td>
-                                {[c.calling_number, c.whatsapp_number].filter(Boolean).join(" / ") ||
-                                  "—"}
-                              </td>
-                              <td>
-                                {[c.wechat_number, c.email].filter(Boolean).join(" / ") || "—"}
-                              </td>
-                              <td>{c.handling_territory || "—"}</td>
-                              <td className="actions">
+                              </div>
+                              {c.designation ? (
+                                <div style={{ fontSize: "12.5px", color: "#64748b", marginTop: "2px" }}>{c.designation}</div>
+                              ) : (
+                                <div style={{ fontSize: "12px", color: "#cbd5e1" }}>—</div>
+                              )}
+                            </td>
+
+                            {/* CALLING / WHATSAPP */}
+                            <td style={{ padding: "12px 14px", verticalAlign: "top" }}>
+                              <div style={{ display: "flex", flexDirection: "column", gap: "4px", fontSize: "13px" }}>
+                                {c.calling_number ? (
+                                  <a href={`tel:${c.calling_number}`} style={{ color: "#0061f2", textDecoration: "none", fontWeight: 500, display: "inline-flex", alignItems: "center", gap: "5px" }}>
+                                    📞 {c.calling_number}
+                                  </a>
+                                ) : <span style={{ color: "#cbd5e1" }}>—</span>}
+                                {c.whatsapp_number ? (
+                                  <a href={`https://wa.me/${c.whatsapp_number.replace(/[^0-9]/g, "")}`} target="_blank" rel="noopener noreferrer" style={{ color: "#16a34a", textDecoration: "none", fontWeight: 500, display: "inline-flex", alignItems: "center", gap: "5px" }}>
+                                    💬 {c.whatsapp_number}
+                                  </a>
+                                ) : null}
+                              </div>
+                            </td>
+
+                            {/* WECHAT / EMAIL */}
+                            <td style={{ padding: "12px 14px", verticalAlign: "top" }}>
+                              <div style={{ display: "flex", flexDirection: "column", gap: "4px", fontSize: "13px" }}>
+                                {c.wechat_number ? (
+                                  <span style={{ color: "#334155", fontWeight: 500, display: "inline-flex", alignItems: "center", gap: "5px" }}>
+                                    💬 {c.wechat_number}
+                                  </span>
+                                ) : <span style={{ color: "#cbd5e1" }}>—</span>}
+                                {c.email ? (
+                                  <a href={`mailto:${c.email}`} style={{ color: "#0061f2", textDecoration: "none", fontWeight: 500, display: "inline-flex", alignItems: "center", gap: "5px" }}>
+                                    ✉️ {c.email}
+                                  </a>
+                                ) : null}
+                              </div>
+                            </td>
+
+                            {/* HANDLING TERRITORY */}
+                            <td style={{ padding: "12px 14px", verticalAlign: "top" }}>
+                              <span style={{ fontSize: "13px", color: "#334155", fontWeight: 500 }}>
+                                {c.handling_territory || "—"}
+                              </span>
+                            </td>
+
+                            {/* ACTION */}
+                            <td style={{ padding: "12px 14px", verticalAlign: "top", textAlign: "center" }}>
+                              <div style={{ display: "flex", gap: "8px", justifyContent: "center" }}>
                                 <button
                                   type="button"
-                                  className="btn btn-small"
                                   onClick={() => openContactForm(c)}
+                                  style={{
+                                    background: "#0061f2",
+                                    color: "#ffffff",
+                                    border: "none",
+                                    borderRadius: "5px",
+                                    padding: "5px 12px",
+                                    fontSize: "12px",
+                                    fontWeight: 600,
+                                    cursor: "pointer",
+                                    display: "inline-flex",
+                                    alignItems: "center",
+                                    gap: "4px",
+                                  }}
                                 >
-                                  Edit
+                                  ✏️ Edit
                                 </button>
                                 {!c.is_primary && (
                                   <button
                                     type="button"
-                                    className="btn btn-small btn-danger"
                                     onClick={() => handleContactDelete(c.id)}
+                                    style={{
+                                      background: "#ef4444",
+                                      color: "#ffffff",
+                                      border: "none",
+                                      borderRadius: "5px",
+                                      padding: "5px 12px",
+                                      fontSize: "12px",
+                                      fontWeight: 600,
+                                      cursor: "pointer",
+                                      display: "inline-flex",
+                                      alignItems: "center",
+                                      gap: "4px",
+                                    }}
                                   >
-                                    Delete
+                                    🗑️ Delete
                                   </button>
                                 )}
-                              </td>
-                            </tr>
-                          ))
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
+                              </div>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
                 </div>
-              )}
-
-              {Boolean(error) && (
-                <div style={{ marginTop: "20px" }}>
-                  <Banner error={error} />
-                </div>
-              )}
-
-              {/* FULL PAGE FORM FOOTER ACTION BUTTONS */}
-              <div
-                style={{
-                  paddingTop: "24px",
-                  marginTop: "28px",
-                  borderTop: "1px solid #e2e8f0",
-                  display: "flex",
-                  gap: "14px",
-                  justifyContent: "flex-end",
-                }}
-              >
-                <button
-                  type="button"
-                  className="btn"
-                  onClick={closeModal}
-                  style={{ background: "#ffffff", border: "1px solid #cbd5e1", color: "#475569", padding: "10px 20px", borderRadius: "6px", fontWeight: 600, fontSize: "14px" }}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-add-new"
-                  disabled={saving}
-                  style={{ background: "#0061f2", color: "#ffffff", padding: "10px 24px", borderRadius: "6px", fontWeight: 600, fontSize: "14px", border: "none", opacity: saving ? 0.7 : 1 }}
-                  onClick={handleSaveAndExit}
-                >
-                  {saving ? "Saving..." : "Save & Exit"}
-                </button>
               </div>
-            </form>
+            )}
           </div>
         </main>
       ) : (

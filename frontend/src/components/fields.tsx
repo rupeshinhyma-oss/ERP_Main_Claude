@@ -34,6 +34,7 @@ export function TextField({
   min,
   max,
   className,
+  autoComplete = "off",
 }: BaseFieldProps & {
   value: string;
   onChange: (value: string) => void;
@@ -48,6 +49,7 @@ export function TextField({
   min?: string | number;
   max?: string | number;
   className?: string;
+  autoComplete?: string;
 }) {
   return (
     <div className="field" style={style}>
@@ -67,6 +69,7 @@ export function TextField({
         min={min}
         max={max}
         className={className}
+        autoComplete={autoComplete}
       />
       {hint && <span className="hint">{hint}</span>}
     </div>

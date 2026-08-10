@@ -863,6 +863,47 @@ export interface ImpExpDropdownProps {
   onExportCsv: () => void;
 }
 
+function downloadSampleCsv(entityName: string, headers: ImportHeader[]) {
+  const headerKeys = headers.map((h) => h.key);
+  const sampleValues: Record<string, string> = {
+    product_code: "PROD-SAMPLE-001",
+    product_name: "Sample Commercial Item",
+    category_code: "CAT-01",
+    sub_category_code: "SUBCAT-01",
+    brand_code: "BRAND-01",
+    hsn_code: "84223000",
+    uom_code: "KGS",
+    secondary_uom_code: "PCS",
+    specification: "Food Grade / Standard Specification",
+    description: "Sample description for import reference",
+    weight: "25.0",
+    length: "50",
+    width: "40",
+    height: "30",
+    status: "active",
+    company_name: "Sample Supplier Co Ltd",
+    country: "China",
+    province: "Shanghai",
+    city: "Shanghai",
+  };
+
+  const sampleRow = headerKeys.map((k) => {
+    const val = sampleValues[k] || `Sample ${k}`;
+    return `"${val.replace(/"/g, '""')}"`;
+  });
+
+  const csvContent = "\uFEFF" + headerKeys.join(",") + "\n" + sampleRow.join(",") + "\n";
+  const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.setAttribute("href", url);
+  link.setAttribute("download", `${entityName.toLowerCase().replace(/\s+/g, "_")}_sample_template.csv`);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
 export function ImpExpDropdown({
   apiBase,
   entityName,
@@ -948,6 +989,29 @@ export function ImpExpDropdown({
             overflow: "hidden",
           }}
         >
+          <button
+            type="button"
+            onClick={() => {
+              setOpen(false);
+              downloadSampleCsv(entityName, importHeaders);
+            }}
+            style={{
+              width: "100%",
+              textAlign: "left",
+              padding: "10px 14px",
+              fontSize: "13.5px",
+              color: "#334155",
+              fontWeight: 600,
+              background: "none",
+              border: "none",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
+            }}
+          >
+            📄 SAMPLE FILE
+          </button>
           <label
             style={{
               display: "flex",
@@ -959,9 +1023,10 @@ export function ImpExpDropdown({
               fontWeight: 600,
               cursor: "pointer",
               margin: 0,
+              borderTop: "1px solid #f1f5f9",
             }}
           >
-            📥 Import
+            📥 IMPORT
             <input
               ref={inputRef}
               type="file"
@@ -992,7 +1057,7 @@ export function ImpExpDropdown({
               gap: "8px",
             }}
           >
-            📤 CSV export
+            📤 EXPORT
           </button>
         </div>
       )}

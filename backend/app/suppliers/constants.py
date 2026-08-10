@@ -11,7 +11,7 @@ MODULE_NAME = "suppliers"
 # generic app.core.constants.Regex.PHONE (7-15 digits, used elsewhere in
 # the app) since this module's rule is specifically 7-11 digits.
 PHONE_MIN_DIGITS = 7
-PHONE_MAX_DIGITS = 11
+PHONE_MAX_DIGITS = 15
 
 DEFAULT_SALUTATIONS = ("Mr.", "Mrs.", "Ms.")
 

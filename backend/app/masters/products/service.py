@@ -300,43 +300,41 @@ class ProductService:
         return summary
 
     async def export_file(self, file_format: str) -> bytes:
-        """Export every product to CSV or XLSX bytes."""
+        """Export every product to CSV or XLSX bytes with clean, resolved business headers."""
         products = await self.repository.list_all()
-        rows = [
-            {
-                "id": str(p.id),
-                "product_code": p.product_code,
-                "product_name": p.product_name,
-                "barcode": p.barcode,
-                "category_id": str(p.category_id),
-                "sub_category_id": str(p.sub_category_id) if p.sub_category_id else None,
-                "brand_id": str(p.brand_id) if p.brand_id else None,
-                "hsn_id": str(p.hsn_id) if p.hsn_id else None,
-                "uom_id": str(p.uom_id),
-                "secondary_uom_id": str(p.secondary_uom_id) if p.secondary_uom_id else None,
-                "specification": p.specification,
-                "description": p.description,
-                "images": ",".join(p.images) if p.images else None,
-                "weight": float(p.weight) if p.weight is not None else None,
-                "length": float(p.length) if p.length is not None else None,
-                "width": float(p.width) if p.width is not None else None,
-                "height": float(p.height) if p.height is not None else None,
-                "color": p.color,
-                "material": p.material,
-                "conversion_factor": float(p.conversion_factor) if p.conversion_factor is not None else None,
-                "minimum_order_quantity": float(p.minimum_order_quantity) if p.minimum_order_quantity is not None else None,
-                "reorder_level": float(p.reorder_level) if p.reorder_level is not None else None,
-                "standard_cost": float(p.standard_cost) if p.standard_cost is not None else None,
-                "standard_price": float(p.standard_price) if p.standard_price is not None else None,
-                "is_purchasable": p.is_purchasable,
-                "is_sellable": p.is_sellable,
-                "is_active_for_inventory": p.is_active_for_inventory,
-                "status": p.status.value,
-                "created_at": p.created_at.isoformat(),
-                "updated_at": p.updated_at.isoformat(),
-            }
-            for p in products
-        ]
+
+        # Batch resolve lookup names
+        categories = {str(c.id): c.name for c in await self.category_repository.list(limit=1000)}
+        sub_categories = {str(sc.id): sc.name for sc in await self.sub_category_repository.list(limit=2000)}
+        brands = {str(b.id): b.name for b in await self.brand_repository.list(limit=1000)}
+        hsns = {str(h.id): h.code for h in await self.hsn_repository.list(limit=1000)}
+        uoms = {str(u.id): (u.short_name or u.name or u.code) for u in await self.uom_repository.list(limit=1000)}
+
+        rows = []
+        for p in products:
+            l = getattr(p, "length_cm", None) or getattr(p, "length", None)
+            w = getattr(p, "width_cm", None) or getattr(p, "width", None)
+            h = getattr(p, "height_cm", None) or getattr(p, "height", None)
+            status_str = p.status.value if hasattr(p.status, "value") else str(p.status)
+
+            rows.append({
+                "Product Code": p.product_code or "",
+                "Product Name (As Per Tally)": p.product_name or "",
+                "Category": categories.get(str(p.category_id), "") if p.category_id else "",
+                "Sub-Category": sub_categories.get(str(p.sub_category_id), "") if p.sub_category_id else "",
+                "Brand": brands.get(str(p.brand_id), "") if p.brand_id else "",
+                "HSN Code": hsns.get(str(p.hsn_id), "") if p.hsn_id else "",
+                "UOM": uoms.get(str(p.uom_id), "") if p.uom_id else "",
+                "Secondary UOM": uoms.get(str(p.secondary_uom_id), "") if p.secondary_uom_id else "",
+                "Compliance & License Requirements": p.specification or "",
+                "Description": p.description or "",
+                "Pack Gross Weight (Kg)": float(p.weight) if p.weight is not None else "",
+                "Length (cm)": float(l) if l is not None else "",
+                "Width (cm)": float(w) if w is not None else "",
+                "Height (cm)": float(h) if h is not None else "",
+                "Status": status_str,
+            })
+
         if file_format == "csv":
             return build_csv_export(EXPORT_HEADERS, rows)
         return build_excel_export(EXPORT_HEADERS, rows, sheet_title="Products")

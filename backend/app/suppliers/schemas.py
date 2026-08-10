@@ -37,14 +37,13 @@ class SupplierContactCreate(BaseModel):
     designation: str | None = Field(default=None, max_length=150)
     handling_territory: str | None = Field(default=None, max_length=150)
     country_id: uuid.UUID | None = None
-    calling_number: str | None = Field(default=None, max_length=20)
-    whatsapp_number: str | None = Field(default=None, max_length=20)
-    wechat_number: str | None = Field(default=None, max_length=20)
+    calling_number: str | None = Field(default=None, max_length=50)
+    whatsapp_number: str | None = Field(default=None, max_length=50)
+    wechat_number: str | None = Field(default=None, max_length=50)
     email: EmailStr | None = None
 
     _validate_calling = field_validator("calling_number")(_phone_validator("Calling number"))
     _validate_whatsapp = field_validator("whatsapp_number")(_phone_validator("WhatsApp number"))
-    _validate_wechat = field_validator("wechat_number")(_phone_validator("WeChat number"))
 
 
 class SupplierContactUpdate(BaseModel):
@@ -55,14 +54,13 @@ class SupplierContactUpdate(BaseModel):
     designation: str | None = Field(default=None, max_length=150)
     handling_territory: str | None = Field(default=None, max_length=150)
     country_id: uuid.UUID | None = None
-    calling_number: str | None = Field(default=None, max_length=20)
-    whatsapp_number: str | None = Field(default=None, max_length=20)
-    wechat_number: str | None = Field(default=None, max_length=20)
+    calling_number: str | None = Field(default=None, max_length=50)
+    whatsapp_number: str | None = Field(default=None, max_length=50)
+    wechat_number: str | None = Field(default=None, max_length=50)
     email: EmailStr | None = None
 
     _validate_calling = field_validator("calling_number")(_phone_validator("Calling number"))
     _validate_whatsapp = field_validator("whatsapp_number")(_phone_validator("WhatsApp number"))
-    _validate_wechat = field_validator("wechat_number")(_phone_validator("WeChat number"))
 
 
 class SupplierContactRead(BaseModel):

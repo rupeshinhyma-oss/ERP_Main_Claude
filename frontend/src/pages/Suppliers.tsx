@@ -1130,8 +1130,7 @@ export function SuppliersPage() {
                     <SelectField id="supplier_type" label="Supplier Type" value={form.supplier_type} onChange={(v) => setField("supplier_type", v)}>
                       <option value="">Select</option>
                       <option value="manufacturer">Manufacturer</option>
-                      <option value="trader">Trader</option>
-                      <option value="dealer">Dealer</option>
+                      <option value="dealer">Dealer / Trader</option>
                     </SelectField>
                     <TextField id="brand_description" label="Brand of Supplier's Products" placeholder="Description..." value={form.brand_description} onChange={(v) => setField("brand_description", v)} />
                     <div className="field">
@@ -1163,7 +1162,9 @@ export function SuppliersPage() {
                         allowCustomText={true}
                         onTextChange={(text) => {
                           setFormStateCustomText(text);
-                          if (!formStateId) setFormStateId(null);
+                          setFormStateId(null);
+                          setFormCityId(null);
+                          setFormCityCustomText("");
                         }}
                         placeholder="Search or type province..."
                         fetchOptions={searchFetcher("/masters/states", (): Record<string, string> =>
@@ -1183,7 +1184,7 @@ export function SuppliersPage() {
                         allowCustomText={true}
                         onTextChange={(text) => {
                           setFormCityCustomText(text);
-                          if (!formCityId) setFormCityId(null);
+                          setFormCityId(null);
                         }}
                         placeholder="Search or type city..."
                         fetchOptions={searchFetcher("/masters/cities", (): Record<string, string> =>

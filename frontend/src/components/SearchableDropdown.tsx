@@ -399,7 +399,7 @@ export function SearchableDropdownMulti({
         style={{
           border: "1px solid var(--color-border-strong, #cbd5e1)",
           borderRadius: "var(--radius-sm, 6px)",
-          padding: "5px 8px",
+          padding: "5px 32px 5px 8px",
           minHeight: "42px",
           background: "#ffffff",
           display: "flex",
@@ -407,6 +407,7 @@ export function SearchableDropdownMulti({
           alignItems: "center",
           gap: "6px",
           cursor: "text",
+          position: "relative",
         }}
         onClick={() => inputRef.current?.focus()}
       >
@@ -469,6 +470,22 @@ export function SearchableDropdownMulti({
           onKeyDown={handleKeyDown}
           onBlur={handleBlur}
         />
+        {/* Dropdown arrow indicator */}
+        <span
+          style={{
+            position: "absolute",
+            right: "10px",
+            top: "50%",
+            transform: open ? "translateY(-50%) rotate(180deg)" : "translateY(-50%)",
+            pointerEvents: "none",
+            color: "#94a3b8",
+            fontSize: "11px",
+            transition: "transform 0.2s ease",
+            lineHeight: 1,
+          }}
+        >
+          ▼
+        </span>
       </div>
 
       {open && (

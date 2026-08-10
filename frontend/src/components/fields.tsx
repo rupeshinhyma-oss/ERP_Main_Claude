@@ -164,7 +164,7 @@ export function SelectField({
   function toggleOpen() {
     const nextState = !open;
     setOpen(nextState);
-    if (nextState) {
+    if (nextState && options.length > 5) {
       setSearchTerm("");
       setTimeout(() => searchInputRef.current?.focus(), 50);
     }
@@ -224,7 +224,8 @@ export function SelectField({
             overflow: "hidden",
           }}
         >
-          {/* Search Bar at Top */}
+          {/* Search Bar — only shown for longer lists */}
+          {options.length > 5 && (
           <div style={{ padding: "8px", borderBottom: "1px solid #f1f5f9", background: "#f8fafc" }}>
             <input
               ref={searchInputRef}
@@ -250,6 +251,7 @@ export function SelectField({
               }}
             />
           </div>
+          )}
 
           {/* Options List */}
           <div style={{ overflowY: "auto", flex: 1, maxHeight: "200px", padding: "4px 0" }}>

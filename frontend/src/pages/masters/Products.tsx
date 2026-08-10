@@ -150,6 +150,7 @@ export function ProductsPage() {
       searchPlaceholder="Search code, name, or barcode or Sr. No..."
       reloadToken={lookupsReady}
       useFullPageForm={true}
+      hideQuickAdd={true}
       extraFilters={Object.keys(extraFilters).length ? extraFilters : undefined}
       toolbarExtras={
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "20px", width: "100%" }}>

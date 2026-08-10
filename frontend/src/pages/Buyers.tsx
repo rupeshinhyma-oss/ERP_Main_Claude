@@ -60,7 +60,7 @@ export function BuyersPage() {
   const [rows, setRows] = useState<Buyer[]>([]);
   const [pagination, setPagination] = useState<PaginationMeta | undefined>();
   const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize] = useState(20);
+  const [pageSize] = useState(50);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const [reloadCounter, setReloadCounter] = useState(0);

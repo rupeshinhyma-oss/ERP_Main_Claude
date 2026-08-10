@@ -37,13 +37,7 @@ export const NAV_SECTIONS: NavSection[] = [
       { key: "industrial-zones", label: "City", path: "/masters/cities", icon: "sliders", permission: "city.view" },
     ],
   },
-  {
-    label: "TASK",
-    items: [
-      { key: "tasks", label: "Marketing Tasks", path: "/tasks", icon: "task", permission: "task.view" },
-      { key: "technical-tasks", label: "Technical Tasks", path: "/tasks", icon: "fileText", permission: "task.view" },
-    ],
-  },
+
   {
     label: "INVENTORY",
     items: [

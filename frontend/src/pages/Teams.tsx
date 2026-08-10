@@ -177,7 +177,7 @@ export function TeamsPage() {
   const [empPagination, setEmpPagination] = useState<PaginationMeta | undefined>();
   const [empLoading, setEmpLoading] = useState(true);
   const [empPage, setEmpPage] = useState(1);
-  const [empPageSize, setEmpPageSize] = useState(20);
+  const [empPageSize, setEmpPageSize] = useState(50);
   const [empSearchInput, setEmpSearchInput] = useState("");
   const [empQuery, setEmpQuery] = useState("");
   const [empDeptFilter, setEmpDeptFilter] = useState("");
@@ -249,7 +249,7 @@ export function TeamsPage() {
   const [deptPagination, setDeptPagination] = useState<PaginationMeta | undefined>();
   const [deptLoading, setDeptLoading] = useState(true);
   const [deptPage, setDeptPage] = useState(1);
-  const [deptPageSize, setDeptPageSize] = useState(20);
+  const [deptPageSize, setDeptPageSize] = useState(50);
   const [deptSearchInput, setDeptSearchInput] = useState("");
   const [deptSearch, setDeptSearch] = useState("");
   const [deptStatusFilter, setDeptStatusFilter] = useState("");
@@ -381,7 +381,7 @@ export function TeamsPage() {
   const [desigPagination, setDesigPagination] = useState<PaginationMeta | undefined>();
   const [desigLoading, setDesigLoading] = useState(true);
   const [desigPage, setDesigPage] = useState(1);
-  const [desigPageSize, setDesigPageSize] = useState(20);
+  const [desigPageSize, setDesigPageSize] = useState(50);
   const [desigSearchInput, setDesigSearchInput] = useState("");
   const [desigSearch, setDesigSearch] = useState("");
   const [desigStatusFilter, setDesigStatusFilter] = useState("");

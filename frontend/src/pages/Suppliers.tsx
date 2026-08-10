@@ -80,7 +80,7 @@ const SUPPLIER_IMPORT_HEADERS: ImportHeader[] = [
 
 const MAX_CHIPS = 5;
 
-type ModalTab = "first" | "second" | "contacts";
+type ModalTab = "first" | "second" | "contacts" | "continue";
 
 const EMPTY_SUPPLIER_FORM = {
   company_name: "",
@@ -831,6 +831,9 @@ export function SuppliersPage() {
 
       if (nextAction === "exit") {
         closeModal();
+      } else if (nextAction === "continue") {
+        setModalMode("full");
+        setEditTab("profile");
       } else if (nextAction) {
         setModalTab(nextAction);
       }
@@ -854,6 +857,11 @@ export function SuppliersPage() {
         await saveSupplierData("contacts");
       }
     }
+  }
+
+  async function handleSaveAndContinue(e: React.MouseEvent) {
+    e.preventDefault();
+    await saveSupplierData("continue");
   }
 
   async function handleSaveAndExit(e: React.MouseEvent) {
@@ -1425,11 +1433,49 @@ export function SuppliersPage() {
                 )}
 
                 {/* FULL PAGE FORM FOOTER ACTION BUTTONS */}
-                <div style={{ paddingTop: "24px", marginTop: "28px", borderTop: "1px solid #e2e8f0", display: "flex", gap: "14px", justifyContent: "flex-end" }}>
+                <div style={{ paddingTop: "24px", marginTop: "28px", borderTop: "1px solid #e2e8f0", display: "flex", gap: "12px", justifyContent: "flex-end" }}>
                   <button type="button" className="btn" onClick={closeModal} style={{ background: "#ffffff", border: "1px solid #cbd5e1", color: "#475569", padding: "10px 20px", borderRadius: "6px", fontWeight: 600, fontSize: "14px" }}>
                     Cancel
                   </button>
-                  <button type="button" className="btn btn-add-new" disabled={saving} style={{ background: "#0061f2", color: "#ffffff", padding: "10px 24px", borderRadius: "6px", fontWeight: 600, fontSize: "14px", border: "none", opacity: saving ? 0.7 : 1 }} onClick={handleSaveAndExit}>
+                  {!currentSupplierId && (
+                    <button
+                      type="button"
+                      className="btn"
+                      disabled={saving}
+                      style={{
+                        background: "#0061f2",
+                        color: "#ffffff",
+                        padding: "10px 24px",
+                        borderRadius: "6px",
+                        fontWeight: 600,
+                        fontSize: "14px",
+                        border: "none",
+                        cursor: saving ? "not-allowed" : "pointer",
+                        opacity: saving ? 0.7 : 1,
+                        boxShadow: "0 2px 6px rgba(0, 97, 242, 0.25)",
+                      }}
+                      onClick={handleSaveAndContinue}
+                    >
+                      {saving ? "Saving..." : "Save & Continue"}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="btn"
+                    disabled={saving}
+                    style={{
+                      background: !currentSupplierId ? "#ffffff" : "#0061f2",
+                      border: !currentSupplierId ? "1px solid #cbd5e1" : "none",
+                      color: !currentSupplierId ? "#334155" : "#ffffff",
+                      padding: "10px 24px",
+                      borderRadius: "6px",
+                      fontWeight: 600,
+                      fontSize: "14px",
+                      cursor: saving ? "not-allowed" : "pointer",
+                      opacity: saving ? 0.7 : 1,
+                    }}
+                    onClick={handleSaveAndExit}
+                  >
                     {saving ? "Saving..." : "Save & Exit"}
                   </button>
                 </div>

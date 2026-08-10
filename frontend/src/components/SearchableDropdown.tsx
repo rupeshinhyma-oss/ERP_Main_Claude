@@ -227,7 +227,7 @@ export function SearchableDropdown({
                     selectOption({ value: inputValue.trim(), label: inputValue.trim() });
                   }}
                 >
-                  + Use "{inputValue.trim()}"
+                  Use "{inputValue.trim()}"
                 </div>
               )}
             </>
@@ -529,7 +529,7 @@ export function SearchableDropdownMulti({
                     addSelection({ value: inputValue.trim(), label: inputValue.trim() });
                   }}
                 >
-                  + Add "{inputValue.trim()}"
+                  Add "{inputValue.trim()}"
                 </div>
               )}
             </>

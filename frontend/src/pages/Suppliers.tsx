@@ -213,6 +213,7 @@ export function SuppliersPage() {
   const [formCategoryIds, setFormCategoryIds] = useState<string[]>([]);
   const [formSubCategoryIds, setFormSubCategoryIds] = useState<string[]>([]);
   const [formProductIds, setFormProductIds] = useState<string[]>([]);
+  const [lockNewStatus, setLockNewStatus] = useState(false);
   const [formStateCustomText, setFormStateCustomText] = useState("");
   const [formCityCustomText, setFormCityCustomText] = useState("");
   const [whatsappSameAsCalling, setWhatsappSameAsCalling] = useState(false);
@@ -1332,7 +1333,7 @@ export function SuppliersPage() {
                       </SelectField>
                       <SelectField id="current_status" label="Current Status" value={form.current_status} onChange={(v) => setField("current_status", v)}>
                         <option value="">Select Status</option>
-                        <option value="new">New</option>
+                        <option value="new" disabled={lockNewStatus}>New</option>
                         <option value="contacted">Contacted</option>
                         <option value="sample_requested">Sample Requested</option>
                         <option value="sample_received">Sample Received</option>

@@ -591,21 +591,29 @@ export function ProductsPage() {
               </SelectField>
             </div>
 
-            <div className="section-title">Compliance &amp; License Requirements</div>
-            <div className="form-grid" style={{ gridTemplateColumns: "1fr" }}>
-              <TextAreaField
-                id="license_certificate_required"
-                label="Any License / Certificate (if needed)"
-                rows={2}
-                placeholder="e.g. Import License, Drug Certificate. Highlighted RED in Inquiry if set."
-                value={f.license_certificate_required}
-                onChange={(v) => set("license_certificate_required", v)}
-              />
-            </div>
-
-            <div className="section-title">Specifications</div>
-            <div className="form-grid" style={{ gridTemplateColumns: "1fr" }}>
-              <TextAreaField id="specification" label="Specification" value={f.specification} onChange={(v) => set("specification", v)} />
+            <div className="form-grid" style={{ gridTemplateColumns: "1fr 1fr", gap: "20px" }}>
+              <div>
+                <div className="section-title" style={{ marginTop: 0 }}>Compliance &amp; License Requirements</div>
+                <TextAreaField
+                  id="license_certificate_required"
+                  label="Any License / Certificate (if needed)"
+                  rows={3}
+                  placeholder="e.g. Import License, Drug Certificate. Highlighted RED in Inquiry if set."
+                  value={f.license_certificate_required}
+                  onChange={(v) => set("license_certificate_required", v)}
+                />
+              </div>
+              <div>
+                <div className="section-title" style={{ marginTop: 0 }}>Specifications</div>
+                <TextAreaField
+                  id="specification"
+                  label="Specification"
+                  rows={3}
+                  placeholder="Enter detailed product specifications..."
+                  value={f.specification}
+                  onChange={(v) => set("specification", v)}
+                />
+              </div>
             </div>
 
             <div className="section-title">Packaging &amp; Physical Attributes</div>

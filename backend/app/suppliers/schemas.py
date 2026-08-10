@@ -7,6 +7,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
+from app.core.exceptions import BadRequestException
 from app.suppliers.models import SupplierCurrentStatus, SupplierGrade, SupplierPotential, SupplierType
 from app.suppliers.validators import validate_phone_number
 
@@ -19,7 +20,10 @@ def _phone_validator(field_label: str):
     """Build a Pydantic field_validator closure for a named phone field."""
 
     def _validate(cls, value: str | None) -> str | None:
-        return validate_phone_number(value, field_label=field_label)
+        try:
+            return validate_phone_number(value, field_label=field_label)
+        except BadRequestException as exc:
+            raise ValueError(exc.message) from exc
 
     return _validate
 
@@ -104,9 +108,9 @@ class SupplierCreate(BaseModel):
     contact_salutation: str | None = Field(default=None, max_length=10)
     contact_full_name: str | None = Field(default=None, max_length=150)
     contact_designation: str | None = Field(default=None, max_length=150)
-    contact_calling_number: str | None = Field(default=None, max_length=20)
-    contact_whatsapp_number: str | None = Field(default=None, max_length=20)
-    contact_wechat_number: str | None = Field(default=None, max_length=20)
+    contact_calling_number: str | None = Field(default=None, max_length=50)
+    contact_whatsapp_number: str | None = Field(default=None, max_length=50)
+    contact_wechat_number: str | None = Field(default=None, max_length=50)
     emails: list[EmailStr] = Field(default_factory=list, description="Email ID (multiple emails).")
 
     # --- Second form ---
@@ -134,7 +138,6 @@ class SupplierCreate(BaseModel):
 
     _validate_calling = field_validator("contact_calling_number")(_phone_validator("Calling number"))
     _validate_whatsapp = field_validator("contact_whatsapp_number")(_phone_validator("WhatsApp number"))
-    _validate_wechat = field_validator("contact_wechat_number")(_phone_validator("WeChat number"))
 
 
 class SupplierUpdate(BaseModel):
@@ -151,9 +154,9 @@ class SupplierUpdate(BaseModel):
     contact_salutation: str | None = Field(default=None, max_length=10)
     contact_full_name: str | None = Field(default=None, max_length=150)
     contact_designation: str | None = Field(default=None, max_length=150)
-    contact_calling_number: str | None = Field(default=None, max_length=20)
-    contact_whatsapp_number: str | None = Field(default=None, max_length=20)
-    contact_wechat_number: str | None = Field(default=None, max_length=20)
+    contact_calling_number: str | None = Field(default=None, max_length=50)
+    contact_whatsapp_number: str | None = Field(default=None, max_length=50)
+    contact_wechat_number: str | None = Field(default=None, max_length=50)
     emails: list[EmailStr] | None = None
 
     tax_id_number: str | None = Field(default=None, max_length=100)
@@ -176,7 +179,6 @@ class SupplierUpdate(BaseModel):
 
     _validate_calling = field_validator("contact_calling_number")(_phone_validator("Calling number"))
     _validate_whatsapp = field_validator("contact_whatsapp_number")(_phone_validator("WhatsApp number"))
-    _validate_wechat = field_validator("contact_wechat_number")(_phone_validator("WeChat number"))
 
 
 class SupplierGradeUpdate(BaseModel):

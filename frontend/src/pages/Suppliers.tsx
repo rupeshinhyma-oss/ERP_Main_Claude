@@ -139,6 +139,15 @@ function StatusPill({ value }: { value?: string | null }) {
   return <span className={`badge ${cls}`}>{label}</span>;
 }
 
+function validatePhoneNumber(val: string): string | null {
+  if (!val.trim()) return null;
+  const digits = val.replace(/\D/g, "");
+  if (digits.length < 7 || digits.length > 15) {
+    return "Phone number must have between 7 and 15 digits.";
+  }
+  return null;
+}
+
 export function SuppliersPage() {
   const { hasPermission } = useAuth();
   const canCreate = hasPermission("supplier.create");
@@ -204,7 +213,6 @@ export function SuppliersPage() {
   const [formCategoryIds, setFormCategoryIds] = useState<string[]>([]);
   const [formSubCategoryIds, setFormSubCategoryIds] = useState<string[]>([]);
   const [formProductIds, setFormProductIds] = useState<string[]>([]);
-  const [lockNewStatus, setLockNewStatus] = useState(false);
   const [formStateCustomText, setFormStateCustomText] = useState("");
   const [formCityCustomText, setFormCityCustomText] = useState("");
   const [whatsappSameAsCalling, setWhatsappSameAsCalling] = useState(false);
@@ -985,7 +993,6 @@ export function SuppliersPage() {
   }
 
   const startSrNo = (currentPage - 1) * pageSize + 1;
-  const visited = form.visited_factory_office === "true";
 
   return (
     <AppShell activeKey="suppliers" pageClassName="page-suppliers">
@@ -1363,7 +1370,7 @@ export function SuppliersPage() {
                         </label>
                         <label className="btn btn-small" style={{ background: "#f1f5f9", border: "1px solid #cbd5e1", color: "#334155", cursor: uploadingMedia ? "not-allowed" : "pointer" }}>
                           {uploadingMedia ? "Uploading..." : "📁 Select Photos / Videos"}
-                          <input type="file" multiple accept="image/*,video/*" onChange={handleMediaFileUpload} disabled={uploadingMedia} style={{ display: "none" }} />
+                          <input type="file" multiple accept="image/*,video/*" onChange={(e) => void handleMediaFileUpload(e.target.files)} disabled={uploadingMedia} style={{ display: "none" }} />
                         </label>
                       </div>
 

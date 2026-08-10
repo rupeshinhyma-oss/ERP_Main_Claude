@@ -526,7 +526,16 @@ export function ProductsPage() {
             </div>
 
             <div className="section-title">Classification &amp; Tax</div>
-            <div className="form-grid">
+            <div className="form-grid" style={{ gridTemplateColumns: "repeat(3, 1fr)" }}>
+              {/* Row 2: Brand, Category, Sub-Category */}
+              <SelectField id="brand_id" label="Brand *" value={f.brand_id} onChange={(v) => set("brand_id", v)}>
+                <option value="">-- Select Brand --</option>
+                {brands.items.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.name}
+                  </option>
+                ))}
+              </SelectField>
               <SelectField
                 id="category_id"
                 label="Category *"
@@ -552,21 +561,14 @@ export function ProductsPage() {
                   </option>
                 ))}
               </SelectField>
-              <SelectField id="brand_id" label="Brand *" value={f.brand_id} onChange={(v) => set("brand_id", v)}>
-                <option value="">-- Select Brand --</option>
-                {brands.items.map((b) => (
-                  <option key={b.id} value={b.id}>
-                    {b.name}
-                  </option>
-                ))}
-              </SelectField>
+
+              {/* Row 3: HSN Code, Refund VAT %, Organization, UOM */}
               <SelectField
                 id="hsn_id"
                 label="HSN Code *"
                 value={f.hsn_id}
                 onChange={(v) => {
                   set("hsn_id", v);
-                  // Selecting an HSN code auto-fills its refund VAT rate.
                   const picked = hsnCodes.items.find((h) => h.id === v);
                   set("refund_vat_percent", String(picked?.refund_vat_percent ?? 0));
                 }}
@@ -579,14 +581,6 @@ export function ProductsPage() {
                 ))}
               </SelectField>
               <TextField id="refund_vat_percent" label="Refund VAT %" type="number" step="0.01" min={0} max={100} placeholder="Auto from HSN or manual" value={f.refund_vat_percent} onChange={(v) => set("refund_vat_percent", v)} />
-              <SelectField id="uom_id" label="UOM (Unit of Measure) *" required value={f.uom_id} onChange={(v) => set("uom_id", v)}>
-                <option value="">-- Select UOM --</option>
-                {uoms.items.map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {`${u.name} (${u.code})`}
-                  </option>
-                ))}
-              </SelectField>
               <SelectField id="organization_id" label="Organization" value={f.organization_id} onChange={(v) => set("organization_id", v)}>
                 <option value="">-- Select Organization --</option>
                 {organizations.items.map((org) => (
@@ -598,7 +592,7 @@ export function ProductsPage() {
             </div>
 
             <div className="section-title">Compliance &amp; License Requirements</div>
-            <div className="form-grid">
+            <div className="form-grid" style={{ gridTemplateColumns: "1fr" }}>
               <TextAreaField
                 id="license_certificate_required"
                 label="Any License / Certificate (if needed)"
@@ -606,23 +600,34 @@ export function ProductsPage() {
                 placeholder="e.g. Import License, Drug Certificate. Highlighted RED in Inquiry if set."
                 value={f.license_certificate_required}
                 onChange={(v) => set("license_certificate_required", v)}
-                style={{ gridColumn: "span 2" }}
               />
             </div>
 
             <div className="section-title">Specifications</div>
-            <div className="form-grid">
-              <TextAreaField id="specification" label="Specification" value={f.specification} onChange={(v) => set("specification", v)} style={{ gridColumn: "span 2" }} />
+            <div className="form-grid" style={{ gridTemplateColumns: "1fr" }}>
+              <TextAreaField id="specification" label="Specification" value={f.specification} onChange={(v) => set("specification", v)} />
             </div>
 
             <div className="section-title">Packaging &amp; Physical Attributes</div>
-            <div className="form-grid">
+            <div className="form-grid" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
+              <SelectField id="uom_id" label="UOM (Unit of Measure) *" required value={f.uom_id} onChange={(v) => set("uom_id", v)}>
+                <option value="">-- Select UOM --</option>
+                {uoms.items.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {`${u.name} (${u.code})`}
+                  </option>
+                ))}
+              </SelectField>
               <TextField id="packaging_quantity" label="Packaging Quantity (unit)" type="number" step="0.001" min={0} value={f.packaging_quantity} onChange={(v) => set("packaging_quantity", v)} />
               <TextField id="packaging_net_weight" label="Packaging Net Weight (kg)" type="number" step="0.001" min={0} value={f.packaging_net_weight} onChange={(v) => set("packaging_net_weight", v)} />
               <TextField id="packaging_gross_weight" label="Packaging Gross Weight (kg)" type="number" step="0.001" min={0} value={f.packaging_gross_weight} onChange={(v) => set("packaging_gross_weight", v)} />
-              <TextField id="length_cm" label="Length (cm)" type="number" step="0.001" min={0} className="cbm-calc" value={f.length_cm} onChange={(v) => setDimension("length_cm", v)} />
-              <TextField id="width_cm" label="Width (cm)" type="number" step="0.001" min={0} className="cbm-calc" value={f.width_cm} onChange={(v) => setDimension("width_cm", v)} />
-              <TextField id="height_cm" label="Height (cm)" type="number" step="0.001" min={0} className="cbm-calc" value={f.height_cm} onChange={(v) => setDimension("height_cm", v)} />
+            </div>
+
+            <div className="section-title" style={{ marginTop: "16px" }}>Dimensions For CBM</div>
+            <div className="form-grid" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
+              <TextField id="length_cm" label="Length (cm) *" type="number" step="0.001" min={0} className="cbm-calc" value={f.length_cm} onChange={(v) => setDimension("length_cm", v)} />
+              <TextField id="width_cm" label="Width (cm) *" type="number" step="0.001" min={0} className="cbm-calc" value={f.width_cm} onChange={(v) => setDimension("width_cm", v)} />
+              <TextField id="height_cm" label="Height (cm) *" type="number" step="0.001" min={0} className="cbm-calc" value={f.height_cm} onChange={(v) => setDimension("height_cm", v)} />
               <TextField
                 id="packaging_unit_cbm"
                 label="Packaging Unit CBM"

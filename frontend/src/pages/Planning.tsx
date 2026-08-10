@@ -60,8 +60,8 @@ const SOURCE_MODULE_LABEL_FIELD: Record<string, string> = {
 };
 import { BUILTIN_STATUS_COLORS } from "@/types/planning";
 
-const CELL_MIN_WIDTH = 140;
-const ITEM_COL_WIDTH = 220;
+const CELL_MIN_WIDTH = 150;
+const ITEM_COL_WIDTH = 240;
 
 /**
  * Hide/Freeze are per-user *display* preferences (which columns to show,
@@ -389,6 +389,7 @@ function GridCell({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value ?? "");
   const [descAnchor, setDescAnchor] = useState<HTMLElement | null>(null);
+  const [hovered, setHovered] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const swatch = statusSwatchColor(statusColor, customStatusTagId, customTags);
   const isManual = sourceType === "manual";
@@ -404,22 +405,31 @@ function GridCell({
     if (draft !== (value ?? "")) onSave(draft);
   }
 
+  const bg = isFrozen ? (!isManual ? "#F8FAFC" : "#fff") : !isManual ? "#F8FAFC" : "#fff";
+
   return (
     <td
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
       style={{
         position: isFrozen ? "sticky" : "relative",
         left: isFrozen ? stickyLeft : undefined,
-        zIndex: isFrozen ? 1 : undefined,
+        zIndex: isFrozen ? 3 : undefined,
         minWidth: CELL_MIN_WIDTH,
+        width: CELL_MIN_WIDTH,
+        maxWidth: CELL_MIN_WIDTH,
+        boxSizing: "border-box",
         padding: 0,
+        textAlign: "center",
+        borderBottom: "1px solid #F1F5F9",
         borderLeft: "3px solid transparent",
-        borderRight: isFrozen && isLastFrozen ? "1px solid #E2E8F0" : undefined,
-        backgroundColor: isFrozen ? (!isManual ? "#F8FAFC" : "#fff") : !isManual ? "#F8FAFC" : undefined,
-        boxShadow: isFrozen && isLastFrozen ? "2px 0 4px -2px rgba(0,0,0,0.15)" : undefined,
+        borderRight: isFrozen && isLastFrozen ? "2px solid #CBD5E1" : "1px solid #F1F5F9",
+        backgroundColor: bg,
+        boxShadow: isFrozen && isLastFrozen ? "3px 0 6px -2px rgba(0,0,0,0.15)" : undefined,
       }}
       className="planning-cell"
     >
-      <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 6px" }}>
+      <div style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "center", minHeight: 32, padding: "4px 6px" }}>
         {editing && isManual ? (
           <input
             ref={inputRef}
@@ -439,6 +449,7 @@ function GridCell({
               borderRadius: 4,
               padding: "3px 5px",
               fontSize: 13,
+              textAlign: "center",
               color: swatch || undefined,
               fontWeight: swatch ? 600 : undefined,
             }}
@@ -454,11 +465,12 @@ function GridCell({
                   : undefined
             }
             style={{
-              flex: 1,
+              width: "100%",
               cursor: canEdit && isManual ? "text" : "default",
               fontSize: 13,
               minHeight: 18,
               display: "block",
+              textAlign: "center",
               fontStyle: !isManual ? "italic" : undefined,
               color: swatch || (!isManual ? "#475569" : undefined),
               fontWeight: swatch ? 600 : undefined,
@@ -467,57 +479,69 @@ function GridCell({
             {shownValue || ""}
           </span>
         )}
-        {sourceType === "linked_lookup" && canEdit && (
-          <button
-            type="button"
-            onClick={onOpenLinkPicker}
-            title="Link this row to a record"
-            style={{ border: "none", background: "transparent", cursor: "pointer", color: "#2563EB", fontSize: 11, flexShrink: 0 }}
-          >
-            🔗
-          </button>
-        )}
-        {/* Description button — only shown when column has enable_description turned on */}
-        {enableDescription && !editing && (
-          <button
-            type="button"
-            className="planning-desc-btn"
-            onClick={(e) => setDescAnchor(descAnchor ? null : e.currentTarget)}
-            title={hasDescription ? `Description: ${description}` : "Add description"}
-            style={{
-              border: "none",
-              background: "transparent",
-              cursor: "pointer",
-              fontSize: 11,
-              flexShrink: 0,
-              color: hasDescription ? "#2563EB" : "#CBD5E1",
-              opacity: hasDescription ? 1 : 0.5,
-              lineHeight: 1,
-              padding: "1px 2px",
-            }}
-          >
-            ✎
-          </button>
-        )}
-        {canEdit && !editing && enableStatusColor && (
-          <button
-            type="button"
-            className="planning-status-dot"
-            onClick={(e) => onOpenStatusPicker(e.currentTarget)}
-            title={statusLabel(statusColor, customStatusTagId, customTags)}
-            style={{
-              width: 12,
-              height: 12,
-              borderRadius: "50%",
-              border: swatch ? "none" : "1px dashed #CBD5E1",
-              background: swatch || "transparent",
-              flexShrink: 0,
-              cursor: "pointer",
-              opacity: swatch ? 1 : 0.4,
-            }}
-          />
-        )}
-        {showMumHistory && sheetId && rowId && <MumStatusHistoryButton sheetId={sheetId} rowId={rowId} />}
+        <div
+          style={{
+            position: "absolute",
+            right: 4,
+            top: "50%",
+            transform: "translateY(-50%)",
+            display: "flex",
+            alignItems: "center",
+            gap: 3,
+            background: bg,
+          }}
+        >
+          {sourceType === "linked_lookup" && canEdit && (
+            <button
+              type="button"
+              onClick={onOpenLinkPicker}
+              title="Link this row to a record"
+              style={{ border: "none", background: "transparent", cursor: "pointer", color: "#2563EB", fontSize: 11, flexShrink: 0 }}
+            >
+              🔗
+            </button>
+          )}
+          {enableDescription && !editing && (
+            <button
+              type="button"
+              className="planning-desc-btn"
+              onClick={(e) => setDescAnchor(descAnchor ? null : e.currentTarget)}
+              title={hasDescription ? `Description: ${description}` : "Add description"}
+              style={{
+                border: "none",
+                background: "transparent",
+                cursor: "pointer",
+                fontSize: 11,
+                flexShrink: 0,
+                color: hasDescription ? "#2563EB" : "#CBD5E1",
+                opacity: hasDescription ? 1 : 0.5,
+                lineHeight: 1,
+                padding: "1px 2px",
+              }}
+            >
+              ✎
+            </button>
+          )}
+          {canEdit && !editing && enableStatusColor && (hovered || swatch) && (
+            <button
+              type="button"
+              className="planning-status-dot"
+              onClick={(e) => onOpenStatusPicker(e.currentTarget)}
+              title={statusLabel(statusColor, customStatusTagId, customTags)}
+              style={{
+                width: 12,
+                height: 12,
+                borderRadius: "50%",
+                border: swatch ? "none" : "1px dashed #CBD5E1",
+                background: swatch || "transparent",
+                flexShrink: 0,
+                cursor: "pointer",
+                opacity: swatch ? 1 : 0.4,
+              }}
+            />
+          )}
+          {showMumHistory && sheetId && rowId && <MumStatusHistoryButton sheetId={sheetId} rowId={rowId} />}
+        </div>
       </div>
       {/* Description popover rendered inside the cell so its z-index stack is local */}
       {descAnchor && (
@@ -829,6 +853,11 @@ export function PlanningPage() {
     const validIds = new Set(columns.map((c) => c.id));
 
     setFrozenColumnIds((prev) => {
+      // If user has not set custom frozen columns yet, default to first 2 dynamic columns (TEST(Y/N), APPROVAL DATE)
+      if (localStorage.getItem(frozenColumnsStorageKey(activeSheetId)) === null && prev.size === 0) {
+        const defaults = new Set(columns.slice(0, 2).map((c) => c.id));
+        return defaults;
+      }
       const pruned = new Set([...prev].filter((id) => validIds.has(id)));
       if (pruned.size !== prev.size) {
         localStorage.setItem(frozenColumnsStorageKey(activeSheetId), JSON.stringify([...pruned]));
@@ -926,56 +955,65 @@ export function PlanningPage() {
   async function handleAddColumn(e: React.FormEvent) {
     e.preventDefault();
     if (!activeSheetId) return;
-    const baseName = newColumnName.trim();
-    if (!baseName) return;
-
-    // Document: "allow Add columns only for Mum 45 ... when created Mum 45
-    // it should automatically create Mum 45 Remarks. Same if user created a
-    // column of Mum 46 the system should automatically create Mum 46
-    // Remarks and so on" -- and per the source Excel sheet, also the 3
-    // computed columns (NO. OF PKG / TOTAL WEIGHT / TOTAL CBM), which the
-    // admin wires up with their own formula afterward -- created empty here.
-    const mumMatch = baseName.match(/^mum\s*(\d+)$/i);
-    if (!mumMatch) {
-      setError(new Error(`Column name must be "Mum" followed by a number (e.g. "Mum 45"). Got "${baseName}".`));
-      return;
-    }
-    const mumNumber = mumMatch[1];
+    const name = newColumnName.trim();
+    if (!name) return;
 
     try {
-      const basePosition = newColumnPosition === "" ? null : Number(newColumnPosition);
-      // Created in this exact order so they land side-by-side in the grid,
-      // matching the source sheet's Mum34 / Mum34 Remarks pairing -- each
-      // subsequent column is inserted one slot after the previous one.
-      const companions: { name: string; data_type: PlanningColumnDataType; offset: number }[] = [
-        { name: baseName, data_type: newColumnType, offset: 0 },
-        { name: `Mum${mumNumber} Remarks`, data_type: "text", offset: 1 },
-        { name: `NO. OF PKG MUM${mumNumber}`, data_type: "number", offset: 2 },
-        { name: `TOTAL WEIGHT MUM${mumNumber}`, data_type: "number", offset: 3 },
-        { name: `TOTAL CBM MUM${mumNumber}`, data_type: "number", offset: 4 },
-      ];
-
-      let firstNewColumn: PlanningColumn | null = null;
-      for (const companion of companions) {
-        const position = basePosition === null ? null : basePosition + companion.offset;
-        const { data: newCol } = await apiPost<PlanningColumn>(`/planning/sheets/${activeSheetId}/columns`, {
-          name: companion.name,
-          data_type: companion.data_type,
-          position,
-        });
-        if (!firstNewColumn) firstNewColumn = newCol;
-      }
+      const position = newColumnPosition === "" ? null : Number(newColumnPosition);
+      await apiPost<PlanningColumn>(`/planning/sheets/${activeSheetId}/columns`, {
+        name,
+        data_type: newColumnType,
+        position,
+      });
 
       setNewColumnName("");
       setNewColumnType("text");
       setNewColumnPosition("");
       setAddColumnOpen(false);
-      // 5 columns were created in one go -- simplest correct way to reflect
-      // all of them (and their real server-assigned positions) is a reload,
-      // rather than hand-splicing 5 entries into local state in the right order.
       await loadGrid(activeSheetId);
     } catch (err) {
       setError(err);
+    }
+  }
+
+  const [creatingNextMum, setCreatingNextMum] = useState(false);
+
+  async function handleCreateNextMumGroup() {
+    if (!activeSheetId) return;
+    setCreatingNextMum(true);
+    setError(null);
+    try {
+      let maxMum = 0;
+      for (const col of columns) {
+        const match = col.name.match(/mum\s*(\d+)/i);
+        if (match) {
+          const num = parseInt(match[1], 10);
+          if (!isNaN(num) && num > maxMum) maxMum = num;
+        }
+      }
+      const nextMumNum = maxMum > 0 ? maxMum + 1 : 1;
+
+      const companions: { name: string; data_type: PlanningColumnDataType }[] = [
+        { name: `Mum ${nextMumNum}`, data_type: "number" },
+        { name: `Mum${nextMumNum} Remarks`, data_type: "text" },
+        { name: `NO. OF PKG MUM${nextMumNum}`, data_type: "number" },
+        { name: `TOTAL WEIGHT MUM${nextMumNum}`, data_type: "number" },
+        { name: `TOTAL CBM MUM${nextMumNum}`, data_type: "number" },
+      ];
+
+      for (const companion of companions) {
+        await apiPost<PlanningColumn>(`/planning/sheets/${activeSheetId}/columns`, {
+          name: companion.name,
+          data_type: companion.data_type,
+          position: null,
+        });
+      }
+
+      await loadGrid(activeSheetId);
+    } catch (err) {
+      setError(err);
+    } finally {
+      setCreatingNextMum(false);
     }
   }
 
@@ -1259,10 +1297,21 @@ export function PlanningPage() {
               <button type="button" className="btn btn-secondary" onClick={() => setColumnsPanelOpen(true)} disabled={columns.length === 0}>
                 Columns{hiddenColumnIds.size > 0 ? ` (${hiddenColumnIds.size} hidden)` : ""}
               </button>
+              <Can permission="planning.column.manage">
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={handleCreateNextMumGroup}
+                  disabled={creatingNextMum || !activeSheetId}
+                  title="Automatically detect latest Mum number and create next Mum column group (Mum, Remarks, PKG, Weight, CBM)"
+                >
+                  {creatingNextMum ? "Creating Next Mum…" : "+ Next Mum"}
+                </button>
+              </Can>
             </div>
 
             <div style={{ overflowX: "auto", border: "1px solid #E2E8F0", borderRadius: 8 }}>
-              <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 13 }}>
+              <table style={{ borderCollapse: "separate", borderSpacing: 0, width: "max-content", minWidth: "100%", fontSize: 13 }}>
                 <thead>
                   <tr style={{ background: "#F8FAFC" }}>
                     <EditableItemHeader
@@ -1270,6 +1319,7 @@ export function PlanningPage() {
                       canManage={canManageColumns}
                       onRename={setItemHeaderTitle}
                       onOpenConfigure={() => setConfigureColumn(itemColumn)}
+                      isLastFrozen={lastFrozenColumnId === null}
                     />
                     {orderedColumns.map((col) => (
                       <ColumnHeader
@@ -1282,8 +1332,6 @@ export function PlanningPage() {
                         isFrozen={frozenColumnIds.has(col.id)}
                         isLastFrozen={col.id === lastFrozenColumnId}
                         stickyLeft={stickyLeftByColumnId.get(col.id)}
-                        onToggleFreeze={() => toggleColumnFrozen(col.id)}
-                        onHide={() => toggleColumnHidden(col.id)}
                       />
                     ))}
                     <th style={{ width: 40, borderBottom: "1px solid #E2E8F0" }} />
@@ -1306,6 +1354,7 @@ export function PlanningPage() {
                           onSave={(newLabel) => handleRenameRow(row.id, newLabel)}
                           onOpenLinkPicker={() => setLinkPicker({ rowId: row.id, column: itemColumn })}
                           onSaveDescription={(text) => handleSaveRowDescription(row.id, text)}
+                          isLastFrozen={lastFrozenColumnId === null}
                         />
                         {orderedColumns.map((col) => {
                           const cell = cellByRowColumn.get(`${row.id}:${col.id}`);
@@ -1488,16 +1537,15 @@ export function PlanningPage() {
 
         {/* Add Column modal */}
         {addColumnOpen && (
-          <SimpleModal title="Add Mum Column" onClose={() => setAddColumnOpen(false)}>
+          <SimpleModal title="Add Column" onClose={() => setAddColumnOpen(false)}>
             <form onSubmit={handleAddColumn}>
               <TextField
                 id="new_column_name"
-                label="Column Name * (must be Mum + a number)"
+                label="Column Name *"
                 required
-                placeholder="e.g. Mum 45"
+                placeholder="e.g. Supplier Name, Quantity, Delivery Date"
                 value={newColumnName}
                 onChange={setNewColumnName}
-                hint='Creating "Mum 45" also automatically creates "Mum45 Remarks", "NO. OF PKG MUM45", "TOTAL WEIGHT MUM45", and "TOTAL CBM MUM45" alongside it.'
               />
               <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: "#334155", margin: "12px 0 6px" }}>
                 Data Type
@@ -1608,8 +1656,6 @@ function ColumnHeader({
   isFrozen,
   isLastFrozen,
   stickyLeft,
-  onToggleFreeze,
-  onHide,
 }: {
   column: PlanningColumn;
   canManage: boolean;
@@ -1619,11 +1665,10 @@ function ColumnHeader({
   isFrozen: boolean;
   isLastFrozen: boolean;
   stickyLeft: number | undefined;
-  onToggleFreeze: () => void;
-  onHide: () => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(column.name);
+  const [hovered, setHovered] = useState(false);
 
   function commit() {
     setEditing(false);
@@ -1642,19 +1687,25 @@ function ColumnHeader({
 
   return (
     <th
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
       style={{
         padding: "8px 10px",
-        textAlign: "left",
+        textAlign: "center",
         minWidth: CELL_MIN_WIDTH,
+        width: CELL_MIN_WIDTH,
+        maxWidth: CELL_MIN_WIDTH,
+        boxSizing: "border-box",
         borderBottom: "1px solid #E2E8F0",
-        position: isFrozen ? "sticky" : undefined,
+        borderRight: isFrozen && isLastFrozen ? "2px solid #CBD5E1" : "1px solid #E2E8F0",
+        position: isFrozen ? "sticky" : "relative",
         left: isFrozen ? stickyLeft : undefined,
-        zIndex: isFrozen ? 2 : undefined,
-        background: isFrozen ? "#F8FAFC" : undefined,
-        boxShadow: isFrozen && isLastFrozen ? "2px 0 4px -2px rgba(0,0,0,0.15)" : undefined,
+        zIndex: isFrozen ? 9 : 2,
+        background: "#F8FAFC",
+        boxShadow: isFrozen && isLastFrozen ? "3px 0 6px -2px rgba(0,0,0,0.15)" : undefined,
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+      <div style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "center", minHeight: 24 }}>
         {editing ? (
           <input
             autoFocus
@@ -1668,12 +1719,24 @@ function ColumnHeader({
                 setEditing(false);
               }
             }}
-            style={{ width: "100%", border: "1px solid #2563EB", borderRadius: 4, padding: "2px 5px", fontSize: 13 }}
+            style={{ width: "100%", border: "1px solid #2563EB", borderRadius: 4, padding: "2px 5px", fontSize: 13, textAlign: "center" }}
           />
         ) : (
           <span
             onClick={() => canManage && setEditing(true)}
-            style={{ cursor: canManage ? "text" : "default", fontWeight: 600, color: "#334155" }}
+            style={{
+              cursor: canManage ? "text" : "default",
+              fontWeight: 600,
+              color: "#334155",
+              textAlign: "center",
+              padding: "0 14px",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              display: "block",
+              width: "100%",
+            }}
+            title={column.name}
           >
             {column.name}
           </span>
@@ -1688,57 +1751,43 @@ function ColumnHeader({
               background: "#EDE9FE",
               borderRadius: 4,
               padding: "1px 4px",
+              marginLeft: 2,
             }}
           >
             {sourceBadge.label}
           </span>
         )}
-        {canManage && !editing && (
-          <button
-            type="button"
-            onClick={onOpenConfigure}
-            title="Configure data source / formula / role lock"
-            style={{ border: "none", background: "transparent", cursor: "pointer", color: "#94A3B8", fontSize: 12 }}
-          >
-            ⚙
-          </button>
-        )}
-        {!editing && (
-          <button
-            type="button"
-            onClick={onToggleFreeze}
-            title={isFrozen ? "Unfreeze column" : "Freeze column (pin it while scrolling)"}
+        {canManage && !editing && hovered && (
+          <div
             style={{
-              border: "none",
-              background: "transparent",
-              cursor: "pointer",
-              color: isFrozen ? "#2563EB" : "#CBD5E1",
-              fontSize: 12,
-              marginLeft: canManage ? undefined : "auto",
+              position: "absolute",
+              right: 0,
+              top: "50%",
+              transform: "translateY(-50%)",
+              display: "flex",
+              alignItems: "center",
+              gap: 2,
+              background: "#F8FAFC",
+              paddingLeft: 4,
             }}
           >
-            📌
-          </button>
-        )}
-        {!editing && (
-          <button
-            type="button"
-            onClick={onHide}
-            title="Hide column"
-            style={{ border: "none", background: "transparent", cursor: "pointer", color: "#CBD5E1", fontSize: 12 }}
-          >
-            🙈
-          </button>
-        )}
-        {canManage && !editing && (
-          <button
-            type="button"
-            onClick={onDelete}
-            title="Delete column"
-            style={{ border: "none", background: "transparent", cursor: "pointer", color: "#CBD5E1", marginLeft: canManage ? "auto" : undefined }}
-          >
-            ×
-          </button>
+            <button
+              type="button"
+              onClick={onOpenConfigure}
+              title="Configure data source / formula / role lock"
+              style={{ border: "none", background: "transparent", cursor: "pointer", color: "#64748B", fontSize: 12, padding: "1px 3px" }}
+            >
+              ⚙
+            </button>
+            <button
+              type="button"
+              onClick={onDelete}
+              title="Delete column"
+              style={{ border: "none", background: "transparent", cursor: "pointer", color: "#EF4444", fontSize: 13, padding: "1px 3px" }}
+            >
+              ×
+            </button>
+          </div>
         )}
       </div>
     </th>
@@ -1751,14 +1800,17 @@ function EditableItemHeader({
   canManage,
   onRename,
   onOpenConfigure,
+  isLastFrozen,
 }: {
   column: PlanningColumn;
   canManage: boolean;
   onRename: (newTitle: string) => void;
   onOpenConfigure: () => void;
+  isLastFrozen?: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(column.name);
+  const [hovered, setHovered] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -1789,19 +1841,25 @@ function EditableItemHeader({
 
   return (
     <th
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
       style={{
         padding: "8px 10px",
         textAlign: "left",
         minWidth: ITEM_COL_WIDTH,
+        width: ITEM_COL_WIDTH,
+        maxWidth: ITEM_COL_WIDTH,
+        boxSizing: "border-box",
         borderBottom: "1px solid #E2E8F0",
+        borderRight: isLastFrozen ? "2px solid #CBD5E1" : "1px solid #E2E8F0",
         position: "sticky",
         left: 0,
-        zIndex: 3,
+        zIndex: 10,
         background: "#F8FAFC",
-        boxShadow: "2px 0 4px -2px rgba(0,0,0,0.15)",
+        boxShadow: isLastFrozen ? "3px 0 6px -2px rgba(0,0,0,0.15)" : undefined,
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+      <div style={{ position: "relative", display: "flex", alignItems: "center", minHeight: 24 }}>
         {editing && canManage ? (
           <input
             ref={inputRef}
@@ -1836,17 +1894,29 @@ function EditableItemHeader({
               background: "#EDE9FE",
               borderRadius: 4,
               padding: "1px 4px",
+              marginLeft: 4,
             }}
           >
             {sourceBadge.label}
           </span>
         )}
-        {canManage && !editing && (
+        {canManage && !editing && hovered && (
           <button
             type="button"
             onClick={onOpenConfigure}
             title="Configure data source / formula / role lock"
-            style={{ border: "none", background: "transparent", cursor: "pointer", color: "#94A3B8", fontSize: 12 }}
+            style={{
+              position: "absolute",
+              right: 0,
+              top: "50%",
+              transform: "translateY(-50%)",
+              border: "none",
+              background: "#F8FAFC",
+              cursor: "pointer",
+              color: "#64748B",
+              fontSize: 12,
+              padding: "1px 4px",
+            }}
           >
             ⚙
           </button>
@@ -1866,6 +1936,7 @@ function EditableRowLabel({
   onSave,
   onOpenLinkPicker,
   onSaveDescription,
+  isLastFrozen,
 }: {
   label: string;
   canEdit: boolean;
@@ -1875,6 +1946,7 @@ function EditableRowLabel({
   onSave: (newLabel: string) => void;
   onOpenLinkPicker: () => void;
   onSaveDescription: (text: string | null) => void;
+  isLastFrozen?: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(label);
@@ -1904,17 +1976,22 @@ function EditableRowLabel({
     <td
       style={{
         padding: "6px 10px",
+        textAlign: "left",
         borderBottom: "1px solid #F1F5F9",
+        borderRight: isLastFrozen ? "2px solid #CBD5E1" : "1px solid #F1F5F9",
         fontWeight: 500,
         minWidth: ITEM_COL_WIDTH,
+        width: ITEM_COL_WIDTH,
+        maxWidth: ITEM_COL_WIDTH,
+        boxSizing: "border-box",
         position: "sticky",
         left: 0,
-        zIndex: 1,
+        zIndex: 4,
         background: "#fff",
-        boxShadow: "2px 0 4px -2px rgba(0,0,0,0.15)",
+        boxShadow: isLastFrozen ? "3px 0 6px -2px rgba(0,0,0,0.15)" : undefined,
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+      <div style={{ position: "relative", display: "flex", alignItems: "center", gap: 4, paddingRight: enableDescription ? 16 : 0 }}>
         {editing && canEdit && isManual ? (
           <input
             ref={inputRef}
@@ -1950,10 +2027,18 @@ function EditableRowLabel({
             }}
           >
             {label}
-            {canEdit && isManual && <span style={{ opacity: 0.3, marginLeft: 6, fontSize: 11 }}>✏️</span>}
           </span>
         )}
-        {/* Description button for the ITEM column */}
+        {sourceType === "linked_lookup" && canEdit && (
+          <button
+            type="button"
+            onClick={onOpenLinkPicker}
+            title="Link this row to a record"
+            style={{ border: "none", background: "transparent", cursor: "pointer", color: "#2563EB", fontSize: 11, flexShrink: 0 }}
+          >
+            🔗
+          </button>
+        )}
         {enableDescription && !editing && (
           <button
             type="button"
@@ -1973,16 +2058,6 @@ function EditableRowLabel({
             }}
           >
             ✎
-          </button>
-        )}
-        {sourceType === "linked_lookup" && canEdit && (
-          <button
-            type="button"
-            onClick={onOpenLinkPicker}
-            title="Link this row to a record"
-            style={{ border: "none", background: "transparent", cursor: "pointer", color: "#2563EB", fontSize: 11, flexShrink: 0 }}
-          >
-            🔗
           </button>
         )}
       </div>

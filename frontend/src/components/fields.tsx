@@ -16,6 +16,19 @@ interface BaseFieldProps {
   style?: React.CSSProperties;
 }
 
+function renderLabel(label: ReactNode) {
+  if (typeof label !== "string") return label;
+  if (label.endsWith(" *")) {
+    const mainText = label.slice(0, -2);
+    return (
+      <>
+        {mainText} <span style={{ color: "#dc2626", fontWeight: 700, marginLeft: "2px" }}>*</span>
+      </>
+    );
+  }
+  return label;
+}
+
 export function TextField({
   id,
   label,
@@ -53,7 +66,7 @@ export function TextField({
 }) {
   return (
     <div className="field" style={style}>
-      <label htmlFor={id}>{label}</label>
+      <label htmlFor={id}>{renderLabel(label)}</label>
       <input
         id={id}
         type={type}
@@ -93,7 +106,7 @@ export function TextAreaField({
 }) {
   return (
     <div className="field" style={style}>
-      <label htmlFor={id}>{label}</label>
+      <label htmlFor={id}>{renderLabel(label)}</label>
       <textarea
         id={id}
         value={value}
@@ -172,7 +185,7 @@ export function SelectField({
 
   return (
     <div className="field" style={{ ...style, position: "relative" }} ref={containerRef}>
-      <label htmlFor={id}>{label}</label>
+      <label htmlFor={id}>{renderLabel(label)}</label>
 
       <div
         id={id}

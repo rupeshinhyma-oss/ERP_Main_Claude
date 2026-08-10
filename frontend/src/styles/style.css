@@ -1062,7 +1062,9 @@ td .cell-secondary {
 .section-title {
   font-size: 14px;
   font-weight: 700;
-  margin: var(--space-4) 0 var(--space-2);
+  color: #1e293b;
+  letter-spacing: -0.01em;
+  margin: 20px 0 10px;
 }
 
 /* File input trigger used for import */

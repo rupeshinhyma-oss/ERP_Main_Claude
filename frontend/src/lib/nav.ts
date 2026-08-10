@@ -34,7 +34,6 @@ export const NAV_SECTIONS: NavSection[] = [
     items: [
       { key: "suppliers", label: "Suppliers", path: "/suppliers", icon: "users", permission: "supplier.view" },
       { key: "buyers", label: "Buyers", path: "/buyers", icon: "user", permission: "buyer.view" },
-      { key: "industrial-zones", label: "City", path: "/masters/cities", icon: "sliders", permission: "city.view" },
     ],
   },
 

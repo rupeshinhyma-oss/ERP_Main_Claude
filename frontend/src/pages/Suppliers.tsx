@@ -856,11 +856,6 @@ export function SuppliersPage() {
     }
   }
 
-  async function handleSaveAndContinue(e: React.MouseEvent, nextTab: ModalTab) {
-    e.preventDefault();
-    await saveSupplierData(nextTab);
-  }
-
   async function handleSaveAndExit(e: React.MouseEvent) {
     e.preventDefault();
     await saveSupplierData("exit");

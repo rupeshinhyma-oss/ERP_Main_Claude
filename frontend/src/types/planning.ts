@@ -34,6 +34,16 @@ export interface PlanningSheet {
   name: string;
   description?: string | null;
   position: number;
+  item_source_type: PlanningColumnSourceType;
+  item_source_module?: string | null;
+  item_source_field?: string | null;
+  item_formula_expression?: string | null;
+  /** When true, each ITEM cell shows a hover button to write a free-text note. */
+  item_enable_description?: boolean;
+  /** Persisted state of the "Load all records automatically" checkbox for the ITEM column. */
+  item_auto_populate_enabled?: boolean;
+  /** Persisted state of "How many records to load" for the ITEM column. null/undefined means "All". */
+  item_auto_populate_limit?: number | null;
   created_by: string;
   created_at: string;
   updated_at: string;
@@ -52,6 +62,14 @@ export interface PlanningColumn {
   source_aggregate_fn?: PlanningAggregateFn | null;
   source_aggregate_filters?: Record<string, string> | null;
   formula_expression?: string | null;
+  /** When true, every cell in this column shows a hover button to write a free-text note. */
+  enable_description?: boolean;
+  /** Persisted state of the "Load all records automatically" checkbox. */
+  auto_populate_enabled?: boolean;
+  /** Persisted state of "How many records to load". null/undefined means "All". */
+  auto_populate_limit?: number | null;
+  /** Opt-in: cells in this column can only carry a CRM-style status color when this is true. Off by default. */
+  enable_status_color?: boolean;
   created_by: string;
   updated_by?: string | null;
   created_at: string;
@@ -67,6 +85,8 @@ export interface PlanningCell {
   status_color?: PlanningCellStatusColor | null;
   custom_status_tag_id?: string | null;
   linked_record_id?: string | null;
+  /** Free-text note shown via a hover button when the column's enable_description is on. */
+  description?: string | null;
   updated_by?: string | null;
   updated_at?: string | null;
 }
@@ -76,6 +96,9 @@ export interface PlanningRow {
   sheet_id: string;
   label: string;
   position: number;
+  linked_record_id?: string | null;
+  /** Free-text note shown via a hover button when the sheet's item_enable_description is on. */
+  description?: string | null;
   created_by: string;
   updated_by?: string | null;
   created_at: string;
@@ -134,4 +157,14 @@ export interface SourceModuleInfo {
   key: string;
   label: string;
   fields: SourceFieldInfo[];
+}
+
+/** One status-color change on a Mum-series column, for the Approval Date hover feed. GET /planning/sheets/{id}/rows/{id}/mum-status-history. */
+export interface MumColumnStatusHistoryEntry {
+  column_id: string;
+  column_name: string;
+  old_status?: string | null;
+  new_status?: string | null;
+  changed_at: string;
+  changed_by_username: string;
 }

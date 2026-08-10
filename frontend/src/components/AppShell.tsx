@@ -29,7 +29,7 @@ import { getCachedBrandName, resolveBrandName, subscribeBrandName } from "@/lib/
 import { ICONS, IconBell } from "./icons";
 import { UniversalSearch } from "./UniversalSearch";
 import { ErrorBanner } from "./ui";
-import type { ItemsPage, Profile, Task } from "@/types";
+import type { Profile } from "@/types";
 
 const NAV_SCROLL_KEY = "erp_sidebar_nav_scroll";
 
@@ -44,77 +44,10 @@ interface Notification {
   message: string;
 }
 
-/**
- * Derives the bell's notification list from open tasks: anything past its due
- * date is overdue, anything flagged URGENT/HIGH is urgent. Completed and
- * cancelled tasks are skipped.
- */
-function buildNotifications(tasks: Task[], currentUserId?: string | null): Notification[] {
-  const now = new Date();
-  const notifications: Notification[] = [];
-
-  tasks.forEach((t) => {
-    if (t.status === "COMPLETED" || t.status === "CANCELLED") return;
-
-    // Only notify about tasks the current user is actually involved in --
-    // otherwise every admin sees every overdue task org-wide, which is both
-    // noisy and, once PRIVATE tasks exist, a visibility leak.
-    const isMine =
-      Boolean(currentUserId) &&
-      (t.assigned_to_id === currentUserId || t.created_by_id === currentUserId);
-    if (!isMine) return;
-
-    const isOverdue = Boolean(t.due_date && new Date(t.due_date) < now);
-    if (isOverdue) {
-      notifications.push({
-        id: t.id,
-        type: "overdue",
-        title: `Overdue Task: "${t.title}"`,
-        message: `Due was ${new Date(t.due_date as string).toLocaleString(undefined, {
-          month: "short",
-          day: "numeric",
-          hour: "2-digit",
-          minute: "2-digit",
-        })}`,
-      });
-    } else if (t.priority === "URGENT" || t.priority === "HIGH") {
-      notifications.push({
-        id: t.id,
-        type: "urgent",
-        title: `Urgent Task: "${t.title}"`,
-        message: `Priority: ${t.priority} — Status: ${t.status}`,
-      });
-    }
-  });
-
-  return notifications;
-}
-
 function NotificationBell() {
-  const { hasPermission, profile } = useAuth();
   const [open, setOpen] = useState(false);
-  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [notifications] = useState<Notification[]>([]);
   const wrapperRef = useRef<HTMLDivElement>(null);
-  const navigate = useNavigate();
-  const canViewTasks = hasPermission("task.view");
-  const currentUserId = profile?.id;
-
-  useEffect(() => {
-    if (!canViewTasks) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await apiGet<ItemsPage<Task>>("/tasks?limit=100");
-        if (cancelled || !res?.data || !Array.isArray(res.data.items)) return;
-        setNotifications(buildNotifications(res.data.items, currentUserId));
-      } catch (err) {
-        console.warn("Failed to load notifications:", err);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [canViewTasks, currentUserId]);
 
   // Any click outside the bell closes the dropdown.
   useEffect(() => {
@@ -228,7 +161,6 @@ function NotificationBell() {
                 }}
                 onClick={() => {
                   setOpen(false);
-                  navigate("/tasks");
                 }}
               >
                 <div

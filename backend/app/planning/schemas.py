@@ -37,9 +37,57 @@ class PlanningSheetRead(BaseModel):
     name: str
     description: str | None = None
     position: int
+    item_source_type: PlanningColumnSourceType = PlanningColumnSourceType.MANUAL
+    item_source_module: str | None = None
+    item_source_field: str | None = None
+    item_formula_expression: str | None = None
+    item_enable_description: bool = False
+    item_auto_populate_enabled: bool = False
+    item_auto_populate_limit: int | None = None
     created_by: uuid.UUID
     created_at: datetime
     updated_at: datetime
+
+
+class PlanningItemSourceConfigure(BaseModel):
+    """
+    Payload to configure the sheet's built-in ITEM column data source.
+
+    Same shape and validation rules as ``PlanningColumnSourceConfigure``
+    (see ``PlanningService.configure_item_source``); kept as a separate
+    schema since the ITEM column lives on the sheet, not in
+    ``planning_columns``.
+    """
+
+    source_type: PlanningColumnSourceType
+    source_module: str | None = Field(default=None, description="Required for LINKED_LOOKUP, e.g. 'product'.")
+    source_field: str | None = Field(default=None, description="Required for LINKED_LOOKUP.")
+    formula_expression: str | None = Field(default=None, max_length=2000, description="Required for FORMULA.")
+    item_enable_description: bool = Field(
+        default=False, description="When set, every row's ITEM cell shows a description button on hover."
+    )
+    item_auto_populate_enabled: bool = Field(
+        default=False, description="Persisted state of the 'Load all records automatically' checkbox."
+    )
+    item_auto_populate_limit: int | None = Field(
+        default=None, ge=1, description="Persisted state of 'How many records to load'. Omit/null for 'All'."
+    )
+
+
+class PlanningItemLinkRecord(BaseModel):
+    """Payload to link one row's ITEM cell to a record in the sheet's item_source_module."""
+
+    record_id: uuid.UUID
+
+
+class PlanningItemAutoPopulate(BaseModel):
+    """Payload for bulk-creating rows straight from the ITEM source module, one per record."""
+
+    limit: int | None = Field(
+        default=25,
+        ge=1,
+        description="How many records to pull from the source module (e.g. 25/50/100). Omit or pass null to load ALL records.",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -85,6 +133,10 @@ class PlanningColumnRead(BaseModel):
     source_aggregate_fn: str | None = None
     source_aggregate_filters: dict | None = None
     formula_expression: str | None = None
+    enable_description: bool = False
+    auto_populate_enabled: bool = False
+    auto_populate_limit: int | None = None
+    enable_status_color: bool = False
     created_by: uuid.UUID
     updated_by: uuid.UUID | None = None
     created_at: datetime
@@ -114,6 +166,15 @@ class PlanningColumnSourceConfigure(BaseModel):
     formula_expression: str | None = Field(
         default=None, max_length=2000, description="Required for FORMULA, e.g. 'Mum40 * Rate'."
     )
+    enable_description: bool = Field(
+        default=False, description="When set, every cell in this column shows a description button on hover."
+    )
+    auto_populate_enabled: bool = Field(
+        default=False, description="Persisted state of the 'Load all records automatically' checkbox."
+    )
+    auto_populate_limit: int | None = Field(
+        default=None, ge=1, description="Persisted state of 'How many records to load'. Omit/null for 'All'."
+    )
 
 
 class PlanningColumnLinkRecord(BaseModel):
@@ -126,6 +187,18 @@ class PlanningColumnRoleLockUpdate(BaseModel):
     """Payload to set (or clear, with an empty list) the roles allowed to edit one column."""
 
     role_ids: list[uuid.UUID] = Field(default_factory=list)
+
+
+class PlanningColumnStatusColorToggle(BaseModel):
+    """
+    Payload to opt a column in/out of carrying CRM-style cell status colors.
+
+    Off by default for every column (including pre-existing ones) -- a
+    cell in a column with this False cannot have a status_color set at
+    all, and the status-dot button is hidden entirely in the UI.
+    """
+
+    enable_status_color: bool
 
 
 class SourceFieldInfo(BaseModel):
@@ -173,6 +246,7 @@ class PlanningCellRead(BaseModel):
     status_color: PlanningCellStatusColor | None = None
     custom_status_tag_id: uuid.UUID | None = None
     linked_record_id: uuid.UUID | None = None
+    description: str | None = None
     updated_by: uuid.UUID | None = None
     updated_at: datetime
 
@@ -184,6 +258,8 @@ class PlanningRowRead(BaseModel):
     sheet_id: uuid.UUID
     label: str
     position: int
+    linked_record_id: uuid.UUID | None = None
+    description: str | None = None
     created_by: uuid.UUID
     updated_by: uuid.UUID | None = None
     created_at: datetime
@@ -227,6 +303,24 @@ class PlanningCellStatusUpdate(BaseModel):
     )
 
 
+class PlanningCellDescriptionUpdate(BaseModel):
+    """
+    Set or clear a cell's free-text description.
+
+    Independent of the cell's value/status -- only meaningful (shown in
+    the UI) when the cell's column has enable_description set, but can be
+    written regardless.
+    """
+
+    description: str | None = Field(default=None, max_length=10000)
+
+
+class PlanningRowDescriptionUpdate(BaseModel):
+    """Set or clear a row's ITEM-cell free-text description. Mirrors PlanningCellDescriptionUpdate for the built-in ITEM column."""
+
+    description: str | None = Field(default=None, max_length=10000)
+
+
 # ---------------------------------------------------------------------------
 # Status tags (admin-defined custom colors beyond the 3 built-ins)
 # ---------------------------------------------------------------------------
@@ -267,3 +361,14 @@ class PlanningChangeLogRead(BaseModel):
     old_value: str | None = None
     new_value: str | None = None
     description: str | None = None
+
+
+class MumColumnStatusHistoryEntry(BaseModel):
+    """One status-color change on a Mum-series column, for the Approval Date hover feed."""
+
+    column_id: uuid.UUID
+    column_name: str
+    old_status: str | None = None
+    new_status: str | None = None
+    changed_at: datetime
+    changed_by_username: str

@@ -858,8 +858,10 @@ export function SuppliersPage() {
       const categoryIds = await resolveCustomCategories();
 
       const basePayload = buildPayload();
+      const existingSupplier = rows.find((s) => s.id === currentSupplierId);
       const payload = {
         ...basePayload,
+        version: existingSupplier?.version,
         state_id: stateId || formStateId,
         city_id: cityId || formCityId,
         category_ids: categoryIds,
@@ -870,7 +872,12 @@ export function SuppliersPage() {
         : await apiPost<Supplier>("/suppliers", payload);
       setCurrentSupplierId(supplier.id);
       setContacts(supplier.contacts || []);
-      reload();
+      if (currentSupplierId && supplier) {
+        setRows((prev) => prev.map((row) => (row.id === supplier.id ? supplier : row)));
+      } else if (supplier) {
+        setRows((prev) => [supplier, ...prev]);
+        setPagination((prev) => (prev ? { ...prev, total_records: (prev.total_records || 0) + 1 } : prev));
+      }
 
       if (nextAction === "exit") {
         closeModal();
@@ -1004,7 +1011,8 @@ export function SuppliersPage() {
     if (!confirm("Delete this supplier?")) return;
     try {
       await apiDelete(`/suppliers/${id}`);
-      reload();
+      setRows((prev) => prev.filter((r) => r.id !== id));
+      setPagination((prev) => (prev ? { ...prev, total_records: Math.max(0, (prev.total_records || 1) - 1) } : prev));
     } catch (err) {
       setError(err);
     }
@@ -1015,8 +1023,8 @@ export function SuppliersPage() {
     if (!confirm(`Delete ${selectedIds.length} selected supplier(s)? This cannot be undone.`)) return;
     try {
       await Promise.all(selectedIds.map((id) => apiDelete(`/suppliers/${id}`)));
+      setRows((prev) => prev.filter((r) => !selectedIds.includes(r.id)));
       setSelectedIds([]);
-      reload();
     } catch (err) {
       setError(err);
     }

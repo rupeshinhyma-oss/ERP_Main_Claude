@@ -75,6 +75,7 @@ export interface Profile {
 /** Every master entity carries an id and an active/inactive status. */
 export interface MasterRecord {
   id: string;
+  version?: number;
   status: string;
 }
 
@@ -231,6 +232,7 @@ export type OrganizationFieldId =
 
 export interface User {
   id: string;
+  version?: number;
   username: string;
   email: string;
   phone: string;
@@ -389,6 +391,7 @@ export interface SupplierContact {
 
 export interface Supplier {
   id: string;
+  version?: number;
   company_name: string;
   category_ids?: string[];
   sub_category_ids?: string[];
@@ -421,48 +424,6 @@ export interface Supplier {
   is_active?: boolean;
   dealing_officer_id?: string | null;
   contacts?: SupplierContact[];
-}
-
-/* ------------------------------------------------------------------ */
-/* Tasks                                                              */
-/* ------------------------------------------------------------------ */
-
-export type TaskStatus =
-  | "PENDING"
-  | "IN_PROGRESS"
-  | "IN_REVIEW"
-  | "COMPLETED"
-  | "CANCELLED";
-
-export type TaskPriority = "LOW" | "MEDIUM" | "HIGH" | "URGENT";
-
-/** PRIVATE: visible only to the creator and assignee. PUBLIC: visible to everyone. */
-export type TaskVisibility = "PRIVATE" | "PUBLIC";
-
-export interface TaskUserRef {
-  id?: string;
-  username: string;
-  email?: string;
-  display_name?: string | null;
-  full_name?: string | null;
-}
-
-export interface Task {
-  id: string;
-  title: string;
-  description?: string | null;
-  status: TaskStatus;
-  priority: TaskPriority;
-  visibility?: TaskVisibility;
-  assigned_to_id?: string | null;
-  created_by_id?: string | null;
-  assigned_to?: TaskUserRef | null;
-  created_by?: TaskUserRef | null;
-  due_date?: string | null;
-  related_entity_type?: string | null;
-  related_entity_id?: string | null;
-  created_at?: string | null;
-  updated_at?: string | null;
 }
 
 /** Backend list endpoints that wrap rows in an object rather than an array. */

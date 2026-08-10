@@ -98,6 +98,7 @@ class UserRead(BaseModel):
     last_login_at: datetime | None = None
     failed_login_count: int = 0
     locked_until: datetime | None = None
+    version: int = 1
     created_by: uuid.UUID | None = None
     created_at: datetime
     updated_at: datetime
@@ -118,6 +119,7 @@ class UserWithRoles(UserRead):
 class UserUpdate(BaseModel):
     """Payload to update a user's non-credential profile fields."""
 
+    version: int | None = None
     first_name: str | None = Field(default=None, max_length=100)
     middle_name: str | None = Field(default=None, max_length=100)
     last_name: str | None = Field(default=None, max_length=100)

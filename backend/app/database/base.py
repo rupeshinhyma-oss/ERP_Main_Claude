@@ -17,7 +17,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime
+from sqlalchemy import DateTime, Integer
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.types import TypeDecorator, CHAR
 
@@ -96,6 +96,21 @@ class UUIDPrimaryKeyMixin:
     )
 
 
+class VersionMixin:
+    """
+    Mixin providing an integer ``version`` column for Optimistic Concurrency Control (OCC).
+
+    Starts at 1 on insert and increments on every successful mutation.
+    """
+
+    version: Mapped[int] = mapped_column(
+        Integer,
+        default=1,
+        server_default="1",
+        nullable=False,
+    )
+
+
 class TimestampMixin:
     """
     Mixin providing ``created_at`` / ``updated_at`` UTC timestamp columns.
@@ -138,3 +153,4 @@ class SoftDeleteMixin:
     def is_deleted(self) -> bool:
         """Return True if this record has been soft-deleted."""
         return self.deleted_at is not None
+

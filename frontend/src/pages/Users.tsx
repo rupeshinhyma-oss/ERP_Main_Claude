@@ -203,7 +203,7 @@ export function UsersPage() {
     try {
       const { data } = await apiPost<{ revoked_sessions?: number }>(path);
       onDone?.();
-      reload();
+      // Targeted action complete: no full list reload
       return data;
     } catch (err) {
       setError(err);
@@ -217,7 +217,6 @@ export function UsersPage() {
         `/users/${userId}/force-logout`
       );
       alert(`Successfully revoked ${data.revoked_sessions || 0} active session(s).`);
-      reload();
     } catch (err) {
       setError(err);
     }
@@ -291,8 +290,13 @@ export function UsersPage() {
       });
       setCreateOpen(false);
       setCreateForm(EMPTY_CREATE);
-      reload();
-      if (data.temporary_password) setTempPassword(data.temporary_password);
+      if (data) {
+        setRows((prev) => [data, ...prev]);
+        setPagination((prev) => (prev ? { ...prev, total_records: (prev.total_records || 0) + 1 } : prev));
+        if (data.temporary_password) setTempPassword(data.temporary_password);
+      } else {
+        reload();
+      }
     } catch (err) {
       setError(err);
     }
@@ -301,7 +305,9 @@ export function UsersPage() {
   async function handleEditSubmit(e: React.FormEvent) {
     e.preventDefault();
     try {
-      await apiPatch(`/users/${editForm.id}`, {
+      const existingUser = rows.find((u) => u.id === editForm.id);
+      const { data: updatedUser } = await apiPatch<User>(`/users/${editForm.id}`, {
+        version: existingUser?.version,
         first_name: editForm.first_name.trim() || null,
         last_name: editForm.last_name.trim() || null,
         email: editForm.email.trim(),
@@ -311,7 +317,26 @@ export function UsersPage() {
         designation_id: editForm.designation_id || null,
       });
       setEditOpen(false);
-      reload();
+      if (updatedUser) {
+        setRows((prev) => prev.map((u) => (u.id === editForm.id ? updatedUser : u)));
+      } else {
+        setRows((prev) =>
+          prev.map((u) =>
+            u.id === editForm.id
+              ? {
+                  ...u,
+                  first_name: editForm.first_name.trim() || null,
+                  last_name: editForm.last_name.trim() || null,
+                  email: editForm.email.trim(),
+                  employee_code: editForm.employee_code.trim() || null,
+                  phone: editForm.phone.trim() || u.phone,
+                  department_id: editForm.department_id || null,
+                  designation_id: editForm.designation_id || null,
+                }
+              : u
+          )
+        );
+      }
     } catch (err) {
       setError(err);
     }

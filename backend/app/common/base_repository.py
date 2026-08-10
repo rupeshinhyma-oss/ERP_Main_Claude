@@ -41,7 +41,7 @@ from typing import TYPE_CHECKING, Any, Generic, TypeVar
 from sqlalchemy import Select, String, Text, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import BadRequestException
+from app.core.exceptions import BadRequestException, ConflictException
 from app.database.base import Base, SoftDeleteMixin
 
 if TYPE_CHECKING:
@@ -97,7 +97,7 @@ class BaseRepository(Generic[ModelT]):
         self,
         *,
         offset: int = 0,
-        limit: int = 20,
+        limit: int | None = 20,
         filters: dict[str, Any] | None = None,
         order_by: Any | None = None,
     ) -> list[ModelT]:
@@ -106,7 +106,7 @@ class BaseRepository(Generic[ModelT]):
 
         Args:
             offset: Number of rows to skip.
-            limit: Maximum number of rows to return.
+            limit: Maximum number of rows to return. Pass ``None`` to fetch every matching row (no LIMIT clause).
             filters: Mapping of column name -> exact value to filter on.
             order_by: A SQLAlchemy ordering expression, e.g. ``Model.created_at.desc()``.
         """
@@ -114,7 +114,9 @@ class BaseRepository(Generic[ModelT]):
         stmt = self._apply_filters(stmt, filters)
         if order_by is not None:
             stmt = stmt.order_by(order_by)
-        stmt = stmt.offset(offset).limit(limit)
+        stmt = stmt.offset(offset)
+        if limit is not None:
+            stmt = stmt.limit(limit)
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
@@ -247,10 +249,29 @@ class BaseRepository(Generic[ModelT]):
         await self.session.flush()  # populate defaults (id, timestamps) without ending the transaction
         return instance
 
-    async def update(self, instance: ModelT, **field_values: Any) -> ModelT:
-        """Apply the given field updates to an existing instance and flush."""
+    async def update(self, instance: ModelT, expected_version: int | None = None, **field_values: Any) -> ModelT:
+        """Apply the given field updates to an existing instance and flush, enforcing OCC if expected_version is provided."""
+        # Extract version from field_values if present
+        if expected_version is None and "version" in field_values:
+            version_val = field_values.pop("version")
+            if isinstance(version_val, int):
+                expected_version = version_val
+
+        current_ver = getattr(instance, "version", None)
+        if expected_version is not None and current_ver is not None:
+            if current_ver != expected_version:
+                raise ConflictException(
+                    "This record was updated by another user before you saved. "
+                    "Your changes were not saved. Please refresh the record and review the latest data."
+                )
+
         for field_name, value in field_values.items():
-            setattr(instance, field_name, value)
+            if field_name != "version":
+                setattr(instance, field_name, value)
+
+        if current_ver is not None:
+            setattr(instance, "version", current_ver + 1)
+
         await self.session.flush()
         return instance
 

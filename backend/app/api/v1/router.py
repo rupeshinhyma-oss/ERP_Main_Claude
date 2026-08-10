@@ -35,7 +35,6 @@ from app.planning.routes import router as planning_router
 from app.queue.routes import router as queue_router
 from app.rbac.routes import router as rbac_router
 from app.suppliers.routes import router as suppliers_router
-from app.tasks.routes import router as tasks_router
 from app.trash.routes import router as trash_router
 from app.users.routes import router as users_router
 
@@ -76,9 +75,6 @@ api_router.include_router(buyers_router)
 
 # Inquiries (Requirement) workflow -- two-layer consignment planning.
 api_router.include_router(inquiries_router)
-
-# Tasks: Task management flow.
-api_router.include_router(tasks_router)
 
 # Shipment Planning: dynamic branch-sheet grid (Mum Branch, MP Branch, ...).
 api_router.include_router(planning_router)

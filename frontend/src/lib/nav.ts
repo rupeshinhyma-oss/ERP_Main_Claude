@@ -36,7 +36,6 @@ export const NAV_SECTIONS: NavSection[] = [
       { key: "buyers", label: "Buyers", path: "/buyers", icon: "user", permission: "buyer.view" },
     ],
   },
-
   {
     label: "INVENTORY",
     items: [
@@ -87,7 +86,6 @@ export const NAV_SECTIONS: NavSection[] = [
 export const PAGE_TITLES: Record<string, string> = {
   trash: "Trash Management",
   dashboard: "Dashboard",
-  tasks: "Tasks & Work Management",
   reports: "Reports & Analytics",
   buyers: "Agents & Buyers",
   inquiries: "Proforma & Sales",
@@ -154,7 +152,6 @@ export const LEGACY_REDIRECTS: Record<string, string> = {
   "/effective-permissions.html": "/effective-permissions",
   "/teams.html": "/teams",
   "/suppliers.html": "/suppliers",
-  "/tasks.html": "/tasks",
   "/buyers.html": "/buyers",
   "/inquiries.html": "/inquiries",
   "/masters-countries.html": "/masters/countries",

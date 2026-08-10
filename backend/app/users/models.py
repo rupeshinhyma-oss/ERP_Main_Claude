@@ -16,7 +16,7 @@ from enum import Enum
 from sqlalchemy import Boolean, Date, DateTime, Enum as SAEnum, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.database.base import GUID, Base, SoftDeleteMixin, TimestampMixin, UUIDPrimaryKeyMixin
+from app.database.base import GUID, Base, SoftDeleteMixin, TimestampMixin, UUIDPrimaryKeyMixin, VersionMixin
 from app.departments.models import Department
 from app.designations.models import Designation
 
@@ -61,7 +61,7 @@ class UserStatus(str, Enum):
     PASSWORD_CHANGE_REQUIRED = "PASSWORD_CHANGE_REQUIRED"
 
 
-class User(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
+class User(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin, SoftDeleteMixin):
     """
     A single unified user record (incorporating login account + profile information).
     """

@@ -171,6 +171,8 @@ export function MasterPage<T extends MasterRecord>({
 
   const [modalOpen, setModalOpen] = useState(false);
   const [editingId, setEditingId] = useState("");
+  const [editingItem, setEditingItem] = useState<T | null>(null);
+  const [submitting, setSubmitting] = useState(false);
   const [form, setForm] = useState<FormState>(emptyForm);
 
   const [drawerItem, setDrawerItem] = useState<T | null>(null);
@@ -296,6 +298,7 @@ export function MasterPage<T extends MasterRecord>({
   /* --- Modal --- */
   function openModal(item: T | null) {
     setEditingId(item ? item.id : "");
+    setEditingItem(item);
     setForm(fillForm(item));
     setModalOpen(true);
   }
@@ -310,6 +313,7 @@ export function MasterPage<T extends MasterRecord>({
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (submitting) return;
     setError(null);
     let payload: unknown;
     try {
@@ -319,16 +323,38 @@ export function MasterPage<T extends MasterRecord>({
       setError(err);
       return;
     }
+    setSubmitting(true);
     try {
       if (editingId) {
-        await apiPatch(`${apiBase}/${editingId}`, payload);
+        // Include version if available on editingItem
+        const finalPayload =
+          editingItem && "version" in editingItem && typeof editingItem.version === "number"
+            ? { ...((payload as object) || {}), version: editingItem.version }
+            : payload;
+        const { data: updatedRecord } = await apiPatch<T>(`${apiBase}/${editingId}`, finalPayload);
+        const recordToUse =
+          updatedRecord || ({ ...(editingItem || {}), ...((payload as object) || {}) } as T);
+        if (resolveNames) {
+          await resolveNames([recordToUse]);
+        }
+        setRows((prev) => prev.map((row) => (row.id === editingId ? recordToUse : row)));
       } else {
-        await apiPost(apiBase, payload);
+        const { data: newRecord } = await apiPost<T>(apiBase, payload);
+        if (newRecord) {
+          if (resolveNames) {
+            await resolveNames([newRecord]);
+          }
+          setRows((prev) => [newRecord, ...prev]);
+          setPagination((prev) => (prev ? { ...prev, total_records: (prev.total_records || 0) + 1 } : prev));
+        } else {
+          reload();
+        }
       }
       closeModal();
-      reload();
     } catch (err) {
       setError(err);
+    } finally {
+      setSubmitting(false);
     }
   }
 
@@ -354,7 +380,8 @@ export function MasterPage<T extends MasterRecord>({
     if (!confirm(`Delete this ${entityName}? This cannot be undone.`)) return;
     try {
       await apiDelete(`${apiBase}/${id}`);
-      reload();
+      setRows((prev) => prev.filter((row) => row.id !== id));
+      setPagination((prev) => (prev ? { ...prev, total_records: Math.max(0, (prev.total_records || 1) - 1) } : prev));
     } catch (err) {
       setError(err);
     }
@@ -372,8 +399,8 @@ export function MasterPage<T extends MasterRecord>({
     if (!selectedIds.length) return;
     try {
       await Promise.all(selectedIds.map((id) => apiPost(`${apiBase}/${id}/activate`)));
+      setRows((prev) => prev.map((row) => (selectedIds.includes(row.id) ? { ...row, status: "active" } : row)));
       setSelectedIds([]);
-      reload();
     } catch (err) {
       setError(err);
     }
@@ -383,8 +410,8 @@ export function MasterPage<T extends MasterRecord>({
     if (!selectedIds.length) return;
     try {
       await Promise.all(selectedIds.map((id) => apiPost(`${apiBase}/${id}/deactivate`)));
+      setRows((prev) => prev.map((row) => (selectedIds.includes(row.id) ? { ...row, status: "inactive" } : row)));
       setSelectedIds([]);
-      reload();
     } catch (err) {
       setError(err);
     }
@@ -395,8 +422,8 @@ export function MasterPage<T extends MasterRecord>({
     if (!confirm(`Delete ${selectedIds.length} selected ${entityName}(s)? This cannot be undone.`)) return;
     try {
       await Promise.all(selectedIds.map((id) => apiDelete(`${apiBase}/${id}`)));
+      setRows((prev) => prev.filter((row) => !selectedIds.includes(row.id)));
       setSelectedIds([]);
-      reload();
     } catch (err) {
       setError(err);
     }
@@ -450,16 +477,17 @@ export function MasterPage<T extends MasterRecord>({
                 }}
               >
                 {hideQuickAdd ? (
-                  <button type="submit" className="btn btn-add-new" style={{ padding: "10px 24px", background: "#0061f2", color: "#ffffff", fontWeight: 600 }}>
-                    Save
+                  <button type="submit" disabled={submitting} className="btn btn-add-new" style={{ padding: "10px 24px", background: "#0061f2", color: "#ffffff", fontWeight: 600, opacity: submitting ? 0.7 : 1 }}>
+                    {submitting ? "Saving..." : "Save"}
                   </button>
                 ) : (
                   <>
-                    <button type="submit" className="btn btn-add-new" style={{ padding: "10px 24px" }}>
-                      Save &amp; Continue
+                    <button type="submit" disabled={submitting} className="btn btn-add-new" style={{ padding: "10px 24px", opacity: submitting ? 0.7 : 1 }}>
+                      {submitting ? "Saving..." : "Save & Continue"}
                     </button>
                     <button
                       type="button"
+                      disabled={submitting}
                       className="btn btn-quick-add"
                       style={{ padding: "10px 24px" }}
                       onClick={closeModal}
@@ -860,29 +888,15 @@ export function MasterPage<T extends MasterRecord>({
               </div>
               <div className="form-actions" style={{ display: "flex", gap: "12px", width: "100%", padding: "16px 24px", background: "#ffffff", borderTop: "1px solid #e2e8f0" }}>
                 {hideQuickAdd ? (
-                  <button
-                    type="submit"
-                    className="btn btn-add-new"
-                    style={{
-                      flex: 1,
-                      justifyContent: "center",
-                      background: "#0061f2",
-                      color: "#ffffff",
-                      fontWeight: 600,
-                      padding: "10px 24px",
-                      borderRadius: "6px",
-                      border: "none",
-                      cursor: "pointer",
-                    }}
-                  >
-                    Save
+                  <button type="submit" disabled={submitting} className="btn btn-add-new" style={{ flex: 1, justifyContent: "center", background: "#0061f2", color: "#ffffff", fontWeight: 600, opacity: submitting ? 0.7 : 1 }}>
+                    {submitting ? "Saving..." : "Save"}
                   </button>
                 ) : (
                   <>
-                    <button type="submit" className="btn btn-add-new" style={{ flex: 1, justifyContent: "center" }}>
-                      Save &amp; Continue
+                    <button type="submit" disabled={submitting} className="btn btn-add-new" style={{ flex: 1, justifyContent: "center", opacity: submitting ? 0.7 : 1 }}>
+                      {submitting ? "Saving..." : "Save & Continue"}
                     </button>
-                    <button type="button" className="btn btn-quick-add" style={{ flex: 1, justifyContent: "center" }} onClick={closeModal}>
+                    <button type="button" disabled={submitting} className="btn btn-quick-add" style={{ flex: 1, justifyContent: "center" }} onClick={closeModal}>
                       Save &amp; Exit
                     </button>
                   </>

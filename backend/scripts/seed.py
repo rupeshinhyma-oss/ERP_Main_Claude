@@ -166,12 +166,6 @@ BOOTSTRAP_PERMISSIONS: list[tuple[str, str, str, str, str, str]] = [
     ("reports.view", "reports", "reports", "view", "ALL", "View system reports."),
     ("reports.export", "reports", "reports", "export", "ALL", "Export reports."),
     ("reports.print", "reports", "reports", "print", "ALL", "Print system reports."),
-    # Tasks & Work Management
-    ("task.create", "task", "tasks", "create", "ALL", "Create tasks."),
-    ("task.read", "task", "tasks", "view", "ALL", "View tasks."),
-    ("task.view", "task", "tasks", "view", "ALL", "View tasks."),
-    ("task.update", "task", "tasks", "update", "ALL", "Update and reassign tasks."),
-    ("task.delete", "task", "tasks", "delete", "ALL", "Delete tasks."),
     # Settings, Audit & System
     ("settings.manage", "settings", "rbac", "manage", "ALL", "Manage system settings, roles, and permissions."),
     ("audit.read", "audit", "audit", "view", "ALL", "View audit log entries."),
@@ -245,10 +239,6 @@ EMPLOYEE_ROLE_PERMISSION_CODES: list[str] = [
     "buyer.view",
     "inquiry.read",
     "inquiry.view",
-    "task.read",
-    "task.view",
-    "task.create",
-    "task.update",
     "planning.read",
 ]
 

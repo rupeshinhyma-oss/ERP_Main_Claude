@@ -16,6 +16,7 @@ row/column) inside one logical operation.
 from __future__ import annotations
 
 import uuid
+from decimal import Decimal
 from typing import Any
 
 from app.audit.constants import AuditAction
@@ -324,6 +325,10 @@ class PlanningService:
             description=f"Deleted column '{name}'.",
         )
 
+    async def get_column(self, sheet_id: uuid.UUID, column_id: uuid.UUID) -> PlanningColumn:
+        """Public wrapper around ``_get_column_or_raise`` for routes that just need the column (e.g. to recompute a display value)."""
+        return await self._get_column_or_raise(sheet_id, column_id)
+
     async def _get_column_or_raise(self, sheet_id: uuid.UUID, column_id: uuid.UUID) -> PlanningColumn:
         column = await self.column_repository.get_by_id(column_id)
         if column is None or column.sheet_id != sheet_id:
@@ -388,6 +393,34 @@ class PlanningService:
         )
         return column
 
+    async def set_column_status_color_enabled(
+        self, sheet_id: uuid.UUID, column_id: uuid.UUID, *, enabled: bool, user_id: uuid.UUID, username: str
+    ) -> PlanningColumn:
+        """
+        Opt a column in/out of carrying CRM-style cell status colors.
+
+        Off by default for every column, including pre-existing ones.
+        Turning it off doesn't clear any status colors already set on
+        that column's cells (the data isn't touched) -- it only hides the
+        status-dot button going forward and blocks setting new ones
+        (see set_cell_status's enforcement of this flag).
+        """
+        column = await self._get_column_or_raise(sheet_id, column_id)
+        old_value = column.enable_status_color
+        column = await self.column_repository.update(column, enable_status_color=enabled, updated_by=user_id)
+        if old_value != enabled:
+            await self._record_change(
+                action=PlanningChangeAction.COLUMN_STATUS_COLOR_TOGGLED,
+                sheet_id=sheet_id,
+                user_id=user_id,
+                username=username,
+                column_id=column.id,
+                old_value=str(old_value),
+                new_value=str(enabled),
+                description=f"{'Enabled' if enabled else 'Disabled'} status colors on column '{column.name}'.",
+            )
+        return column
+
     async def get_column_role_lock_ids(self, sheet_id: uuid.UUID, column_id: uuid.UUID) -> list[uuid.UUID]:
         await self._get_column_or_raise(sheet_id, column_id)
         return await self.column_repository.list_role_lock_ids(column_id)
@@ -416,6 +449,9 @@ class PlanningService:
         source_aggregate_fn: str | None,
         source_aggregate_filters: dict | None,
         formula_expression: str | None,
+        enable_description: bool,
+        auto_populate_enabled: bool = False,
+        auto_populate_limit: int | None = None,
         user_id: uuid.UUID,
         username: str,
     ) -> PlanningColumn:
@@ -440,6 +476,9 @@ class PlanningService:
                 source_aggregate_filters=None,
                 formula_expression=None,
                 is_locked=False,
+                enable_description=enable_description,
+                auto_populate_enabled=auto_populate_enabled,
+                auto_populate_limit=auto_populate_limit,
                 updated_by=user_id,
             )
 
@@ -459,6 +498,9 @@ class PlanningService:
                 source_aggregate_filters=None,
                 formula_expression=None,
                 is_locked=True,  # computed -- direct cell edits are rejected (see set_cell_value)
+                enable_description=enable_description,
+                auto_populate_enabled=auto_populate_enabled,
+                auto_populate_limit=auto_populate_limit,
                 updated_by=user_id,
             )
 
@@ -483,6 +525,9 @@ class PlanningService:
                 source_aggregate_filters=source_aggregate_filters,
                 formula_expression=None,
                 is_locked=True,
+                enable_description=enable_description,
+                auto_populate_enabled=auto_populate_enabled,
+                auto_populate_limit=auto_populate_limit,
                 updated_by=user_id,
             )
 
@@ -504,6 +549,9 @@ class PlanningService:
                 source_aggregate_filters=None,
                 formula_expression=formula_expression.strip(),
                 is_locked=True,
+                enable_description=enable_description,
+                auto_populate_enabled=auto_populate_enabled,
+                auto_populate_limit=auto_populate_limit,
                 updated_by=user_id,
             )
         else:
@@ -574,6 +622,290 @@ class PlanningService:
         )
         return cell
 
+    async def auto_link_column_to_item_records(
+        self,
+        sheet_id: uuid.UUID,
+        column_id: uuid.UUID,
+        *,
+        user_id: uuid.UUID,
+        username: str,
+    ) -> list[PlanningCell]:
+        """
+        Bulk-link every row's cell under this column to the SAME record its
+        ITEM is already linked to, instead of clicking 🔗 once per row per
+        column. Only meaningful when this column pulls from the same source
+        module as the sheet's ITEM -- e.g. ITEM is "Product Name" from
+        Product Master and this column is "Packaging Net Weight" from the
+        same Product Master, so "the product this row is" is the same
+        record both places.
+
+        Rows with no ITEM link yet, or whose linked record doesn't belong
+        to this column's module, are simply skipped rather than erroring,
+        so this is always safe to run again after adding more rows.
+        """
+        sheet = await self.get_sheet_or_raise(sheet_id)
+        column = await self._get_column_or_raise(sheet_id, column_id)
+        await self.check_column_role_lock(column_id, user_id=user_id)
+
+        if column.source_type != PlanningColumnSourceType.LINKED_LOOKUP:
+            raise BadRequestException(f"Column '{column.name}' is not configured as a linked-lookup column.")
+        if sheet.item_source_type != PlanningColumnSourceType.LINKED_LOOKUP:
+            raise BadRequestException("The sheet's ITEM column must be linked-lookup for this to have any rows to copy from.")
+        if column.source_module != sheet.item_source_module:
+            raise BadRequestException(
+                f"Column '{column.name}' pulls from a different module than ITEM "
+                f"({column.source_module!r} vs {sheet.item_source_module!r}), so there's no matching record to copy."
+            )
+
+        rows = await self.row_repository.list_for_sheet(sheet_id)
+        cells_by_row: dict[uuid.UUID, PlanningCell] = {}
+        for r in rows:
+            for c in r.cells:
+                if c.column_id == column_id:
+                    cells_by_row[r.id] = c
+
+        updated: list[PlanningCell] = []
+        for row in rows:
+            if row.linked_record_id is None:
+                continue
+            existing_cell = cells_by_row.get(row.id)
+            if existing_cell is not None and existing_cell.linked_record_id == row.linked_record_id:
+                continue  # already matches -- nothing to do
+            if existing_cell is None:
+                cell = await self.cell_repository.create(
+                    row_id=row.id, column_id=column_id, linked_record_id=row.linked_record_id, updated_by=user_id
+                )
+            else:
+                cell = await self.cell_repository.update(existing_cell, linked_record_id=row.linked_record_id, updated_by=user_id)
+            updated.append(cell)
+
+        if updated:
+            await self._record_change(
+                action=PlanningChangeAction.CELL_VALUE_CHANGED,
+                sheet_id=sheet_id,
+                user_id=user_id,
+                username=username,
+                column_id=column_id,
+                description=f"Auto-linked {len(updated)} row(s) in '{column.name}' to their ITEM's record.",
+            )
+        return updated
+
+    async def configure_item_source(
+        self,
+        sheet_id: uuid.UUID,
+        *,
+        source_type: PlanningColumnSourceType,
+        source_module: str | None,
+        source_field: str | None,
+        formula_expression: str | None,
+        item_enable_description: bool,
+        item_auto_populate_enabled: bool = False,
+        item_auto_populate_limit: int | None = None,
+        user_id: uuid.UUID,
+        username: str,
+    ) -> PlanningSheet:
+        """
+        Configure the sheet's built-in ITEM column data source (MANUAL / LINKED_LOOKUP / FORMULA).
+
+        Mirrors ``configure_column_source`` but writes to the sheet
+        itself, since ITEM isn't a row in ``planning_columns``. AGGREGATE
+        isn't offered here -- a single sheet-wide number repeated as every
+        row's item name isn't a meaningful use of this column.
+        """
+        sheet = await self.get_sheet_or_raise(sheet_id)
+
+        if source_type == PlanningColumnSourceType.MANUAL:
+            updated = await self.sheet_repository.update(
+                sheet,
+                item_source_type=source_type,
+                item_source_module=None,
+                item_source_field=None,
+                item_formula_expression=None,
+                item_enable_description=item_enable_description,
+                item_auto_populate_enabled=item_auto_populate_enabled,
+                item_auto_populate_limit=item_auto_populate_limit,
+            )
+
+        elif source_type == PlanningColumnSourceType.LINKED_LOOKUP:
+            module = source_registry.get_source_module(source_module or "")
+            if module is None:
+                raise BadRequestException(f"Unknown source module {source_module!r}.")
+            field = source_registry.get_source_field(module.key, source_field or "")
+            if field is None:
+                raise BadRequestException(f"Unknown field {source_field!r} on source module {module.key!r}.")
+            updated = await self.sheet_repository.update(
+                sheet,
+                item_source_type=source_type,
+                item_source_module=module.key,
+                item_source_field=field.key,
+                item_formula_expression=None,
+                item_enable_description=item_enable_description,
+                item_auto_populate_enabled=item_auto_populate_enabled,
+                item_auto_populate_limit=item_auto_populate_limit,
+            )
+
+        elif source_type == PlanningColumnSourceType.FORMULA:
+            if not formula_expression or not formula_expression.strip():
+                raise BadRequestException("formula_expression is required for FORMULA.")
+            sibling_columns = await self.column_repository.list_for_sheet(sheet_id)
+            known_names = {c.name for c in sibling_columns}
+            try:
+                validate_formula_syntax(formula_expression, known_column_names=known_names)
+            except FormulaError:
+                raise
+            updated = await self.sheet_repository.update(
+                sheet,
+                item_source_type=source_type,
+                item_source_module=None,
+                item_source_field=None,
+                item_formula_expression=formula_expression.strip(),
+                item_enable_description=item_enable_description,
+                item_auto_populate_enabled=item_auto_populate_enabled,
+                item_auto_populate_limit=item_auto_populate_limit,
+            )
+        else:
+            raise BadRequestException(f"Unknown source_type {source_type!r} for the ITEM column.")
+
+        await self._record_change(
+            action=PlanningChangeAction.COLUMN_SOURCE_CONFIGURED,
+            sheet_id=sheet_id,
+            user_id=user_id,
+            username=username,
+            description=f"Configured ITEM column as {source_type.value}.",
+        )
+        return updated
+
+    async def link_row_to_item_source_record(
+        self,
+        sheet_id: uuid.UUID,
+        row_id: uuid.UUID,
+        *,
+        record_id: uuid.UUID,
+        user_id: uuid.UUID,
+        username: str,
+    ) -> PlanningRow:
+        """Link one row's ITEM cell to a specific record in the sheet's item_source_module."""
+        sheet = await self.get_sheet_or_raise(sheet_id)
+        row = await self._get_row_or_raise(sheet_id, row_id)
+
+        if sheet.item_source_type != PlanningColumnSourceType.LINKED_LOOKUP:
+            raise BadRequestException("The ITEM column is not configured as a linked-lookup column.")
+        module = source_registry.get_source_module(sheet.item_source_module or "")
+        if module is None:
+            raise ConflictException("The ITEM column references an unregistered source module.")
+
+        repository = module.repository_factory(self.row_repository.session)
+        record = await repository.get_by_id(record_id)
+        if record is None:
+            raise BadRequestException(f"No {module.label} record found with that ID.")
+
+        row = await self.row_repository.update(row, linked_record_id=record_id, updated_by=user_id)
+
+        await self._record_change(
+            action=PlanningChangeAction.CELL_VALUE_CHANGED,
+            sheet_id=sheet_id,
+            user_id=user_id,
+            username=username,
+            row_id=row_id,
+            new_value=str(record_id),
+            description=f"Linked row's ITEM to a {module.label} record.",
+        )
+        return row
+
+    async def auto_populate_rows_from_item_source(
+        self,
+        sheet_id: uuid.UUID,
+        *,
+        limit: int | None,
+        user_id: uuid.UUID,
+        username: str,
+    ) -> list[PlanningRow]:
+        """
+        Bulk-create rows straight from the sheet's configured item source
+        module, one row per record, already linked -- the "check a box
+        instead of linking one row at a time" option next to the manual
+        per-row 🔗 flow.
+
+        Skips any record that's already linked to an existing row in this
+        sheet (comparing against every linked row, not just ones from a
+        previous auto-populate call), so repeating this with a bigger page
+        size to pull more records in doesn't create duplicate rows for
+        records already on the sheet.
+        """
+        sheet = await self.get_sheet_or_raise(sheet_id)
+        if sheet.item_source_type != PlanningColumnSourceType.LINKED_LOOKUP:
+            raise BadRequestException("The ITEM column is not configured as a linked-lookup column.")
+        module = source_registry.get_source_module(sheet.item_source_module or "")
+        if module is None:
+            raise ConflictException("The ITEM column references an unregistered source module.")
+
+        repository = module.repository_factory(self.row_repository.session)
+        records = await repository.list(offset=0, limit=limit)
+
+        existing_rows = await self.row_repository.list_for_sheet(sheet_id)
+        already_linked_ids = {r.linked_record_id for r in existing_rows if r.linked_record_id is not None}
+        next_position = len(existing_rows)
+
+        created: list[PlanningRow] = []
+        for record in records:
+            if record.id in already_linked_ids:
+                continue
+            row = await self.row_repository.create(
+                sheet_id=sheet_id,
+                label=f"{module.label} record",  # placeholder only -- LINKED_LOOKUP always displays the live computed value instead
+                position=next_position,
+                linked_record_id=record.id,
+                created_by=user_id,
+            )
+            next_position += 1
+            created.append(row)
+
+        if created:
+            await self._record_change(
+                action=PlanningChangeAction.ROW_ADDED,
+                sheet_id=sheet_id,
+                user_id=user_id,
+                username=username,
+                description=f"Auto-populated {len(created)} row(s) from {module.label} (loaded {len(records)}, "
+                f"{len(records) - len(created)} already on the sheet).",
+            )
+        return created
+
+
+    async def compute_row_item_display(self, sheet: PlanningSheet, row: PlanningRow) -> str:
+        """
+        Return the effective ITEM value for a row, computing it live when the
+        sheet's ITEM column is linked-lookup or formula (same "never trust a
+        stale value" behavior as ``compute_cell_display_value``).
+
+        Falls back to ``row.label`` for MANUAL (unchanged, original
+        behavior) and whenever a linked/formula value isn't available yet
+        (e.g. the row hasn't been linked to a record), so a row is never
+        left with a blank name.
+        """
+        if sheet.item_source_type == PlanningColumnSourceType.MANUAL:
+            return row.label
+
+        # Reuse compute_cell_display_value by describing the sheet's ITEM
+        # config as a column-shaped object -- same fields it reads, without
+        # needing a real (persisted) PlanningColumn row for it to exist.
+        pseudo_column = PlanningColumn(
+            sheet_id=sheet.id,
+            source_type=sheet.item_source_type,
+            source_module=sheet.item_source_module,
+            source_field=sheet.item_source_field,
+            source_aggregate_fn=None,
+            source_aggregate_filters=None,
+            formula_expression=sheet.item_formula_expression,
+        )
+        pseudo_cell = (
+            PlanningCell(row_id=row.id, column_id=uuid.uuid4(), linked_record_id=row.linked_record_id)
+            if row.linked_record_id is not None
+            else None
+        )
+        display = await self.compute_cell_display_value(pseudo_column, pseudo_cell, row_id=row.id)
+        return display if display else row.label
+
     async def compute_cell_display_value(
         self, column: PlanningColumn, cell: PlanningCell | None, *, row_id: uuid.UUID | None = None
     ) -> str | None:
@@ -623,11 +955,17 @@ class PlanningService:
             # aggregate-by-field SQL helper, and adding one for a handful of
             # numeric fields isn't worth a new abstraction layer here.
             rows = await repository.list(offset=0, limit=5000, filters=filters)
-            values = [
-                v
+            # DB numeric columns (SQLAlchemy `Numeric`) come back as
+            # `Decimal`, not `int`/`float` -- without explicitly allowing
+            # Decimal here, every such field (most of Product's numeric
+            # fields, e.g. packaging weights, stock, cost/price) would be
+            # silently dropped from the aggregate, so SUM/AVG/MIN/MAX would
+            # look like they ran but always return "0" or nothing.
+            values: list[float] = [
+                float(v)
                 for r in rows
                 if (v := module.value_getter(r, column.source_field or "")) is not None
-                and isinstance(v, (int, float))
+                and isinstance(v, (int, float, Decimal))
             ]
             if not values:
                 return "0" if column.source_aggregate_fn == "sum" else None
@@ -646,17 +984,35 @@ class PlanningService:
             if not column.formula_expression or effective_row_id is None:
                 return None
             row_cells = await self.cell_repository.list_for_rows([effective_row_id])
+            cells_by_column_id = {rc.column_id: rc for rc in row_cells}
             sibling_columns = await self.column_repository.list_for_sheet(column.sheet_id)
-            column_names_by_id = {c.id: c.name for c in sibling_columns}
             row_values: dict[str, float] = {}
-            for rc in row_cells:
-                col_name = column_names_by_id.get(rc.column_id)
-                if col_name is None or rc.value is None:
+            for sibling in sibling_columns:
+                # A formula can name any sibling column, not just MANUAL
+                # ones -- but LINKED_LOOKUP and AGGREGATE columns never
+                # store a raw `cell.value` (their value only exists as a
+                # live computed display value), so reading `rc.value`
+                # alone silently made those columns invisible to formulas
+                # even though the module/field extraction itself was
+                # working fine on its own column. Recompute each sibling's
+                # effective value the same way the grid does, instead of
+                # only trusting the stored cell.
+                if sibling.id == column.id:
+                    continue
+                if sibling.source_type == PlanningColumnSourceType.FORMULA:
+                    # Skip formula-referencing-formula: nothing here
+                    # detects cycles, so recursing would risk infinite
+                    # recursion between two formula columns that reference
+                    # each other.
+                    continue
+                sibling_cell = cells_by_column_id.get(sibling.id)
+                raw_value = await self.compute_cell_display_value(sibling, sibling_cell, row_id=effective_row_id)
+                if raw_value is None:
                     continue
                 try:
-                    row_values[col_name] = float(rc.value)
+                    row_values[sibling.name] = float(raw_value)
                 except ValueError:
-                    continue  # non-numeric sibling cell -- simply unavailable to the formula, not an error
+                    continue  # non-numeric sibling value -- simply unavailable to the formula, not an error
             try:
                 result = evaluate_formula(column.formula_expression, row_values=row_values)
             except FormulaError:
@@ -804,6 +1160,27 @@ class PlanningService:
                 new_value=value,
                 description=f"Changed '{row.label}' / '{column.name}' from {old_value!r} to {value!r}.",
             )
+            # Document: "if an user first puts any data or number into that
+            # Color status first turn it into Blue automatically" -- every
+            # value change re-triggers this (not just the first one), even
+            # overriding a status the user set manually before, per the
+            # confirmed requirement. Clearing a cell (value is empty/None)
+            # does not set a color. Silently skipped on columns that don't
+            # allow status colors at all, rather than raising -- typing a
+            # value should never be blocked by an unrelated column setting.
+            if value is not None and value.strip() and column.enable_status_color:
+                try:
+                    cell = await self.set_cell_status(
+                        sheet_id,
+                        row_id,
+                        column_id,
+                        status_color=PlanningCellStatusColor.BLUE_ORDERED,
+                        custom_status_tag_id=None,
+                        user_id=user_id,
+                        username=username,
+                    )
+                except BadRequestException:
+                    pass  # enable_status_color was checked above, but re-check defensively; never block the value save on this.
         return cell
 
     async def set_cell_status(
@@ -826,6 +1203,12 @@ class PlanningService:
         """
         row = await self._get_row_or_raise(sheet_id, row_id)
         column = await self._get_column_or_raise(sheet_id, column_id)
+
+        if status_color is not None and not column.enable_status_color:
+            raise BadRequestException(
+                f"Column '{column.name}' does not allow status colors. "
+                "An admin must enable this for the column first (see the Columns panel)."
+            )
 
         if status_color == PlanningCellStatusColor.CUSTOM:
             if custom_status_tag_id is None:
@@ -868,6 +1251,85 @@ class PlanningService:
             )
         return cell
 
+    async def set_cell_description(
+        self,
+        sheet_id: uuid.UUID,
+        row_id: uuid.UUID,
+        column_id: uuid.UUID,
+        *,
+        description: str | None,
+        user_id: uuid.UUID,
+        username: str,
+    ) -> PlanningCell:
+        """
+        Set or clear a cell's free-text description.
+
+        Independent of the cell's value/status/source-type -- writable
+        regardless of whether the column's enable_description is
+        currently on, so toggling the setting off and back on later
+        doesn't lose anything already written.
+        """
+        row = await self._get_row_or_raise(sheet_id, row_id)
+        column = await self._get_column_or_raise(sheet_id, column_id)
+
+        cell = await self.cell_repository.get_by_row_and_column(row_id, column_id)
+        old_description = cell.description if cell else None
+
+        if cell is None:
+            cell = await self.cell_repository.create(
+                row_id=row_id, column_id=column_id, description=description, updated_by=user_id
+            )
+        else:
+            cell = await self.cell_repository.update(cell, description=description, updated_by=user_id)
+
+        if old_description != description:
+            await self._record_change(
+                action=PlanningChangeAction.CELL_DESCRIPTION_CHANGED,
+                sheet_id=sheet_id,
+                user_id=user_id,
+                username=username,
+                row_id=row_id,
+                column_id=column_id,
+                cell_id=cell.id,
+                old_value=old_description,
+                new_value=description,
+                description=f"Updated description on '{row.label}' / '{column.name}'.",
+            )
+        return cell
+
+    async def set_row_description(
+        self,
+        sheet_id: uuid.UUID,
+        row_id: uuid.UUID,
+        *,
+        description: str | None,
+        user_id: uuid.UUID,
+        username: str,
+    ) -> PlanningRow:
+        """
+        Set or clear a row's ITEM-cell free-text description.
+
+        Mirrors set_cell_description for the built-in ITEM column, which
+        lives directly on PlanningRow rather than as a PlanningCell.
+        """
+        row = await self._get_row_or_raise(sheet_id, row_id)
+        old_description = row.description
+
+        row = await self.row_repository.update(row, description=description, updated_by=user_id)
+
+        if old_description != description:
+            await self._record_change(
+                action=PlanningChangeAction.ROW_DESCRIPTION_CHANGED,
+                sheet_id=sheet_id,
+                user_id=user_id,
+                username=username,
+                row_id=row_id,
+                old_value=old_description,
+                new_value=description,
+                description=f"Updated description on row '{row.label}'.",
+            )
+        return row
+
     # --- Status tags (admin-defined custom colors beyond the 3 built-ins) ---------
 
     async def list_status_tags(self) -> list[PlanningStatusTag]:
@@ -892,6 +1354,50 @@ class PlanningService:
     async def get_row_history(self, sheet_id: uuid.UUID, row_id: uuid.UUID, *, limit: int = 100):
         await self._get_row_or_raise(sheet_id, row_id)
         return await self.change_log_repository.list_for_row(row_id, limit=limit)
+
+    async def get_mum_column_status_history_for_row(
+        self, sheet_id: uuid.UUID, row_id: uuid.UUID, *, limit: int = 200
+    ) -> list[dict[str, Any]]:
+        """
+        Build the Approval Date column's hover-history feed for one row.
+
+        Document: "When Mum 45 was blue and when Mum 46 was blue and other
+        color too" -- a chronological list of every status-color change on
+        that row's Mum-series columns (name starts with "mum",
+        case-insensitive; e.g. "Mum45", "MUM 47", "mum46 remarks" all
+        match), each entry showing which column, old/new color, and when.
+
+        Built from the existing PlanningChangeLog rather than a new
+        tracking mechanism -- CELL_STATUS_CHANGED events already carry
+        everything this needs; this method is purely a filtered,
+        column-name-resolved view over data already being recorded by
+        set_cell_status (including the auto-blue-on-value-entry path in
+        set_cell_value, which calls set_cell_status internally).
+        """
+        await self._get_row_or_raise(sheet_id, row_id)
+        columns = await self.column_repository.list_for_sheet(sheet_id)
+        mum_column_names = {c.id: c.name for c in columns if c.name.strip().lower().startswith("mum")}
+        if not mum_column_names:
+            return []
+
+        entries = await self.change_log_repository.list_for_row(row_id, limit=limit)
+        results = []
+        for entry in entries:
+            if entry.action != PlanningChangeAction.CELL_STATUS_CHANGED:
+                continue
+            if entry.column_id not in mum_column_names:
+                continue
+            results.append(
+                {
+                    "column_id": entry.column_id,
+                    "column_name": mum_column_names[entry.column_id],
+                    "old_status": entry.old_value,
+                    "new_status": entry.new_value,
+                    "changed_at": entry.created_at,
+                    "changed_by_username": entry.changed_by_username_snapshot,
+                }
+            )
+        return results
 
     async def get_column_history(self, sheet_id: uuid.UUID, column_id: uuid.UUID, *, limit: int = 100):
         await self._get_column_or_raise(sheet_id, column_id)

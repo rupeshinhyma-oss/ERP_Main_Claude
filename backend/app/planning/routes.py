@@ -16,6 +16,8 @@ from app.auth.service import CurrentUser
 from app.core.responses import build_success_response
 from app.planning.dependencies import get_planning_service
 from app.planning.schemas import (
+    MumColumnStatusHistoryEntry,
+    PlanningCellDescriptionUpdate,
     PlanningCellRead,
     PlanningCellStatusUpdate,
     PlanningCellValueUpdate,
@@ -26,9 +28,14 @@ from app.planning.schemas import (
     PlanningColumnRead,
     PlanningColumnRename,
     PlanningColumnRoleLockUpdate,
+    PlanningColumnStatusColorToggle,
     PlanningColumnSourceConfigure,
     PlanningGridRead,
+    PlanningItemAutoPopulate,
+    PlanningItemLinkRecord,
+    PlanningItemSourceConfigure,
     PlanningRowCreate,
+    PlanningRowDescriptionUpdate,
     PlanningRowMove,
     PlanningRowRead,
     PlanningRowRename,
@@ -63,6 +70,8 @@ def _row_to_read_dict(row) -> dict:
         "sheet_id": row.sheet_id,
         "label": row.label,
         "position": row.position,
+        "linked_record_id": row.linked_record_id,
+        "description": row.description,
         "created_by": row.created_by,
         "updated_by": row.updated_by,
         "created_at": row.created_at,
@@ -149,6 +158,7 @@ async def get_grid(
         if column.source_type == "aggregate":
             aggregate_cache[column.id] = await service.compute_cell_display_value(column, None)
 
+    sheet = grid["sheet"]
     row_reads = []
     for row in rows:
         cells_by_column_id = {cell.column_id: cell for cell in row.cells}
@@ -175,6 +185,7 @@ async def get_grid(
                     "status_color": None,
                     "custom_status_tag_id": None,
                     "linked_record_id": None,
+                    "description": None,
                     "updated_by": None,
                     "updated_at": None,
                 }
@@ -182,6 +193,12 @@ async def get_grid(
             cell_reads.append(cell_data)
         row_data = PlanningRowRead.model_validate(row).model_dump(mode="json")
         row_data["cells"] = cell_reads
+        # ITEM is the sheet's built-in first column, not a row in `columns`
+        # above -- when the admin has configured it as linked-lookup or
+        # formula (see PlanningItemSourceConfigure), show the live computed
+        # value instead of the raw stored label, same "never trust a stale
+        # value" behavior as every other dynamic column.
+        row_data["label"] = await service.compute_row_item_display(sheet, row)
         row_reads.append(row_data)
 
     data = {
@@ -326,11 +343,102 @@ async def configure_column_source(
         source_aggregate_fn=payload.source_aggregate_fn,
         source_aggregate_filters=payload.source_aggregate_filters,
         formula_expression=payload.formula_expression,
+        enable_description=payload.enable_description,
+        auto_populate_enabled=payload.auto_populate_enabled,
+        auto_populate_limit=payload.auto_populate_limit,
         user_id=current_user.id,
         username=current_user.username,
     )
     data = PlanningColumnRead.model_validate(column).model_dump(mode="json")
     return build_success_response(data=data, request_id=request.state.request_id, message="Column source configured.")
+
+
+@router.put("/sheets/{sheet_id}/item-source", summary="Configure the sheet's built-in ITEM column data source")
+async def configure_item_source(
+    sheet_id: uuid.UUID,
+    payload: PlanningItemSourceConfigure,
+    request: Request,
+    service: PlanningService = Depends(get_planning_service),
+    current_user: CurrentUser = Depends(require_permission("planning.column.manage")),
+) -> dict:
+    """
+    Turn the ITEM column MANUAL / LINKED_LOOKUP / FORMULA, or edit its config.
+
+    The ITEM column is the sheet's built-in first column (row identity),
+    not an entry in ``planning_columns``, so it gets its own endpoint
+    mirroring ``configure_column_source`` above.
+    """
+    sheet = await service.configure_item_source(
+        sheet_id,
+        source_type=payload.source_type,
+        source_module=payload.source_module,
+        source_field=payload.source_field,
+        formula_expression=payload.formula_expression,
+        item_enable_description=payload.item_enable_description,
+        item_auto_populate_enabled=payload.item_auto_populate_enabled,
+        item_auto_populate_limit=payload.item_auto_populate_limit,
+        user_id=current_user.id,
+        username=current_user.username,
+    )
+    data = PlanningSheetRead.model_validate(sheet).model_dump(mode="json")
+    return build_success_response(data=data, request_id=request.state.request_id, message="ITEM column source configured.")
+
+
+@router.put(
+    "/sheets/{sheet_id}/rows/{row_id}/item-link",
+    summary="Link a row's ITEM cell to a record in the sheet's item_source_module",
+)
+async def link_row_to_item_source_record(
+    sheet_id: uuid.UUID,
+    row_id: uuid.UUID,
+    payload: PlanningItemLinkRecord,
+    request: Request,
+    service: PlanningService = Depends(get_planning_service),
+    current_user: CurrentUser = Depends(require_permission("planning.cell.edit")),
+) -> dict:
+    """Pick, per row, which record (e.g. which Product) the ITEM column pulls its name from."""
+    grid = await service.get_grid(sheet_id)
+    row = await service.link_row_to_item_source_record(
+        sheet_id, row_id, record_id=payload.record_id, user_id=current_user.id, username=current_user.username
+    )
+    display_value = await service.compute_row_item_display(grid["sheet"], row)
+    data = PlanningRowRead.model_validate(_row_to_read_dict(row)).model_dump(mode="json")
+    data["label"] = display_value
+    return build_success_response(data=data, request_id=request.state.request_id, message="Row linked.")
+
+
+@router.post(
+    "/sheets/{sheet_id}/item-source/auto-populate",
+    status_code=status.HTTP_201_CREATED,
+    summary="Bulk-create rows straight from the ITEM source module, one row per record",
+)
+async def auto_populate_rows_from_item_source(
+    sheet_id: uuid.UUID,
+    payload: PlanningItemAutoPopulate,
+    request: Request,
+    service: PlanningService = Depends(get_planning_service),
+    current_user: CurrentUser = Depends(require_permission("planning.row.manage")),
+) -> dict:
+    """
+    "Load everything from that field's data automatically" -- the checkbox
+    next to the manual per-row 🔗 flow. Pulls up to ``limit`` records
+    (25/50/100, or every record when ``limit`` is omitted/null) from the
+    sheet's configured ITEM source module and creates one already-linked
+    row per record, skipping any record already represented by an
+    existing row.
+    """
+    grid = await service.get_grid(sheet_id)
+    rows = await service.auto_populate_rows_from_item_source(
+        sheet_id, limit=payload.limit, user_id=current_user.id, username=current_user.username
+    )
+    data = []
+    for row in rows:
+        row_data = PlanningRowRead.model_validate(_row_to_read_dict(row)).model_dump(mode="json")
+        row_data["label"] = await service.compute_row_item_display(grid["sheet"], row)
+        data.append(row_data)
+    return build_success_response(
+        data=data, request_id=request.state.request_id, message=f"Added {len(rows)} row(s)."
+    )
 
 
 @router.put(
@@ -356,6 +464,43 @@ async def link_row_to_source_record(
     data = PlanningCellRead.model_validate(cell).model_dump(mode="json")
     data["display_value"] = display_value
     return build_success_response(data=data, request_id=request.state.request_id, message="Row linked.")
+
+
+@router.post(
+    "/sheets/{sheet_id}/columns/{column_id}/auto-link",
+    status_code=status.HTTP_200_OK,
+    summary="Bulk-link every row's cell under this column to the record its ITEM is already linked to",
+)
+async def auto_link_column_to_item_records(
+    sheet_id: uuid.UUID,
+    column_id: uuid.UUID,
+    request: Request,
+    service: PlanningService = Depends(get_planning_service),
+    current_user: CurrentUser = Depends(require_permission("planning.cell.edit")),
+) -> dict:
+    """
+    "Load everything from that field's data automatically" for a regular
+    linked-lookup column: instead of clicking 🔗 once per row for this
+    column too, reuse whatever record each row's ITEM is already linked
+    to (only valid when this column and ITEM share the same source
+    module).
+    """
+    cells = await service.auto_link_column_to_item_records(
+        sheet_id, column_id, user_id=current_user.id, username=current_user.username
+    )
+    column = await service.get_column(sheet_id, column_id)
+    data = []
+    for cell in cells:
+        display_value = await service.compute_cell_display_value(column, cell, row_id=cell.row_id)
+        cell_data = PlanningCellRead.model_validate(cell).model_dump(mode="json")
+        cell_data["display_value"] = display_value
+        data.append(cell_data)
+    return build_success_response(
+        data=data, request_id=request.state.request_id, message=f"Linked {len(cells)} row(s)."
+    )
+
+
+
 
 
 @router.get(
@@ -399,6 +544,31 @@ async def set_column_role_lock(
     return build_success_response(data=data, request_id=request.state.request_id, message="Column role lock updated.")
 
 
+@router.put(
+    "/sheets/{sheet_id}/columns/{column_id}/status-color-enabled",
+    summary="Opt a column in/out of carrying CRM-style cell status colors",
+)
+async def set_column_status_color_enabled(
+    sheet_id: uuid.UUID,
+    column_id: uuid.UUID,
+    payload: PlanningColumnStatusColorToggle,
+    request: Request,
+    service: PlanningService = Depends(get_planning_service),
+    current_user: CurrentUser = Depends(require_permission("planning.column.manage")),
+) -> dict:
+    """
+    Controlled from the Columns panel, alongside Visible/Frozen -- unlike
+    those two (per-user local display prefs), this is a real structural
+    property of the column itself, so it's backend-persisted and visible
+    to every user, not just the one who set it.
+    """
+    column = await service.set_column_status_color_enabled(
+        sheet_id, column_id, enabled=payload.enable_status_color, user_id=current_user.id, username=current_user.username
+    )
+    data = PlanningColumnRead.model_validate(column).model_dump(mode="json")
+    return build_success_response(data=data, request_id=request.state.request_id, message="Column status-color setting updated.")
+
+
 # ---------------------------------------------------------------------------
 # Rows (item lines, unlimited)
 # ---------------------------------------------------------------------------
@@ -431,6 +601,28 @@ async def rename_row(
     row = await service.rename_row(sheet_id, row_id, label=payload.label, user_id=current_user.id, username=current_user.username)
     data = PlanningRowRead.model_validate(_row_to_read_dict(row)).model_dump(mode="json")
     return build_success_response(data=data, request_id=request.state.request_id, message="Row renamed.")
+
+
+@router.put("/sheets/{sheet_id}/rows/{row_id}/description", summary="Set/clear a row's ITEM-cell free-text description")
+async def set_row_description(
+    sheet_id: uuid.UUID,
+    row_id: uuid.UUID,
+    payload: PlanningRowDescriptionUpdate,
+    request: Request,
+    service: PlanningService = Depends(get_planning_service),
+    current_user: CurrentUser = Depends(require_permission("planning.cell.edit")),
+) -> dict:
+    """
+    Set or clear a row's ITEM-cell free-text description.
+
+    Mirrors set_cell_description for the built-in ITEM column, which
+    lives directly on the row rather than as a separate cell.
+    """
+    row = await service.set_row_description(
+        sheet_id, row_id, description=payload.description, user_id=current_user.id, username=current_user.username
+    )
+    data = PlanningRowRead.model_validate(_row_to_read_dict(row)).model_dump(mode="json")
+    return build_success_response(data=data, request_id=request.state.request_id, message="Row description updated.")
 
 
 @router.post("/sheets/{sheet_id}/rows/{row_id}/move", summary="Move a row to a new position")
@@ -471,6 +663,26 @@ async def get_row_history(
 ) -> dict:
     entries = await service.get_row_history(sheet_id, row_id)
     data = [PlanningChangeLogRead.model_validate(e).model_dump(mode="json") for e in entries]
+    return build_success_response(data=data, request_id=request.state.request_id)
+
+
+@router.get(
+    "/sheets/{sheet_id}/rows/{row_id}/mum-status-history",
+    summary="Get the Approval Date hover feed: every status-color change on this row's Mum-series columns",
+)
+async def get_mum_column_status_history(
+    sheet_id: uuid.UUID,
+    row_id: uuid.UUID,
+    request: Request,
+    service: PlanningService = Depends(get_planning_service),
+    _current_user: CurrentUser = Depends(require_permission("planning.read")),
+) -> dict:
+    """
+    Document: "When Mum 45 was blue and when Mum 46 was blue and other
+    color too" -- powers the eye/history icon on the Approval Date cell.
+    """
+    entries = await service.get_mum_column_status_history_for_row(sheet_id, row_id)
+    data = [MumColumnStatusHistoryEntry(**e).model_dump(mode="json") for e in entries]
     return build_success_response(data=data, request_id=request.state.request_id)
 
 
@@ -523,6 +735,31 @@ async def set_cell_status(
     )
     data = PlanningCellRead.model_validate(cell).model_dump(mode="json")
     return build_success_response(data=data, request_id=request.state.request_id, message="Cell status updated.")
+
+
+@router.put("/sheets/{sheet_id}/rows/{row_id}/columns/{column_id}/description", summary="Set/clear a cell's free-text description")
+async def set_cell_description(
+    sheet_id: uuid.UUID,
+    row_id: uuid.UUID,
+    column_id: uuid.UUID,
+    payload: PlanningCellDescriptionUpdate,
+    request: Request,
+    service: PlanningService = Depends(get_planning_service),
+    current_user: CurrentUser = Depends(require_permission("planning.cell.edit")),
+) -> dict:
+    """
+    Set or clear a cell's free-text description note.
+
+    Independent of the cell's value/status; the description button only
+    appears in the UI when the cell's column has enable_description set,
+    but this write endpoint itself doesn't require that -- a description
+    written while the setting was on is preserved if it's later turned off.
+    """
+    cell = await service.set_cell_description(
+        sheet_id, row_id, column_id, description=payload.description, user_id=current_user.id, username=current_user.username
+    )
+    data = PlanningCellRead.model_validate(cell).model_dump(mode="json")
+    return build_success_response(data=data, request_id=request.state.request_id, message="Cell description updated.")
 
 
 # ---------------------------------------------------------------------------

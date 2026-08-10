@@ -17,7 +17,7 @@ import { SelectField, TextAreaField, TextField } from "@/components/fields";
 import { apiDelete, apiGet, apiPatch, apiPost, toQueryString } from "@/lib/api";
 import { createNameResolver } from "@/lib/nameResolver";
 import type { PaginationMeta } from "@/types";
-import type { Buyer, BuyerContact } from "@/types/buyers";
+import type { Buyer, BuyerContact, BuyerGrade, BuyerPotential } from "@/types/buyers";
 
 const MAX_CHIPS = 5;
 
@@ -268,8 +268,10 @@ export function BuyersPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    const existingBuyer = rows.find((b) => b.id === editingId);
     const payload = {
       ...form,
+      version: existingBuyer?.version,
       buyer_type: form.buyer_type || null,
       city: form.city || null,
       current_status: form.current_status || null,
@@ -280,12 +282,22 @@ export function BuyersPage() {
     };
     try {
       if (modalMode === "create") {
-        await apiPost("/buyers", payload);
+        const { data: newBuyer } = await apiPost<Buyer>("/buyers", payload);
+        if (newBuyer) {
+          setRows((prev) => [newBuyer, ...prev]);
+          setPagination((prev) => (prev ? { ...prev, total_records: (prev.total_records || 0) + 1 } : prev));
+        } else {
+          reload();
+        }
       } else if (editingId) {
-        await apiPatch(`/buyers/${editingId}`, payload);
+        const { data: updatedBuyer } = await apiPatch<Buyer>(`/buyers/${editingId}`, payload);
+        if (updatedBuyer) {
+          setRows((prev) => prev.map((b) => (b.id === editingId ? updatedBuyer : b)));
+        } else {
+          setRows((prev) => prev.map((b) => (b.id === editingId ? ({ ...b, ...payload } as Buyer) : b)));
+        }
       }
       setModalMode(null);
-      reload();
     } catch (err) {
       setError(err);
     }
@@ -295,7 +307,7 @@ export function BuyersPage() {
     if (!window.confirm(`Set ${buyer.company_name} to Inactive?`)) return;
     try {
       await apiPost(`/buyers/${buyer.id}/deactivate`, {});
-      reload();
+      setRows((prev) => prev.map((b) => (b.id === buyer.id ? { ...b, status: "inactive" } : b)));
     } catch (err) {
       setError(err);
     }
@@ -304,7 +316,7 @@ export function BuyersPage() {
   async function handleActivate(buyer: Buyer) {
     try {
       await apiPost(`/buyers/${buyer.id}/activate`, {});
-      reload();
+      setRows((prev) => prev.map((b) => (b.id === buyer.id ? { ...b, status: "active" } : b)));
     } catch (err) {
       setError(err);
     }
@@ -314,7 +326,8 @@ export function BuyersPage() {
     if (!window.confirm(`Delete ${buyer.company_name}? This cannot be undone.`)) return;
     try {
       await apiDelete(`/buyers/${buyer.id}`);
-      reload();
+      setRows((prev) => prev.filter((b) => b.id !== buyer.id));
+      setPagination((prev) => (prev ? { ...prev, total_records: Math.max(0, (prev.total_records || 1) - 1) } : prev));
     } catch (err) {
       setError(err);
     }
@@ -323,7 +336,7 @@ export function BuyersPage() {
   async function handleGradeChange(buyer: Buyer, grade: string) {
     try {
       await apiPatch(`/buyers/${buyer.id}/grade`, { buyer_grade: grade || null });
-      reload();
+      setRows((prev) => prev.map((b) => (b.id === buyer.id ? { ...b, buyer_grade: (grade as BuyerGrade) || null } : b)));
     } catch (err) {
       setError(err);
     }
@@ -332,7 +345,7 @@ export function BuyersPage() {
   async function handlePotentialChange(buyer: Buyer, potential: string) {
     try {
       await apiPatch(`/buyers/${buyer.id}/potential`, { potential: potential || null });
-      reload();
+      setRows((prev) => prev.map((b) => (b.id === buyer.id ? { ...b, potential: (potential as BuyerPotential) || null } : b)));
     } catch (err) {
       setError(err);
     }

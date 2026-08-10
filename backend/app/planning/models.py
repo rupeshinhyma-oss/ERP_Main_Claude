@@ -141,8 +141,11 @@ class PlanningChangeAction(str, Enum):
     COLUMN_DELETED = "COLUMN_DELETED"
     COLUMN_SOURCE_CONFIGURED = "COLUMN_SOURCE_CONFIGURED"
     COLUMN_ROLE_LOCK_CHANGED = "COLUMN_ROLE_LOCK_CHANGED"
+    COLUMN_STATUS_COLOR_TOGGLED = "COLUMN_STATUS_COLOR_TOGGLED"
     CELL_VALUE_CHANGED = "CELL_VALUE_CHANGED"
     CELL_STATUS_CHANGED = "CELL_STATUS_CHANGED"
+    CELL_DESCRIPTION_CHANGED = "CELL_DESCRIPTION_CHANGED"
+    ROW_DESCRIPTION_CHANGED = "ROW_DESCRIPTION_CHANGED"
 
 
 class PlanningSheet(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Base):
@@ -153,6 +156,38 @@ class PlanningSheet(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Base):
     name: Mapped[str] = mapped_column(String(150), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    # --- ITEM column data source (mirrors PlanningColumn's dynamic-source feature) ---
+    # The first "ITEM" column of every sheet is not a row in planning_columns
+    # (it doubles as the row's own label/identity), so it needs its own home
+    # for the same "extract data from other parts" config admins can apply
+    # to any other column. Kept on the sheet (one config for the whole
+    # column) rather than per-row, exactly like PlanningColumn.source_*.
+    item_source_type: Mapped[PlanningColumnSourceType] = mapped_column(
+        SAEnum(PlanningColumnSourceType, name="planning_column_source_type", native_enum=False, values_callable=_enum_values),
+        nullable=False,
+        default=PlanningColumnSourceType.MANUAL,
+    )
+    item_source_module: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    item_source_field: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    item_formula_expression: Mapped[str | None] = mapped_column(Text, nullable=True)
+    item_enable_description: Mapped[bool] = mapped_column(
+        default=False,
+        nullable=False,
+        doc="When set, every row's ITEM cell shows a description button (pencil icon on hover) "
+        "for a free-text note independent of the row's label/value.",
+    )
+    item_auto_populate_enabled: Mapped[bool] = mapped_column(
+        default=False,
+        nullable=False,
+        doc="Persisted state of the 'Load all records automatically' checkbox for the ITEM "
+        "column when it's LINKED_LOOKUP. Mirrors PlanningColumn.auto_populate_enabled.",
+    )
+    item_auto_populate_limit: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+        doc="Persisted state of the ITEM column's 'How many records to load' selector. NULL means 'All'.",
+    )
 
     created_by: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("users.id"), nullable=False)
 
@@ -178,6 +213,19 @@ class PlanningRow(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Base):
     )
     label: Mapped[str] = mapped_column(String(500), nullable=False)
     position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    linked_record_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(),
+        nullable=True,
+        doc="Only meaningful when the sheet's item_source_type is LINKED_LOOKUP. The ID of "
+        "the record in item_source_module this row's ITEM cell is linked to (e.g. a "
+        "specific Product's id) -- same pattern as PlanningCell.linked_record_id.",
+    )
+    description: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        doc="Free-text note for this row's ITEM cell, independent of its label/value. Only "
+        "surfaced in the UI when the sheet's enable_description is set.",
+    )
 
     created_by: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("users.id"), nullable=False)
     updated_by: Mapped[uuid.UUID | None] = mapped_column(GUID(), ForeignKey("users.id"), nullable=True)
@@ -256,6 +304,33 @@ class PlanningColumn(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Base)
         "parser, never eval()). References other columns in the same row by name, e.g. "
         "'Mum40 * Rate'. Required for FORMULA columns.",
     )
+    enable_description: Mapped[bool] = mapped_column(
+        default=False,
+        nullable=False,
+        doc="When set, every cell in this column shows a description button (pencil icon on "
+        "hover) for a free-text note independent of the cell's value/status.",
+    )
+    auto_populate_enabled: Mapped[bool] = mapped_column(
+        default=False,
+        nullable=False,
+        doc="Persisted state of the 'Load all records automatically' checkbox for a "
+        "LINKED_LOOKUP column. Purely a remembered UI preference -- re-running the actual "
+        "bulk-link job is still a separate explicit action (see PlanningService.auto_link_column_to_item_records), "
+        "this field only makes the checkbox itself survive closing and reopening the config modal.",
+    )
+    auto_populate_limit: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+        doc="Persisted state of the 'How many records to load' selector (25/50/100), paired with "
+        "auto_populate_enabled. NULL means 'All'.",
+    )
+    enable_status_color: Mapped[bool] = mapped_column(
+        default=False,
+        nullable=False,
+        doc="Opt-in per column: when False (the default for every column, including existing "
+        "ones as of this field's introduction), cells in this column cannot carry a CRM-style "
+        "status color and the status-dot button is hidden entirely -- set True to allow it.",
+    )
 
     created_by: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("users.id"), nullable=False)
     updated_by: Mapped[uuid.UUID | None] = mapped_column(GUID(), ForeignKey("users.id"), nullable=True)
@@ -297,6 +372,12 @@ class PlanningCell(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         "the record in that column's source_module this row is linked to (e.g. a specific "
         "Product's id). Not a DB foreign key -- the target table varies by source_module, "
         "so referential integrity is enforced in app.planning.service, not at the schema level.",
+    )
+    description: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        doc="Free-text note for this cell, independent of its value/status. Only surfaced in "
+        "the UI when the cell's column has enable_description set.",
     )
 
     updated_by: Mapped[uuid.UUID | None] = mapped_column(GUID(), ForeignKey("users.id"), nullable=True)

@@ -22,6 +22,7 @@ export interface BuyerContact {
 
 export interface Buyer {
   id: string;
+  version?: number;
   company_name: string;
   buyer_type?: BuyerType | null;
   country_id: string;

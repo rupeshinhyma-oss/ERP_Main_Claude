@@ -19,13 +19,13 @@ export function CurrenciesPage() {
       breadcrumbTrail={["Master Data", "Currencies"]}
       newButtonLabel="+ New Currency"
       searchPlaceholder="Search name or code or Sr. No..."
-      columnHeaders={["Name", "Code", "Symbol", "Decimal Places", "Status"]}
+      columnHeaders={["CURRENCY NAME", "CODE", "SYMBOL", "DECIMAL PLACES", "STATUS"]}
       columns={[
-        { header: "Name", render: (c) => <span className="cell-primary">{c.name}</span> },
-        { header: "Code", render: (c) => c.code },
-        { header: "Symbol", render: (c) => dash(c.symbol) },
-        { header: "Decimal Places", render: (c) => c.decimal_places },
-        { header: "Status", render: (c) => <StatusBadge status={c.status} /> },
+        { header: "CURRENCY NAME", render: (c) => <span className="cell-primary">{c.name}</span> },
+        { header: "CODE", render: (c) => c.code },
+        { header: "SYMBOL", render: (c) => dash(c.symbol) },
+        { header: "DECIMAL PLACES", render: (c) => c.decimal_places },
+        { header: "STATUS", render: (c) => <StatusBadge status={c.status} /> },
       ]}
       importHeaders={[
         { key: "name", label: "Currency Name", required: true },

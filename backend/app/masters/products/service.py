@@ -121,7 +121,10 @@ class ProductService:
     async def create(self, **field_values: Any) -> Product:
         """Create a new product, validating code uniqueness and every foreign-key reference."""
         product_code = field_values.get("product_code")
-        if product_code:
+        if not product_code:
+            import random
+            field_values["product_code"] = f"PRD-{random.randint(100000, 999999)}"
+        else:
             existing = await self.repository.get_by_code(product_code)
             if existing is not None:
                 raise ConflictException(

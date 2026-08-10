@@ -47,6 +47,7 @@ const EMPTY: FormState = {
   hsn_id: "",
   uom_id: "",
   secondary_uom_id: "",
+  organization_id: "",
   refund_vat_percent: "",
   license_certificate_required: "",
   conversion_factor: "",
@@ -68,6 +69,8 @@ const EMPTY: FormState = {
   is_purchasable: "true",
   is_sellable: "true",
   status: "active",
+  images_json: "[]",
+  image_url: "",
 };
 
 /** L x W x H in cm -> cubic metres, to 6dp. Blank unless all three are set. */
@@ -95,6 +98,8 @@ export function ProductsPage() {
   const brands = useLookup<Brand>("/masters/brands", 250);
   const hsnCodes = useLookup<Hsn>("/masters/hsn", 250);
   const uoms = useLookup<Uom>("/masters/uom", 250);
+  const organizations = useLookup<{ id: string; name: string }>("/masters/company-list", 250);
+  const existingProducts = useLookup<Product>("/masters/products", 1000);
 
   const [categoryFilter, setCategoryFilter] = useState("");
   const [subCategoryFilter, setSubCategoryFilter] = useState("");
@@ -112,6 +117,7 @@ export function ProductsPage() {
     brands.loaded,
     hsnCodes.loaded,
     uoms.loaded,
+    organizations.loaded,
   ].join("-");
 
   const scopedFilterSubCategories = categoryFilter
@@ -243,6 +249,7 @@ export function ProductsPage() {
         "Sub Category",
         "HSN Code",
         "UOM",
+        "Organization",
         "Pack. Qty",
         "Pack. Gross Weight",
         "Pack. Unit CBM",
@@ -295,6 +302,10 @@ export function ProductsPage() {
             const u = uoms.items.find((x) => x.id === p.uom_id);
             return u ? `${u.name} (${u.code})` : "—";
           },
+        },
+        {
+          header: "Organization",
+          render: (p) => organizations.items.find((x) => x.id === p.organization_id)?.name ?? "—",
         },
         {
           header: "Pkg Qty",
@@ -352,11 +363,13 @@ export function ProductsPage() {
           hsn_id: str(item?.hsn_id),
           uom_id: str(item?.uom_id),
           secondary_uom_id: str(item?.secondary_uom_id),
+          organization_id: str(item?.organization_id),
           refund_vat_percent: str(item?.refund_vat_percent),
           license_certificate_required: str(item?.license_certificate_required),
           conversion_factor: str(item?.conversion_factor),
           specification: str(item?.specification),
           description: str(item?.description),
+          images_json: JSON.stringify(item ? (Array.isArray(item.images) && item.images.length > 0 ? item.images : (item.image_url ? [item.image_url] : [])) : []),
           image_url: str(item ? item.image_url || (item.images && item.images[0]) : ""),
           packaging_quantity: str(item?.packaging_quantity),
           packaging_net_weight: str(item?.packaging_net_weight),
@@ -395,7 +408,7 @@ export function ProductsPage() {
         const tallyName = f.product_name_tally.trim();
 
         return {
-          product_code: f.product_code.trim(),
+          product_code: nullIfBlank(f.product_code),
           product_name_tally: tallyName,
           product_name_invoice: nullIfBlank(f.product_name_invoice),
           product_name: tallyName,
@@ -406,12 +419,17 @@ export function ProductsPage() {
           hsn_id: f.hsn_id || null,
           uom_id: f.uom_id,
           secondary_uom_id: secUomId,
+          organization_id: f.organization_id || null,
           refund_vat_percent: numOrNull(f.refund_vat_percent) ?? 0,
           license_certificate_required: nullIfBlank(f.license_certificate_required),
           conversion_factor: numOrNull(f.conversion_factor),
           specification: nullIfBlank(f.specification),
           description: nullIfBlank(f.description),
-          images: f.image_url ? [f.image_url] : [],
+          images: (() => {
+            try { return JSON.parse(f.images_json || "[]"); }
+            catch { return f.image_url ? [f.image_url] : []; }
+          })(),
+          image_url: nullIfBlank(f.image_url),
           packaging_quantity: numOrNull(f.packaging_quantity),
           packaging_net_weight: numOrNull(f.packaging_net_weight),
           packaging_gross_weight: numOrNull(f.packaging_gross_weight),
@@ -451,7 +469,58 @@ export function ProductsPage() {
           <>
             <div className="section-title">Identity</div>
             <div className="form-grid">
-              <TextField id="product_name_tally" label="Product Name (As per Tally) *" required maxLength={255} placeholder="Name as in Tally" value={f.product_name_tally} onChange={(v) => set("product_name_tally", v)} />
+              <div style={{ position: "relative" }}>
+                <TextField
+                  id="product_name_tally"
+                  label="Product Name (As per Tally) *"
+                  required
+                  maxLength={255}
+                  placeholder="Name as in Tally"
+                  value={f.product_name_tally}
+                  onChange={(v) => set("product_name_tally", v)}
+                />
+                {(() => {
+                  const cleanTyped = (f.product_name_tally || "").trim().toLowerCase().replace(/[\s-]/g, "");
+                  if (!cleanTyped) return null;
+                  const matches = existingProducts.items.filter((p) => {
+                    const pName = (p.product_name_tally || p.product_name || "").toLowerCase().replace(/[\s-]/g, "");
+                    const pCode = (p.product_code || "").toLowerCase().replace(/[\s-]/g, "");
+                    return pName.includes(cleanTyped) || pCode.includes(cleanTyped);
+                  }).slice(0, 5);
+                  const exact = existingProducts.items.find((p) => {
+                    const pName = (p.product_name_tally || p.product_name || "").toLowerCase().replace(/[\s-]/g, "");
+                    const pCode = (p.product_code || "").toLowerCase().replace(/[\s-]/g, "");
+                    return pName === cleanTyped || pCode === cleanTyped;
+                  });
+
+                  return (
+                    <>
+                      {exact && (
+                        <div style={{ marginTop: "4px", fontSize: "12px", color: "#dc2626", fontWeight: 600, display: "flex", alignItems: "center", gap: "4px" }}>
+                          <span>⚠️</span> Product "{exact.product_name_tally || exact.product_name}" (Code: {exact.product_code || "—"}) already exists!
+                        </div>
+                      )}
+                      {matches.length > 0 && !exact && (
+                        <div style={{ position: "absolute", top: "100%", left: 0, right: 0, zIndex: 100, background: "#ffffff", border: "1px solid #cbd5e0", borderRadius: "6px", boxShadow: "0 4px 12px rgba(0,0,0,0.15)", maxHeight: "160px", overflowY: "auto", marginTop: "2px" }}>
+                          <div style={{ padding: "6px 12px", fontSize: "11px", fontWeight: 700, color: "#64748b", background: "#f8fafc", borderBottom: "1px solid #f1f5f9" }}>
+                            Existing Similar Products:
+                          </div>
+                          {matches.map((p) => (
+                            <div
+                              key={p.id}
+                              style={{ padding: "8px 12px", fontSize: "12.5px", cursor: "pointer", borderBottom: "1px solid #f8fafc", display: "flex", justifyContent: "space-between", background: "#fff" }}
+                              onClick={() => set("product_name_tally", p.product_name_tally || p.product_name || "")}
+                            >
+                              <span style={{ fontWeight: 600, color: "#1e293b" }}>{p.product_name_tally || p.product_name}</span>
+                              <span style={{ color: "#64748b", fontSize: "11.5px" }}>Code: {p.product_code || "—"}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
+              </div>
               <TextField id="product_name_invoice" label="Product Name (As per Invoice)" maxLength={255} placeholder="Name for Tax Invoices" value={f.product_name_invoice} onChange={(v) => set("product_name_invoice", v)} />
               <TextField id="product_code" label="Product Code" maxLength={50} placeholder="e.g. PRD-001" value={f.product_code} onChange={(v) => set("product_code", v)} />
             </div>
@@ -518,6 +587,14 @@ export function ProductsPage() {
                   </option>
                 ))}
               </SelectField>
+              <SelectField id="organization_id" label="Organization" value={f.organization_id} onChange={(v) => set("organization_id", v)}>
+                <option value="">-- Select Organization --</option>
+                {organizations.items.map((org) => (
+                  <option key={org.id} value={org.id}>
+                    {org.name}
+                  </option>
+                ))}
+              </SelectField>
             </div>
 
             <div className="section-title">Compliance &amp; License Requirements</div>
@@ -558,92 +635,176 @@ export function ProductsPage() {
               />
             </div>
 
-            <div className="section-title">Image Of Product</div>
+            <div className="section-title">Image Of Product (Max 5 images, &lt;5MB each)</div>
             <div className="form-grid" style={{ gridTemplateColumns: "1fr" }}>
               <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                 <label style={{ fontSize: "12.5px", fontWeight: 600, color: "var(--color-text-secondary)" }}>
-                  Product Image (Photo)
+                  Product Images (Photos)
                 </label>
-                <div style={{ display: "flex", gap: "16px", alignItems: "center" }}>
-                  <div
-                    style={{
-                      width: "110px",
-                      height: "110px",
-                      borderRadius: "8px",
-                      border: "2px dashed #cbd5e0",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      background: "#f8fafc",
-                      overflow: "hidden",
-                    }}
-                  >
-                    {f.image_url ? (
-                      <img src={resolveImageUrl(f.image_url)} alt="Product Preview" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                    ) : (
-                      <div style={{ textAlign: "center", color: "#94a3b8" }}>
-                        <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                          <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-                          <circle cx="8.5" cy="8.5" r="1.5" />
-                          <polyline points="21 15 16 10 5 21" />
-                        </svg>
-                        <div style={{ fontSize: "11px", marginTop: "4px" }}>No Image</div>
-                      </div>
-                    )}
-                  </div>
+                {(() => {
+                  let imageList: string[] = [];
+                  try {
+                    imageList = JSON.parse(f.images_json || "[]");
+                  } catch {
+                    imageList = f.image_url ? [f.image_url] : [];
+                  }
 
-                  <div>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      id="product_image_file"
-                      style={{ display: "none" }}
-                      onChange={(e) => {
-                        const file = e.target.files?.[0];
-                        if (file) {
-                          // Instant on-screen preview
-                          const reader = new FileReader();
-                          reader.onload = (uploadEvent) => {
-                            const base64Data = uploadEvent.target?.result as string;
-                            if (base64Data) set("image_url", base64Data);
-                          };
-                          reader.readAsDataURL(file);
+                  return (
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: "14px", alignItems: "center" }}>
+                      {imageList.map((imgUrl, index) => (
+                        <div
+                          key={index}
+                          style={{
+                            position: "relative",
+                            width: "110px",
+                            height: "110px",
+                            borderRadius: "8px",
+                            border: "1px solid #cbd5e0",
+                            background: "#f8fafc",
+                            overflow: "hidden",
+                            boxShadow: "0 1px 3px rgba(0,0,0,0.08)",
+                          }}
+                        >
+                          <img src={resolveImageUrl(imgUrl)} alt={`Product Preview ${index + 1}`} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                          <button
+                            type="button"
+                            style={{
+                              position: "absolute",
+                              top: "4px",
+                              right: "4px",
+                              background: "rgba(220, 38, 38, 0.9)",
+                              color: "#ffffff",
+                              border: "none",
+                              borderRadius: "50%",
+                              width: "22px",
+                              height: "22px",
+                              cursor: "pointer",
+                              fontSize: "12px",
+                              fontWeight: "bold",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              boxShadow: "0 2px 4px rgba(0,0,0,0.2)",
+                            }}
+                            title="Remove Image"
+                            onClick={() => {
+                              const updated = imageList.filter((_, i) => i !== index);
+                              set("images_json", JSON.stringify(updated));
+                              set("image_url", updated[0] || "");
+                            }}
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      ))}
 
-                          // Upload to Supabase Storage in background
-                          const formData = new FormData();
-                          formData.append("file", file);
-                          apiPostMultipart<{ url: string }>("/masters/products/upload-image", formData)
-                            .then((res) => {
-                              if (res.data?.url) set("image_url", res.data.url);
-                            })
-                            .catch((err) => {
-                              console.warn("Background upload to Supabase fell back to local preview:", err);
-                            });
-                        }
-                      }}
-                    />
-                    <label
-                      htmlFor="product_image_file"
-                      className="btn btn-secondary"
-                      style={{ padding: "8px 16px", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "6px" }}
-                    >
-                      📁 Select Image
-                    </label>
-                    {f.image_url && (
-                      <button
-                        type="button"
-                        className="btn"
-                        style={{ marginLeft: "8px", background: "#ef4444", color: "#ffffff", padding: "8px 12px" }}
-                        onClick={() => set("image_url", "")}
-                      >
-                        Remove
-                      </button>
-                    )}
-                    <div style={{ fontSize: "12px", color: "#64748b", marginTop: "6px" }}>
-                      Upload PNG, JPG, or WEBP photo of the product.
+                      {imageList.length < 5 && (
+                        <div>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            multiple
+                            id="product_multi_image_file"
+                            style={{ display: "none" }}
+                            onChange={async (e) => {
+                              const rawFiles = Array.from(e.target.files || []);
+                              if (rawFiles.length === 0) return;
+
+                              const availableSlots = 5 - imageList.length;
+                              if (availableSlots <= 0) {
+                                alert("Maximum limit of 5 images per product reached.");
+                                e.target.value = "";
+                                return;
+                              }
+
+                              if (rawFiles.length > availableSlots) {
+                                alert(`You selected ${rawFiles.length} images, but only ${availableSlots} more image(s) can be added (max 5 total).`);
+                              }
+
+                              const filesToProcess = rawFiles.slice(0, availableSlots);
+                              const newBase64s: string[] = [];
+
+                              for (const file of filesToProcess) {
+                                if (file.size > 5 * 1024 * 1024) {
+                                  alert(`File "${file.name}" exceeds 5MB size limit and was skipped.`);
+                                  continue;
+                                }
+
+                                const base64Data = await new Promise<string>((resolve) => {
+                                  const reader = new FileReader();
+                                  reader.onload = (ev) => resolve((ev.target?.result as string) || "");
+                                  reader.readAsDataURL(file);
+                                });
+
+                                if (base64Data) {
+                                  newBase64s.push(base64Data);
+                                }
+                              }
+
+                              if (newBase64s.length > 0) {
+                                const combinedList = [...imageList, ...newBase64s];
+                                set("images_json", JSON.stringify(combinedList));
+                                set("image_url", combinedList[0]);
+
+                                // Upload files to server in background and replace base64 with server URLs if successful
+                                filesToProcess.forEach((file, idx) => {
+                                  const base64Str = newBase64s[idx];
+                                  if (!base64Str) return;
+
+                                  const formData = new FormData();
+                                  formData.append("file", file);
+                                  apiPostMultipart<{ url: string }>("/masters/products/upload-image", formData)
+                                    .then((res) => {
+                                      if (res.data?.url) {
+                                        const serverUrl = res.data.url;
+                                        // Read latest image list and swap matching base64
+                                        const currentList: string[] = [...combinedList];
+                                        const matchIdx = currentList.indexOf(base64Str);
+                                        if (matchIdx !== -1) {
+                                          currentList[matchIdx] = serverUrl;
+                                          set("images_json", JSON.stringify(currentList));
+                                          set("image_url", currentList[0]);
+                                        }
+                                      }
+                                    })
+                                    .catch((err) => {
+                                      console.warn("Background upload fell back to local preview:", err);
+                                    });
+                                });
+                              }
+
+                              e.target.value = "";
+                            }}
+                          />
+                          <label
+                            htmlFor="product_multi_image_file"
+                            style={{
+                              width: "110px",
+                              height: "110px",
+                              borderRadius: "8px",
+                              border: "2px dashed #3b82f6",
+                              display: "flex",
+                              flexDirection: "column",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              background: "#eff6ff",
+                              cursor: "pointer",
+                              color: "#2563eb",
+                              fontSize: "12px",
+                              fontWeight: 600,
+                              textAlign: "center",
+                              padding: "8px",
+                            }}
+                          >
+                            <span style={{ fontSize: "20px" }}>📷</span>
+                            <span>+ Add Image</span>
+                            <span style={{ fontSize: "10px", color: "#64748b", fontWeight: 400 }}>({imageList.length}/5, &lt;5MB)</span>
+                          </label>
+                        </div>
+                      )}
                     </div>
-                  </div>
-                </div>
+                  );
+                })()}
               </div>
             </div>
 
@@ -668,6 +829,7 @@ export function ProductsPage() {
   const brand = p ? brands.items.find((b) => b.id === p.brand_id) : undefined;
   const hsn = p ? hsnCodes.items.find((h) => h.id === p.hsn_id) : undefined;
   const uom = p ? uoms.items.find((u) => u.id === p.uom_id) : undefined;
+  const org = p ? organizations.items.find((o) => o.id === p.organization_id) : undefined;
 
   const length = p ? p.length_cm ?? p.length : null;
   const width = p ? p.width_cm ?? p.width : null;
@@ -725,6 +887,7 @@ export function ProductsPage() {
                 { label: "Category", value: cat ? cat.name : "—" },
                 { label: "Sub Category", value: subCat ? subCat.name : "—" },
                 { label: "HSN Code", value: hsn ? hsn.code : "—" },
+                { label: "Organization", value: org ? org.name : "—" },
                 {
                   label: "Refund VAT % / GST %",
                   value: (

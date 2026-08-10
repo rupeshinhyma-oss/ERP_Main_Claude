@@ -27,23 +27,23 @@ export function CitiesPage() {
       apiBase="/masters/cities"
       permissionPrefix="city"
       entityName="city"
-      heading="Prefectures & Counties (Second & Third Level)"
-      subtitle="Second and third level administrative divisions of China: Prefectures, Prefecture-level Cities, Autonomous Prefectures, Counties, and Districts."
-      breadcrumbTrail={["Master Data", "Prefectures & Counties"]}
-      newButtonLabel="+ New Prefecture / County"
-      searchPlaceholder="Search prefecture or county name or Sr. No..."
+      heading="City Master"
+      subtitle="Administrative cities, prefectures, and districts."
+      breadcrumbTrail={["Master Data", "Cities"]}
+      newButtonLabel="+ ADD NEW CITY"
+      searchPlaceholder="Search city name or Sr. No..."
       reloadToken={`${countries.loaded}-${states.loaded}`}
-      columnHeaders={["Prefecture / County", "Province / Region", "Country", "Status"]}
+      columnHeaders={["CITY", "PROVINCE / REGION", "COUNTRY", "STATUS"]}
       columns={[
-        { header: "Prefecture / County", render: (c) => <span className="cell-primary">{c.name}</span> },
-        { header: "Province / Region", render: (c) => stateName(c.state_id) },
-        { header: "Country", render: (c) => countryName(c.country_id) },
-        { header: "Status", render: (c) => <StatusBadge status={c.status} /> },
+        { header: "CITY", render: (c) => <span className="cell-primary">{c.name}</span> },
+        { header: "PROVINCE / REGION", render: (c) => stateName(c.state_id) },
+        { header: "COUNTRY", render: (c) => countryName(c.country_id) },
+        { header: "STATUS", render: (c) => <StatusBadge status={c.status} /> },
       ]}
       importHeaders={[
         { key: "country_code", label: "Country Code", required: true },
         { key: "state_name", label: "Province / Region Name", required: true },
-        { key: "name", label: "Prefecture / County Name", required: true },
+        { key: "name", label: "City Name", required: true },
         { key: "status", label: "Status (active/inactive)" },
       ]}
       emptyForm={EMPTY}
@@ -109,13 +109,13 @@ export function CitiesPage() {
                 </option>
               ))}
             </SelectField>
-            <TextField id="name" label="Prefecture / County Name *" required maxLength={150} value={f.name} onChange={(v) => set("name", v)} />
+            <TextField id="name" label="City Name *" required maxLength={150} value={f.name} onChange={(v) => set("name", v)} />
             <StatusSelectField value={f.status} onChange={(v) => set("status", v)} />
           </div>
         );
       }}
       detailFields={(c) => [
-        { label: "Prefecture / County Name", value: c.name, fullWidth: true },
+        { label: "City Name", value: c.name, fullWidth: true },
         { label: "Province / Region", value: stateName(c.state_id) },
         { label: "Country", value: countryName(c.country_id) },
         { label: "Current Status", value: <StatusBadge status={c.status} /> },

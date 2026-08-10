@@ -20,7 +20,7 @@
  *    they stay correct automatically.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { AppShell } from "./AppShell";
 import { Banner, Can, StatusBadge, TableMessageRow } from "./ui";
 import { Pagination } from "./Pagination";
@@ -35,7 +35,7 @@ import {
   downloadExport,
   toQueryString,
 } from "@/lib/api";
-import { useAuth, useSrNoJump, isSrNoQuery } from "@/lib/hooks";
+import { useAuth, useSrNoJump } from "@/lib/hooks";
 import type { ImportHeader, ImportSummary, MasterRecord, PaginationMeta } from "@/types";
 
 /** Form state is a flat id -> string map, mirroring the original inputs. */
@@ -167,6 +167,7 @@ export function MasterPage<T extends MasterRecord>({
   const [statusFilter, setStatusFilter] = useState("");
   const [filterOpen, setFilterOpen] = useState(false);
   const [reloadCounter, setReloadCounter] = useState(0);
+  const [frozenCount, setFrozenCount] = useState<number>(0);
 
   const [modalOpen, setModalOpen] = useState(false);
   const [editingId, setEditingId] = useState("");
@@ -177,16 +178,49 @@ export function MasterPage<T extends MasterRecord>({
   const [importSummary, setImportSummary] = useState<ImportSummary | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
-
-  const srNoJump = useSrNoJump();
-  const tableBodyRef = useRef<HTMLTableSectionElement>(null);
-  // The search term actually sent to the backend. A bare Sr. No. is a
-  // client-side pagination jump, so it is deliberately NOT sent as ?search=
-  // (the backend's search is text-based and knows no such field).
   const [effectiveSearch, setEffectiveSearch] = useState("");
 
   const colCount = columns.length + 3; // +1 for Checkbox, +1 for Sr. No., +1 for actions
   const extraFiltersKey = JSON.stringify(extraFilters || {});
+
+  const srNoJump = useSrNoJump();
+  const tableRef = useRef<HTMLTableElement>(null);
+  const tableBodyRef = useRef<HTMLTableSectionElement>(null);
+  const [colLefts, setColLefts] = useState<number[]>([]);
+
+  useLayoutEffect(() => {
+    if (frozenCount <= 0 || !tableRef.current) return;
+    const ths = tableRef.current.querySelectorAll("thead th");
+    let accum = 0;
+    const lefts: number[] = [];
+    ths.forEach((th) => {
+      lefts.push(accum);
+      accum += (th as HTMLElement).offsetWidth;
+    });
+    setColLefts(lefts);
+  }, [frozenCount, rows, columns, loading]);
+
+  const getFreezeStyle = useCallback((colIdx: number, isHeader = false): React.CSSProperties => {
+    if (frozenCount <= 0 || colIdx >= frozenCount) return {};
+
+    const fallbackWidths = [40, 65, 200, 140, 130, 140, 140];
+    let fallbackLeft = 0;
+    for (let i = 0; i < colIdx; i++) fallbackLeft += fallbackWidths[i] || 140;
+
+    const left = colLefts[colIdx] !== undefined ? colLefts[colIdx] : fallbackLeft;
+    const isLastFrozen = colIdx === frozenCount - 1;
+
+    return {
+      position: "sticky",
+      left: `${left}px`,
+      zIndex: isHeader ? 12 : 10,
+      backgroundColor: isHeader ? "#f8fafc" : "#ffffff",
+      boxShadow: isLastFrozen ? "3px 0 6px -2px rgba(0, 0, 0, 0.18)" : "none",
+      borderRight: isLastFrozen ? "2px solid #cbd5e1" : undefined,
+    };
+  }, [frozenCount, colLefts]);
+
+
 
   const reload = useCallback(() => setReloadCounter((n) => n + 1), []);
 
@@ -242,25 +276,15 @@ export function MasterPage<T extends MasterRecord>({
     reloadToken,
   ]);
 
-  /* --- Search: 300ms debounce, with the Sr. No. jump shortcut --- */
+  /* --- Search: 300ms debounce --- */
   useEffect(() => {
     const timer = setTimeout(() => {
       const raw = searchInput.trim();
-      if (raw && isSrNoQuery(raw)) {
-        const srNo = parseInt(raw, 10);
-        if (srNo >= 1) {
-          setCurrentPage(Math.ceil(srNo / pageSize));
-          setEffectiveSearch("");
-          srNoJump.request(srNo);
-          return;
-        }
-      }
       srNoJump.clear();
       setCurrentPage(1);
       setEffectiveSearch(raw);
     }, 300);
     return () => clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchInput, pageSize]);
 
   // Once the target page has painted, scroll to the row and flash it.
@@ -380,8 +404,12 @@ export function MasterPage<T extends MasterRecord>({
 
   const headerCells = useMemo(() => {
     const labels = columnHeaders ?? columns.map((col) => col.header);
-    return labels.map((label, i) => <th key={`${label}-${i}`}>{label}</th>);
-  }, [columns, columnHeaders]);
+    return labels.map((label, i) => (
+      <th key={`${label}-${i}`} style={getFreezeStyle(i + 2, true)}>
+        {label}
+      </th>
+    ));
+  }, [columns, columnHeaders, getFreezeStyle]);
 
   // Sr. No. is a running number across the whole result set, not just this
   // page -- so page 2 continues at 21, 22, 23... rather than restarting at 1.
@@ -452,12 +480,12 @@ export function MasterPage<T extends MasterRecord>({
     <AppShell activeKey={activeKey}>
       <main className="page">
         <Breadcrumb trail={breadcrumbTrail} />
-        <div className="page-header">
-          <div>
+        <div className="page-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "16px", marginBottom: "16px" }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
             <h1>{heading}</h1>
             <div className="page-subtitle">{subtitle}</div>
           </div>
-          <div className="page-header-actions" style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+          <div className="page-header-actions" style={{ display: "flex", gap: "10px", alignItems: "center", flexShrink: 0 }}>
             <button
               type="button"
               className="btn"
@@ -636,6 +664,29 @@ export function MasterPage<T extends MasterRecord>({
               <span style={{ fontSize: "12px", color: "#64748b", fontWeight: 500 }}>Items/Page</span>
             </div>
             <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
+              <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                <span style={{ fontSize: "12.5px", color: "#475569", fontWeight: 600 }}>📌 Freeze:</span>
+                <select
+                  value={frozenCount}
+                  onChange={(e) => setFrozenCount(Number(e.target.value))}
+                  style={{
+                    padding: "6px 10px",
+                    borderRadius: "6px",
+                    border: "1px solid #cbd5e1",
+                    fontSize: "13px",
+                    background: "#ffffff",
+                    cursor: "pointer",
+                    color: "#0f172a",
+                    fontWeight: 500,
+                  }}
+                >
+                  <option value={0}>No Freeze</option>
+                  <option value={2}>Sr. No. + Checkbox</option>
+                  <option value={3}>1st Column (+ Name)</option>
+                  <option value={4}>2nd Column (+ Code)</option>
+                  <option value={5}>3rd Column (+ Brand/Type)</option>
+                </select>
+              </div>
               <input
                 type="text"
                 placeholder={searchPlaceholder || "Search..."}
@@ -647,10 +698,10 @@ export function MasterPage<T extends MasterRecord>({
           </div>
 
           <div className="table-scroll">
-            <table>
+            <table ref={tableRef}>
               <thead>
                 <tr>
-                  <th style={{ width: "40px", textAlign: "center" }}>
+                  <th style={{ width: "40px", textAlign: "center", ...getFreezeStyle(0, true) }}>
                     <input
                       type="checkbox"
                       checked={rows.length > 0 && rows.every((r) => selectedIds.includes(String(r.id)))}
@@ -664,7 +715,7 @@ export function MasterPage<T extends MasterRecord>({
                       style={{ cursor: "pointer", width: "16px", height: "16px" }}
                     />
                   </th>
-                  <th>Sr. No.</th>
+                  <th style={getFreezeStyle(1, true)}>Sr. No.</th>
                   {headerCells}
                   <th style={{ textAlign: "center" }}>{actionsHeader || "ACTION"}</th>
                 </tr>
@@ -677,7 +728,7 @@ export function MasterPage<T extends MasterRecord>({
                 ) : (
                   rows.map((item, index) => (
                     <tr key={item.id}>
-                      <td style={{ width: "40px", textAlign: "center" }}>
+                      <td style={{ width: "40px", textAlign: "center", ...getFreezeStyle(0, false) }}>
                         <input
                           type="checkbox"
                           checked={selectedIds.includes(String(item.id))}
@@ -692,9 +743,9 @@ export function MasterPage<T extends MasterRecord>({
                           style={{ cursor: "pointer", width: "16px", height: "16px" }}
                         />
                       </td>
-                      <td className="cell-srno">{startingSrNo + index}</td>
+                      <td className="cell-srno" style={getFreezeStyle(1, false)}>{startingSrNo + index}</td>
                       {columns.map((col, colIndex) => (
-                        <td key={col.header}>
+                        <td key={col.header} style={getFreezeStyle(colIndex + 2, false)}>
                           {colIndex === 0 && detailFields ? (
                             <a
                               href="#"

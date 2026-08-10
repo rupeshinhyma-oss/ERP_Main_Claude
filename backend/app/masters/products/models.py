@@ -57,6 +57,9 @@ class Product(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
     secondary_uom_id: Mapped[uuid.UUID | None] = mapped_column(
         GUID(), ForeignKey("units_of_measurement.id", ondelete="RESTRICT"), nullable=True, index=True
     )
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("master_companies.id", ondelete="SET NULL"), nullable=True, index=True
+    )
 
     # --- Tax & Compliance ---------------------------------------------------------
     refund_vat_percent: Mapped[float] = mapped_column(Numeric(5, 2), default=0.0, nullable=False)

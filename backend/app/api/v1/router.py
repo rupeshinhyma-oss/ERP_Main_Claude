@@ -21,6 +21,7 @@ from app.designations.routes import router as designations_router
 from app.inquiries.routes import router as inquiries_router
 from app.masters.brands.routes import router as brands_router
 from app.masters.cities.routes import router as cities_router
+from app.masters.company_list.routes import router as company_list_router
 from app.masters.countries.routes import router as countries_router
 from app.masters.currencies.routes import router as currencies_router
 from app.masters.hsn.routes import router as hsn_router
@@ -65,6 +66,7 @@ api_router.include_router(brands_router)
 api_router.include_router(product_categories_router)
 api_router.include_router(product_sub_categories_router)
 api_router.include_router(products_router)
+api_router.include_router(company_list_router)
 
 # Phase 8: Supplier Management.
 api_router.include_router(suppliers_router)

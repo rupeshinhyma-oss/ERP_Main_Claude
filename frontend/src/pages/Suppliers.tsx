@@ -14,7 +14,7 @@
  * results, not the full related tables.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { Banner, Can, TableMessageRow } from "@/components/ui";
@@ -22,7 +22,7 @@ import { Pagination } from "@/components/Pagination";
 import { ImpExpDropdown, BulkActionsDropdown, ImportSummaryPanel } from "@/components/ImportWizard";
 import {
   SearchableDropdown,
-  SearchableDropdownMulti,
+  SearchableDropdownMultiPanel,
   type DropdownOption,
 } from "@/components/SearchableDropdown";
 import { SelectField, TextAreaField, TextField } from "@/components/fields";
@@ -200,6 +200,41 @@ export function SuppliersPage() {
   const [importSummary, setImportSummary] = useState<ImportSummary | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [frozenCount, setFrozenCount] = useState<number>(0);
+  const tableRef = useRef<HTMLTableElement>(null);
+  const [colLefts, setColLefts] = useState<number[]>([]);
+
+  useLayoutEffect(() => {
+    if (frozenCount <= 0 || !tableRef.current) return;
+    const ths = tableRef.current.querySelectorAll("thead th");
+    let accum = 0;
+    const lefts: number[] = [];
+    ths.forEach((th) => {
+      lefts.push(accum);
+      accum += (th as HTMLElement).offsetWidth;
+    });
+    setColLefts(lefts);
+  }, [frozenCount, rows, loading]);
+
+  const getFreezeStyle = useCallback((colIdx: number, isHeader = false): React.CSSProperties => {
+    if (frozenCount <= 0 || colIdx >= frozenCount) return {};
+
+    const fallbackWidths = [44, 65, 220, 160, 180, 180, 180, 120, 140, 130];
+    let fallbackLeft = 0;
+    for (let i = 0; i < colIdx; i++) fallbackLeft += fallbackWidths[i] || 140;
+
+    const left = colLefts[colIdx] !== undefined ? colLefts[colIdx] : fallbackLeft;
+    const isLastFrozen = colIdx === frozenCount - 1;
+
+    return {
+      position: "sticky",
+      left: `${left}px`,
+      zIndex: isHeader ? 12 : 10,
+      backgroundColor: isHeader ? "#f8fafc" : "#ffffff",
+      boxShadow: isLastFrozen ? "3px 0 6px -2px rgba(0, 0, 0, 0.18)" : "none",
+      borderRight: isLastFrozen ? "2px solid #cbd5e1" : undefined,
+    };
+  }, [frozenCount, colLefts]);
 
   /* Modal state */
   const [modalOpen, setModalOpen] = useState(false);
@@ -808,8 +843,16 @@ export function SuppliersPage() {
         setError("Province is required.");
         return false;
       }
+      if (formStateCustomText.trim() && !stateId) {
+        setError("Province could not be resolved — please select from the dropdown or check your entry.");
+        return false;
+      }
       if (!cityId && !formCityCustomText.trim()) {
         setError("City is required.");
+        return false;
+      }
+      if (formCityCustomText.trim() && !cityId) {
+        setError("City could not be resolved — please select from the dropdown or check your Province / City match.");
         return false;
       }
       const categoryIds = await resolveCustomCategories();
@@ -1103,7 +1146,8 @@ export function SuppliersPage() {
                   <h3 style={{ fontSize: "16px", fontWeight: 700, margin: "0 0 16px 0", color: "#0f172a" }}>
                     1. General Information
                   </h3>
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "18px", marginBottom: "24px" }}>
+                  {/* Row 1: Company Name + Product Category (2 columns) */}
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "18px", marginBottom: "18px" }}>
                     <div className="field">
                       <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>Name of Company *</label>
                       <SearchableDropdown
@@ -1118,21 +1162,28 @@ export function SuppliersPage() {
                     </div>
                     <div className="field">
                       <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>Product Category (multiple)</label>
-                      <SearchableDropdownMulti
+                      <SearchableDropdownMultiPanel
                         values={formCategoryIds}
                         onChange={setFormCategoryIds}
-                        allowCustomText={false}
-                        placeholder="Click to select product categories..."
+                        placeholder="-- Select Categories --"
                         fetchOptions={searchFetcher("/masters/product-categories")}
                         fetchLabelForValue={fetchNameLabel("/masters/product-categories")}
                       />
                     </div>
+                  </div>
+
+                  {/* Row 2: Supplier Type + Brand of Supplier's Products (2 columns) */}
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "18px", marginBottom: "18px" }}>
                     <SelectField id="supplier_type" label="Supplier Type" value={form.supplier_type} onChange={(v) => setField("supplier_type", v)}>
                       <option value="">Select</option>
                       <option value="manufacturer">Manufacturer</option>
                       <option value="dealer">Dealer / Trader</option>
                     </SelectField>
                     <TextField id="brand_description" label="Brand of Supplier's Products" placeholder="Description..." value={form.brand_description} onChange={(v) => setField("brand_description", v)} />
+                  </div>
+
+                  {/* Row 3: Country + Province + City (3 columns) */}
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "18px", marginBottom: "24px" }}>
                     <div className="field">
                       <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>Country *</label>
                       <SearchableDropdown
@@ -1336,15 +1387,9 @@ export function SuppliersPage() {
                         <option value="D">Grade D</option>
                       </SelectField>
                       <SelectField id="current_status" label="Current Status" value={form.current_status} onChange={(v) => setField("current_status", v)}>
-                        <option value="">Select Status</option>
+                        <option value="">Select</option>
                         <option value="new" disabled={lockNewStatus}>New</option>
-                        <option value="contacted">Contacted</option>
-                        <option value="sample_requested">Sample Requested</option>
-                        <option value="sample_received">Sample Received</option>
-                        <option value="sample_approved">Sample Approved</option>
-                        <option value="rejected">Rejected</option>
-                        <option value="shortlisted">Shortlisted</option>
-                        <option value="verified">Verified</option>
+                        <option value="existing">Existing</option>
                       </SelectField>
                       <SelectField id="potential" label="Potential (Yes / No)" value={form.potential} onChange={(v) => setField("potential", v)}>
                         <option value="">Select Potential</option>
@@ -2336,20 +2381,45 @@ export function SuppliersPage() {
                 </select>
                 <span style={{ fontSize: "13px", color: "#64748b" }}>Items/Page</span>
               </div>
-              <input
-                type="text"
-                placeholder="Search company name or Sr. No..."
-                value={searchInput}
-                onChange={(e) => setSearchInput(e.target.value)}
-                style={{ width: "320px", padding: "8px 14px", borderRadius: "6px", border: "1px solid #cbd5e1" }}
-              />
+              <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
+                <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                  <span style={{ fontSize: "12.5px", color: "#475569", fontWeight: 600 }}>📌 Freeze:</span>
+                  <select
+                    value={frozenCount}
+                    onChange={(e) => setFrozenCount(Number(e.target.value))}
+                    style={{
+                      padding: "6px 10px",
+                      borderRadius: "6px",
+                      border: "1px solid #cbd5e1",
+                      fontSize: "13px",
+                      background: "#ffffff",
+                      cursor: "pointer",
+                      color: "#0f172a",
+                      fontWeight: 500,
+                    }}
+                  >
+                    <option value={0}>No Freeze</option>
+                    <option value={2}>Sr. No. + Checkbox</option>
+                    <option value={3}>1st Column (+ Company Name)</option>
+                    <option value={4}>2nd Column (+ Category)</option>
+                    <option value={5}>3rd Column (+ Key Strength)</option>
+                  </select>
+                </div>
+                <input
+                  type="text"
+                  placeholder="Search company name or Sr. No..."
+                  value={searchInput}
+                  onChange={(e) => setSearchInput(e.target.value)}
+                  style={{ width: "320px", padding: "8px 14px", borderRadius: "6px", border: "1px solid #cbd5e1" }}
+                />
+              </div>
             </div>
 
             <div className="table-scroll">
-              <table>
+              <table ref={tableRef}>
                 <thead>
                   <tr>
-                    <th>
+                    <th style={getFreezeStyle(0, true)}>
                       <input
                         type="checkbox"
                         checked={rows.length > 0 && rows.every((r) => selectedIds.includes(r.id))}
@@ -2360,11 +2430,11 @@ export function SuppliersPage() {
                         style={{ cursor: "pointer", width: "16px", height: "16px" }}
                       />
                     </th>
-                    <th>Sr. No.</th>
-                    <th>Company Name</th>
-                    <th>Product Category</th>
-                    <th>Key Strength Sub-Category</th>
-                    <th>Products Supplied</th>
+                    <th style={getFreezeStyle(1, true)}>Sr. No.</th>
+                    <th style={getFreezeStyle(2, true)}>Company Name</th>
+                    <th style={getFreezeStyle(3, true)}>Product Category</th>
+                    <th style={getFreezeStyle(4, true)}>Key Strength Sub-Category</th>
+                    <th style={getFreezeStyle(5, true)}>Products Supplied</th>
                     <th>Secondary Products</th>
                     <th>Country</th>
                     <th>City, Province</th>
@@ -2384,7 +2454,7 @@ export function SuppliersPage() {
                   ) : (
                     rows.map((s, index) => (
                       <tr key={s.id}>
-                        <td>
+                        <td style={getFreezeStyle(0, false)}>
                           <input
                             type="checkbox"
                             className="row-select"
@@ -2396,8 +2466,8 @@ export function SuppliersPage() {
                             style={{ cursor: "pointer", width: "16px", height: "16px" }}
                           />
                         </td>
-                        <td className="cell-srno">{startSrNo + index}</td>
-                        <td>
+                        <td className="cell-srno" style={getFreezeStyle(1, false)}>{startSrNo + index}</td>
+                        <td style={getFreezeStyle(2, false)}>
                           <a
                             href="#"
                             onClick={(e) => {
@@ -2408,8 +2478,8 @@ export function SuppliersPage() {
                             {s.company_name}
                           </a>
                         </td>
-                        <td>{chipList(s.category_ids, "categories")}</td>
-                        <td>{chipList(s.sub_category_ids, "subCategories")}</td>
+                        <td style={getFreezeStyle(3, false)}>{chipList(s.category_ids, "categories")}</td>
+                        <td style={getFreezeStyle(4, false)}>{chipList(s.sub_category_ids, "subCategories")}</td>
                         <td>{chipList(s.product_ids, "products")}</td>
                         <td>
                           {s.secondary_products_description ? (

@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 from app.core.constants import RecordStatus
 
@@ -13,7 +13,7 @@ from app.core.constants import RecordStatus
 class ProductCreate(BaseModel):
     """Payload to create a new product."""
 
-    product_code: str = Field(..., min_length=1, max_length=50)
+    product_code: str | None = Field(default=None, max_length=50)
     product_name_tally: str = Field(..., min_length=1, max_length=255)
     product_name_invoice: str | None = Field(default=None, max_length=255)
     product_name: str | None = Field(default=None, max_length=255)  # Optional alias (defaults to product_name_tally)
@@ -25,6 +25,7 @@ class ProductCreate(BaseModel):
     hsn_id: uuid.UUID | None = None
     uom_id: uuid.UUID
     secondary_uom_id: uuid.UUID | None = None
+    organization_id: uuid.UUID | None = None
 
     refund_vat_percent: float | None = Field(default=None, ge=0, le=100)
     license_certificate_required: str | None = None
@@ -74,6 +75,7 @@ class ProductUpdate(BaseModel):
     hsn_id: uuid.UUID | None = None
     uom_id: uuid.UUID | None = None
     secondary_uom_id: uuid.UUID | None = None
+    organization_id: uuid.UUID | None = None
 
     refund_vat_percent: float | None = Field(default=None, ge=0, le=100)
     license_certificate_required: str | None = None
@@ -126,13 +128,21 @@ class ProductRead(BaseModel):
     hsn_id: uuid.UUID | None
     uom_id: uuid.UUID
     secondary_uom_id: uuid.UUID | None
+    organization_id: uuid.UUID | None = None
 
     refund_vat_percent: float = 0.0
     license_certificate_required: str | None = None
 
     specification: str | None
     description: str | None
-    images: list[str] | None
+    images: list[str] | None = None
+
+    @computed_field
+    @property
+    def image_url(self) -> str | None:
+        if self.images and len(self.images) > 0:
+            return self.images[0]
+        return None
 
     packaging_quantity: float | None = None
     packaging_net_weight: float | None = None

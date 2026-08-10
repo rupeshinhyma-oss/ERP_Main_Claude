@@ -556,3 +556,258 @@ export function SearchableDropdownMulti({
     </div>
   );
 }
+
+/* ------------------------------------------------------------------ */
+/* Multi-select panel (checkbox style, like Product Master)           */
+/* ------------------------------------------------------------------ */
+
+export interface SearchableDropdownMultiPanelProps extends SharedProps {
+  values: string[];
+  onChange: (values: string[]) => void;
+  placeholder?: string;
+}
+
+export function SearchableDropdownMultiPanel({
+  values,
+  onChange,
+  placeholder = "-- Select --",
+  fetchOptions,
+  fetchLabelForValue,
+}: SearchableDropdownMultiPanelProps) {
+  const [open, setOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [options, setOptions] = useState<DropdownOption[]>([]);
+  const [selected, setSelected] = useState<DropdownOption[]>([]);
+  const [loading, setLoading] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const search = useSearchController();
+
+  // Resolve labels for pre-filled values
+  useEffect(() => {
+    let cancelled = false;
+    const ids = values || [];
+    if (ids.length === 0) { setSelected([]); return; }
+
+    setSelected((prev) => {
+      const knownLabels = new Map(prev.map((s) => [s.value, s.label]));
+      const needsResolving = ids.some((id) => !knownLabels.has(id));
+      if (!needsResolving) {
+        return ids.map((id) => ({ value: id, label: knownLabels.get(id) as string }));
+      }
+      if (fetchLabelForValue) {
+        void Promise.all(
+          ids.map(async (id) => ({
+            value: id,
+            label: knownLabels.get(id) ?? ((await fetchLabelForValue(id).catch(() => id)) || id),
+          }))
+        ).then((resolved) => { if (!cancelled) setSelected(resolved); });
+        return ids.map((id) => ({ value: id, label: knownLabels.get(id) ?? id }));
+      }
+      return ids.map((id) => ({ value: id, label: knownLabels.get(id) ?? id }));
+    });
+
+    return () => { cancelled = true; };
+  }, [values, fetchLabelForValue]);
+
+  // Click outside to close
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+        setSearchTerm("");
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  // Load options when opening or searching
+  useEffect(() => {
+    if (!open) return;
+    setLoading(true);
+    void search.run(async (signal) => {
+      const found = (await fetchOptions(searchTerm.trim(), signal)) || [];
+      setOptions(found);
+      setLoading(false);
+    }, 150);
+  }, [open, searchTerm]);
+
+  function toggleOpen() {
+    const next = !open;
+    setOpen(next);
+    if (next) {
+      setSearchTerm("");
+      setTimeout(() => searchInputRef.current?.focus(), 50);
+    }
+  }
+
+  function toggleItem(opt: DropdownOption) {
+    const isSelected = selected.some((s) => s.value === opt.value);
+    let next: DropdownOption[];
+    if (isSelected) {
+      next = selected.filter((s) => s.value !== opt.value);
+    } else {
+      next = [...selected, opt];
+    }
+    setSelected(next);
+    onChange(next.map((s) => s.value));
+  }
+
+  const displayText = selected.length === 0
+    ? placeholder
+    : selected.map((s) => s.label).join(", ");
+
+  const selectedValues = new Set(selected.map((s) => s.value));
+
+  return (
+    <div ref={containerRef} style={{ position: "relative" }}>
+      {/* Trigger button */}
+      <div
+        tabIndex={0}
+        onClick={toggleOpen}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleOpen(); } }}
+        style={{
+          border: "1px solid var(--color-border-strong, #cbd5e1)",
+          borderRadius: "var(--radius-sm, 6px)",
+          padding: "9px 32px 9px 11px",
+          minHeight: "42px",
+          background: "#ffffff",
+          cursor: "pointer",
+          fontSize: "13.5px",
+          color: selected.length === 0 ? "#94a3b8" : "#1e293b",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          userSelect: "none",
+          position: "relative",
+        }}
+      >
+        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
+          {displayText}
+        </span>
+        <span style={{
+          position: "absolute",
+          right: "10px",
+          top: "50%",
+          transform: open ? "translateY(-50%) rotate(180deg)" : "translateY(-50%)",
+          color: "#94a3b8",
+          fontSize: "11px",
+          transition: "transform 0.2s ease",
+          pointerEvents: "none",
+        }}>▼</span>
+      </div>
+
+      {/* Dropdown panel */}
+      {open && (
+        <div style={{
+          position: "absolute",
+          top: "calc(100% + 2px)",
+          left: 0,
+          right: 0,
+          zIndex: 9999,
+          background: "#ffffff",
+          border: "1px solid #cbd5e0",
+          borderRadius: "6px",
+          boxShadow: "0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -2px rgba(0,0,0,0.05)",
+          maxHeight: "280px",
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+        }}>
+          {/* Search bar */}
+          <div style={{ padding: "8px", borderBottom: "1px solid #f1f5f9", background: "#f8fafc" }}>
+            <input
+              ref={searchInputRef}
+              type="text"
+              placeholder="Search / Type here..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              style={{
+                width: "100%",
+                padding: "6px 10px",
+                fontSize: "13px",
+                border: "1px solid #cbd5e0",
+                borderRadius: "4px",
+                outline: "none",
+                background: "#ffffff",
+                boxSizing: "border-box",
+              }}
+            />
+          </div>
+
+          {/* Options list with checkboxes */}
+          <div style={{ overflowY: "auto", flex: 1 }}>
+            {loading ? (
+              <div style={{ padding: "10px 12px", fontSize: "13px", color: "#94a3b8", textAlign: "center" }}>Loading...</div>
+            ) : options.length === 0 ? (
+              <div style={{ padding: "10px 12px", fontSize: "13px", color: "#94a3b8", textAlign: "center" }}>No matching results</div>
+            ) : (
+              options.map((opt) => {
+                const isChecked = selectedValues.has(opt.value);
+                return (
+                  <div
+                    key={opt.value}
+                    onMouseDown={(e) => { e.preventDefault(); toggleItem(opt); }}
+                    style={{
+                      padding: "8px 12px",
+                      fontSize: "13.5px",
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "10px",
+                      background: isChecked ? "#eff6ff" : "transparent",
+                      color: "#1e293b",
+                      transition: "background 0.1s",
+                    }}
+                    onMouseOver={(e) => { if (!isChecked) e.currentTarget.style.background = "#f8fafc"; }}
+                    onMouseOut={(e) => { if (!isChecked) e.currentTarget.style.background = "transparent"; }}
+                  >
+                    <span style={{
+                      width: "16px",
+                      height: "16px",
+                      border: isChecked ? "2px solid #0061f2" : "2px solid #cbd5e1",
+                      borderRadius: "3px",
+                      background: isChecked ? "#0061f2" : "#ffffff",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      flexShrink: 0,
+                      transition: "all 0.15s",
+                    }}>
+                      {isChecked && <span style={{ color: "#fff", fontSize: "10px", fontWeight: "bold" }}>✓</span>}
+                    </span>
+                    {opt.label}
+                  </div>
+                );
+              })
+            )}
+          </div>
+
+          {/* Footer: selected count + clear */}
+          {selected.length > 0 && (
+            <div style={{
+              padding: "6px 12px",
+              borderTop: "1px solid #f1f5f9",
+              background: "#f8fafc",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              fontSize: "12px",
+              color: "#64748b",
+            }}>
+              <span>{selected.length} selected</span>
+              <button
+                type="button"
+                onMouseDown={(e) => { e.preventDefault(); setSelected([]); onChange([]); }}
+                style={{ background: "none", border: "none", color: "#ef4444", cursor: "pointer", fontSize: "12px", fontWeight: 600 }}
+              >
+                Clear all
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}

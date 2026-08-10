@@ -13,13 +13,34 @@ from app.masters.products.models import Product
 class ProductRepository(BaseRepository[Product]):
     """Repository for product rows."""
 
-    searchable_fields = ("product_code", "product_name", "barcode")
+    searchable_fields = ("product_code", "product_name", "product_name_tally", "product_name_invoice", "barcode")
     sortable_fields = ("product_code", "product_name", "created_at", "updated_at", "standard_price")
-    filterable_fields = ("status", "category_id", "sub_category_id", "brand_id", "hsn_id", "uom_id")
+    filterable_fields = ("status", "category_id", "sub_category_id", "brand_id", "hsn_id", "uom_id", "organization_id")
 
     def __init__(self, session: AsyncSession) -> None:
         """Bind to a DB session, operating on the ``Product`` model."""
         super().__init__(session, Product)
+
+    def _apply_search(self, stmt, term: str | None):
+        """Apply a flexible, space-normalized case-insensitive search across searchable_fields."""
+        if not term:
+            return stmt
+
+        from sqlalchemy import func, or_
+
+        clean_term = term.replace(" ", "").replace("-", "").lower()
+        pattern = f"%{term}%"
+        clean_pattern = f"%{clean_term}%"
+
+        conditions = []
+        for field in ("product_code", "product_name", "product_name_tally", "product_name_invoice", "barcode"):
+            if hasattr(self.model, field):
+                col = getattr(self.model, field)
+                conditions.append(col.ilike(pattern))
+                normalized_col = func.lower(func.replace(func.replace(col, " ", ""), "-", ""))
+                conditions.append(normalized_col.like(clean_pattern))
+
+        return stmt.where(or_(*conditions))
 
     async def get_by_code(self, product_code: str) -> Product | None:
         """Fetch a product by its unique code."""

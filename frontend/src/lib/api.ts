@@ -277,6 +277,16 @@ export function toQueryString(
 
 /** Extract a displayable message from any thrown value. */
 export function errorMessage(err: unknown): string {
+  if (err instanceof ApiError) {
+    if (err.errors && err.errors.length > 0) {
+      const details = err.errors
+        .map((e) => e.message || (e.field ? `${e.field}: invalid` : null))
+        .filter(Boolean)
+        .join("; ");
+      if (details) return `${err.message}: ${details}`;
+    }
+    return err.message;
+  }
   if (err instanceof Error && err.message) return err.message;
   return String(err);
 }

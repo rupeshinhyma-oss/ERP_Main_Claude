@@ -32,6 +32,7 @@ import { PlanningPage } from "@/pages/Planning";
 import { CountriesPage } from "@/pages/masters/Countries";
 import { StatesPage } from "@/pages/masters/States";
 import { CitiesPage } from "@/pages/masters/Cities";
+import { CompanyListPage } from "@/pages/masters/CompanyList";
 import { CurrenciesPage } from "@/pages/masters/Currencies";
 import { UomPage } from "@/pages/masters/Uom";
 import { HsnPage } from "@/pages/masters/Hsn";
@@ -75,6 +76,7 @@ export function App() {
       <Route path="/inquiries" element={<InquiriesPage />} />
       <Route path="/planning" element={<PlanningPage />} />
 
+      <Route path="/masters/company-list" element={<CompanyListPage />} />
       <Route path="/masters/countries" element={<CountriesPage />} />
       <Route path="/masters/states" element={<StatesPage />} />
       <Route path="/masters/cities" element={<CitiesPage />} />

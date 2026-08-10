@@ -28,14 +28,14 @@ export function CountriesPage() {
       breadcrumbTrail={["Master Data", "Countries"]}
       newButtonLabel="+ New Country"
       searchPlaceholder="Search code or name or Sr. No..."
-      columnHeaders={["Name", "Code", "ISO2 / ISO3", "Phone Code", "Currency", "Status"]}
+      columnHeaders={["COUNTRY NAME", "CODE", "ISO2 / ISO3", "PHONE CODE", "CURRENCY", "STATUS"]}
       columns={[
-        { header: "Name", render: (c) => <span className="cell-primary">{c.name}</span> },
-        { header: "Code", render: (c) => c.code },
-        { header: "ISO", render: (c) => `${dash(c.iso2)} / ${dash(c.iso3)}` },
-        { header: "Phone Code", render: (c) => dash(c.phone_code) },
-        { header: "Currency", render: (c) => dash(c.currency) },
-        { header: "Status", render: (c) => <StatusBadge status={c.status} /> },
+        { header: "COUNTRY NAME", render: (c) => <span className="cell-primary">{c.name}</span> },
+        { header: "CODE", render: (c) => c.code },
+        { header: "ISO2 / ISO3", render: (c) => `${dash(c.iso2)} / ${dash(c.iso3)}` },
+        { header: "PHONE CODE", render: (c) => dash(c.phone_code) },
+        { header: "CURRENCY", render: (c) => dash(c.currency) },
+        { header: "STATUS", render: (c) => <StatusBadge status={c.status} /> },
       ]}
       importHeaders={[
         { key: "name", label: "Country Name", required: true },

@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { SideDrawer, DetailFieldGrid } from "@/components/SideDrawer";
-import { apiGet } from "@/lib/api";
+import { apiGet, apiPatch } from "@/lib/api";
 import { useLookup } from "@/lib/lookups";
 import type {
   Product,
@@ -31,9 +31,10 @@ export function ProductGalleryPage() {
   const [brandFilter, setBrandFilter] = useState("");
 
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const [selectedImageIndex, setSelectedImageIndex] = useState(0);
 
-  const categories = useLookup<ProductCategory>("/masters/categories", 250);
-  const subCategories = useLookup<ProductSubCategory>("/masters/subcategories", 250);
+  const categories = useLookup<ProductCategory>("/masters/product-categories", 250);
+  const subCategories = useLookup<ProductSubCategory>("/masters/product-sub-categories", 250);
   const brands = useLookup<Brand>("/masters/brands", 250);
   const hsnCodes = useLookup<Hsn>("/masters/hsn", 250);
   const uoms = useLookup<Uom>("/masters/uom", 250);
@@ -45,7 +46,11 @@ export function ProductGalleryPage() {
   async function fetchProducts() {
     setLoading(true);
     try {
-      const params: Record<string, string> = { limit: "250" };
+      const params: Record<string, string> = {
+        page_size: "1000",
+        sort_by: "created_at",
+        sort_order: "desc",
+      };
       if (categoryFilter) params.category_id = categoryFilter;
       if (subCategoryFilter) params.sub_category_id = subCategoryFilter;
       if (brandFilter) params.brand_id = brandFilter;
@@ -66,11 +71,19 @@ export function ProductGalleryPage() {
     : subCategories.items;
 
   const filteredProducts = products.filter((p) => {
+    // Only include products that HAVE uploaded photos
+    const imgList = Array.isArray(p.images) && p.images.length > 0
+      ? p.images
+      : (p.image_url ? [p.image_url] : []);
+
+    const hasPhoto = imgList.length > 0 && imgList.some((img) => img && img.trim() !== "");
+    if (!hasPhoto) return false;
+
     if (!search.trim()) return true;
-    const term = search.toLowerCase();
-    const name = (p.product_name_tally || p.product_name || "").toLowerCase();
-    const code = (p.product_code || "").toLowerCase();
-    return name.includes(term) || code.includes(term);
+    const cleanSearch = search.toLowerCase().replace(/[\s-]/g, "");
+    const name = (p.product_name_tally || p.product_name || "").toLowerCase().replace(/[\s-]/g, "");
+    const code = (p.product_code || "").toLowerCase().replace(/[\s-]/g, "");
+    return name.includes(cleanSearch) || code.includes(cleanSearch);
   });
 
   const p = selectedProduct;
@@ -204,7 +217,10 @@ export function ProductGalleryPage() {
             }}
           >
             {filteredProducts.map((prod) => {
-              const img = prod.image_url || (prod.images && prod.images[0]);
+              const imgList = Array.isArray(prod.images) && prod.images.length > 0
+                ? prod.images
+                : (prod.image_url ? [prod.image_url] : []);
+              const img = imgList[0];
               const brandObj = brands.items.find((b) => b.id === prod.brand_id);
               const subCatObj = subCategories.items.find((sc) => sc.id === prod.sub_category_id);
 
@@ -212,7 +228,10 @@ export function ProductGalleryPage() {
                 <div
                   key={prod.id}
                   className="card"
-                  onClick={() => setSelectedProduct(prod)}
+                  onClick={() => {
+                    setSelectedProduct(prod);
+                    setSelectedImageIndex(0);
+                  }}
                   style={{
                     borderRadius: "10px",
                     overflow: "hidden",
@@ -277,6 +296,27 @@ export function ProductGalleryPage() {
                         {prod.product_code}
                       </span>
                     )}
+
+                    {imgList.length > 1 && (
+                      <span
+                        style={{
+                          position: "absolute",
+                          bottom: "10px",
+                          right: "10px",
+                          background: "rgba(37, 99, 235, 0.85)",
+                          color: "#ffffff",
+                          fontSize: "11px",
+                          fontWeight: 600,
+                          padding: "3px 8px",
+                          borderRadius: "4px",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "4px",
+                        }}
+                      >
+                        📷 {imgList.length} Photos
+                      </span>
+                    )}
                   </div>
 
                   {/* Card Body */}
@@ -323,23 +363,103 @@ export function ProductGalleryPage() {
         subtitle={p ? p.product_name_tally || p.product_name || "" : ""}
         onClose={() => setSelectedProduct(null)}
       >
-        {p && (
-          <>
-            {(p.image_url || (p.images && p.images.length > 0)) && (
-              <div style={{ marginBottom: "20px", textAlign: "center", background: "#f8fafc", padding: "16px", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
-                <img
-                  src={resolveImageUrl(p.image_url || p.images?.[0])}
-                  alt="Product Photo"
-                  style={{
-                    maxHeight: "240px",
-                    maxWidth: "100%",
-                    borderRadius: "8px",
-                    objectFit: "contain",
-                    boxShadow: "0 4px 6px -1px rgba(0,0,0,0.1)",
-                  }}
-                />
-              </div>
-            )}
+        {p && (() => {
+          const detailImgList: string[] = Array.isArray(p.images) && p.images.length > 0
+            ? p.images
+            : (p.image_url ? [p.image_url] : []);
+
+          const handleDeletePhoto = async (indexToDelete: number) => {
+            if (!p) return;
+            if (!window.confirm("Are you sure you want to delete this photo from the product?")) return;
+
+            const updatedImages = detailImgList.filter((_, idx) => idx !== indexToDelete);
+            const updatedPayload = {
+              images: updatedImages,
+              image_url: updatedImages[0] || null,
+            };
+
+            try {
+              await apiPatch<Product>(`/masters/products/${p.id}`, updatedPayload);
+              setProducts((prev) =>
+                prev.map((prod) => (prod.id === p.id ? { ...prod, ...updatedPayload } : prod))
+              );
+              setSelectedProduct((prev) => (prev ? { ...prev, ...updatedPayload } : null));
+              setSelectedImageIndex(0);
+            } catch (err) {
+              console.error("Failed to delete photo:", err);
+              alert("Failed to delete photo. Please try again.");
+            }
+          };
+
+          return (
+            <>
+              {detailImgList.length > 0 && (
+                <div style={{ marginBottom: "20px", background: "#f8fafc", padding: "16px", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
+                  <div style={{ textAlign: "center", position: "relative" }}>
+                    <img
+                      src={resolveImageUrl(detailImgList[selectedImageIndex] || detailImgList[0])}
+                      alt="Product Primary Photo"
+                      style={{
+                        maxHeight: "260px",
+                        maxWidth: "100%",
+                        borderRadius: "8px",
+                        objectFit: "contain",
+                        boxShadow: "0 4px 6px -1px rgba(0,0,0,0.1)",
+                        transition: "all 0.2s ease",
+                      }}
+                    />
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "10px", padding: "0 4px" }}>
+                    <span style={{ fontSize: "12px", color: "#64748b", fontWeight: 500 }}>
+                      Photo {selectedImageIndex + 1} of {detailImgList.length}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => handleDeletePhoto(selectedImageIndex)}
+                      style={{
+                        background: "#fee2e2",
+                        color: "#dc2626",
+                        border: "1px solid #fca5a5",
+                        borderRadius: "6px",
+                        padding: "4px 10px",
+                        fontSize: "12px",
+                        fontWeight: 600,
+                        cursor: "pointer",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "4px",
+                        transition: "all 0.15s ease",
+                      }}
+                      title="Delete this photo from product"
+                    >
+                      🗑️ Delete Photo
+                    </button>
+                  </div>
+                  {detailImgList.length > 1 && (
+                    <div style={{ display: "flex", gap: "10px", justifyContent: "center", flexWrap: "wrap", marginTop: "12px" }}>
+                      {detailImgList.map((imgUri, idx) => (
+                        <img
+                          key={idx}
+                          src={resolveImageUrl(imgUri)}
+                          alt={`Thumbnail ${idx + 1}`}
+                          onClick={() => setSelectedImageIndex(idx)}
+                          style={{
+                            width: "56px",
+                            height: "56px",
+                            borderRadius: "6px",
+                            objectFit: "cover",
+                            cursor: "pointer",
+                            border: idx === selectedImageIndex ? "2.5px solid #2563eb" : "1px solid #cbd5e0",
+                            boxShadow: idx === selectedImageIndex ? "0 0 0 2px rgba(37,99,235,0.2)" : "0 1px 3px rgba(0,0,0,0.1)",
+                            transform: idx === selectedImageIndex ? "scale(1.08)" : "scale(1)",
+                            transition: "all 0.15s ease",
+                          }}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
 
             <DetailFieldGrid
               fields={[
@@ -361,7 +481,8 @@ export function ProductGalleryPage() {
               ]}
             />
           </>
-        )}
+        );
+      })()}
       </SideDrawer>
     </AppShell>
   );

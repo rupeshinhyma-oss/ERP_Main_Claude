@@ -154,6 +154,7 @@ export interface Product extends MasterRecord {
   hsn_id?: string | null;
   uom_id: string;
   secondary_uom_id?: string | null;
+  organization_id?: string | null;
   refund_vat_percent?: number | null;
   license_certificate_required?: string | null;
   conversion_factor?: number | null;

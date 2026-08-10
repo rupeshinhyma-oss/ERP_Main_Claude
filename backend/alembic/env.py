@@ -45,6 +45,7 @@ import app.departments.models  # noqa: F401,E402 - Phase 6
 import app.masters.countries.models  # noqa: F401,E402 - Phase 7
 import app.masters.states.models  # noqa: F401,E402 - Phase 7
 import app.masters.cities.models  # noqa: F401,E402 - Phase 7
+import app.masters.company_list.models  # noqa: F401,E402
 import app.masters.currencies.models  # noqa: F401,E402 - Phase 7
 import app.masters.uom.models  # noqa: F401,E402 - Phase 7
 import app.masters.hsn.models  # noqa: F401,E402 - Phase 7

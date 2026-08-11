@@ -696,6 +696,7 @@ export function SuppliersPage() {
   function closeModal() {
     setModalOpen(false);
     setCurrentSupplierId(null);
+    setError(null);
   }
 
   function buildPayload() {

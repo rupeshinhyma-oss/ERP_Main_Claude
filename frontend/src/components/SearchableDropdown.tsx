@@ -586,6 +586,38 @@ export function SearchableDropdownMultiPanel({
   const searchInputRef = useRef<HTMLInputElement>(null);
   const search = useSearchController();
 
+  // Eagerly pre-fetch options when values are provided so human-readable labels resolve immediately
+  useEffect(() => {
+    if (!values || values.length === 0) return;
+    if (fetchOptions && options.length === 0) {
+      void fetchOptions("").then((found) => {
+        if (found && found.length > 0) {
+          setOptions(found);
+        }
+      });
+    }
+  }, [values, fetchOptions, options.length]);
+
+  // Sync selected item labels from options whenever options land or change
+  useEffect(() => {
+    if (options.length === 0 || selected.length === 0) return;
+    const isUUID = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
+    const optMap = new Map(options.map((o) => [o.value, o.label]));
+
+    let updated = false;
+    const next = selected.map((s) => {
+      if ((s.label === s.value || isUUID(s.label)) && optMap.has(s.value)) {
+        updated = true;
+        return { value: s.value, label: optMap.get(s.value)! };
+      }
+      return s;
+    });
+
+    if (updated) {
+      setSelected(next);
+    }
+  }, [options, selected]);
+
   // Resolve labels for pre-filled values
   useEffect(() => {
     let cancelled = false;
@@ -594,24 +626,41 @@ export function SearchableDropdownMultiPanel({
 
     setSelected((prev) => {
       const knownLabels = new Map(prev.map((s) => [s.value, s.label]));
-      const needsResolving = ids.some((id) => !knownLabels.has(id));
+      const optMap = new Map(options.map((o) => [o.value, o.label]));
+      const isUUID = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
+
+      const getBestLabel = (id: string) => {
+        const known = knownLabels.get(id);
+        if (known && known !== id && !isUUID(known)) return known;
+        if (optMap.has(id)) return optMap.get(id)!;
+        return id;
+      };
+
+      const needsResolving = ids.some((id) => {
+        const lbl = getBestLabel(id);
+        return lbl === id || isUUID(lbl);
+      });
+
       if (!needsResolving) {
-        return ids.map((id) => ({ value: id, label: knownLabels.get(id) as string }));
+        return ids.map((id) => ({ value: id, label: getBestLabel(id) }));
       }
+
       if (fetchLabelForValue) {
         void Promise.all(
-          ids.map(async (id) => ({
-            value: id,
-            label: knownLabels.get(id) ?? ((await fetchLabelForValue(id).catch(() => id)) || id),
-          }))
+          ids.map(async (id) => {
+            const currentLbl = getBestLabel(id);
+            if (currentLbl !== id && !isUUID(currentLbl)) return { value: id, label: currentLbl };
+            const fetched = await fetchLabelForValue(id).catch(() => id);
+            return { value: id, label: fetched || currentLbl };
+          })
         ).then((resolved) => { if (!cancelled) setSelected(resolved); });
-        return ids.map((id) => ({ value: id, label: knownLabels.get(id) ?? id }));
+        return ids.map((id) => ({ value: id, label: getBestLabel(id) }));
       }
-      return ids.map((id) => ({ value: id, label: knownLabels.get(id) ?? id }));
+      return ids.map((id) => ({ value: id, label: getBestLabel(id) }));
     });
 
     return () => { cancelled = true; };
-  }, [values, fetchLabelForValue]);
+  }, [values, fetchLabelForValue, options]);
 
   // Click outside to close
   useEffect(() => {

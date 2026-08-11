@@ -22,7 +22,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { AppShell } from "./AppShell";
-import { Banner, Can, StatusBadge, TableMessageRow } from "./ui";
+import { Banner, Can, ModalAlert, StatusBadge, TableMessageRow } from "./ui";
 import { Pagination } from "./Pagination";
 import { ImpExpDropdown, BulkActionsDropdown, ImportSummaryPanel } from "./ImportWizard";
 import { SideDrawer, DetailFieldGrid, type DetailField } from "./SideDrawer";
@@ -181,6 +181,7 @@ export function MasterPage<T extends MasterRecord>({
   const [importError, setImportError] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [effectiveSearch, setEffectiveSearch] = useState("");
+  const [alertPopup, setAlertPopup] = useState<{ title: string; message: string } | null>(null);
 
   const colCount = columns.length + 3; // +1 for Checkbox, +1 for Sr. No., +1 for actions
   const extraFiltersKey = JSON.stringify(extraFilters || {});
@@ -315,12 +316,22 @@ export function MasterPage<T extends MasterRecord>({
     e.preventDefault();
     if (submitting) return;
     setError(null);
+
+    const triggerAlert = (err: unknown) => {
+      setError(err);
+      const msg = err instanceof Error ? err.message : String(err);
+      const title = msg.toLowerCase().includes("duplicate") || msg.toLowerCase().includes("already exists")
+        ? "Duplicate Record Warning"
+        : "Validation Error";
+      setAlertPopup({ title, message: msg });
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    };
+
     let payload: unknown;
     try {
       payload = toPayload(form);
     } catch (err) {
-      // Page-level validation (e.g. "Please select a valid Country.")
-      setError(err);
+      triggerAlert(err);
       return;
     }
     setSubmitting(true);
@@ -352,7 +363,7 @@ export function MasterPage<T extends MasterRecord>({
       }
       closeModal();
     } catch (err) {
-      setError(err);
+      triggerAlert(err);
     } finally {
       setSubmitting(false);
     }
@@ -938,6 +949,13 @@ export function MasterPage<T extends MasterRecord>({
           {drawerItem && <DetailFieldGrid fields={detailFields(drawerItem)} />}
         </SideDrawer>
       )}
+
+      <ModalAlert
+        isOpen={Boolean(alertPopup)}
+        title={alertPopup?.title}
+        message={alertPopup?.message || ""}
+        onClose={() => setAlertPopup(null)}
+      />
     </AppShell>
   );
 }

@@ -17,7 +17,8 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
-import { Banner, Can, TableMessageRow } from "@/components/ui";
+import { Banner, Can, ModalAlert, TableMessageRow } from "@/components/ui";
+import { SideDrawer, DetailFieldGrid } from "@/components/SideDrawer";
 import { Pagination } from "@/components/Pagination";
 import { ImpExpDropdown, BulkActionsDropdown, ImportSummaryPanel } from "@/components/ImportWizard";
 import {
@@ -78,8 +79,6 @@ const SUPPLIER_IMPORT_HEADERS: ImportHeader[] = [
   { key: "overall_remarks", label: "Overall Remarks" },
   { key: "is_active", label: "Is Active (true/false)" },
 ];
-
-const MAX_CHIPS = 5;
 
 type ModalTab = "first" | "second" | "contacts" | "continue";
 
@@ -201,6 +200,8 @@ export function SuppliersPage() {
   const [importSummary, setImportSummary] = useState<ImportSummary | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [alertPopup, setAlertPopup] = useState<{ title: string; message: string } | null>(null);
+  const [drawerSupplier, setDrawerSupplier] = useState<Supplier | null>(null);
   const [frozenCount, setFrozenCount] = useState<number>(0);
   const tableRef = useRef<HTMLTableElement>(null);
   const [colLefts, setColLefts] = useState<number[]>([]);
@@ -590,26 +591,81 @@ export function SuppliersPage() {
 
   const reload = () => setReloadCounter((n) => n + 1);
 
-  function chipList(ids: string[] | undefined, tableKey: string) {
+  function renderTruncatedText(text: string | null | undefined, maxLen = 22, modalTitle = "Details") {
+    if (!text) return <span className="muted">—</span>;
+    const str = text.trim();
+    if (str.length <= maxLen) return <span style={{ whiteSpace: "nowrap" }}>{str}</span>;
+
+    const shortText = str.slice(0, maxLen) + "…";
+    return (
+      <span style={{ display: "inline-flex", alignItems: "center", gap: "6px", whiteSpace: "nowrap" }}>
+        <span style={{ maxWidth: "150px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "inline-block" }} title={str}>
+          {shortText}
+        </span>
+        <button
+          type="button"
+          onClick={() => setAlertPopup({ title: modalTitle, message: str })}
+          style={{
+            border: "1px solid #cbd5e1",
+            background: "#f8fafc",
+            color: "#0061f2",
+            fontSize: "11px",
+            padding: "1px 6px",
+            borderRadius: "10px",
+            cursor: "pointer",
+            fontWeight: 600,
+            whiteSpace: "nowrap",
+            flexShrink: 0,
+          }}
+          title="Click to view full text 👁️"
+        >
+          👁️
+        </button>
+      </span>
+    );
+  }
+
+  function chipList(ids: string[] | undefined, tableKey: string, modalTitle = "Selected Items") {
     if (!ids || !ids.length) return <span className="muted">—</span>;
     const names = ids.map((id) => resolver.get(tableKey, id) || "…");
-    const shown = names.slice(0, MAX_CHIPS);
-    const remaining = names.length - shown.length;
+    const first = names[0];
+    const remaining = names.length - 1;
     return (
-      <div className="chip-list">
-        {shown.map((n, i) => (
-          <span className="chip" key={`${n}-${i}`}>
-            {n}
-          </span>
-        ))}
+      <div className="chip-list" style={{ display: "inline-flex", flexWrap: "nowrap", gap: "4px", alignItems: "center", whiteSpace: "nowrap" }}>
+        <span
+          className="chip"
+          title={first}
+          style={{
+            maxWidth: "120px",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+            display: "inline-block",
+            verticalAlign: "middle",
+          }}
+        >
+          {first}
+        </span>
         {remaining > 0 && (
           <button
             type="button"
             className="chip-more"
             title={names.join(", ")}
-            onClick={() => alert(names.join(", "))}
+            onClick={() => setAlertPopup({ title: modalTitle, message: "• " + names.join("\n• ") })}
+            style={{
+              fontWeight: 600,
+              fontSize: "11px",
+              color: "#0061f2",
+              background: "#eff6ff",
+              border: "1px solid #bfdbfe",
+              borderRadius: "12px",
+              padding: "1px 7px",
+              cursor: "pointer",
+              whiteSpace: "nowrap",
+              flexShrink: 0,
+            }}
           >
-            +{remaining} more
+            +{remaining} 👁️
           </button>
         )}
       </div>
@@ -840,24 +896,34 @@ export function SuppliersPage() {
       }
     }
 
+    const triggerAlert = (err: unknown) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(msg);
+      const title = msg.toLowerCase().includes("duplicate") || msg.toLowerCase().includes("already exists")
+        ? "Duplicate Supplier Warning"
+        : "Validation Error";
+      setAlertPopup({ title, message: msg });
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    };
+
     setError(null);
     setSaving(true);
     try {
       const { stateId, cityId } = await resolveCustomGeography(formCountryId);
       if (!stateId && !formStateCustomText.trim()) {
-        setError("Province is required.");
+        triggerAlert("Province is required.");
         return false;
       }
       if (formStateCustomText.trim() && !stateId) {
-        setError("Province could not be resolved — please select from the dropdown or check your entry.");
+        triggerAlert("Province could not be resolved — please select from the dropdown or check your entry.");
         return false;
       }
       if (!cityId && !formCityCustomText.trim()) {
-        setError("City is required.");
+        triggerAlert("City is required.");
         return false;
       }
       if (formCityCustomText.trim() && !cityId) {
-        setError("City could not be resolved — please select from the dropdown or check your Province / City match.");
+        triggerAlert("City could not be resolved — please select from the dropdown or check your Province / City match.");
         return false;
       }
       const categoryIds = await resolveCustomCategories();
@@ -894,7 +960,7 @@ export function SuppliersPage() {
       }
       return true;
     } catch (err) {
-      setError(err);
+      triggerAlert(err);
       return false;
     } finally {
       setSaving(false);
@@ -1295,9 +1361,11 @@ export function SuppliersPage() {
                           setFormCityId(null);
                         }}
                         placeholder="Search or type city..."
-                        fetchOptions={searchFetcher("/masters/cities", (): Record<string, string> =>
-                          formStateId ? { state_id: formStateId } : {}
-                        )}
+                        fetchOptions={searchFetcher("/masters/cities", (): Record<string, string> => {
+                          if (formStateId) return { state_id: formStateId };
+                          if (formCountryId) return { country_id: formCountryId };
+                          return {};
+                        })}
                         fetchLabelForValue={fetchNameLabel("/masters/cities")}
                       />
                     </div>
@@ -2333,9 +2401,11 @@ export function SuppliersPage() {
                       setCurrentPage(1);
                     }}
                     placeholder="Filter: City"
-                    fetchOptions={searchFetcher("/masters/cities", (): Record<string, string> =>
-                      stateFilter ? { state_id: stateFilter } : {}
-                    )}
+                    fetchOptions={searchFetcher("/masters/cities", (): Record<string, string> => {
+                      if (stateFilter) return { state_id: stateFilter };
+                      if (countryFilter) return { country_id: countryFilter };
+                      return {};
+                    })}
                     fetchLabelForValue={fetchNameLabel("/masters/cities")}
                   />
                 </div>
@@ -2529,34 +2599,22 @@ export function SuppliersPage() {
                             href="#"
                             onClick={(e) => {
                               e.preventDefault();
-                              void handleRowEdit(s.id);
+                              setDrawerSupplier(s);
                             }}
                           >
                             {s.company_name}
                           </a>
                         </td>
-                        <td style={getFreezeStyle(3, false)}>{chipList(s.category_ids, "categories")}</td>
-                        <td style={getFreezeStyle(4, false)}>{chipList(s.sub_category_ids, "subCategories")}</td>
-                        <td>{chipList(s.product_ids, "products")}</td>
-                        <td>
-                          {s.secondary_products_description ? (
-                            s.secondary_products_description.slice(0, 60)
-                          ) : (
-                            <span className="muted">—</span>
-                          )}
-                        </td>
+                        <td style={getFreezeStyle(3, false)}>{chipList(s.category_ids, "categories", "Product Categories")}</td>
+                        <td style={getFreezeStyle(4, false)}>{chipList(s.sub_category_ids, "subCategories", "Sub-Categories")}</td>
+                        <td>{chipList(s.product_ids, "products", "Products Supplied")}</td>
+                        <td>{renderTruncatedText(s.secondary_products_description, 20, "Secondary Products")}</td>
                         <td>{resolver.get("countries", s.country_id) || "…"}</td>
                         <td>
                           {resolver.get("cities", s.city_id) || "…"},{" "}
                           {resolver.get("states", s.state_id) || "…"}
                         </td>
-                        <td>
-                          {s.brand_description ? (
-                            s.brand_description
-                          ) : (
-                            <span className="muted">—</span>
-                          )}
-                        </td>
+                        <td>{renderTruncatedText(s.brand_description, 20, "Brand Description")}</td>
                         <td>
                           {s.supplier_type ? s.supplier_type : <span className="muted">—</span>}
                         </td>
@@ -2675,6 +2733,80 @@ export function SuppliersPage() {
             </div>
           </div>
         </main>
+      )}
+
+      <ModalAlert
+        isOpen={Boolean(alertPopup)}
+        title={alertPopup?.title}
+        message={alertPopup?.message || ""}
+        onClose={() => setAlertPopup(null)}
+      />
+
+      {drawerSupplier && (
+        <SideDrawer
+          open={Boolean(drawerSupplier)}
+          title={`Supplier Detail #${drawerSupplier.company_name}`}
+          subtitle={`Supplier Type: ${drawerSupplier.supplier_type || "—"} | Status: ${drawerSupplier.is_active ? "Active" : "Inactive"}`}
+          onClose={() => setDrawerSupplier(null)}
+          onEdit={
+            canUpdate
+              ? () => {
+                  const id = drawerSupplier.id;
+                  setDrawerSupplier(null);
+                  void handleRowEdit(id);
+                }
+              : undefined
+          }
+          editLabel="✏️ Edit Supplier"
+        >
+          <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+            <DetailFieldGrid
+              fields={[
+                { label: "Company Name", value: drawerSupplier.company_name, fullWidth: true },
+                { label: "Supplier Type", value: drawerSupplier.supplier_type || "—" },
+                { label: "Brand Description", value: drawerSupplier.brand_description || "—" },
+                { label: "Country", value: resolver.get("countries", drawerSupplier.country_id) || "—" },
+                { label: "Province / State", value: resolver.get("states", drawerSupplier.state_id) || "—" },
+                { label: "City", value: resolver.get("cities", drawerSupplier.city_id) || "—" },
+                { label: "Product Categories", value: chipList(drawerSupplier.category_ids, "categories"), fullWidth: true },
+                { label: "Sub-Categories", value: chipList(drawerSupplier.sub_category_ids, "subCategories"), fullWidth: true },
+                { label: "Products Supplied", value: chipList(drawerSupplier.product_ids, "products"), fullWidth: true },
+                { label: "Secondary Products", value: drawerSupplier.secondary_products_description || "—", fullWidth: true },
+              ]}
+            />
+
+            <div style={{ background: "#f8fafc", padding: "16px", borderRadius: "10px", border: "1px solid #e2e8f0" }}>
+              <h4 style={{ fontSize: "14px", fontWeight: 700, margin: "0 0 12px 0", color: "#0f172a" }}>
+                Primary Contact Information
+              </h4>
+              <DetailFieldGrid
+                fields={[
+                  {
+                    label: "Full Name",
+                    value: `${drawerSupplier.contact_salutation || ""} ${drawerSupplier.contact_full_name || ""}`.trim() || "—",
+                  },
+                  { label: "Designation", value: drawerSupplier.contact_designation || "—" },
+                  { label: "Calling Number", value: drawerSupplier.contact_calling_number || "—" },
+                  { label: "WhatsApp Number", value: drawerSupplier.contact_whatsapp_number || "—" },
+                  { label: "WeChat Number", value: drawerSupplier.contact_wechat_number || "—" },
+                  { label: "Email Addresses", value: drawerSupplier.emails && drawerSupplier.emails.length ? drawerSupplier.emails.join(", ") : "—", fullWidth: true },
+                  { label: "Primary Website", value: drawerSupplier.primary_website || "—" },
+                  { label: "Secondary Website", value: drawerSupplier.secondary_website || "—" },
+                ]}
+              />
+            </div>
+
+            <DetailFieldGrid
+              fields={[
+                { label: "Supplier Grade", value: drawerSupplier.supplier_grade || "—" },
+                { label: "Current Status", value: <StatusPill value={drawerSupplier.current_status} /> },
+                { label: "Potential", value: drawerSupplier.potential || "—" },
+                { label: "Visited Factory/Office", value: drawerSupplier.visited_factory_office ? "Yes" : "No" },
+                { label: "Overall Remarks", value: drawerSupplier.overall_remarks || "—", fullWidth: true },
+              ]}
+            />
+          </div>
+        </SideDrawer>
       )}
     </AppShell>
   );

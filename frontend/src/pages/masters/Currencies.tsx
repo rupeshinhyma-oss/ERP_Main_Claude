@@ -19,6 +19,7 @@ export function CurrenciesPage() {
       breadcrumbTrail={["Master Data", "Currencies"]}
       newButtonLabel="+ New Currency"
       searchPlaceholder="Search name or code or Sr. No..."
+      hideQuickAdd={true}
       columnHeaders={["CURRENCY NAME", "CODE", "SYMBOL", "DECIMAL PLACES", "STATUS"]}
       columns={[
         { header: "CURRENCY NAME", render: (c) => <span className="cell-primary">{c.name}</span> },

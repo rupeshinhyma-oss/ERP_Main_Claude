@@ -25,6 +25,7 @@ export function StatesPage() {
       breadcrumbTrail={["Master Data", "Provinces"]}
       newButtonLabel="+ New Province"
       searchPlaceholder="Search province name or code or Sr. No..."
+      hideQuickAdd={true}
       reloadToken={countries.loaded}
       extraFilters={countryFilter ? { country_id: countryFilter } : undefined}
       toolbarExtras={

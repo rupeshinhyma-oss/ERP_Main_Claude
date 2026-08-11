@@ -136,8 +136,17 @@ class SupplierCreate(BaseModel):
     overall_remarks: str | None = None
     is_active: bool = True
 
+    @field_validator("supplier_type", mode="before")
+    @classmethod
+    def _normalize_supplier_type(cls, value: str | None) -> str | None:
+        if isinstance(value, str):
+            val_clean = value.strip().lower()
+            return val_clean if val_clean else None
+        return value
+
     _validate_calling = field_validator("contact_calling_number")(_phone_validator("Calling number"))
     _validate_whatsapp = field_validator("contact_whatsapp_number")(_phone_validator("WhatsApp number"))
+
 
 
 class SupplierUpdate(BaseModel):
@@ -177,8 +186,17 @@ class SupplierUpdate(BaseModel):
     overall_remarks: str | None = None
     is_active: bool | None = None
 
+    @field_validator("supplier_type", mode="before")
+    @classmethod
+    def _normalize_supplier_type(cls, value: str | None) -> str | None:
+        if isinstance(value, str):
+            val_clean = value.strip().lower()
+            return val_clean if val_clean else None
+        return value
+
     _validate_calling = field_validator("contact_calling_number")(_phone_validator("Calling number"))
     _validate_whatsapp = field_validator("contact_whatsapp_number")(_phone_validator("WhatsApp number"))
+
 
 
 class SupplierGradeUpdate(BaseModel):

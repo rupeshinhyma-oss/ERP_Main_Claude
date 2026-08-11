@@ -32,6 +32,7 @@ export function CitiesPage() {
       breadcrumbTrail={["Master Data", "Cities"]}
       newButtonLabel="+ ADD NEW CITY"
       searchPlaceholder="Search city name or Sr. No..."
+      hideQuickAdd={true}
       reloadToken={`${countries.loaded}-${states.loaded}`}
       columnHeaders={["CITY", "PROVINCE / REGION", "COUNTRY", "STATUS"]}
       columns={[

@@ -17,7 +17,8 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
-import { Banner, Can, TableMessageRow } from "@/components/ui";
+import { Banner, Can, ModalAlert, TableMessageRow } from "@/components/ui";
+import { SideDrawer, DetailFieldGrid } from "@/components/SideDrawer";
 import { Pagination } from "@/components/Pagination";
 import { ImpExpDropdown, BulkActionsDropdown, ImportSummaryPanel } from "@/components/ImportWizard";
 import {
@@ -78,8 +79,6 @@ const SUPPLIER_IMPORT_HEADERS: ImportHeader[] = [
   { key: "overall_remarks", label: "Overall Remarks" },
   { key: "is_active", label: "Is Active (true/false)" },
 ];
-
-const MAX_CHIPS = 5;
 
 type ModalTab = "first" | "second" | "contacts" | "continue";
 
@@ -201,41 +200,144 @@ export function SuppliersPage() {
   const [importSummary, setImportSummary] = useState<ImportSummary | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const [frozenCount, setFrozenCount] = useState<number>(0);
+  const [alertPopup, setAlertPopup] = useState<{ title: string; message: string } | null>(null);
+  const [drawerSupplier, setDrawerSupplier] = useState<Supplier | null>(null);
+  const [pinnedCols, setPinnedCols] = useState<Record<number, "left" | "right">>(() => {
+    const saved = localStorage.getItem("suppliers_pinned_cols");
+    if (saved !== null) {
+      try {
+        return JSON.parse(saved);
+      } catch {
+        // fallback
+      }
+    }
+    return { 0: "left", 1: "left", 2: "left" };
+  });
+
+  useEffect(() => {
+    localStorage.setItem("suppliers_pinned_cols", JSON.stringify(pinnedCols));
+  }, [pinnedCols]);
+
+  const [colLeftOffsets, setColLeftOffsets] = useState<Record<number, number>>({});
+  const [colRightOffsets, setColRightOffsets] = useState<Record<number, number>>({});
+  const [pinMenuOpen, setPinMenuOpen] = useState(false);
+  const pinMenuRef = useRef<HTMLDivElement>(null);
+
   const tableRef = useRef<HTMLTableElement>(null);
-  const [colLefts, setColLefts] = useState<number[]>([]);
+
+  // Close popup menu when clicking outside anywhere on screen
+  useEffect(() => {
+    if (!pinMenuOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (pinMenuRef.current && !pinMenuRef.current.contains(e.target as Node)) {
+        setPinMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [pinMenuOpen]);
+
+  const togglePin = useCallback((colIdx: number) => {
+    setPinnedCols((prev) => {
+      const next = { ...prev };
+      if (next[colIdx]) {
+        delete next[colIdx];
+      } else {
+        if (colIdx >= 13) {
+          next[colIdx] = "right";
+        } else {
+          next[colIdx] = "left";
+        }
+      }
+      return next;
+    });
+  }, []);
+
+  const displayOrder = useMemo(() => {
+    const allIndices = Array.from({ length: 15 }, (_, i) => i);
+    const lefts = allIndices.filter((idx) => pinnedCols[idx] === "left");
+    const unpinned = allIndices.filter((idx) => !pinnedCols[idx]);
+    const rights = allIndices.filter((idx) => pinnedCols[idx] === "right");
+    return [...lefts, ...unpinned, ...rights];
+  }, [pinnedCols]);
 
   useLayoutEffect(() => {
-    if (frozenCount <= 0 || !tableRef.current) return;
-    const ths = tableRef.current.querySelectorAll("thead th");
-    let accum = 0;
-    const lefts: number[] = [];
-    ths.forEach((th) => {
-      lefts.push(accum);
-      accum += (th as HTMLElement).offsetWidth;
-    });
-    setColLefts(lefts);
-  }, [frozenCount, rows, loading]);
+    if (!tableRef.current) return;
+    const tableEl = tableRef.current;
+
+    const updateOffsets = () => {
+      const ths = tableEl.querySelectorAll("thead th");
+      if (!ths.length) return;
+
+      const lefts = displayOrder.filter((idx) => pinnedCols[idx] === "left");
+      let accumLeft = 0;
+      const nextLefts: Record<number, number> = {};
+      for (const idx of lefts) {
+        const thPos = displayOrder.indexOf(idx);
+        if (ths[thPos]) {
+          nextLefts[idx] = accumLeft;
+          accumLeft += (ths[thPos] as HTMLElement).offsetWidth;
+        }
+      }
+
+      const rights = displayOrder.filter((idx) => pinnedCols[idx] === "right").reverse();
+      let accumRight = 0;
+      const nextRights: Record<number, number> = {};
+      for (const idx of rights) {
+        const thPos = displayOrder.indexOf(idx);
+        if (ths[thPos]) {
+          nextRights[idx] = accumRight;
+          accumRight += (ths[thPos] as HTMLElement).offsetWidth;
+        }
+      }
+
+      setColLeftOffsets(nextLefts);
+      setColRightOffsets(nextRights);
+    };
+
+    updateOffsets();
+
+    const ro = new ResizeObserver(() => updateOffsets());
+    ro.observe(tableEl);
+    return () => ro.disconnect();
+  }, [pinnedCols, rows, loading, displayOrder]);
 
   const getFreezeStyle = useCallback((colIdx: number, isHeader = false): React.CSSProperties => {
-    if (frozenCount <= 0 || colIdx >= frozenCount) return {};
+    const dir = pinnedCols[colIdx];
+    if (!dir) return {};
 
-    const fallbackWidths = [44, 65, 220, 160, 180, 180, 180, 120, 140, 130];
-    let fallbackLeft = 0;
-    for (let i = 0; i < colIdx; i++) fallbackLeft += fallbackWidths[i] || 140;
+    const lefts = displayOrder.filter((idx) => pinnedCols[idx] === "left");
+    const rights = displayOrder.filter((idx) => pinnedCols[idx] === "right");
 
-    const left = colLefts[colIdx] !== undefined ? colLefts[colIdx] : fallbackLeft;
-    const isLastFrozen = colIdx === frozenCount - 1;
+    const isLastLeft = dir === "left" && colIdx === lefts[lefts.length - 1];
+    const isFirstRight = dir === "right" && colIdx === rights[0];
 
+    if (dir === "left") {
+      const left = colLeftOffsets[colIdx] ?? 0;
+      return {
+        position: "sticky",
+        left: `${left}px`,
+        zIndex: isHeader ? 12 : 10,
+        backgroundColor: isHeader ? "#f8fafc" : "#ffffff",
+        boxShadow: isLastLeft ? "3px 0 6px -2px rgba(0, 0, 0, 0.15)" : "none",
+        borderRight: isLastLeft ? "2px solid #cbd5e1" : undefined,
+      };
+    }
+
+    const right = colRightOffsets[colIdx] ?? 0;
     return {
       position: "sticky",
-      left: `${left}px`,
+      right: `${right}px`,
       zIndex: isHeader ? 12 : 10,
       backgroundColor: isHeader ? "#f8fafc" : "#ffffff",
-      boxShadow: isLastFrozen ? "3px 0 6px -2px rgba(0, 0, 0, 0.18)" : "none",
-      borderRight: isLastFrozen ? "2px solid #cbd5e1" : undefined,
+      boxShadow: isFirstRight ? "-3px 0 6px -2px rgba(0, 0, 0, 0.15)" : "none",
+      borderLeft: isFirstRight ? "2px solid #cbd5e1" : undefined,
     };
-  }, [frozenCount, colLefts]);
+  }, [pinnedCols, colLeftOffsets, colRightOffsets, displayOrder]);
+
+
+
+
 
   /* Modal state */
   const [modalOpen, setModalOpen] = useState(false);
@@ -590,26 +692,81 @@ export function SuppliersPage() {
 
   const reload = () => setReloadCounter((n) => n + 1);
 
-  function chipList(ids: string[] | undefined, tableKey: string) {
+  function renderTruncatedText(text: string | null | undefined, maxLen = 22, modalTitle = "Details") {
+    if (!text) return <span className="muted">—</span>;
+    const str = text.trim();
+    if (str.length <= maxLen) return <span style={{ whiteSpace: "nowrap" }}>{str}</span>;
+
+    const shortText = str.slice(0, maxLen) + "…";
+    return (
+      <span style={{ display: "inline-flex", alignItems: "center", gap: "6px", whiteSpace: "nowrap" }}>
+        <span style={{ maxWidth: "150px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "inline-block" }} title={str}>
+          {shortText}
+        </span>
+        <button
+          type="button"
+          onClick={() => setAlertPopup({ title: modalTitle, message: str })}
+          style={{
+            border: "1px solid #cbd5e1",
+            background: "#f8fafc",
+            color: "#0061f2",
+            fontSize: "11px",
+            padding: "1px 6px",
+            borderRadius: "10px",
+            cursor: "pointer",
+            fontWeight: 600,
+            whiteSpace: "nowrap",
+            flexShrink: 0,
+          }}
+          title="Click to view full text 👁️"
+        >
+          👁️
+        </button>
+      </span>
+    );
+  }
+
+  function chipList(ids: string[] | undefined, tableKey: string, modalTitle = "Selected Items") {
     if (!ids || !ids.length) return <span className="muted">—</span>;
     const names = ids.map((id) => resolver.get(tableKey, id) || "…");
-    const shown = names.slice(0, MAX_CHIPS);
-    const remaining = names.length - shown.length;
+    const first = names[0];
+    const remaining = names.length - 1;
     return (
-      <div className="chip-list">
-        {shown.map((n, i) => (
-          <span className="chip" key={`${n}-${i}`}>
-            {n}
-          </span>
-        ))}
+      <div className="chip-list" style={{ display: "inline-flex", flexWrap: "nowrap", gap: "4px", alignItems: "center", whiteSpace: "nowrap" }}>
+        <span
+          className="chip"
+          title={first}
+          style={{
+            maxWidth: "120px",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+            display: "inline-block",
+            verticalAlign: "middle",
+          }}
+        >
+          {first}
+        </span>
         {remaining > 0 && (
           <button
             type="button"
             className="chip-more"
             title={names.join(", ")}
-            onClick={() => alert(names.join(", "))}
+            onClick={() => setAlertPopup({ title: modalTitle, message: "• " + names.join("\n• ") })}
+            style={{
+              fontWeight: 600,
+              fontSize: "11px",
+              color: "#0061f2",
+              background: "#eff6ff",
+              border: "1px solid #bfdbfe",
+              borderRadius: "12px",
+              padding: "1px 7px",
+              cursor: "pointer",
+              whiteSpace: "nowrap",
+              flexShrink: 0,
+            }}
           >
-            +{remaining} more
+            +{remaining} 👁️
           </button>
         )}
       </div>
@@ -712,7 +869,8 @@ export function SuppliersPage() {
     return {
       company_name: form.company_name.trim(),
       category_ids: formCategoryIds,
-      supplier_type: form.supplier_type || null,
+      supplier_type: form.supplier_type ? form.supplier_type.toLowerCase() : null,
+
       brand_description: form.brand_description.trim() || null,
       country_id: formCountryId,
       state_id: formStateId,
@@ -840,24 +998,34 @@ export function SuppliersPage() {
       }
     }
 
+    const triggerAlert = (err: unknown) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(msg);
+      const title = msg.toLowerCase().includes("duplicate") || msg.toLowerCase().includes("already exists")
+        ? "Duplicate Supplier Warning"
+        : "Validation Error";
+      setAlertPopup({ title, message: msg });
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    };
+
     setError(null);
     setSaving(true);
     try {
       const { stateId, cityId } = await resolveCustomGeography(formCountryId);
       if (!stateId && !formStateCustomText.trim()) {
-        setError("Province is required.");
+        triggerAlert("Province is required.");
         return false;
       }
       if (formStateCustomText.trim() && !stateId) {
-        setError("Province could not be resolved — please select from the dropdown or check your entry.");
+        triggerAlert("Province could not be resolved — please select from the dropdown or check your entry.");
         return false;
       }
       if (!cityId && !formCityCustomText.trim()) {
-        setError("City is required.");
+        triggerAlert("City is required.");
         return false;
       }
       if (formCityCustomText.trim() && !cityId) {
-        setError("City could not be resolved — please select from the dropdown or check your Province / City match.");
+        triggerAlert("City could not be resolved — please select from the dropdown or check your Province / City match.");
         return false;
       }
       const categoryIds = await resolveCustomCategories();
@@ -894,7 +1062,7 @@ export function SuppliersPage() {
       }
       return true;
     } catch (err) {
-      setError(err);
+      triggerAlert(err);
       return false;
     } finally {
       setSaving(false);
@@ -1231,13 +1399,22 @@ export function SuppliersPage() {
 
                   {/* Row 2: Supplier Type + Brand of Supplier's Products (2 columns) */}
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "18px", marginBottom: "18px" }}>
-                    <SelectField id="supplier_type" label="Supplier Type" value={form.supplier_type} onChange={(v) => setField("supplier_type", v)}>
-                      <option value="">Select</option>
-                      <option value="manufacturer">Manufacturer</option>
-                      <option value="dealer">Dealer / Trader</option>
-                    </SelectField>
+                    <div className="field">
+                      <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>Supplier Type</label>
+                      <SearchableDropdown
+                        value={form.supplier_type ? form.supplier_type : null}
+                        onChange={(_v, label) => setField("supplier_type", label || _v || "")}
+                        allowCustomText={true}
+                        onTextChange={(text) => setField("supplier_type", text)}
+                        placeholder="Search or select supplier type..."
+                        fetchOptions={searchFetcher("/masters/supplier-types")}
+                        fetchLabelForValue={async (val) => val}
+                      />
+                    </div>
                     <TextField id="brand_description" label="Brand of Supplier's Products" placeholder="Description..." value={form.brand_description} onChange={(v) => setField("brand_description", v)} />
                   </div>
+
+
 
                   {/* Row 3: Country + Province + City (3 columns) */}
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "18px", marginBottom: "24px" }}>
@@ -1295,9 +1472,11 @@ export function SuppliersPage() {
                           setFormCityId(null);
                         }}
                         placeholder="Search or type city..."
-                        fetchOptions={searchFetcher("/masters/cities", (): Record<string, string> =>
-                          formStateId ? { state_id: formStateId } : {}
-                        )}
+                        fetchOptions={searchFetcher("/masters/cities", (): Record<string, string> => {
+                          if (formStateId) return { state_id: formStateId };
+                          if (formCountryId) return { country_id: formCountryId };
+                          return {};
+                        })}
                         fetchLabelForValue={fetchNameLabel("/masters/cities")}
                       />
                     </div>
@@ -2333,28 +2512,33 @@ export function SuppliersPage() {
                       setCurrentPage(1);
                     }}
                     placeholder="Filter: City"
-                    fetchOptions={searchFetcher("/masters/cities", (): Record<string, string> =>
-                      stateFilter ? { state_id: stateFilter } : {}
-                    )}
+                    fetchOptions={searchFetcher("/masters/cities", (): Record<string, string> => {
+                      if (stateFilter) return { state_id: stateFilter };
+                      if (countryFilter) return { country_id: countryFilter };
+                      return {};
+                    })}
                     fetchLabelForValue={fetchNameLabel("/masters/cities")}
                   />
                 </div>
                 <div>
                   <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>Supplier Type</label>
-                  <select
-                    value={supplierTypeFilter}
-                    onChange={(e) => {
+                  <SearchableDropdown
+                    value={supplierTypeFilter || null}
+                    onChange={(_v, label) => {
                       setCurrentPage(1);
-                      setSupplierTypeFilter(e.target.value);
+                      setSupplierTypeFilter(label || _v || "");
                     }}
-                    style={{ width: "100%", padding: "8px 10px", borderRadius: "6px", border: "1px solid #cbd5e1" }}
-                  >
-                    <option value="">Supplier Type: All</option>
-                    <option value="manufacturer">Manufacturer</option>
-                    <option value="trader">Trader</option>
-                    <option value="dealer">Dealer</option>
-                  </select>
+                    allowCustomText={true}
+                    onTextChange={(text) => {
+                      setCurrentPage(1);
+                      setSupplierTypeFilter(text);
+                    }}
+                    placeholder="Filter: Supplier Type"
+                    fetchOptions={searchFetcher("/masters/supplier-types")}
+                    fetchLabelForValue={async (val) => val}
+                  />
                 </div>
+
                 <div>
                   <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>Supplier's Grade</label>
                   <select
@@ -2421,86 +2605,179 @@ export function SuppliersPage() {
           )}
 
           <div className="card">
-            <div className="toolbar" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                <select
-                  value={pageSize}
-                  onChange={(e) => {
-                    setPageSize(Number(e.target.value));
-                    setCurrentPage(1);
-                  }}
-                  style={{ padding: "6px 12px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px" }}
-                >
-                  <option value={10}>10</option>
-                  <option value={20}>20</option>
-                  <option value={50}>50</option>
-                  <option value={100}>100</option>
-                </select>
-                <span style={{ fontSize: "13px", color: "#64748b" }}>Items/Page</span>
-              </div>
+            <div className="toolbar" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 20px", gap: "12px", flexWrap: "wrap" }}>
               <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
-                <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
-                  <span style={{ fontSize: "12.5px", color: "#475569", fontWeight: 600 }}>📌 Freeze:</span>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                   <select
-                    value={frozenCount}
-                    onChange={(e) => setFrozenCount(Number(e.target.value))}
+                    value={pageSize}
+                    onChange={(e) => {
+                      setPageSize(Number(e.target.value));
+                      setCurrentPage(1);
+                    }}
+                    style={{ padding: "6px 12px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px" }}
+                  >
+                    <option value={10}>10</option>
+                    <option value={20}>20</option>
+                    <option value={50}>50</option>
+                    <option value={100}>100</option>
+                  </select>
+                  <span style={{ fontSize: "13px", color: "#64748b", fontWeight: 500 }}>Items/Page</span>
+                </div>
+
+                <div ref={pinMenuRef} style={{ position: "relative" }}>
+
+
+                  <button
+                    type="button"
+                    onClick={() => setPinMenuOpen((v) => !v)}
                     style={{
-                      padding: "6px 10px",
+                      padding: "6px 12px",
                       borderRadius: "6px",
                       border: "1px solid #cbd5e1",
                       fontSize: "13px",
-                      background: "#ffffff",
+                      background: pinMenuOpen ? "#e2e8f0" : "#ffffff",
                       cursor: "pointer",
                       color: "#0f172a",
-                      fontWeight: 500,
+                      fontWeight: 600,
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "6px",
                     }}
                   >
-                    <option value={0}>No Freeze</option>
-                    <option value={2}>Sr. No. + Checkbox</option>
-                    <option value={3}>1st Column (+ Company Name)</option>
-                    <option value={4}>2nd Column (+ Category)</option>
-                    <option value={5}>3rd Column (+ Key Strength)</option>
-                  </select>
+                    📌 Freeze Columns ({Object.keys(pinnedCols).length})
+                  </button>
+                  {pinMenuOpen && (
+                    <div
+                      style={{
+                        position: "absolute",
+                        right: 0,
+                        top: "38px",
+                        zIndex: 100,
+                        background: "#ffffff",
+                        border: "1px solid #cbd5e1",
+                        borderRadius: "8px",
+                        boxShadow: "0 8px 24px rgba(0,0,0,0.15)",
+                        padding: "12px",
+                        minWidth: "220px",
+                        display: "flex",
+                        flexDirection: "column",
+                      }}
+                    >
+                      <div style={{ fontSize: "12px", fontWeight: 700, color: "#475569", marginBottom: "8px", borderBottom: "1px solid #f1f5f9", paddingBottom: "6px" }}>
+                        Toggle Frozen Columns
+                      </div>
+                      <div style={{ maxHeight: "200px", overflowY: "auto", paddingRight: "4px" }}>
+                        {[
+                          "Checkbox", "Sr. No.", "Company Name", "Product Category",
+                          "Key Strength Sub-Category", "Products Supplied", "Secondary Products",
+                          "Country", "City, Province", "Brand", "Supplier Type",
+                          "Current Status", "Grade", "Potential", "Action"
+                        ].map((label, idx) => {
+                          const isPinned = Boolean(pinnedCols[idx]);
+                          return (
+                            <label key={label} style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", cursor: "pointer", padding: "4px 0" }}>
+                              <input type="checkbox" checked={isPinned} onChange={() => togglePin(idx)} /> {label}
+                            </label>
+                          );
+                        })}
+                      </div>
+                      <div style={{ borderTop: "1px solid #f1f5f9", marginTop: "8px", paddingTop: "8px" }}>
+                        <button
+                          type="button"
+                          onClick={() => setPinnedCols({})}
+                          style={{
+                            width: "100%",
+                            padding: "6px 8px",
+                            fontSize: "12px",
+                            borderRadius: "4px",
+                            border: "1px solid #e2e8f0",
+                            background: "#f8fafc",
+                            cursor: "pointer",
+                            color: "#dc2626",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Clear All Freezes
+                        </button>
+                      </div>
+                    </div>
+
+                  )}
                 </div>
+              </div>
+
+              <div style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
                 <input
                   type="text"
                   placeholder="Search company name or Sr. No..."
                   value={searchInput}
                   onChange={(e) => setSearchInput(e.target.value)}
-                  style={{ width: "320px", padding: "8px 14px", borderRadius: "6px", border: "1px solid #cbd5e1" }}
+                  style={{ width: "320px", padding: "8px 36px 8px 14px", borderRadius: "6px", border: "1px solid #cbd5e1" }}
                 />
+                {searchInput && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchInput("")}
+                    title="Clear search"
+                    style={{
+                      position: "absolute",
+                      right: "8px",
+                      background: "none",
+                      border: "none",
+                      cursor: "pointer",
+                      color: "#94a3b8",
+                      fontSize: "16px",
+                      lineHeight: 1,
+                      padding: "0 2px",
+                      display: "flex",
+                      alignItems: "center",
+                    }}
+                  >
+                    ×
+                  </button>
+                )}
               </div>
             </div>
 
             <div className="table-scroll">
               <table ref={tableRef}>
+
                 <thead>
                   <tr>
-                    <th style={getFreezeStyle(0, true)}>
-                      <input
-                        type="checkbox"
-                        checked={rows.length > 0 && rows.every((r) => selectedIds.includes(r.id))}
-                        onChange={(e) => {
-                          if (e.target.checked) setSelectedIds(rows.map((r) => r.id));
-                          else setSelectedIds([]);
-                        }}
-                        style={{ cursor: "pointer", width: "16px", height: "16px" }}
-                      />
-                    </th>
-                    <th style={getFreezeStyle(1, true)}>Sr. No.</th>
-                    <th style={getFreezeStyle(2, true)}>Company Name</th>
-                    <th style={getFreezeStyle(3, true)}>Product Category</th>
-                    <th style={getFreezeStyle(4, true)}>Key Strength Sub-Category</th>
-                    <th style={getFreezeStyle(5, true)}>Products Supplied</th>
-                    <th>Secondary Products</th>
-                    <th>Country</th>
-                    <th>City, Province</th>
-                    <th>Brand</th>
-                    <th>Supplier Type</th>
-                    <th>Current Status</th>
-                    <th>Grade</th>
-                    <th>Potential</th>
-                    <th style={{ textAlign: "center" }}>ACTION</th>
+                    {displayOrder.map((idx) => {
+                      if (idx === 0) {
+                        return (
+                          <th key="col-0" style={getFreezeStyle(0, true)}>
+                            <input
+                              type="checkbox"
+                              checked={rows.length > 0 && rows.every((r) => selectedIds.includes(r.id))}
+                              onChange={(e) => {
+                                if (e.target.checked) setSelectedIds(rows.map((r) => r.id));
+                                else setSelectedIds([]);
+                              }}
+                              style={{ cursor: "pointer", width: "16px", height: "16px" }}
+                            />
+                          </th>
+                        );
+                      }
+                      const label = [
+                        "Checkbox", "Sr. No.", "Company Name", "Product Category",
+                        "Key Strength Sub-Category", "Products Supplied", "Secondary Products",
+                        "Country", "City, Province", "Brand", "Supplier Type",
+                        "Current Status", "Grade", "Potential", "Action"
+                      ][idx];
+                      const isPinned = Boolean(pinnedCols[idx]);
+                      return (
+                        <th key={`col-${idx}-${label}`} style={{ ...(idx === 14 ? { textAlign: "center" } : {}), ...getFreezeStyle(idx, true) }}>
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: idx === 14 ? "center" : "space-between", gap: "4px" }}>
+                            <span>{label}</span>
+                            <button type="button" onClick={() => togglePin(idx)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: "11px", opacity: isPinned ? 1 : 0.3 }} title={isPinned ? "Unfreeze column" : "Freeze column"}>
+                              📌
+                            </button>
+                          </div>
+                        </th>
+                      );
+                    })}
                   </tr>
                 </thead>
                 <tbody ref={tableBodyRef} data-names-version={namesVersion}>
@@ -2511,157 +2788,187 @@ export function SuppliersPage() {
                   ) : (
                     rows.map((s, index) => (
                       <tr key={s.id}>
-                        <td style={getFreezeStyle(0, false)}>
-                          <input
-                            type="checkbox"
-                            className="row-select"
-                            checked={selectedIds.includes(s.id)}
-                            onChange={(e) => {
-                              if (e.target.checked) setSelectedIds((prev) => [...prev, s.id]);
-                              else setSelectedIds((prev) => prev.filter((i) => i !== s.id));
-                            }}
-                            style={{ cursor: "pointer", width: "16px", height: "16px" }}
-                          />
-                        </td>
-                        <td className="cell-srno" style={getFreezeStyle(1, false)}>{startSrNo + index}</td>
-                        <td style={getFreezeStyle(2, false)}>
-                          <a
-                            href="#"
-                            onClick={(e) => {
-                              e.preventDefault();
-                              void handleRowEdit(s.id);
-                            }}
-                          >
-                            {s.company_name}
-                          </a>
-                        </td>
-                        <td style={getFreezeStyle(3, false)}>{chipList(s.category_ids, "categories")}</td>
-                        <td style={getFreezeStyle(4, false)}>{chipList(s.sub_category_ids, "subCategories")}</td>
-                        <td>{chipList(s.product_ids, "products")}</td>
-                        <td>
-                          {s.secondary_products_description ? (
-                            s.secondary_products_description.slice(0, 60)
-                          ) : (
-                            <span className="muted">—</span>
-                          )}
-                        </td>
-                        <td>{resolver.get("countries", s.country_id) || "…"}</td>
-                        <td>
-                          {resolver.get("cities", s.city_id) || "…"},{" "}
-                          {resolver.get("states", s.state_id) || "…"}
-                        </td>
-                        <td>
-                          {s.brand_description ? (
-                            s.brand_description
-                          ) : (
-                            <span className="muted">—</span>
-                          )}
-                        </td>
-                        <td>
-                          {s.supplier_type ? s.supplier_type : <span className="muted">—</span>}
-                        </td>
-                        <td>
-                          <StatusPill value={s.current_status} />
-                        </td>
-                        <td>
-                          {canUpdate ? (
-                            <select
-                              className="inline-select"
-                              defaultValue={s.supplier_grade || ""}
-                              onChange={(e) =>
-                                handleInlineUpdate(`/suppliers/${s.id}/grade`, {
-                                  supplier_grade: e.target.value || null,
-                                })
-                              }
-                            >
-                              <option value="">Select</option>
-                              <option value="A">A</option>
-                              <option value="B">B</option>
-                              <option value="C">C</option>
-                            </select>
-                          ) : (
-                            <span>{s.supplier_grade || "—"}</span>
-                          )}
-                        </td>
-                        <td>
-                          {canUpdate ? (
-                            <select
-                              className="inline-select"
-                              defaultValue={s.potential || ""}
-                              onChange={(e) =>
-                                handleInlineUpdate(`/suppliers/${s.id}/potential`, {
-                                  potential: e.target.value || null,
-                                })
-                              }
-                            >
-                              <option value="">Select</option>
-                              <option value="yes">Yes</option>
-                              <option value="no">No</option>
-                            </select>
-                          ) : (
-                            <span>{s.potential ? s.potential.toUpperCase() : "—"}</span>
-                          )}
-                        </td>
-                        <td className="actions" style={{ textAlign: "center" }}>
-                          <div style={{ display: "flex", gap: "6px", justifyContent: "center", alignItems: "center" }}>
-                            {canUpdate && (
-                              <button
-                                type="button"
-                                className="btn"
-                                style={{
-                                  background: "#0061f2",
-                                  color: "#ffffff",
-                                  padding: "6px 9px",
-                                  borderRadius: "4px",
-                                  border: "none",
-                                  cursor: "pointer",
-                                  display: "inline-flex",
-                                  alignItems: "center",
-                                  justifyContent: "center",
-                                }}
-                                onClick={() => handleRowEdit(s.id)}
-                                title="Edit Supplier"
-                              >
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                                  <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-                                </svg>
-                              </button>
-                            )}
-                            {canDelete && (
-                              <button
-                                type="button"
-                                className="btn"
-                                style={{
-                                  background: "#ef4444",
-                                  color: "#ffffff",
-                                  padding: "6px 9px",
-                                  borderRadius: "4px",
-                                  border: "none",
-                                  cursor: "pointer",
-                                  display: "inline-flex",
-                                  alignItems: "center",
-                                  justifyContent: "center",
-                                }}
-                                onClick={() => handleRowDelete(s.id)}
-                                title="Delete Supplier"
-                              >
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                  <polyline points="3 6 5 6 21 6" />
-                                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                                  <line x1="10" y1="11" x2="10" y2="17" />
-                                  <line x1="14" y1="11" x2="14" y2="17" />
-                                </svg>
-                              </button>
-                            )}
-                          </div>
-                        </td>
+                        {displayOrder.map((idx) => {
+                          switch (idx) {
+                            case 0:
+                              return (
+                                <td key="cell-0" style={getFreezeStyle(0, false)}>
+                                  <input
+                                    type="checkbox"
+                                    className="row-select"
+                                    checked={selectedIds.includes(s.id)}
+                                    onChange={(e) => {
+                                      if (e.target.checked) setSelectedIds((prev) => [...prev, s.id]);
+                                      else setSelectedIds((prev) => prev.filter((i) => i !== s.id));
+                                    }}
+                                    style={{ cursor: "pointer", width: "16px", height: "16px" }}
+                                  />
+                                </td>
+                              );
+                            case 1:
+                              return (
+                                <td key="cell-1" className="cell-srno" style={getFreezeStyle(1, false)}>
+                                  {startSrNo + index}
+                                </td>
+                              );
+                            case 2:
+                              return (
+                                <td key="cell-2" style={getFreezeStyle(2, false)}>
+                                  <a
+                                    href="#"
+                                    onClick={(e) => {
+                                      e.preventDefault();
+                                      setDrawerSupplier(s);
+                                    }}
+                                  >
+                                    {s.company_name}
+                                  </a>
+                                </td>
+                              );
+                            case 3:
+                              return <td key="cell-3" style={getFreezeStyle(3, false)}>{chipList(s.category_ids, "categories", "Product Categories")}</td>;
+                            case 4:
+                              return <td key="cell-4" style={getFreezeStyle(4, false)}>{chipList(s.sub_category_ids, "subCategories", "Sub-Categories")}</td>;
+                            case 5:
+                              return <td key="cell-5" style={getFreezeStyle(5, false)}>{chipList(s.product_ids, "products", "Products Supplied")}</td>;
+                            case 6:
+                              return <td key="cell-6" style={getFreezeStyle(6, false)}>{renderTruncatedText(s.secondary_products_description, 20, "Secondary Products")}</td>;
+                            case 7:
+                              return <td key="cell-7" style={getFreezeStyle(7, false)}>{resolver.get("countries", s.country_id) || "…"}</td>;
+                            case 8:
+                              return (
+                                <td key="cell-8" style={getFreezeStyle(8, false)}>
+                                  {resolver.get("cities", s.city_id) || "…"},{" "}
+                                  {resolver.get("states", s.state_id) || "…"}
+                                </td>
+                              );
+                            case 9:
+                              return <td key="cell-9" style={getFreezeStyle(9, false)}>{renderTruncatedText(s.brand_description, 20, "Brand Description")}</td>;
+                            case 10:
+                              return (
+                                <td key="cell-10" style={getFreezeStyle(10, false)}>
+                                  {s.supplier_type ? s.supplier_type : <span className="muted">—</span>}
+                                </td>
+                              );
+                            case 11:
+                              return (
+                                <td key="cell-11" style={getFreezeStyle(11, false)}>
+                                  <StatusPill value={s.current_status} />
+                                </td>
+                              );
+                            case 12:
+                              return (
+                                <td key="cell-12" style={getFreezeStyle(12, false)}>
+                                  {canUpdate ? (
+                                    <select
+                                      className="inline-select"
+                                      defaultValue={s.supplier_grade || ""}
+                                      onChange={(e) =>
+                                        handleInlineUpdate(`/suppliers/${s.id}/grade`, {
+                                          supplier_grade: e.target.value || null,
+                                        })
+                                      }
+                                    >
+                                      <option value="">Select</option>
+                                      <option value="A">A</option>
+                                      <option value="B">B</option>
+                                      <option value="C">C</option>
+                                    </select>
+                                  ) : (
+                                    <span>{s.supplier_grade || "—"}</span>
+                                  )}
+                                </td>
+                              );
+                            case 13:
+                              return (
+                                <td key="cell-13" style={getFreezeStyle(13, false)}>
+                                  {canUpdate ? (
+                                    <select
+                                      className="inline-select"
+                                      defaultValue={s.potential || ""}
+                                      onChange={(e) =>
+                                        handleInlineUpdate(`/suppliers/${s.id}/potential`, {
+                                          potential: e.target.value || null,
+                                        })
+                                      }
+                                    >
+                                      <option value="">Select</option>
+                                      <option value="yes">Yes</option>
+                                      <option value="no">No</option>
+                                    </select>
+                                  ) : (
+                                    <span>{s.potential ? s.potential.toUpperCase() : "—"}</span>
+                                  )}
+                                </td>
+                              );
+                            case 14:
+                              return (
+                                <td key="cell-14" className="actions" style={{ textAlign: "center", ...getFreezeStyle(14, false) }}>
+                                  <div style={{ display: "flex", gap: "6px", justifyContent: "center", alignItems: "center" }}>
+                                    {canUpdate && (
+                                      <button
+                                        type="button"
+                                        className="btn"
+                                        style={{
+                                          background: "#0061f2",
+                                          color: "#ffffff",
+                                          padding: "6px 9px",
+                                          borderRadius: "4px",
+                                          border: "none",
+                                          cursor: "pointer",
+                                          display: "inline-flex",
+                                          alignItems: "center",
+                                          justifyContent: "center",
+                                        }}
+                                        onClick={() => handleRowEdit(s.id)}
+                                        title="Edit Supplier"
+                                      >
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 2 2h14a2 2 0 0 2 2v-7" />
+                                          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                                        </svg>
+                                      </button>
+                                    )}
+                                    {canDelete && (
+                                      <button
+                                        type="button"
+                                        className="btn"
+                                        style={{
+                                          background: "#ef4444",
+                                          color: "#ffffff",
+                                          padding: "6px 9px",
+                                          borderRadius: "4px",
+                                          border: "none",
+                                          cursor: "pointer",
+                                          display: "inline-flex",
+                                          alignItems: "center",
+                                          justifyContent: "center",
+                                        }}
+                                        onClick={() => handleRowDelete(s.id)}
+                                        title="Delete Supplier"
+                                      >
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                          <polyline points="3 6 5 6 21 6" />
+                                          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                                          <line x1="10" y1="11" x2="10" y2="17" />
+                                          <line x1="14" y1="11" x2="14" y2="17" />
+                                        </svg>
+                                      </button>
+                                    )}
+                                  </div>
+                                </td>
+                              );
+                            default:
+                              return null;
+                          }
+                        })}
                       </tr>
                     ))
                   )}
                 </tbody>
               </table>
             </div>
+
             <div className="pagination">
               <Pagination
                 pagination={pagination}
@@ -2675,6 +2982,80 @@ export function SuppliersPage() {
             </div>
           </div>
         </main>
+      )}
+
+      <ModalAlert
+        isOpen={Boolean(alertPopup)}
+        title={alertPopup?.title}
+        message={alertPopup?.message || ""}
+        onClose={() => setAlertPopup(null)}
+      />
+
+      {drawerSupplier && (
+        <SideDrawer
+          open={Boolean(drawerSupplier)}
+          title={`Supplier Detail #${drawerSupplier.company_name}`}
+          subtitle={`Supplier Type: ${drawerSupplier.supplier_type || "—"} | Status: ${drawerSupplier.is_active ? "Active" : "Inactive"}`}
+          onClose={() => setDrawerSupplier(null)}
+          onEdit={
+            canUpdate
+              ? () => {
+                  const id = drawerSupplier.id;
+                  setDrawerSupplier(null);
+                  void handleRowEdit(id);
+                }
+              : undefined
+          }
+          editLabel="✏️ Edit Supplier"
+        >
+          <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+            <DetailFieldGrid
+              fields={[
+                { label: "Company Name", value: drawerSupplier.company_name, fullWidth: true },
+                { label: "Supplier Type", value: drawerSupplier.supplier_type || "—" },
+                { label: "Brand Description", value: drawerSupplier.brand_description || "—" },
+                { label: "Country", value: resolver.get("countries", drawerSupplier.country_id) || "—" },
+                { label: "Province / State", value: resolver.get("states", drawerSupplier.state_id) || "—" },
+                { label: "City", value: resolver.get("cities", drawerSupplier.city_id) || "—" },
+                { label: "Product Categories", value: chipList(drawerSupplier.category_ids, "categories"), fullWidth: true },
+                { label: "Sub-Categories", value: chipList(drawerSupplier.sub_category_ids, "subCategories"), fullWidth: true },
+                { label: "Products Supplied", value: chipList(drawerSupplier.product_ids, "products"), fullWidth: true },
+                { label: "Secondary Products", value: drawerSupplier.secondary_products_description || "—", fullWidth: true },
+              ]}
+            />
+
+            <div style={{ background: "#f8fafc", padding: "16px", borderRadius: "10px", border: "1px solid #e2e8f0" }}>
+              <h4 style={{ fontSize: "14px", fontWeight: 700, margin: "0 0 12px 0", color: "#0f172a" }}>
+                Primary Contact Information
+              </h4>
+              <DetailFieldGrid
+                fields={[
+                  {
+                    label: "Full Name",
+                    value: `${drawerSupplier.contact_salutation || ""} ${drawerSupplier.contact_full_name || ""}`.trim() || "—",
+                  },
+                  { label: "Designation", value: drawerSupplier.contact_designation || "—" },
+                  { label: "Calling Number", value: drawerSupplier.contact_calling_number || "—" },
+                  { label: "WhatsApp Number", value: drawerSupplier.contact_whatsapp_number || "—" },
+                  { label: "WeChat Number", value: drawerSupplier.contact_wechat_number || "—" },
+                  { label: "Email Addresses", value: drawerSupplier.emails && drawerSupplier.emails.length ? drawerSupplier.emails.join(", ") : "—", fullWidth: true },
+                  { label: "Primary Website", value: drawerSupplier.primary_website || "—" },
+                  { label: "Secondary Website", value: drawerSupplier.secondary_website || "—" },
+                ]}
+              />
+            </div>
+
+            <DetailFieldGrid
+              fields={[
+                { label: "Supplier Grade", value: drawerSupplier.supplier_grade || "—" },
+                { label: "Current Status", value: <StatusPill value={drawerSupplier.current_status} /> },
+                { label: "Potential", value: drawerSupplier.potential || "—" },
+                { label: "Visited Factory/Office", value: drawerSupplier.visited_factory_office ? "Yes" : "No" },
+                { label: "Overall Remarks", value: drawerSupplier.overall_remarks || "—", fullWidth: true },
+              ]}
+            />
+          </div>
+        </SideDrawer>
       )}
     </AppShell>
   );

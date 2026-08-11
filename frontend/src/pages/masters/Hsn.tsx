@@ -25,6 +25,7 @@ export function HsnPage() {
       breadcrumbTrail={["Master Data", "HSN Codes"]}
       newButtonLabel="+ New HSN Code"
       searchPlaceholder="Search code or description or Sr. No..."
+      hideQuickAdd={true}
       columnHeaders={["HSN Code", "Description", "GST %", "Refund VAT %", "Status"]}
       columns={[
         { header: "HSN Code", render: (h) => <span className="cell-primary">{h.code}</span> },

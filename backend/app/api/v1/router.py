@@ -29,6 +29,7 @@ from app.masters.product_categories.routes import router as product_categories_r
 from app.masters.product_sub_categories.routes import router as product_sub_categories_router
 from app.masters.products.routes import router as products_router
 from app.masters.states.routes import router as states_router
+from app.masters.supplier_types.routes import router as supplier_types_router
 from app.masters.uom.routes import router as uom_router
 from app.organizations.routes import router as organizations_router
 from app.planning.routes import router as planning_router
@@ -66,6 +67,7 @@ api_router.include_router(product_categories_router)
 api_router.include_router(product_sub_categories_router)
 api_router.include_router(products_router)
 api_router.include_router(company_list_router)
+api_router.include_router(supplier_types_router)
 
 # Phase 8: Supplier Management.
 api_router.include_router(suppliers_router)

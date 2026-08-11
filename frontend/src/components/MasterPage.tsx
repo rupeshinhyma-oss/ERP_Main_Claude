@@ -22,7 +22,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { AppShell } from "./AppShell";
-import { Banner, Can, StatusBadge, TableMessageRow } from "./ui";
+import { Banner, Can, ModalAlert, StatusBadge, TableMessageRow } from "./ui";
 import { Pagination } from "./Pagination";
 import { ImpExpDropdown, BulkActionsDropdown, ImportSummaryPanel } from "./ImportWizard";
 import { SideDrawer, DetailFieldGrid, type DetailField } from "./SideDrawer";
@@ -167,7 +167,27 @@ export function MasterPage<T extends MasterRecord>({
   const [statusFilter, setStatusFilter] = useState("");
   const [filterOpen, setFilterOpen] = useState(false);
   const [reloadCounter, setReloadCounter] = useState(0);
-  const [frozenCount, setFrozenCount] = useState<number>(0);
+  const storageKey = `master_pinned_cols_${entityName}`;
+  const [pinnedCols, setPinnedCols] = useState<Record<number, "left" | "right">>(() => {
+    const saved = localStorage.getItem(storageKey);
+    if (saved !== null) {
+      try {
+        return JSON.parse(saved);
+      } catch {
+        // fallback
+      }
+    }
+    return { 0: "left", 1: "left" };
+  });
+
+  useEffect(() => {
+    localStorage.setItem(storageKey, JSON.stringify(pinnedCols));
+  }, [pinnedCols, storageKey]);
+
+  const [colLeftOffsets, setColLeftOffsets] = useState<Record<number, number>>({});
+  const [colRightOffsets, setColRightOffsets] = useState<Record<number, number>>({});
+  const [pinMenuOpen, setPinMenuOpen] = useState(false);
+  const pinMenuRef = useRef<HTMLDivElement>(null);
 
   const [modalOpen, setModalOpen] = useState(false);
   const [editingId, setEditingId] = useState("");
@@ -181,6 +201,7 @@ export function MasterPage<T extends MasterRecord>({
   const [importError, setImportError] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [effectiveSearch, setEffectiveSearch] = useState("");
+  const [alertPopup, setAlertPopup] = useState<{ title: string; message: string } | null>(null);
 
   const colCount = columns.length + 3; // +1 for Checkbox, +1 for Sr. No., +1 for actions
   const extraFiltersKey = JSON.stringify(extraFilters || {});
@@ -188,39 +209,119 @@ export function MasterPage<T extends MasterRecord>({
   const srNoJump = useSrNoJump();
   const tableRef = useRef<HTMLTableElement>(null);
   const tableBodyRef = useRef<HTMLTableSectionElement>(null);
-  const [colLefts, setColLefts] = useState<number[]>([]);
+
+  // Close popup menu when clicking outside anywhere on screen
+  useEffect(() => {
+    if (!pinMenuOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (pinMenuRef.current && !pinMenuRef.current.contains(e.target as Node)) {
+        setPinMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [pinMenuOpen]);
+
+  const togglePin = useCallback((colIdx: number) => {
+    setPinnedCols((prev) => {
+      const next = { ...prev };
+      if (next[colIdx]) {
+        delete next[colIdx];
+      } else {
+        if (colIdx >= colCount - 2) {
+          next[colIdx] = "right";
+        } else {
+          next[colIdx] = "left";
+        }
+      }
+      return next;
+    });
+  }, [colCount]);
+
+  const displayOrder = useMemo(() => {
+    const allIndices = Array.from({ length: colCount }, (_, i) => i);
+    const lefts = allIndices.filter((idx) => pinnedCols[idx] === "left");
+    const unpinned = allIndices.filter((idx) => !pinnedCols[idx]);
+    const rights = allIndices.filter((idx) => pinnedCols[idx] === "right");
+    return [...lefts, ...unpinned, ...rights];
+  }, [colCount, pinnedCols]);
 
   useLayoutEffect(() => {
-    if (frozenCount <= 0 || !tableRef.current) return;
-    const ths = tableRef.current.querySelectorAll("thead th");
-    let accum = 0;
-    const lefts: number[] = [];
-    ths.forEach((th) => {
-      lefts.push(accum);
-      accum += (th as HTMLElement).offsetWidth;
-    });
-    setColLefts(lefts);
-  }, [frozenCount, rows, columns, loading]);
+    if (!tableRef.current) return;
+    const tableEl = tableRef.current;
+
+    const updateOffsets = () => {
+      const ths = tableEl.querySelectorAll("thead th");
+      if (!ths.length) return;
+
+      const lefts = displayOrder.filter((idx) => pinnedCols[idx] === "left");
+      let accumLeft = 0;
+      const nextLefts: Record<number, number> = {};
+      for (const idx of lefts) {
+        const thPos = displayOrder.indexOf(idx);
+        if (ths[thPos]) {
+          nextLefts[idx] = accumLeft;
+          accumLeft += (ths[thPos] as HTMLElement).offsetWidth;
+        }
+      }
+
+      const rights = displayOrder.filter((idx) => pinnedCols[idx] === "right").reverse();
+      let accumRight = 0;
+      const nextRights: Record<number, number> = {};
+      for (const idx of rights) {
+        const thPos = displayOrder.indexOf(idx);
+        if (ths[thPos]) {
+          nextRights[idx] = accumRight;
+          accumRight += (ths[thPos] as HTMLElement).offsetWidth;
+        }
+      }
+
+      setColLeftOffsets(nextLefts);
+      setColRightOffsets(nextRights);
+    };
+
+    updateOffsets();
+
+    const ro = new ResizeObserver(() => updateOffsets());
+    ro.observe(tableEl);
+    return () => ro.disconnect();
+  }, [pinnedCols, rows, columns, loading, displayOrder]);
 
   const getFreezeStyle = useCallback((colIdx: number, isHeader = false): React.CSSProperties => {
-    if (frozenCount <= 0 || colIdx >= frozenCount) return {};
+    const dir = pinnedCols[colIdx];
+    if (!dir) return {};
 
-    const fallbackWidths = [40, 65, 200, 140, 130, 140, 140];
-    let fallbackLeft = 0;
-    for (let i = 0; i < colIdx; i++) fallbackLeft += fallbackWidths[i] || 140;
+    const lefts = displayOrder.filter((idx) => pinnedCols[idx] === "left");
+    const rights = displayOrder.filter((idx) => pinnedCols[idx] === "right");
 
-    const left = colLefts[colIdx] !== undefined ? colLefts[colIdx] : fallbackLeft;
-    const isLastFrozen = colIdx === frozenCount - 1;
+    const isLastLeft = dir === "left" && colIdx === lefts[lefts.length - 1];
+    const isFirstRight = dir === "right" && colIdx === rights[0];
 
+    if (dir === "left") {
+      const left = colLeftOffsets[colIdx] ?? 0;
+      return {
+        position: "sticky",
+        left: `${left}px`,
+        zIndex: isHeader ? 12 : 10,
+        backgroundColor: isHeader ? "#f8fafc" : "#ffffff",
+        boxShadow: isLastLeft ? "3px 0 6px -2px rgba(0, 0, 0, 0.15)" : "none",
+        borderRight: isLastLeft ? "2px solid #cbd5e1" : undefined,
+      };
+    }
+
+    const right = colRightOffsets[colIdx] ?? 0;
     return {
       position: "sticky",
-      left: `${left}px`,
+      right: `${right}px`,
       zIndex: isHeader ? 12 : 10,
       backgroundColor: isHeader ? "#f8fafc" : "#ffffff",
-      boxShadow: isLastFrozen ? "3px 0 6px -2px rgba(0, 0, 0, 0.18)" : "none",
-      borderRight: isLastFrozen ? "2px solid #cbd5e1" : undefined,
+      boxShadow: isFirstRight ? "-3px 0 6px -2px rgba(0, 0, 0, 0.15)" : "none",
+      borderLeft: isFirstRight ? "2px solid #cbd5e1" : undefined,
     };
-  }, [frozenCount, colLefts]);
+  }, [pinnedCols, colLeftOffsets, colRightOffsets, displayOrder]);
+
+
+
 
 
 
@@ -315,12 +416,22 @@ export function MasterPage<T extends MasterRecord>({
     e.preventDefault();
     if (submitting) return;
     setError(null);
+
+    const triggerAlert = (err: unknown) => {
+      setError(err);
+      const msg = err instanceof Error ? err.message : String(err);
+      const title = msg.toLowerCase().includes("duplicate") || msg.toLowerCase().includes("already exists")
+        ? "Duplicate Record Warning"
+        : "Validation Error";
+      setAlertPopup({ title, message: msg });
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    };
+
     let payload: unknown;
     try {
       payload = toPayload(form);
     } catch (err) {
-      // Page-level validation (e.g. "Please select a valid Country.")
-      setError(err);
+      triggerAlert(err);
       return;
     }
     setSubmitting(true);
@@ -352,7 +463,7 @@ export function MasterPage<T extends MasterRecord>({
       }
       closeModal();
     } catch (err) {
-      setError(err);
+      triggerAlert(err);
     } finally {
       setSubmitting(false);
     }
@@ -429,14 +540,9 @@ export function MasterPage<T extends MasterRecord>({
     }
   }
 
-  const headerCells = useMemo(() => {
-    const labels = columnHeaders ?? columns.map((col) => col.header);
-    return labels.map((label, i) => (
-      <th key={`${label}-${i}`} style={getFreezeStyle(i + 2, true)}>
-        {label}
-      </th>
-    ));
-  }, [columns, columnHeaders, getFreezeStyle]);
+
+
+
 
   // Sr. No. is a running number across the whole result set, not just this
   // page -- so page 2 continues at 21, 22, 23... rather than restarting at 1.
@@ -504,8 +610,194 @@ export function MasterPage<T extends MasterRecord>({
     );
   }
 
+  const renderHeaderCell = (idx: number) => {
+
+    if (idx === 0) {
+      return (
+        <th key="col-0" style={{ width: "40px", textAlign: "center", ...getFreezeStyle(0, true) }}>
+          <input
+            type="checkbox"
+            checked={rows.length > 0 && rows.every((r) => selectedIds.includes(String(r.id)))}
+            onChange={(e) => {
+              if (e.target.checked) {
+                setSelectedIds(rows.map((r) => String(r.id)));
+              } else {
+                setSelectedIds([]);
+              }
+            }}
+            style={{ cursor: "pointer", width: "16px", height: "16px" }}
+          />
+        </th>
+      );
+    }
+
+    if (idx === 1) {
+      return (
+        <th key="col-1" style={getFreezeStyle(1, true)}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "4px" }}>
+            <span>Sr. No.</span>
+            <button type="button" onClick={() => togglePin(1)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: "11px", opacity: pinnedCols[1] ? 1 : 0.4 }} title={pinnedCols[1] ? "Unfreeze" : "Freeze"}>
+              📌
+            </button>
+          </div>
+        </th>
+      );
+    }
+
+    if (idx === colCount - 1) {
+      return (
+        <th key="col-action" style={{ textAlign: "center", ...getFreezeStyle(colCount - 1, true) }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "4px" }}>
+            <span>{actionsHeader || "ACTION"}</span>
+            <button type="button" onClick={() => togglePin(colCount - 1)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: "11px", opacity: pinnedCols[colCount - 1] ? 1 : 0.4 }} title={pinnedCols[colCount - 1] ? "Unfreeze" : "Freeze"}>
+              📌
+            </button>
+          </div>
+        </th>
+      );
+    }
+
+    const mIdx = idx - 2;
+    const label = (columnHeaders ?? columns.map((col) => col.header))[mIdx];
+    const isPinned = Boolean(pinnedCols[idx]);
+    return (
+      <th key={`col-${mIdx}-${label}`} style={getFreezeStyle(idx, true)}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "4px" }}>
+          <span>{label}</span>
+          <button
+            type="button"
+            onClick={() => togglePin(idx)}
+            style={{
+              background: "none",
+              border: "none",
+              cursor: "pointer",
+              fontSize: "11px",
+              opacity: isPinned ? 1 : 0.4,
+              padding: "0 2px",
+            }}
+            title={isPinned ? "Unfreeze column" : "Freeze column"}
+          >
+            📌
+          </button>
+        </div>
+      </th>
+    );
+  };
+
+  const renderBodyCell = (item: T, index: number, idx: number) => {
+    if (idx === 0) {
+      return (
+        <td key="cell-0" style={{ width: "40px", textAlign: "center", ...getFreezeStyle(0, false) }}>
+          <input
+            type="checkbox"
+            checked={selectedIds.includes(String(item.id))}
+            onChange={(e) => {
+              const idStr = String(item.id);
+              if (e.target.checked) {
+                setSelectedIds((prev) => [...prev, idStr]);
+              } else {
+                setSelectedIds((prev) => prev.filter((i) => i !== idStr));
+              }
+            }}
+            style={{ cursor: "pointer", width: "16px", height: "16px" }}
+          />
+        </td>
+      );
+    }
+
+    if (idx === 1) {
+      return (
+        <td key="cell-1" className="cell-srno" style={getFreezeStyle(1, false)}>
+          {startingSrNo + index}
+        </td>
+      );
+    }
+
+    if (idx === colCount - 1) {
+      return (
+        <td key="cell-action" className="actions" style={{ textAlign: "center", ...getFreezeStyle(colCount - 1, false) }}>
+          <div style={{ display: "flex", gap: "6px", alignItems: "center", justifyContent: "center" }}>
+            {canUpdate && (
+              <button
+                type="button"
+                title="Edit"
+                onClick={() => handleEdit(item.id)}
+                style={{
+                  width: "32px",
+                  height: "32px",
+                  borderRadius: "4px",
+                  border: "none",
+                  background: "#0061f2",
+                  color: "#ffffff",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  cursor: "pointer",
+                  boxShadow: "0 1px 2px rgba(0,0,0,0.1)",
+                }}
+              >
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 2 2h14a2 2 0 0 2 2v-7"></path>
+                  <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                </svg>
+              </button>
+            )}
+            {canDelete && (
+              <button
+                type="button"
+                title="Delete"
+                onClick={() => handleDelete(item.id)}
+                style={{
+                  width: "32px",
+                  height: "32px",
+                  borderRadius: "4px",
+                  border: "none",
+                  background: "#ef4444",
+                  color: "#ffffff",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  cursor: "pointer",
+                  boxShadow: "0 1px 2px rgba(0,0,0,0.1)",
+                }}
+              >
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="3 6 5 6 21 6"></polyline>
+                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                </svg>
+              </button>
+            )}
+          </div>
+        </td>
+      );
+    }
+
+    const mIdx = idx - 2;
+    const col = columns[mIdx];
+    return (
+      <td key={`cell-${mIdx}-${col?.header}`} style={getFreezeStyle(idx, false)}>
+        {mIdx === 0 && detailFields ? (
+          <a
+            href="#"
+            className="cell-primary"
+            style={{ color: "var(--color-primary)", fontWeight: 600 }}
+            onClick={(e) => {
+              e.preventDefault();
+              setDrawerItem(item);
+            }}
+          >
+            {col?.render(item)}
+          </a>
+        ) : (
+          col?.render(item)
+        )}
+      </td>
+    );
+  };
+
   return (
     <AppShell activeKey={activeKey}>
+
       <main className="page">
         <Breadcrumb trail={breadcrumbTrail} />
         <div className="page-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "16px", marginBottom: "16px" }}>
@@ -675,77 +967,156 @@ export function MasterPage<T extends MasterRecord>({
             </button>
           </div>
 
-          <div className="toolbar" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 20px" }}>
-            <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-              <select
-                value={pageSize}
-                onChange={(e) => {
-                  setPageSize(Number(e.target.value));
-                  setCurrentPage(1);
-                }}
-                style={{ padding: "6px 12px", borderRadius: "4px", border: "1px solid #cbd5e1", width: "90px" }}
-              >
-                <option value={10}>10</option>
-                <option value={50}>50</option>
-                <option value={100}>100</option>
-              </select>
-              <span style={{ fontSize: "12px", color: "#64748b", fontWeight: 500 }}>Items/Page</span>
-            </div>
+          <div className="toolbar" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 20px", gap: "12px", flexWrap: "wrap" }}>
             <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
-              <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
-                <span style={{ fontSize: "12.5px", color: "#475569", fontWeight: 600 }}>📌 Freeze:</span>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                 <select
-                  value={frozenCount}
-                  onChange={(e) => setFrozenCount(Number(e.target.value))}
+                  value={pageSize}
+                  onChange={(e) => {
+                    setPageSize(Number(e.target.value));
+                    setCurrentPage(1);
+                  }}
+                  style={{ padding: "6px 12px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px" }}
+                >
+                  <option value={10}>10</option>
+                  <option value={50}>50</option>
+                  <option value={100}>100</option>
+                </select>
+                <span style={{ fontSize: "13px", color: "#64748b", fontWeight: 500 }}>Items/Page</span>
+              </div>
+
+              <div ref={pinMenuRef} style={{ position: "relative" }}>
+                <button
+                  type="button"
+                  onClick={() => setPinMenuOpen((v) => !v)}
                   style={{
-                    padding: "6px 10px",
+                    padding: "6px 12px",
                     borderRadius: "6px",
                     border: "1px solid #cbd5e1",
                     fontSize: "13px",
-                    background: "#ffffff",
+                    background: pinMenuOpen ? "#e2e8f0" : "#ffffff",
                     cursor: "pointer",
                     color: "#0f172a",
-                    fontWeight: 500,
+                    fontWeight: 600,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px",
                   }}
                 >
-                  <option value={0}>No Freeze</option>
-                  <option value={2}>Sr. No. + Checkbox</option>
-                  <option value={3}>1st Column (+ Name)</option>
-                  <option value={4}>2nd Column (+ Code)</option>
-                  <option value={5}>3rd Column (+ Brand/Type)</option>
-                </select>
+                  📌 Freeze Columns ({Object.keys(pinnedCols).length})
+                </button>
+                {pinMenuOpen && (
+                  <div
+                    style={{
+                      position: "absolute",
+                      left: 0,
+                      top: "38px",
+                      zIndex: 100,
+                      background: "#ffffff",
+                      border: "1px solid #cbd5e1",
+                      borderRadius: "8px",
+                      boxShadow: "0 8px 24px rgba(0,0,0,0.15)",
+                      padding: "12px",
+                      minWidth: "220px",
+                      display: "flex",
+                      flexDirection: "column",
+                    }}
+                  >
+                    <div style={{ fontSize: "12px", fontWeight: 700, color: "#475569", marginBottom: "8px", borderBottom: "1px solid #f1f5f9", paddingBottom: "6px" }}>
+                      Toggle Frozen Columns
+                    </div>
+
+                    <div style={{ maxHeight: "200px", overflowY: "auto", paddingRight: "4px" }}>
+                      <label style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", cursor: "pointer", padding: "4px 0" }}>
+                        <input type="checkbox" checked={Boolean(pinnedCols[0])} onChange={() => togglePin(0)} /> Checkbox
+                      </label>
+                      <label style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", cursor: "pointer", padding: "4px 0" }}>
+                        <input type="checkbox" checked={Boolean(pinnedCols[1])} onChange={() => togglePin(1)} /> Sr. No.
+                      </label>
+                      {(columnHeaders ?? columns.map((col) => col.header)).map((label, i) => {
+                        const idx = i + 2;
+                        const isPinned = Boolean(pinnedCols[idx]);
+                        return (
+                          <label key={`${label}-${i}`} style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", cursor: "pointer", padding: "4px 0" }}>
+                            <input type="checkbox" checked={isPinned} onChange={() => togglePin(idx)} /> {label}
+                          </label>
+                        );
+                      })}
+                      <label style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", cursor: "pointer", padding: "4px 0", borderTop: "1px solid #f1f5f9", marginTop: "4px", paddingTop: "6px" }}>
+                        <input type="checkbox" checked={Boolean(pinnedCols[colCount - 1])} onChange={() => togglePin(colCount - 1)} /> Action
+                      </label>
+                    </div>
+
+                    <div style={{ borderTop: "1px solid #f1f5f9", marginTop: "8px", paddingTop: "8px" }}>
+                      <button
+                        type="button"
+                        onClick={() => setPinnedCols({})}
+                        style={{
+                          width: "100%",
+                          padding: "6px 8px",
+                          fontSize: "12px",
+                          borderRadius: "4px",
+                          border: "1px solid #e2e8f0",
+                          background: "#f8fafc",
+                          cursor: "pointer",
+                          color: "#dc2626",
+                          fontWeight: 600,
+                        }}
+                      >
+                        Clear All Freezes
+                      </button>
+                    </div>
+                  </div>
+
+                )}
               </div>
+            </div>
+
+            <div style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
               <input
                 type="text"
                 placeholder={searchPlaceholder || "Search..."}
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
-                style={{ padding: "8px 14px", borderRadius: "4px", border: "1px solid #cbd5e1", width: "260px", fontSize: "13.5px" }}
+                style={{
+                  padding: "8px 36px 8px 14px",
+                  borderRadius: "6px",
+                  border: "1px solid #cbd5e1",
+                  width: "280px",
+                  fontSize: "13.5px",
+                }}
               />
+              {searchInput && (
+                <button
+                  type="button"
+                  onClick={() => setSearchInput("")}
+                  title="Clear search"
+                  style={{
+                    position: "absolute",
+                    right: "8px",
+                    background: "none",
+                    border: "none",
+                    cursor: "pointer",
+                    color: "#94a3b8",
+                    fontSize: "16px",
+                    lineHeight: 1,
+                    padding: "0 2px",
+                    display: "flex",
+                    alignItems: "center",
+                  }}
+                >
+                  ×
+                </button>
+              )}
             </div>
           </div>
 
           <div className="table-scroll">
             <table ref={tableRef}>
+
               <thead>
                 <tr>
-                  <th style={{ width: "40px", textAlign: "center", ...getFreezeStyle(0, true) }}>
-                    <input
-                      type="checkbox"
-                      checked={rows.length > 0 && rows.every((r) => selectedIds.includes(String(r.id)))}
-                      onChange={(e) => {
-                        if (e.target.checked) {
-                          setSelectedIds(rows.map((r) => String(r.id)));
-                        } else {
-                          setSelectedIds([]);
-                        }
-                      }}
-                      style={{ cursor: "pointer", width: "16px", height: "16px" }}
-                    />
-                  </th>
-                  <th style={getFreezeStyle(1, true)}>Sr. No.</th>
-                  {headerCells}
-                  <th style={{ textAlign: "center" }}>{actionsHeader || "ACTION"}</th>
+                  {displayOrder.map((idx) => renderHeaderCell(idx))}
                 </tr>
               </thead>
               <tbody ref={tableBodyRef}>
@@ -756,95 +1127,7 @@ export function MasterPage<T extends MasterRecord>({
                 ) : (
                   rows.map((item, index) => (
                     <tr key={item.id}>
-                      <td style={{ width: "40px", textAlign: "center", ...getFreezeStyle(0, false) }}>
-                        <input
-                          type="checkbox"
-                          checked={selectedIds.includes(String(item.id))}
-                          onChange={(e) => {
-                            const idStr = String(item.id);
-                            if (e.target.checked) {
-                              setSelectedIds((prev) => [...prev, idStr]);
-                            } else {
-                              setSelectedIds((prev) => prev.filter((i) => i !== idStr));
-                            }
-                          }}
-                          style={{ cursor: "pointer", width: "16px", height: "16px" }}
-                        />
-                      </td>
-                      <td className="cell-srno" style={getFreezeStyle(1, false)}>{startingSrNo + index}</td>
-                      {columns.map((col, colIndex) => (
-                        <td key={col.header} style={getFreezeStyle(colIndex + 2, false)}>
-                          {colIndex === 0 && detailFields ? (
-                            <a
-                              href="#"
-                              className="cell-primary"
-                              style={{ color: "var(--color-primary)", fontWeight: 600 }}
-                              onClick={(e) => {
-                                e.preventDefault();
-                                setDrawerItem(item);
-                              }}
-                            >
-                              {col.render(item)}
-                            </a>
-                          ) : (
-                            col.render(item)
-                          )}
-                        </td>
-                      ))}
-                      <td className="actions" style={{ textAlign: "center" }}>
-                        <div style={{ display: "flex", gap: "6px", alignItems: "center", justifyContent: "center" }}>
-                          {canUpdate && (
-                            <button
-                              type="button"
-                              title="Edit"
-                              onClick={() => handleEdit(item.id)}
-                              style={{
-                                width: "32px",
-                                height: "32px",
-                                borderRadius: "4px",
-                                border: "none",
-                                background: "#0061f2",
-                                color: "#ffffff",
-                                display: "inline-flex",
-                                alignItems: "center",
-                                justifyContent: "center",
-                                cursor: "pointer",
-                                boxShadow: "0 1px 2px rgba(0,0,0,0.1)",
-                              }}
-                            >
-                              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-                                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
-                              </svg>
-                            </button>
-                          )}
-                          {canDelete && (
-                            <button
-                              type="button"
-                              title="Delete"
-                              onClick={() => handleDelete(item.id)}
-                              style={{
-                                width: "32px",
-                                height: "32px",
-                                borderRadius: "4px",
-                                border: "none",
-                                background: "#ef4444",
-                                color: "#ffffff",
-                                display: "inline-flex",
-                                alignItems: "center",
-                                justifyContent: "center",
-                                cursor: "pointer",
-                                boxShadow: "0 1px 2px rgba(0,0,0,0.1)",
-                              }}
-                            >
-                              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                <polyline points="3 6 5 6 21 6"></polyline>
-                                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                              </svg>
-                            </button>
-                          )}
-                        </div>
-                      </td>
+                      {displayOrder.map((idx) => renderBodyCell(item, index, idx))}
                     </tr>
                   ))
                 )}
@@ -852,6 +1135,7 @@ export function MasterPage<T extends MasterRecord>({
             </table>
           </div>
           <div className="pagination">
+
             <Pagination
               pagination={pagination}
               pageSize={pageSize}
@@ -938,6 +1222,13 @@ export function MasterPage<T extends MasterRecord>({
           {drawerItem && <DetailFieldGrid fields={detailFields(drawerItem)} />}
         </SideDrawer>
       )}
+
+      <ModalAlert
+        isOpen={Boolean(alertPopup)}
+        title={alertPopup?.title}
+        message={alertPopup?.message || ""}
+        onClose={() => setAlertPopup(null)}
+      />
     </AppShell>
   );
 }

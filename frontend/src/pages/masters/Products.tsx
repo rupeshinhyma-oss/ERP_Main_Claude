@@ -411,6 +411,7 @@ export function ProductsPage() {
           is_purchasable: item ? String(item.is_purchasable) : "true",
           is_sellable: item ? String(item.is_sellable) : "true",
           status: item?.status ?? "active",
+          _editing_id: item?.id ?? "",
         };
       }}
       toPayload={(f) => {
@@ -430,6 +431,17 @@ export function ProductsPage() {
         if (secUomId === f.uom_id) secUomId = null;
 
         const tallyName = f.product_name_tally.trim();
+        if (!tallyName) throw new Error("Product Name (As per Tally) is required.");
+
+        const cleanTally = tallyName.toLowerCase().replace(/[\s-]/g, "");
+        const duplicate = existingProducts.items.find((p) => {
+          const pName = (p.product_name_tally || p.product_name || "").toLowerCase().replace(/[\s-]/g, "");
+          return pName === cleanTally;
+        });
+
+        if (duplicate && (!f._editing_id || duplicate.id !== f._editing_id)) {
+          throw new Error(`Product "${tallyName}" already exists in Product Master! Duplicate products are not allowed.`);
+        }
 
         return {
           product_code: nullIfBlank(f.product_code),

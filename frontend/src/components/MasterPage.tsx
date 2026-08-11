@@ -167,7 +167,23 @@ export function MasterPage<T extends MasterRecord>({
   const [statusFilter, setStatusFilter] = useState("");
   const [filterOpen, setFilterOpen] = useState(false);
   const [reloadCounter, setReloadCounter] = useState(0);
-  const [pinnedCols, setPinnedCols] = useState<Record<number, "left" | "right">>({ 0: "left", 1: "left" });
+  const storageKey = `master_pinned_cols_${entityName}`;
+  const [pinnedCols, setPinnedCols] = useState<Record<number, "left" | "right">>(() => {
+    const saved = localStorage.getItem(storageKey);
+    if (saved !== null) {
+      try {
+        return JSON.parse(saved);
+      } catch {
+        // fallback
+      }
+    }
+    return { 0: "left", 1: "left" };
+  });
+
+  useEffect(() => {
+    localStorage.setItem(storageKey, JSON.stringify(pinnedCols));
+  }, [pinnedCols, storageKey]);
+
   const [colLeftOffsets, setColLeftOffsets] = useState<Record<number, number>>({});
   const [colRightOffsets, setColRightOffsets] = useState<Record<number, number>>({});
   const [pinMenuOpen, setPinMenuOpen] = useState(false);
@@ -1002,50 +1018,56 @@ export function MasterPage<T extends MasterRecord>({
                       boxShadow: "0 8px 24px rgba(0,0,0,0.15)",
                       padding: "12px",
                       minWidth: "220px",
-                      maxHeight: "300px",
-                      overflowY: "auto",
+                      display: "flex",
+                      flexDirection: "column",
                     }}
                   >
                     <div style={{ fontSize: "12px", fontWeight: 700, color: "#475569", marginBottom: "8px", borderBottom: "1px solid #f1f5f9", paddingBottom: "6px" }}>
                       Toggle Frozen Columns
                     </div>
-                    <label style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", cursor: "pointer", padding: "4px 0" }}>
-                      <input type="checkbox" checked={Boolean(pinnedCols[0])} onChange={() => togglePin(0)} /> Checkbox
-                    </label>
-                    <label style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", cursor: "pointer", padding: "4px 0" }}>
-                      <input type="checkbox" checked={Boolean(pinnedCols[1])} onChange={() => togglePin(1)} /> Sr. No.
-                    </label>
-                    {(columnHeaders ?? columns.map((col) => col.header)).map((label, i) => {
-                      const idx = i + 2;
-                      const isPinned = Boolean(pinnedCols[idx]);
-                      return (
-                        <label key={`${label}-${i}`} style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", cursor: "pointer", padding: "4px 0" }}>
-                          <input type="checkbox" checked={isPinned} onChange={() => togglePin(idx)} /> {label}
-                        </label>
-                      );
-                    })}
-                    <label style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", cursor: "pointer", padding: "4px 0", borderTop: "1px solid #f1f5f9", marginTop: "4px", paddingTop: "6px" }}>
-                      <input type="checkbox" checked={Boolean(pinnedCols[colCount - 1])} onChange={() => togglePin(colCount - 1)} /> Action
-                    </label>
-                    <button
-                      type="button"
-                      onClick={() => setPinnedCols({})}
-                      style={{
-                        marginTop: "8px",
-                        width: "100%",
-                        padding: "6px 8px",
-                        fontSize: "12px",
-                        borderRadius: "4px",
-                        border: "1px solid #e2e8f0",
-                        background: "#f8fafc",
-                        cursor: "pointer",
-                        color: "#dc2626",
-                        fontWeight: 600,
-                      }}
-                    >
-                      Clear All Freezes
-                    </button>
+
+                    <div style={{ maxHeight: "200px", overflowY: "auto", paddingRight: "4px" }}>
+                      <label style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", cursor: "pointer", padding: "4px 0" }}>
+                        <input type="checkbox" checked={Boolean(pinnedCols[0])} onChange={() => togglePin(0)} /> Checkbox
+                      </label>
+                      <label style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", cursor: "pointer", padding: "4px 0" }}>
+                        <input type="checkbox" checked={Boolean(pinnedCols[1])} onChange={() => togglePin(1)} /> Sr. No.
+                      </label>
+                      {(columnHeaders ?? columns.map((col) => col.header)).map((label, i) => {
+                        const idx = i + 2;
+                        const isPinned = Boolean(pinnedCols[idx]);
+                        return (
+                          <label key={`${label}-${i}`} style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", cursor: "pointer", padding: "4px 0" }}>
+                            <input type="checkbox" checked={isPinned} onChange={() => togglePin(idx)} /> {label}
+                          </label>
+                        );
+                      })}
+                      <label style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", cursor: "pointer", padding: "4px 0", borderTop: "1px solid #f1f5f9", marginTop: "4px", paddingTop: "6px" }}>
+                        <input type="checkbox" checked={Boolean(pinnedCols[colCount - 1])} onChange={() => togglePin(colCount - 1)} /> Action
+                      </label>
+                    </div>
+
+                    <div style={{ borderTop: "1px solid #f1f5f9", marginTop: "8px", paddingTop: "8px" }}>
+                      <button
+                        type="button"
+                        onClick={() => setPinnedCols({})}
+                        style={{
+                          width: "100%",
+                          padding: "6px 8px",
+                          fontSize: "12px",
+                          borderRadius: "4px",
+                          border: "1px solid #e2e8f0",
+                          background: "#f8fafc",
+                          cursor: "pointer",
+                          color: "#dc2626",
+                          fontWeight: 600,
+                        }}
+                      >
+                        Clear All Freezes
+                      </button>
+                    </div>
                   </div>
+
                 )}
               </div>
             </div>

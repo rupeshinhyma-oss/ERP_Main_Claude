@@ -202,7 +202,22 @@ export function SuppliersPage() {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [alertPopup, setAlertPopup] = useState<{ title: string; message: string } | null>(null);
   const [drawerSupplier, setDrawerSupplier] = useState<Supplier | null>(null);
-  const [pinnedCols, setPinnedCols] = useState<Record<number, "left" | "right">>({ 0: "left", 1: "left", 2: "left" });
+  const [pinnedCols, setPinnedCols] = useState<Record<number, "left" | "right">>(() => {
+    const saved = localStorage.getItem("suppliers_pinned_cols");
+    if (saved !== null) {
+      try {
+        return JSON.parse(saved);
+      } catch {
+        // fallback
+      }
+    }
+    return { 0: "left", 1: "left", 2: "left" };
+  });
+
+  useEffect(() => {
+    localStorage.setItem("suppliers_pinned_cols", JSON.stringify(pinnedCols));
+  }, [pinnedCols]);
+
   const [colLeftOffsets, setColLeftOffsets] = useState<Record<number, number>>({});
   const [colRightOffsets, setColRightOffsets] = useState<Record<number, number>>({});
   const [pinMenuOpen, setPinMenuOpen] = useState(false);
@@ -854,7 +869,8 @@ export function SuppliersPage() {
     return {
       company_name: form.company_name.trim(),
       category_ids: formCategoryIds,
-      supplier_type: form.supplier_type || null,
+      supplier_type: form.supplier_type ? form.supplier_type.toLowerCase() : null,
+
       brand_description: form.brand_description.trim() || null,
       country_id: formCountryId,
       state_id: formStateId,
@@ -1382,6 +1398,7 @@ export function SuppliersPage() {
                   </div>
 
                   {/* Row 2: Supplier Type + Brand of Supplier's Products (2 columns) */}
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "18px", marginBottom: "18px" }}>
                     <div className="field">
                       <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>Supplier Type</label>
                       <SearchableDropdown
@@ -1395,6 +1412,8 @@ export function SuppliersPage() {
                       />
                     </div>
                     <TextField id="brand_description" label="Brand of Supplier's Products" placeholder="Description..." value={form.brand_description} onChange={(v) => setField("brand_description", v)} />
+                  </div>
+
 
 
                   {/* Row 3: Country + Province + City (3 columns) */}
@@ -2640,45 +2659,49 @@ export function SuppliersPage() {
                         boxShadow: "0 8px 24px rgba(0,0,0,0.15)",
                         padding: "12px",
                         minWidth: "220px",
-                        maxHeight: "300px",
-                        overflowY: "auto",
+                        display: "flex",
+                        flexDirection: "column",
                       }}
                     >
                       <div style={{ fontSize: "12px", fontWeight: 700, color: "#475569", marginBottom: "8px", borderBottom: "1px solid #f1f5f9", paddingBottom: "6px" }}>
                         Toggle Frozen Columns
                       </div>
-                      {[
-                        "Checkbox", "Sr. No.", "Company Name", "Product Category",
-                        "Key Strength Sub-Category", "Products Supplied", "Secondary Products",
-                        "Country", "City, Province", "Brand", "Supplier Type",
-                        "Current Status", "Grade", "Potential", "Action"
-                      ].map((label, idx) => {
-                        const isPinned = Boolean(pinnedCols[idx]);
-                        return (
-                          <label key={label} style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", cursor: "pointer", padding: "4px 0" }}>
-                            <input type="checkbox" checked={isPinned} onChange={() => togglePin(idx)} /> {label}
-                          </label>
-                        );
-                      })}
-                      <button
-                        type="button"
-                        onClick={() => setPinnedCols({})}
-                        style={{
-                          marginTop: "8px",
-                          width: "100%",
-                          padding: "6px 8px",
-                          fontSize: "12px",
-                          borderRadius: "4px",
-                          border: "1px solid #e2e8f0",
-                          background: "#f8fafc",
-                          cursor: "pointer",
-                          color: "#dc2626",
-                          fontWeight: 600,
-                        }}
-                      >
-                        Clear All Freezes
-                      </button>
+                      <div style={{ maxHeight: "200px", overflowY: "auto", paddingRight: "4px" }}>
+                        {[
+                          "Checkbox", "Sr. No.", "Company Name", "Product Category",
+                          "Key Strength Sub-Category", "Products Supplied", "Secondary Products",
+                          "Country", "City, Province", "Brand", "Supplier Type",
+                          "Current Status", "Grade", "Potential", "Action"
+                        ].map((label, idx) => {
+                          const isPinned = Boolean(pinnedCols[idx]);
+                          return (
+                            <label key={label} style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", cursor: "pointer", padding: "4px 0" }}>
+                              <input type="checkbox" checked={isPinned} onChange={() => togglePin(idx)} /> {label}
+                            </label>
+                          );
+                        })}
+                      </div>
+                      <div style={{ borderTop: "1px solid #f1f5f9", marginTop: "8px", paddingTop: "8px" }}>
+                        <button
+                          type="button"
+                          onClick={() => setPinnedCols({})}
+                          style={{
+                            width: "100%",
+                            padding: "6px 8px",
+                            fontSize: "12px",
+                            borderRadius: "4px",
+                            border: "1px solid #e2e8f0",
+                            background: "#f8fafc",
+                            cursor: "pointer",
+                            color: "#dc2626",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Clear All Freezes
+                        </button>
+                      </div>
                     </div>
+
                   )}
                 </div>
               </div>

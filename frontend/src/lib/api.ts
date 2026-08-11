@@ -196,9 +196,19 @@ export async function apiCall<T>(
   }
 
   if (!response.ok || body.success === false) {
-    const message = body.message || "The request failed.";
+    let message = body.message || "The request failed.";
+    if (body.errors && body.errors.length > 0) {
+      const details = body.errors
+        .map((e) => (e.field ? `${e.field}: ${e.message}` : e.message))
+        .filter(Boolean)
+        .join("; ");
+      if (details) {
+        message = `${message} (${details})`;
+      }
+    }
     throw new ApiError(message, response.status, body.errors || []);
   }
+
 
   return { data: body.data as T, meta: body.meta };
 }

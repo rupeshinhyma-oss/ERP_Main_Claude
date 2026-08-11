@@ -376,7 +376,7 @@ class PlanningService:
             raise ConflictException(f"A sheet named {name!r} already exists.")
 
         new_sheet = await self.create_sheet(
-            name=name, description=description, user_id=user_id, username=username, auto_populate=False
+            name=name, description=description, user_id=user_id, username=username, auto_populate=True
         )
         # create_sheet() always defaults mum_group_label to "Mum" via the
         # ORM column default -- overwrite it with the requested one before

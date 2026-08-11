@@ -22,8 +22,7 @@ Transaction policy
   block, regardless of outcome.
 """
 
-from __future__ import annotations
-
+import asyncio
 from collections.abc import AsyncGenerator
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -43,24 +42,20 @@ async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
     request (e.g. background tasks) via ``async with get_sessionmaker()()``.
     """
     session_factory = get_sessionmaker()
-    async with session_factory() as session:
+    session = session_factory()
+    try:
+        yield session
+        await session.commit()
+    except BaseException as exc:
         try:
-            yield session
-            await session.commit()
-        except BaseException:
-            # BaseException, not Exception: a client disconnecting mid-request
-            # (e.g. the browser aborting an in-flight chunked import upload)
-            # surfaces here as asyncio.CancelledError, which is a
-            # BaseException subclass, not an Exception subclass -- an
-            # `except Exception` clause would silently miss it, skipping the
-            # explicit rollback below and relying only on close()'s implicit
-            # rollback-of-pending-work. That implicit behavior happens to be
-            # safe today, but this handler is the one place responsible for
-            # guaranteeing "no half-applied write ever survives a broken
-            # request", so it rolls back explicitly for every kind of
-            # interruption, not just the ones that happen to be Exceptions.
             await session.rollback()
-            logger.exception("Session rolled back due to an unhandled exception or cancellation.")
-            raise
-        finally:
+        except Exception:
+            pass
+        if not isinstance(exc, (asyncio.CancelledError, KeyboardInterrupt)):
+            logger.exception("Session rolled back due to an unhandled exception.")
+        raise
+    finally:
+        try:
             await session.close()
+        except Exception:
+            pass

@@ -22,12 +22,14 @@ import { Breadcrumb } from "@/components/Breadcrumb";
 import { Banner, Can, TableMessageRow } from "@/components/ui";
 import { SearchableDropdown, type DropdownOption } from "@/components/SearchableDropdown";
 import { SelectField, TextAreaField, TextField } from "@/components/fields";
-import { apiDelete, apiGet, apiPatch, apiPost, apiPut, toQueryString } from "@/lib/api";
+import { apiDelete, apiGet, apiPatch, apiPost, apiPut, API_BASE, toQueryString } from "@/lib/api";
+import { Auth } from "@/lib/auth";
 import { useAuth } from "@/lib/hooks";
 import type { Role } from "@/types";
 import type {
   MumColumnStatusHistoryEntry,
   PlanningAggregateFn,
+  PlanningCell,
   PlanningCellStatusColor,
   PlanningChangeLogEntry,
   PlanningColumn,
@@ -77,6 +79,51 @@ const ITEM_COL_WIDTH = 240;
  */
 function isApprovalDateColumn(columnName: string): boolean {
   return columnName.trim().toLowerCase() === "approval date";
+}
+
+/**
+ * Extract the group number from any column belonging to a "Mum N" group:
+ * "Mum 2", "Mum2 Remarks", "NO. OF PKG MUM2", "TOTAL WEIGHT MUM2",
+ * "TOTAL CBM MUM2" all return 2. Returns null for anything else (e.g.
+ * "Mumbai Office" does not match -- the number is required right after
+ * "mum", with only optional whitespace between).
+ *
+ * This is the single source of truth for "which columns belong together
+ * as one Mum group" -- used by the eye/history popover (group entries by
+ * this number), delete-column (cascade-delete the whole group), and
+ * hide-column (cascade-hide the whole group) so all three features
+ * always agree on grouping, instead of three separate regexes drifting
+ * apart over time.
+ */
+function mumGroupNumber(columnName: string, label?: string): number | null {
+  const str = (columnName || "").trim();
+  if (label) {
+    const escapedLabel = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(`(?:${escapedLabel}|mum)\\s*(\\d+)`, "i");
+    const match = str.match(regex);
+    if (match) {
+      const num = parseInt(match[1], 10);
+      return Number.isNaN(num) ? null : num;
+    }
+  }
+  const match = str.match(/(?:mum|[a-z0-9_-]+)\s*(\d+)/i);
+  if (!match) return null;
+  const num = parseInt(match[1], 10);
+  return Number.isNaN(num) ? null : num;
+}
+
+/**
+ * Wrap a column name for safe use inside a FORMULA expression.
+ *
+ * Backend formulas (app.planning.formula) accept bare identifiers only
+ * when the column name is already a valid one (e.g. "Mum40"); any column
+ * name with spaces or special characters (e.g. "PKG QTY", "Mum 1") must
+ * be wrapped in square brackets so the backend's expression rewriter can
+ * find and safely mangle it. Wrapping is harmless even for names that
+ * would already be valid bare identifiers, so this is always safe to use.
+ */
+function quoteColumnRef(columnName: string): string {
+  return `[${columnName}]`;
 }
 
 function hiddenColumnsStorageKey(sheetId: string): string {
@@ -218,126 +265,179 @@ function DescriptionPopover({
     </>
   );
 }
+function isSystemColumn(name: string): boolean {
+  const cleaned = (name || "").trim().toLowerCase();
+  return cleaned === "item" || cleaned === "test(y/n)" || cleaned.includes("test (y/n)") || cleaned === "approval date";
+}
 
-/** One editable cell: click to edit the value, hover to reveal the status swatch + optional description button. */
-/**
- * Eye/history button for the Approval Date cell: fetches the row's
- * Mum-series status-color history lazily (only once, on first hover) and
- * shows it in a small popover -- "when Mum45 was blue, when it changed to
- * green, when Mum46 was blue", etc., in chronological order.
- */
-function MumStatusHistoryButton({ sheetId, rowId }: { sheetId: string; rowId: string }) {
-  const [open, setOpen] = useState(false);
-  const [entries, setEntries] = useState<MumColumnStatusHistoryEntry[] | null>(null);
-  const [loading, setLoading] = useState(false);
-  const anchorRef = useRef<HTMLButtonElement>(null);
-
-  async function handleOpen() {
-    setOpen(true);
-    if (entries !== null) return; // already fetched once; hovering again just re-shows it
-    setLoading(true);
-    try {
-      const { data } = await apiGet<MumColumnStatusHistoryEntry[]>(
-        `/planning/sheets/${sheetId}/rows/${rowId}/mum-status-history`
-      );
-      setEntries(data);
-    } catch {
-      setEntries([]);
-    } finally {
-      setLoading(false);
-    }
+function isPureMumColumn(name: string, label?: string): boolean {
+  const cleaned = (name || "").trim().toLowerCase();
+  if (cleaned.includes("remark") || cleaned.startsWith("no. of pkg") || cleaned.startsWith("total")) {
+    return false;
   }
+  if (label) {
+    const escapedLabel = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(`^(?:${escapedLabel}|mum)\\s*\\d+$`, "i");
+    if (regex.test(cleaned)) return true;
+  }
+  return /^(?:mum|[a-z0-9_-]+)\s*\d+$/i.test(cleaned);
+}
 
-  const rect = anchorRef.current?.getBoundingClientRect();
+function formatDaysMonthYear(dateStr: string | null | undefined): string {
+  if (!dateStr) return "";
+  const trimmed = String(dateStr).trim();
+  if (/^\d{2}\/\d{2}\/\d{4}$/.test(trimmed)) return trimmed;
+  const match = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (match) {
+    const [, yyyy, mm, dd] = match;
+    return `${dd}/${mm}/${yyyy}`;
+  }
+  const d = new Date(trimmed);
+  if (isNaN(d.getTime())) return dateStr;
+  const day = String(d.getDate()).padStart(2, "0");
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const year = d.getFullYear();
+  return `${day}/${month}/${year}`;
+}
+
+/** Popover for showing a row's Mum-series status history feed. */
+function MumStatusHistoryPopover({
+  anchor,
+  sheetId,
+  rowId,
+  visibleMumGroupNumbers,
+  onClose,
+}: {
+  anchor: HTMLElement;
+  sheetId: string;
+  rowId: string;
+  visibleMumGroupNumbers?: Set<number>;
+  onClose: () => void;
+}) {
+  const [entries, setEntries] = useState<MumColumnStatusHistoryEntry[] | null>(null);
+  const [loading, setLoading] = useState(true);
+  const rect = anchor.getBoundingClientRect();
+
+  useEffect(() => {
+    let active = true;
+    apiGet<MumColumnStatusHistoryEntry[]>(`/planning/sheets/${sheetId}/rows/${rowId}/mum-status-history`)
+      .then(({ data }) => {
+        if (active) setEntries(data || []);
+      })
+      .catch(() => {
+        if (active) setEntries([]);
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [sheetId, rowId]);
+
+  const groupedEntries = useMemo(() => {
+    if (!entries || entries.length === 0) return [];
+    const latestByGroup = new Map<number, MumColumnStatusHistoryEntry>();
+    const unGrouped: MumColumnStatusHistoryEntry[] = [];
+
+    for (const entry of entries) {
+      const groupNum = mumGroupNumber(entry.column_name);
+      if (groupNum === null) {
+        unGrouped.push(entry);
+        continue;
+      }
+      if (visibleMumGroupNumbers && visibleMumGroupNumbers.size > 0 && !visibleMumGroupNumbers.has(groupNum)) {
+        continue;
+      }
+      const existing = latestByGroup.get(groupNum);
+      if (!existing || new Date(entry.changed_at).getTime() > new Date(existing.changed_at).getTime()) {
+        latestByGroup.set(groupNum, entry);
+      }
+    }
+    const grouped = [...latestByGroup.entries()].sort((a, b) => a[0] - b[0]).map(([groupNum, entry]) => ({ groupNum, entry }));
+    const fallbackUnGrouped = unGrouped.map((entry, idx) => ({ groupNum: 9000 + idx, entry }));
+    return [...grouped, ...fallbackUnGrouped];
+  }, [entries, visibleMumGroupNumbers]);
 
   return (
     <>
-      <button
-        ref={anchorRef}
-        type="button"
-        onMouseEnter={handleOpen}
-        onClick={handleOpen}
-        onMouseLeave={() => setOpen(false)}
-        title="View Mum column status history for this row"
+      <div style={{ position: "fixed", inset: 0, zIndex: 199 }} onClick={onClose} />
+      <div
         style={{
-          border: "none",
-          background: "transparent",
-          cursor: "pointer",
-          color: "#94A3B8",
-          fontSize: 13,
-          padding: "1px 3px",
-          flexShrink: 0,
+          position: "fixed",
+          top: Math.min(rect.bottom + 4, window.innerHeight - 300),
+          left: Math.max(10, Math.min(rect.left, window.innerWidth - 320)),
+          zIndex: 200,
+          width: 300,
+          maxHeight: 280,
+          overflowY: "auto",
+          background: "#fff",
+          border: "1px solid #CBD5E1",
+          borderRadius: 8,
+          boxShadow: "0 8px 24px rgba(0,0,0,0.18)",
+          padding: 12,
+          textAlign: "left",
         }}
       >
-        👁
-      </button>
-      {open && rect && (
-        <div
-          onMouseEnter={() => setOpen(true)}
-          onMouseLeave={() => setOpen(false)}
-          style={{
-            position: "fixed",
-            top: rect.bottom + 4,
-            left: Math.min(rect.left, window.innerWidth - 300),
-            zIndex: 60,
-            width: 280,
-            maxHeight: 260,
-            overflowY: "auto",
-            background: "#fff",
-            border: "1px solid #E2E8F0",
-            borderRadius: 8,
-            boxShadow: "0 8px 24px rgba(0,0,0,0.14)",
-            padding: 10,
-          }}
-        >
-          <div style={{ fontSize: 11, fontWeight: 700, color: "#64748B", marginBottom: 6, textTransform: "uppercase" }}>
-            Mum Column Status History
-          </div>
-          {loading ? (
-            <div className="muted" style={{ fontSize: 12 }}>Loading…</div>
-          ) : !entries || entries.length === 0 ? (
-            <div className="muted" style={{ fontSize: 12 }}>No status changes on Mum columns yet.</div>
-          ) : (
-            entries.map((e, i) => {
-              const builtinEntry =
-                e.new_status && e.new_status !== "custom"
-                  ? BUILTIN_STATUS_COLORS[e.new_status as Exclude<PlanningCellStatusColor, "custom">]
-                  : undefined;
-              const swatch = builtinEntry?.hex ?? null;
-              const label = e.new_status ? builtinEntry?.label || e.new_status : "cleared";
-              return (
-                <div
-                  key={i}
+        <div style={{ fontSize: 11, fontWeight: 700, color: "#64748B", marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+          Mum Column Status History
+        </div>
+        {loading ? (
+          <div className="muted" style={{ fontSize: 12 }}>Loading status history…</div>
+        ) : !groupedEntries || groupedEntries.length === 0 ? (
+          <div className="muted" style={{ fontSize: 12 }}>No status changes recorded on Mum columns yet.</div>
+        ) : (
+          groupedEntries.map(({ groupNum, entry: e }, i) => {
+            const builtinEntry =
+              e.new_status && e.new_status !== "custom"
+                ? BUILTIN_STATUS_COLORS[e.new_status as Exclude<PlanningCellStatusColor, "custom">]
+                : undefined;
+            const swatch = builtinEntry?.hex ?? "#94A3B8";
+            const label = e.new_status ? builtinEntry?.label || e.new_status : "Cleared";
+            const d = new Date(e.changed_at);
+            const day = String(d.getDate()).padStart(2, "0");
+            const month = String(d.getMonth() + 1).padStart(2, "0");
+            const year = d.getFullYear();
+            const hours = String(d.getHours()).padStart(2, "0");
+            const minutes = String(d.getMinutes()).padStart(2, "0");
+            const formattedTime = isNaN(d.getTime()) ? e.changed_at : `${day}/${month}/${year} ${hours}:${minutes}`;
+            return (
+              <div
+                key={groupNum}
+                style={{
+                  display: "flex",
+                  alignItems: "flex-start",
+                  gap: 8,
+                  padding: "6px 0",
+                  borderBottom: i < groupedEntries.length - 1 ? "1px solid #F1F5F9" : "none",
+                }}
+              >
+                <span
                   style={{
-                    display: "flex",
-                    alignItems: "flex-start",
-                    gap: 6,
-                    padding: "5px 0",
-                    borderBottom: i < entries.length - 1 ? "1px solid #F1F5F9" : "none",
+                    width: 10,
+                    height: 10,
+                    borderRadius: "50%",
+                    background: swatch,
+                    flexShrink: 0,
+                    marginTop: 3,
                   }}
-                >
-                  <span
-                    style={{
-                      width: 9,
-                      height: 9,
-                      borderRadius: "50%",
-                      background: swatch || "#CBD5E1",
-                      flexShrink: 0,
-                      marginTop: 3,
-                    }}
-                  />
-                  <div style={{ fontSize: 12, color: "#334155" }}>
-                    <strong>{e.column_name}</strong> turned <strong>{label}</strong>
-                    <div style={{ fontSize: 11, color: "#94A3B8" }}>
-                      {new Date(e.changed_at).toLocaleString()} · {e.changed_by_username}
-                    </div>
+                />
+                <div style={{ fontSize: 12, color: "#334155", flex: 1 }}>
+                  <div>
+                    <strong style={{ color: "#0F172A" }}>{e.column_name}</strong>:{" "}
+                    <span style={{ fontWeight: 600, color: swatch !== "#94A3B8" ? swatch : "#475569" }}>
+                      {label}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: 11, color: "#64748B", marginTop: 2 }}>
+                    {formattedTime} · <span style={{ color: "#334155", fontWeight: 500 }}>{e.changed_by_username}</span>
                   </div>
                 </div>
-              );
-            })
-          )}
-        </div>
-      )}
+              </div>
+            );
+          })
+        )}
+      </div>
     </>
   );
 }
@@ -350,16 +450,12 @@ function GridCell({
   customTags,
   canEdit,
   sourceType,
-  enableDescription,
   enableStatusColor,
-  description,
   showMumHistory,
-  sheetId,
-  rowId,
   onSave,
   onOpenStatusPicker,
+  onOpenMumHistory,
   onOpenLinkPicker,
-  onSaveDescription,
   isFrozen,
   isLastFrozen,
   stickyLeft,
@@ -371,30 +467,25 @@ function GridCell({
   customTags: PlanningStatusTag[];
   canEdit: boolean;
   sourceType: PlanningColumnSourceType;
-  enableDescription?: boolean;
   enableStatusColor?: boolean;
-  description?: string | null;
   /** True only for the Approval Date column -- adds the Mum-status-history eye button. */
   showMumHistory?: boolean;
-  sheetId?: string;
-  rowId?: string;
   onSave: (newValue: string) => void;
   onOpenStatusPicker: (anchor: HTMLElement) => void;
+  onOpenMumHistory?: (anchor: HTMLElement) => void;
   onOpenLinkPicker: () => void;
-  onSaveDescription: (text: string | null) => void;
   isFrozen?: boolean;
   isLastFrozen?: boolean;
   stickyLeft?: number;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value ?? "");
-  const [descAnchor, setDescAnchor] = useState<HTMLElement | null>(null);
   const [hovered, setHovered] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const swatch = statusSwatchColor(statusColor, customStatusTagId, customTags);
   const isManual = sourceType === "manual";
-  const shownValue = isManual ? value : displayValue;
-  const hasDescription = !!description;
+  const rawShownValue = isManual ? (value ?? displayValue) : (displayValue ?? value);
+  const shownValue = showMumHistory ? formatDaysMonthYear(rawShownValue) : rawShownValue;
 
   useEffect(() => {
     if (editing) inputRef.current?.focus();
@@ -489,6 +580,7 @@ function GridCell({
             alignItems: "center",
             gap: 3,
             background: bg,
+            zIndex: 2,
           }}
         >
           {sourceType === "linked_lookup" && canEdit && (
@@ -499,27 +591,6 @@ function GridCell({
               style={{ border: "none", background: "transparent", cursor: "pointer", color: "#2563EB", fontSize: 11, flexShrink: 0 }}
             >
               🔗
-            </button>
-          )}
-          {enableDescription && !editing && (
-            <button
-              type="button"
-              className="planning-desc-btn"
-              onClick={(e) => setDescAnchor(descAnchor ? null : e.currentTarget)}
-              title={hasDescription ? `Description: ${description}` : "Add description"}
-              style={{
-                border: "none",
-                background: "transparent",
-                cursor: "pointer",
-                fontSize: 11,
-                flexShrink: 0,
-                color: hasDescription ? "#2563EB" : "#CBD5E1",
-                opacity: hasDescription ? 1 : 0.5,
-                lineHeight: 1,
-                padding: "1px 2px",
-              }}
-            >
-              ✎
             </button>
           )}
           {canEdit && !editing && enableStatusColor && (hovered || swatch) && (
@@ -540,18 +611,29 @@ function GridCell({
               }}
             />
           )}
-          {showMumHistory && sheetId && rowId && <MumStatusHistoryButton sheetId={sheetId} rowId={rowId} />}
+          {showMumHistory && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onOpenMumHistory?.(e.currentTarget);
+              }}
+              title="View Mum column status history for this row"
+              style={{
+                border: "none",
+                background: "transparent",
+                cursor: "pointer",
+                color: "#94A3B8",
+                fontSize: 13,
+                padding: "1px 3px",
+                flexShrink: 0,
+              }}
+            >
+              👁
+            </button>
+          )}
         </div>
       </div>
-      {/* Description popover rendered inside the cell so its z-index stack is local */}
-      {descAnchor && (
-        <DescriptionPopover
-          anchor={descAnchor}
-          initialValue={description ?? ""}
-          onSave={(text) => onSaveDescription(text || null)}
-          onClose={() => setDescAnchor(null)}
-        />
-      )}
     </td>
   );
 }
@@ -731,15 +813,13 @@ export function PlanningPage() {
   const [addSheetOpen, setAddSheetOpen] = useState(false);
   const [newSheetName, setNewSheetName] = useState("");
 
-  const [addColumnOpen, setAddColumnOpen] = useState(false);
-  const [newColumnName, setNewColumnName] = useState("");
-  const [newColumnType, setNewColumnType] = useState<PlanningColumnDataType>("text");
-  const [newColumnPosition, setNewColumnPosition] = useState<string>(""); // "" = append at end
-
-  const [addRowOpen, setAddRowOpen] = useState(false);
-  const [newRowRecordId, setNewRowRecordId] = useState("");
+  const [duplicateSheetSource, setDuplicateSheetSource] = useState<PlanningSheet | null>(null);
+  const [duplicateSheetName, setDuplicateSheetName] = useState("");
+  const [duplicateSheetLabel, setDuplicateSheetLabel] = useState("");
+  const [duplicatingSheet, setDuplicatingSheet] = useState(false);
 
   const [statusPicker, setStatusPicker] = useState<{ anchor: HTMLElement; rowId: string; columnId: string } | null>(null);
+  const [mumHistoryPopover, setMumHistoryPopover] = useState<{ anchor: HTMLElement; rowId: string } | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyEntries, setHistoryEntries] = useState<PlanningChangeLogEntry[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -761,15 +841,28 @@ export function PlanningPage() {
   const toggleColumnHidden = useCallback(
     (columnId: string) => {
       if (!activeSheetId) return;
+      const cols = grid?.columns ?? [];
+      const target = cols.find((c) => c.id === columnId);
+      // Hiding any column in a "Mum N" group (main column, Remarks, or
+      // any of the 3 computed totals) hides the WHOLE group together --
+      // leaving "TOTAL CBM MUM2" visible with no "Mum 2" column next to
+      // it just orphans a number nobody can trace back to its source.
+      const mumLabel = grid?.sheet?.mum_group_label || "Mum";
+      const groupNum = target ? mumGroupNumber(target.name, mumLabel) : null;
+      const groupIds =
+        groupNum !== null ? cols.filter((c) => mumGroupNumber(c.name, mumLabel) === groupNum).map((c) => c.id) : [columnId];
       setHiddenColumnIds((prev) => {
         const next = new Set(prev);
-        if (next.has(columnId)) next.delete(columnId);
-        else next.add(columnId);
+        const nowHiding = !next.has(columnId); // toggling based on the clicked column's current state
+        for (const id of groupIds) {
+          if (nowHiding) next.add(id);
+          else next.delete(id);
+        }
         localStorage.setItem(hiddenColumnsStorageKey(activeSheetId), JSON.stringify([...next]));
         return next;
       });
     },
-    [activeSheetId]
+    [activeSheetId, grid?.columns]
   );
 
   const toggleColumnFrozen = useCallback(
@@ -836,6 +929,234 @@ export function PlanningPage() {
     }
   }, []);
 
+  /**
+   * Live updates: apply an event pushed from the backend WebSocket
+   * directly onto the in-memory grid, so a change made by another user
+   * (or another tab) appears immediately without a manual refresh.
+   * Every branch here mirrors the equivalent local-state update the
+   * corresponding REST handler already does for the person who made the
+   * change themselves (e.g. handleSaveCellValue) -- this is just the
+   * same patch applied on behalf of *other* viewers.
+   */
+  const applyLiveEvent = useCallback(
+    (event: { type: string; payload: any }) => {
+      const { type, payload } = event;
+
+      // "A Product Master (or other source module) record changed
+      // somewhere else" -- this event isn't sheet-specific (it's
+      // broadcast to every open Planning tab, since the backend has no
+      // cheap way to know in advance which sheets reference that record;
+      // see ws_manager.notify_source_record_changed), so THIS tab decides
+      // for itself whether it's relevant: only when the current sheet's
+      // ITEM column pulls from that exact module AND at least one row is
+      // actually linked to the changed record, or any other column does.
+      // A full grid reload (not a hand-patched cell) is used here because
+      // determining the new display value client-side would mean
+      // re-implementing compute_cell_display_value's module-lookup logic
+      // in the browser -- correctness over cleverness for a rare event.
+      if (type === "source_record_changed") {
+        if (!activeSheetId || !grid) return;
+        const changedModule = payload.module as string;
+        const changedRecordId = payload.record_id as string;
+        const itemUsesModule = grid.sheet.item_source_module === changedModule;
+        const columnUsesModule = grid.columns.some((c) => c.source_module === changedModule);
+        if (!itemUsesModule && !columnUsesModule) return; // nothing on this sheet could possibly reference it
+        const anyRowLinkedToRecord =
+          grid.rows.some((r) => r.linked_record_id === changedRecordId) ||
+          grid.rows.some((r) => r.cells.some((c) => c.linked_record_id === changedRecordId));
+        if (!anyRowLinkedToRecord) return; // this sheet uses the module, but not THIS specific record
+        void loadGrid(activeSheetId);
+        return;
+      }
+
+      setGrid((prev) => {
+        if (!prev) return prev;
+
+        switch (type) {
+          case "column_added": {
+            if (prev.columns.some((c) => c.id === payload.id)) return prev;
+            return { ...prev, columns: [...prev.columns, payload].sort((a, b) => a.position - b.position) };
+          }
+          case "column_renamed":
+          case "column_moved":
+          case "column_source_configured":
+          case "column_role_lock_changed":
+          case "column_status_color_toggled":
+          case "column_description_changed": {
+            return {
+              ...prev,
+              columns: prev.columns.map((c) => (c.id === payload.id ? payload : c)).sort((a, b) => a.position - b.position),
+            };
+          }
+          case "item_description_changed": {
+            return { ...prev, sheet: payload };
+          }
+          case "column_deleted": {
+            const columnId = payload.column_id;
+            return {
+              ...prev,
+              columns: prev.columns.filter((c) => c.id !== columnId),
+              rows: prev.rows.map((r) => ({ ...r, cells: r.cells.filter((cell) => cell.column_id !== columnId) })),
+            };
+          }
+          case "row_added": {
+            if (prev.rows.some((r) => r.id === payload.id)) return prev;
+            return { ...prev, rows: [...prev.rows, { ...payload, cells: payload.cells ?? [] }] };
+          }
+          case "row_renamed":
+          case "row_moved":
+          case "row_description_changed": {
+            return {
+              ...prev,
+              rows: prev.rows.map((r) => (r.id === payload.id ? { ...r, ...payload, cells: r.cells } : r)),
+            };
+          }
+          case "row_deleted": {
+            return { ...prev, rows: prev.rows.filter((r) => r.id !== payload.row_id) };
+          }
+          case "cell_value_changed": {
+            const cellPayload = payload.cell;
+            const rowId = payload.row_id as string;
+            const rawDerived = (payload.derived_values ?? {}) as Record<string, string | null | Record<string, string>>;
+            const mumApprovalDates = (rawDerived["__mum_approval_dates__"] as Record<string, string> | undefined) ?? undefined;
+            const derived = Object.fromEntries(
+              Object.entries(rawDerived).filter(([k]) => k !== "__mum_approval_dates__")
+            ) as Record<string, string | null>;
+            const approvalDateColumnId = prev.columns.find((c) => isApprovalDateColumn(c.name))?.id;
+            return {
+              ...prev,
+              rows: prev.rows.map((r) => {
+                if (r.id !== rowId) return r;
+                const exists = r.cells.some((c) => c.column_id === cellPayload.column_id);
+                let updatedCells = exists
+                  ? r.cells.map((c) => (c.column_id === cellPayload.column_id ? { ...c, ...cellPayload } : c))
+                  : [...r.cells, cellPayload];
+                // Patch every FORMULA/derived column's fresh display value too
+                // (e.g. NO. OF PKG / TOTAL WEIGHT / TOTAL CBM recompute the
+                // instant a sibling Mum column is typed into).
+                updatedCells = updatedCells.map((c) => {
+                  if (!Object.prototype.hasOwnProperty.call(derived, c.column_id)) return c;
+                  const nextDisplayValue = derived[c.column_id];
+                  // The Approval Date column renders from `value` (it's a
+                  // MANUAL column), not `display_value` -- see GridCell's
+                  // isManual branch -- so its auto-computed date has to land
+                  // in `value` too, exactly like the initial grid load does,
+                  // or it silently never appears despite being computed correctly.
+                  // Never clobbers a value the person actually typed in themselves
+                  // (guarded by is_auto_approval_date, not a value/string guess).
+                  if (c.column_id === approvalDateColumnId && (c.is_auto_approval_date || !c.value)) {
+                    return { ...c, display_value: nextDisplayValue, value: nextDisplayValue, is_auto_approval_date: true };
+                  }
+                  return { ...c, display_value: nextDisplayValue };
+                });
+                // Any derived column not yet present as a cell entry (formula
+                // columns often have none) needs a synthetic one so the grid
+                // still has one entry per (row, column) to render.
+                const presentColumnIds = new Set(updatedCells.map((c) => c.column_id));
+                for (const [columnId, displayValue] of Object.entries(derived)) {
+                  if (!presentColumnIds.has(columnId)) {
+                    updatedCells.push({
+                      id: null,
+                      row_id: rowId,
+                      column_id: columnId,
+                      value: columnId === approvalDateColumnId ? displayValue : null,
+                      display_value: displayValue,
+                      status_color: null,
+                      custom_status_tag_id: null,
+                      is_auto_approval_date: columnId === approvalDateColumnId,
+                    } as any);
+                  }
+                }
+                // Keep mum_approval_dates current too -- cellByRowColumn's
+                // hidden-aware recompute (the "first non-hidden Mum group"
+                // pick) reads this off the row, not off derived_values, so
+                // without updating it here a live edit from another tab
+                // would patch the raw cell correctly but the hidden-column
+                // override would keep using stale per-group dates.
+                return { ...r, cells: updatedCells, mum_approval_dates: mumApprovalDates ?? r.mum_approval_dates };
+              }),
+            };
+          }
+          case "cell_status_changed":
+          case "cell_description_changed": {
+            const cellPayload = payload.cell;
+            const rowId = payload.row_id as string;
+            return {
+              ...prev,
+              rows: prev.rows.map((r) => {
+                if (r.id !== rowId) return r;
+                const exists = r.cells.some((c) => c.column_id === cellPayload.column_id);
+                const updatedCells = exists
+                  ? r.cells.map((c) => (c.column_id === cellPayload.column_id ? { ...c, ...cellPayload } : c))
+                  : [...r.cells, cellPayload];
+                return { ...r, cells: updatedCells };
+              }),
+            };
+          }
+          default:
+            return prev;
+        }
+      });
+    },
+    [activeSheetId, grid, loadGrid]
+  );
+
+  const wsRef = useRef<WebSocket | null>(null);
+
+  useEffect(() => {
+    if (!activeSheetId) return;
+    const token = Auth.getAccessToken();
+    if (!token) return;
+
+    // Build the WS URL from the same API_BASE the REST client uses, so
+    // this works identically whether the backend is same-origin (dev, via
+    // the Vite proxy -- API_BASE is just "/api/v1", a relative path with
+    // no scheme) or a separate absolute origin (VITE_API_ORIGIN set,
+    // API_BASE already starts with http(s)://). The WebSocket constructor
+    // requires an absolute ws(s):// URL -- a bare relative path throws a
+    // SyntaxError immediately -- so a relative API_BASE is first resolved
+    // against window.location before the scheme swap.
+    const absoluteApiBase = new URL(`${API_BASE}/planning/sheets/${activeSheetId}/live`, window.location.href).toString();
+    const wsUrl =
+      absoluteApiBase.replace(/^https:/, "wss:").replace(/^http:/, "ws:") + `?token=${encodeURIComponent(token)}`;
+
+    let socket: WebSocket;
+    let cancelled = false;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+
+    function connect() {
+      socket = new WebSocket(wsUrl);
+      wsRef.current = socket;
+      socket.onmessage = (evt) => {
+        try {
+          const parsed = JSON.parse(evt.data);
+          applyLiveEvent(parsed);
+        } catch {
+          // Ignore malformed events rather than crashing the socket handler.
+        }
+      };
+      socket.onclose = () => {
+        if (cancelled) return;
+        // Reconnect after a short delay (e.g. transient network blip, or
+        // the backend restarting) rather than leaving the tab silently
+        // stuck without live updates until the person manually reloads.
+        retryTimer = setTimeout(connect, 3000);
+      };
+      socket.onerror = () => {
+        socket.close();
+      };
+    }
+
+    connect();
+
+    return () => {
+      cancelled = true;
+      if (retryTimer) clearTimeout(retryTimer);
+      wsRef.current = null;
+      socket?.close();
+    };
+  }, [activeSheetId, applyLiveEvent]);
+
   useEffect(() => {
     void loadSheets();
     void loadCustomTags();
@@ -875,6 +1196,117 @@ export function PlanningPage() {
   }, [activeSheetId, columns]);
   const rows = grid?.rows ?? [];
 
+  function isTestColumn(colName: string): boolean {
+    const name = colName.trim().toLowerCase();
+    return name.startsWith("test");
+  }
+
+  function isApprovalDateColumn(colName: string): boolean {
+    const name = colName.trim().toLowerCase();
+    return name === "approval date" || name === "approval_date";
+  }
+
+  function isMumMainColumn(colName: string): boolean {
+    const name = colName.trim().toLowerCase();
+    if (name.startsWith("no. of pkg") || name.startsWith("total weight") || name.startsWith("total cbm")) {
+      return false;
+    }
+    return mumGroupNumber(colName, grid?.sheet?.mum_group_label) !== null;
+  }
+
+  function isMumTotalColumn(colName: string): boolean {
+    const name = colName.trim().toLowerCase();
+    return (
+      name.startsWith("no. of pkg") ||
+      name.startsWith("total weight") ||
+      name.startsWith("total cbm")
+    );
+  }
+
+  function organizeNonFrozenColumns(cols: PlanningColumn[]): PlanningColumn[] {
+    const mumLabel = grid?.sheet?.mum_group_label || "Mum";
+    const testCols: PlanningColumn[] = [];
+    const approvalCols: PlanningColumn[] = [];
+    const mumMain: PlanningColumn[] = [];
+    const mumTotals: PlanningColumn[] = [];
+    const standard: PlanningColumn[] = [];
+
+    for (const c of cols) {
+      if (isTestColumn(c.name)) {
+        testCols.push(c);
+      } else if (isApprovalDateColumn(c.name)) {
+        approvalCols.push(c);
+      } else if (isMumMainColumn(c.name)) {
+        mumMain.push(c);
+      } else if (isMumTotalColumn(c.name)) {
+        mumTotals.push(c);
+      } else {
+        standard.push(c);
+      }
+    }
+
+    // Sort group main/remarks columns in ASCENDING NUMERIC ORDER (Group 1, Group 1 Remarks, Group 2, Group 2 Remarks...)
+    mumMain.sort((a, b) => {
+      const numA = mumGroupNumber(a.name, mumLabel) ?? 999;
+      const numB = mumGroupNumber(b.name, mumLabel) ?? 999;
+      if (numA !== numB) return numA - numB;
+      const isRemarksA = a.name.toLowerCase().includes("remark");
+      const isRemarksB = b.name.toLowerCase().includes("remark");
+      if (!isRemarksA && isRemarksB) return -1;
+      if (isRemarksA && !isRemarksB) return 1;
+      return a.position - b.position;
+    });
+
+    // Sort summary total columns by group number ascending if applicable
+    mumTotals.sort((a, b) => {
+      const numA = mumGroupNumber(a.name, mumLabel) ?? 999;
+      const numB = mumGroupNumber(b.name, mumLabel) ?? 999;
+      if (numA !== numB) return numA - numB;
+      return a.position - b.position;
+    });
+
+    const supplierIdx = standard.findIndex((c) => /supplier/i.test(c.name));
+    const cbmIdx = standard.findIndex((c) => /cbm\s*[\/\.]?\s*pkg/i.test(c.name));
+
+    let beforeSupplier: PlanningColumn[] = [];
+    let supplierToCbm: PlanningColumn[] = [];
+    let afterCbm: PlanningColumn[] = [];
+
+    if (supplierIdx !== -1) {
+      beforeSupplier = standard.slice(0, supplierIdx);
+      if (cbmIdx !== -1 && cbmIdx >= supplierIdx) {
+        supplierToCbm = standard.slice(supplierIdx, cbmIdx + 1);
+        afterCbm = standard.slice(cbmIdx + 1);
+      } else {
+        supplierToCbm = standard.slice(supplierIdx);
+      }
+    } else {
+      if (cbmIdx !== -1) {
+        supplierToCbm = standard.slice(0, cbmIdx + 1);
+        afterCbm = standard.slice(cbmIdx + 1);
+      } else {
+        supplierToCbm = standard;
+      }
+    }
+
+    // Compulsory layout from Left to Right:
+    // 1. TEST(Y/N)
+    // 2. APPROVAL DATE
+    // 3. Before Supplier standard columns
+    // 4. Group columns in ascending numeric order (Mum 1, Mum1 Remarks, Mum 2, Mum2 Remarks...)
+    // 5. Compulsory 3 summary totals (NO. OF PKG, TOTAL WEIGHT, TOTAL CBM) immediately after group columns
+    // 6. Supplier through CBM/PKG columns and remaining columns
+    return [
+      ...testCols,
+      ...approvalCols,
+      ...beforeSupplier,
+      ...mumMain,
+      ...mumTotals,
+      ...supplierToCbm,
+      ...afterCbm,
+    ];
+  }
+
   // Hidden columns are simply excluded. Frozen (pinned) columns are moved to
   // the front, in their original relative order, so they sit right after the
   // always-frozen ITEM column and stay stuck there while the rest scrolls --
@@ -884,10 +1316,22 @@ export function PlanningPage() {
     () => columns.filter((c) => !hiddenColumnIds.has(c.id)),
     [columns, hiddenColumnIds]
   );
+  // Which Mum group numbers are currently visible (not hidden) -- the
+  // Approval Date eye popover uses this to exclude hidden Mum groups from
+  // its history list, matching the fact that the group's own columns are
+  // hidden from the grid too.
+  const visibleMumGroupNumbers = useMemo(() => {
+    const nums = new Set<number>();
+    for (const c of visibleColumns) {
+      const groupNum = mumGroupNumber(c.name);
+      if (groupNum !== null) nums.add(groupNum);
+    }
+    return nums;
+  }, [visibleColumns]);
   const orderedColumns = useMemo(() => {
     const frozen = visibleColumns.filter((c) => frozenColumnIds.has(c.id));
     const rest = visibleColumns.filter((c) => !frozenColumnIds.has(c.id));
-    return [...frozen, ...rest];
+    return [...frozen, ...organizeNonFrozenColumns(rest)];
   }, [visibleColumns, frozenColumnIds]);
   const stickyLeftByColumnId = useMemo(() => {
     const map = new Map<string, number>();
@@ -904,15 +1348,58 @@ export function PlanningPage() {
     return frozenInOrder.length > 0 ? frozenInOrder[frozenInOrder.length - 1].id : null;
   }, [orderedColumns, frozenColumnIds]);
 
+  const approvalDateColumnId = useMemo(
+    () => columns.find((c) => isApprovalDateColumn(c.name))?.id,
+    [columns]
+  );
+
   const cellByRowColumn = useMemo(() => {
     const map = new Map<string, PlanningRow["cells"][number]>();
     for (const row of rows) {
       for (const cell of row.cells) {
         map.set(`${row.id}:${cell.column_id}`, cell);
       }
+      // Approval Date override: pick the FIRST Mum group (lowest number)
+      // that is both (a) not hidden by this viewer and (b) has an
+      // approval date, from the backend's per-group breakdown -- the
+      // backend's own auto-fill (already baked into the fetched cell
+      // above) can't know about per-user hidden columns, so it may have
+      // picked a group this viewer has hidden. `is_auto_approval_date`
+      // (explicit backend flag, not a string-comparison guess) ensures
+      // this only ever overrides a backend-computed date, NEVER a value
+      // someone actually typed into the Approval Date cell themselves.
+      if (approvalDateColumnId && row.mum_approval_dates) {
+        const existingCell = map.get(`${row.id}:${approvalDateColumnId}`);
+        const isAutoFilled = existingCell?.is_auto_approval_date ?? (!existingCell && Object.keys(row.mum_approval_dates).length > 0);
+        if (isAutoFilled) {
+          const visibleGroupNums = Object.keys(row.mum_approval_dates)
+            .map((k) => parseInt(k, 10))
+            .filter((n) => !Number.isNaN(n) && visibleMumGroupNumbers.has(n))
+            .sort((a, b) => a - b);
+          const firstVisibleDate = visibleGroupNums.length > 0 ? row.mum_approval_dates[String(visibleGroupNums[0])] : null;
+          if (existingCell) {
+            map.set(`${row.id}:${approvalDateColumnId}`, {
+              ...existingCell,
+              value: firstVisibleDate ?? null,
+              display_value: firstVisibleDate ?? null,
+            });
+          } else if (firstVisibleDate) {
+            map.set(`${row.id}:${approvalDateColumnId}`, {
+              id: null,
+              row_id: row.id,
+              column_id: approvalDateColumnId,
+              value: firstVisibleDate,
+              display_value: firstVisibleDate,
+              status_color: null,
+              custom_status_tag_id: null,
+              is_auto_approval_date: true,
+            });
+          }
+        }
+      }
     }
     return map;
-  }, [rows]);
+  }, [rows, approvalDateColumnId, visibleMumGroupNumbers]);
 
   const itemColumn: PlanningColumn = useMemo(
     () => ({
@@ -952,27 +1439,55 @@ export function PlanningPage() {
     }
   }
 
-  async function handleAddColumn(e: React.FormEvent) {
-    e.preventDefault();
-    if (!activeSheetId) return;
-    const name = newColumnName.trim();
-    if (!name) return;
-
+  async function handleDeleteSheet(sheetId: string, sheetName: string) {
+    if (!window.confirm(`Are you sure you want to delete sheet '${sheetName}'? This will remove the sheet and all its columns and rows.`)) return;
     try {
-      const position = newColumnPosition === "" ? null : Number(newColumnPosition);
-      await apiPost<PlanningColumn>(`/planning/sheets/${activeSheetId}/columns`, {
-        name,
-        data_type: newColumnType,
-        position,
-      });
-
-      setNewColumnName("");
-      setNewColumnType("text");
-      setNewColumnPosition("");
-      setAddColumnOpen(false);
-      await loadGrid(activeSheetId);
+      await apiDelete(`/planning/sheets/${sheetId}`);
+      await loadSheets();
+      if (activeSheetId === sheetId) {
+        const remaining = sheets.filter((s) => s.id !== sheetId);
+        setActiveSheetId(remaining.length > 0 ? remaining[0].id : null);
+      }
     } catch (err) {
       setError(err);
+    }
+  }
+
+  async function handleRenameSheet(sheetId: string, currentName: string) {
+    const newName = window.prompt("Rename sheet:", currentName);
+    if (!newName || !newName.trim() || newName.trim() === currentName) return;
+    try {
+      await apiPatch(`/planning/sheets/${sheetId}`, { name: newName.trim() });
+      await loadSheets();
+    } catch (err) {
+      setError(err);
+    }
+  }
+
+  function handleOpenDuplicateSheet(sheet: PlanningSheet) {
+    setDuplicateSheetSource(sheet);
+    setDuplicateSheetName(`${sheet.name} copy`);
+    setDuplicateSheetLabel(sheet.mum_group_label || "Mum");
+  }
+
+  async function handleDuplicateSheet(e: React.FormEvent) {
+    e.preventDefault();
+    if (!duplicateSheetSource || !duplicateSheetName.trim() || !duplicateSheetLabel.trim()) return;
+    setDuplicatingSheet(true);
+    try {
+      const { data } = await apiPost<PlanningSheet>(`/planning/sheets/${duplicateSheetSource.id}/duplicate`, {
+        name: duplicateSheetName.trim(),
+        mum_group_label: duplicateSheetLabel.trim(),
+      });
+      setDuplicateSheetSource(null);
+      setDuplicateSheetName("");
+      setDuplicateSheetLabel("");
+      await loadSheets();
+      setActiveSheetId(data.id);
+    } catch (err) {
+      setError(err);
+    } finally {
+      setDuplicatingSheet(false);
     }
   }
 
@@ -983,31 +1498,130 @@ export function PlanningPage() {
     setCreatingNextMum(true);
     setError(null);
     try {
+      const mumLabel = grid?.sheet?.mum_group_label || "Mum";
       let maxMum = 0;
       for (const col of columns) {
-        const match = col.name.match(/mum\s*(\d+)/i);
-        if (match) {
-          const num = parseInt(match[1], 10);
-          if (!isNaN(num) && num > maxMum) maxMum = num;
-        }
+        const num = mumGroupNumber(col.name, mumLabel);
+        if (num !== null && num > maxMum) maxMum = num;
       }
       const nextMumNum = maxMum > 0 ? maxMum + 1 : 1;
 
-      const companions: { name: string; data_type: PlanningColumnDataType }[] = [
-        { name: `Mum ${nextMumNum}`, data_type: "number" },
-        { name: `Mum${nextMumNum} Remarks`, data_type: "text" },
-        { name: `NO. OF PKG MUM${nextMumNum}`, data_type: "number" },
-        { name: `TOTAL WEIGHT MUM${nextMumNum}`, data_type: "number" },
-        { name: `TOTAL CBM MUM${nextMumNum}`, data_type: "number" },
+      // PKG QTY / UNIT WEIGHT/PKG (KG) / CBM/PKG (KG) / Supplier Name / City
+      // are always extracted from Product Master, never typed in -- find
+      // each by its LINKED_LOOKUP source_field (product master's
+      // packaging_quantity / packaging_gross_weight / packaging_unit_cbm /
+      // supplier_name / supplier_city), creating it as a LINKED_LOOKUP
+      // column the first time this sheet needs it. Every item's exact
+      // supplier/city/packaging numbers come from that exact item's own
+      // Product Master record -- editing Product Master updates these
+      // columns immediately, with nothing to type or keep in sync by hand.
+      async function findOrCreateProductLookupColumn(
+        label: string,
+        sourceField: string,
+        dataType: PlanningColumnDataType,
+        position: number | null
+      ): Promise<PlanningColumn> {
+        const existing = columns.find(
+          (c) => c.source_type === "linked_lookup" && c.source_module === "product" && c.source_field === sourceField
+        );
+        if (existing) return existing;
+
+        const { data: created } = await apiPost<PlanningColumn>(`/planning/sheets/${activeSheetId}/columns`, {
+          name: label,
+          data_type: dataType,
+          position,
+        });
+        await apiPut(`/planning/sheets/${activeSheetId}/columns/${created.id}/source`, {
+          source_type: "linked_lookup",
+          source_module: "product",
+          source_field: sourceField,
+          enable_description: false,
+          auto_populate_enabled: true, // bulk-link every row to its ITEM's Product Master record immediately
+          auto_populate_limit: null,
+        });
+        try {
+          await apiPost(`/planning/sheets/${activeSheetId}/columns/${created.id}/auto-link`);
+        } catch {
+          // Non-fatal: existing rows just stay unlinked for this column until
+          // the admin reruns "Load all records automatically" from its config modal.
+        }
+        columns.push({ ...created, source_type: "linked_lookup", source_module: "product", source_field: sourceField });
+        return created;
+      }
+
+      const supplierCol = columns.find((c) => /supplier/i.test(c.name));
+      const supplierNameCol = await findOrCreateProductLookupColumn(
+        "Supplier Name",
+        "supplier_name",
+        "text",
+        supplierCol ? supplierCol.position : 0
+      );
+      const cityCol = await findOrCreateProductLookupColumn(
+        "City",
+        "supplier_city",
+        "text",
+        supplierNameCol.position + 1
+      );
+      const pkgQtyCol = await findOrCreateProductLookupColumn("PKG QTY", "packaging_quantity", "number", null);
+      const unitWeightCol = await findOrCreateProductLookupColumn(
+        "UNIT WEIGHT/PKG (KG)",
+        "packaging_gross_weight",
+        "number",
+        null
+      );
+      const cbmPerPkgCol = await findOrCreateProductLookupColumn("CBM/PKG (KG)", "packaging_unit_cbm", "number", null);
+
+      const mumMainPos = cityCol.position + 1;
+      const cbmHeaderCol = columns.find((c) => /cbm\s*[\/\.]?\s*pkg/i.test(c.name));
+      const mumTotalsPos = cbmHeaderCol ? cbmHeaderCol.position + 1 : null;
+
+      const mumColName = `${mumLabel} ${nextMumNum}`;
+      const companions: { name: string; data_type: PlanningColumnDataType; pos: number | null }[] = [
+        { name: mumColName, data_type: "number", pos: mumMainPos },
+        { name: `${mumLabel}${nextMumNum} Remarks`, data_type: "text", pos: mumMainPos !== null ? mumMainPos + 1 : null },
+        { name: `NO. OF PKG ${mumLabel.toUpperCase()}${nextMumNum}`, data_type: "number", pos: mumTotalsPos },
+        { name: `TOTAL WEIGHT ${mumLabel.toUpperCase()}${nextMumNum}`, data_type: "number", pos: mumTotalsPos !== null ? mumTotalsPos + 1 : null },
+        { name: `TOTAL CBM ${mumLabel.toUpperCase()}${nextMumNum}`, data_type: "number", pos: mumTotalsPos !== null ? mumTotalsPos + 2 : null },
       ];
 
+      const created: PlanningColumn[] = [];
       for (const companion of companions) {
-        await apiPost<PlanningColumn>(`/planning/sheets/${activeSheetId}/columns`, {
+        const { data } = await apiPost<PlanningColumn>(`/planning/sheets/${activeSheetId}/columns`, {
           name: companion.name,
           data_type: companion.data_type,
-          position: null,
+          position: companion.pos,
         });
+        if (data) created.push(data);
       }
+
+      // NO. OF PKG / TOTAL WEIGHT / TOTAL CBM MUM<n> always use one fixed
+      // backend formula (Mum<n> / PKG QTY, then x UNIT WEIGHT/PKG or x
+      // CBM/PKG) -- the backend recognizes these three names and computes
+      // them itself; the formula_expression sent here is just a
+      // human-readable label, not something the backend actually evaluates
+      // for these columns (see app.planning.service.is_fixed_mum_derived_column).
+      const pkgCol = created.find((c) => c.name === `NO. OF PKG MUM${nextMumNum}`);
+      const weightCol = created.find((c) => c.name === `TOTAL WEIGHT MUM${nextMumNum}`);
+      const cbmCol = created.find((c) => c.name === `TOTAL CBM MUM${nextMumNum}`);
+
+      async function wireFixedFormula(col: PlanningColumn | undefined, label: string) {
+        if (!col || !activeSheetId) return;
+        try {
+          await apiPut(`/planning/sheets/${activeSheetId}/columns/${col.id}/source`, {
+            source_type: "formula",
+            formula_expression: label,
+            enable_description: false,
+            auto_populate_enabled: false,
+            auto_populate_limit: null,
+          });
+        } catch {
+          // Non-fatal: the column just stays a plain manual number column if the formula couldn't be saved.
+        }
+      }
+
+      await wireFixedFormula(pkgCol, `${quoteColumnRef(mumColName)} / ${quoteColumnRef(pkgQtyCol.name)}`);
+      await wireFixedFormula(weightCol, `NO. OF PKG MUM${nextMumNum} * ${quoteColumnRef(unitWeightCol.name)}`);
+      await wireFixedFormula(cbmCol, `NO. OF PKG MUM${nextMumNum} * ${quoteColumnRef(cbmPerPkgCol.name)}`);
 
       await loadGrid(activeSheetId);
     } catch (err) {
@@ -1017,43 +1631,69 @@ export function PlanningPage() {
     }
   }
 
-  async function handleAddRow(e: React.FormEvent) {
-    e.preventDefault();
+  const [loadingMoreProducts, setLoadingMoreProducts] = useState(false);
+
+  /**
+   * "Load more products" -- the ONLY way left to pull additional Product
+   * Master rows into the sheet now that the manual per-row 🔗 link icon
+   * and the ITEM header's Configure (⚙) modal have both been removed
+   * (ITEM is permanently Product Master -> Product Name; see
+   * PlanningService.create_sheet). Mirrors Product Master's own default
+   * page size of 50 (see MasterPage's pageSize=50): each click asks for
+   * 50 more than currently loaded, and the backend's own de-dupe (by
+   * linked_record_id) means re-fetching from the top and skipping
+   * already-linked products is safe and never creates duplicate rows.
+   */
+  async function handleLoadMoreProducts() {
     if (!activeSheetId) return;
-    if (!newRowRecordId) return;
-
+    setLoadingMoreProducts(true);
+    setError(null);
     try {
-      // The row always needs a `label` (it's the required fallback if the
-      // link is ever cleared later); this is a throwaway placeholder
-      // that's immediately superseded by the linked record's live value
-      // once we reload the grid below.
-      const { data: newRow } = await apiPost<PlanningRow>(`/planning/sheets/${activeSheetId}/rows`, { label: "Linked item" });
-
-      if (newRow) {
-        await apiPut(`/planning/sheets/${activeSheetId}/rows/${newRow.id}/item-link`, { record_id: newRowRecordId });
-      }
-
-      setNewRowRecordId("");
-      setAddRowOpen(false);
-      // Reload so `label` reflects the live-computed value (compute_row_item_display)
-      // instead of the throwaway placeholder.
+      const nextLimit = rows.length + 50;
+      await apiPost(`/planning/sheets/${activeSheetId}/item-source/auto-populate`, { limit: nextLimit });
       await loadGrid(activeSheetId);
     } catch (err) {
       setError(err);
+    } finally {
+      setLoadingMoreProducts(false);
     }
   }
 
   async function handleDeleteColumn(columnId: string) {
     if (!activeSheetId) return;
-    if (!window.confirm("Delete this column? This removes every value stored in it.")) return;
+    const target = columns.find((c) => c.id === columnId);
+    if (!target) return;
+    if (isSystemColumn(target.name)) {
+      setError(`System column '${target.name}' cannot be deleted.`);
+      return;
+    }
+
+    // Deleting any column that belongs to a "Mum N" group (the main Mum
+    // column, its Remarks, or any of the 3 computed totals) cascades to
+    // the WHOLE group -- leaving, say, "TOTAL CBM MUM2" behind after
+    // "Mum 2" itself is deleted would just be a dead formula column
+    // referencing a Mum column that no longer exists.
+    const mumLabel = grid?.sheet?.mum_group_label || "Mum";
+    const groupNum = mumGroupNumber(target.name, mumLabel);
+    const groupColumns = groupNum !== null ? columns.filter((c) => mumGroupNumber(c.name, mumLabel) === groupNum) : [target];
+
+    const confirmMessage =
+      groupColumns.length > 1
+        ? `Delete the whole ${mumLabel} ${groupNum} group? This removes "${groupColumns.map((c) => c.name).join('", "')}" and every value stored in them.`
+        : "Delete this column? This removes every value stored in it.";
+    if (!window.confirm(confirmMessage)) return;
+
     try {
-      await apiDelete(`/planning/sheets/${activeSheetId}/columns/${columnId}`);
+      for (const col of groupColumns) {
+        await apiDelete(`/planning/sheets/${activeSheetId}/columns/${col.id}`);
+      }
+      const deletedIds = new Set(groupColumns.map((c) => c.id));
       setGrid((prev) =>
         prev
           ? {
             ...prev,
-            columns: prev.columns.filter((c) => c.id !== columnId),
-            rows: prev.rows.map((r) => ({ ...r, cells: r.cells.filter((cell) => cell.column_id !== columnId) })),
+            columns: prev.columns.filter((c) => !deletedIds.has(c.id)),
+            rows: prev.rows.map((r) => ({ ...r, cells: r.cells.filter((cell) => !deletedIds.has(cell.column_id)) })),
           }
           : prev
       );
@@ -1110,23 +1750,72 @@ export function PlanningPage() {
   async function handleSaveCellValue(rowId: string, columnId: string, value: string) {
     if (!activeSheetId) return;
     try {
-      await apiPut(`/planning/sheets/${activeSheetId}/rows/${rowId}/columns/${columnId}/value`, { value });
+      const { data } = await apiPut<{ cell: PlanningCell; derived_values: Record<string, string | null | Record<string, string>> }>(
+        `/planning/sheets/${activeSheetId}/rows/${rowId}/columns/${columnId}/value`,
+        { value }
+      );
+      const patchedCell = data?.cell;
+      const rawDerived = data?.derived_values ?? {};
+      const mumApprovalDates = (rawDerived["__mum_approval_dates__"] as Record<string, string> | undefined) ?? undefined;
+      const derived = Object.fromEntries(
+        Object.entries(rawDerived).filter(([k]) => k !== "__mum_approval_dates__")
+      ) as Record<string, string | null>;
       setGrid((prev) => {
         if (!prev) return prev;
+        const approvalDateColumnId = prev.columns.find((c) => isApprovalDateColumn(c.name))?.id;
         return {
           ...prev,
           rows: prev.rows.map((r) => {
             if (r.id !== rowId) return r;
             const exists = r.cells.some((cell) => cell.column_id === columnId);
-            const updatedCells = exists
-              ? r.cells.map((cell) =>
-                cell.column_id === columnId ? { ...cell, value, display_value: value } : cell
-              )
-              : [
-                ...r.cells,
-                { id: null, row_id: rowId, column_id: columnId, value, display_value: value, status_color: null, custom_status_tag_id: null },
-              ];
-            return { ...r, cells: updatedCells };
+            // Apply the REAL response from the server, not a hand-rolled
+            // guess -- typing into a Mum column auto-turns its status blue
+            // server-side (see PlanningService.set_cell_value), and this
+            // cell's own tab needs that status_color applied immediately
+            // too, or the dot only turns blue after a manual refresh even
+            // though the write itself already succeeded.
+            const patched = patchedCell ?? {
+              id: null,
+              row_id: rowId,
+              column_id: columnId,
+              value,
+              display_value: value,
+              status_color: null,
+              custom_status_tag_id: null,
+            };
+            let updatedCells = exists
+              ? r.cells.map((cell) => (cell.column_id === columnId ? { ...cell, ...patched } : cell))
+              : [...r.cells, patched];
+            // Also patch every derived column (formula totals, and the
+            // Approval Date auto-date) for THIS SAME tab -- the acting
+            // user doesn't receive their own WebSocket broadcast (see
+            // ws_manager's exclude_user_id), so without this the person
+            // who actually typed the value would be the one person who
+            // has to refresh to see their own Approval Date / totals update.
+            updatedCells = updatedCells.map((c) => {
+              if (!Object.prototype.hasOwnProperty.call(derived, c.column_id)) return c;
+              const nextDisplayValue = derived[c.column_id];
+              if (c.column_id === approvalDateColumnId && (c.is_auto_approval_date || !c.value)) {
+                return { ...c, display_value: nextDisplayValue, value: nextDisplayValue, is_auto_approval_date: true };
+              }
+              return { ...c, display_value: nextDisplayValue };
+            });
+            const presentColumnIds = new Set(updatedCells.map((c) => c.column_id));
+            for (const [derivedColumnId, displayValue] of Object.entries(derived)) {
+              if (!presentColumnIds.has(derivedColumnId)) {
+                updatedCells.push({
+                  id: null,
+                  row_id: rowId,
+                  column_id: derivedColumnId,
+                  value: derivedColumnId === approvalDateColumnId ? displayValue : null,
+                  display_value: displayValue,
+                  status_color: null,
+                  custom_status_tag_id: null,
+                  is_auto_approval_date: derivedColumnId === approvalDateColumnId,
+                } as any);
+              }
+            }
+            return { ...r, cells: updatedCells, mum_approval_dates: mumApprovalDates ?? r.mum_approval_dates };
           }),
         };
       });
@@ -1182,38 +1871,25 @@ export function PlanningPage() {
     }
   }
 
-  async function handleSaveCellDescription(rowId: string, columnId: string, description: string | null) {
+  /** Set/clear a column's single header-level description note (pencil on the column header). */
+  async function handleSaveColumnDescription(columnId: string, description: string | null) {
     if (!activeSheetId) return;
     try {
-      await apiPut(`/planning/sheets/${activeSheetId}/rows/${rowId}/columns/${columnId}/description`, { description });
-      setGrid((prev) => {
-        if (!prev) return prev;
-        return {
-          ...prev,
-          rows: prev.rows.map((r) => {
-            if (r.id !== rowId) return r;
-            const exists = r.cells.some((cell) => cell.column_id === columnId);
-            const updatedCells = exists
-              ? r.cells.map((cell) => (cell.column_id === columnId ? { ...cell, description } : cell))
-              : [...r.cells, { id: null, row_id: rowId, column_id: columnId, value: null, display_value: null, status_color: null, custom_status_tag_id: null, description }];
-            return { ...r, cells: updatedCells };
-          }),
-        };
+      const { data } = await apiPut<PlanningColumn>(`/planning/sheets/${activeSheetId}/columns/${columnId}/description`, {
+        description,
       });
+      setGrid((prev) => (prev && data ? { ...prev, columns: prev.columns.map((c) => (c.id === columnId ? data : c)) } : prev));
     } catch (err) {
       setError(err);
     }
   }
 
-  async function handleSaveRowDescription(rowId: string, description: string | null) {
+  /** Set/clear the ITEM column's single header-level description note. Mirrors handleSaveColumnDescription. */
+  async function handleSaveItemDescription(description: string | null) {
     if (!activeSheetId) return;
     try {
-      await apiPut(`/planning/sheets/${activeSheetId}/rows/${rowId}/description`, { description });
-      setGrid((prev) =>
-        prev
-          ? { ...prev, rows: prev.rows.map((r) => (r.id === rowId ? { ...r, description } : r)) }
-          : prev
-      );
+      const { data } = await apiPut<PlanningSheet>(`/planning/sheets/${activeSheetId}/item-description`, { description });
+      setGrid((prev) => (prev && data ? { ...prev, sheet: data } : prev));
     } catch (err) {
       setError(err);
     }
@@ -1254,25 +1930,73 @@ export function PlanningPage() {
         <Banner error={error} />
 
         {/* Sheet tabs -- one per branch (Mum Branch, MP Branch, GJ Branch, ...), unlimited. */}
-        <div style={{ display: "flex", gap: 4, borderBottom: "1px solid #E2E8F0", marginBottom: 16, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 4, borderBottom: "1px solid #E2E8F0", marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
           {sheets.map((sheet) => (
-            <button
+            <div
               key={sheet.id}
-              type="button"
-              onClick={() => setActiveSheetId(sheet.id)}
               style={{
-                padding: "8px 16px",
-                border: "none",
-                background: "transparent",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                padding: "6px 12px",
                 borderBottom: sheet.id === activeSheetId ? "2px solid #2563EB" : "2px solid transparent",
                 color: sheet.id === activeSheetId ? "#2563EB" : "#475569",
                 fontWeight: sheet.id === activeSheetId ? 600 : 500,
                 fontSize: 13,
                 cursor: "pointer",
+                userSelect: "none",
+                background: sheet.id === activeSheetId ? "#F8FAFC" : "transparent",
+                borderRadius: "4px 4px 0 0",
               }}
+              onClick={() => setActiveSheetId(sheet.id)}
             >
-              {sheet.name}
-            </button>
+              <span
+                onDoubleClick={(e) => {
+                  e.stopPropagation();
+                  handleRenameSheet(sheet.id, sheet.name);
+                }}
+                title="Double-click to rename sheet"
+              >
+                {sheet.name}
+              </span>
+              <Can permission="planning.sheet.manage">
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleRenameSheet(sheet.id, sheet.name);
+                  }}
+                  title="Rename sheet"
+                  style={{ border: "none", background: "transparent", cursor: "pointer", color: "#94A3B8", fontSize: 11, padding: "0 2px" }}
+                >
+                  ✎
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleOpenDuplicateSheet(sheet);
+                  }}
+                  title="Duplicate sheet as a new branch (same columns, choose a new group label)"
+                  style={{ border: "none", background: "transparent", cursor: "pointer", color: "#94A3B8", fontSize: 12, padding: "0 2px" }}
+                >
+                  ⧉
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleDeleteSheet(sheet.id, sheet.name);
+                  }}
+                  title="Delete sheet"
+                  style={{ border: "none", background: "transparent", cursor: "pointer", color: "#94A3B8", fontSize: 13, fontWeight: 700, padding: "0 2px" }}
+                  onMouseEnter={(e) => (e.currentTarget.style.color = "#EF4444")}
+                  onMouseLeave={(e) => (e.currentTarget.style.color = "#94A3B8")}
+                >
+                  ×
+                </button>
+              </Can>
+            </div>
           ))}
           {sheets.length === 0 && !loading && (
             <div className="muted" style={{ padding: "8px 4px" }}>No sheets yet. Add one to get started.</div>
@@ -1282,20 +2006,8 @@ export function PlanningPage() {
         {activeSheetId && (
           <>
             <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-              {itemColumn.source_type === "linked_lookup" && (
-                <Can permission="planning.row.manage">
-                  <button type="button" className="btn btn-secondary" onClick={() => setAddRowOpen(true)}>
-                    + Row (pick record)
-                  </button>
-                </Can>
-              )}
-              <Can permission="planning.column.manage">
-                <button type="button" className="btn btn-secondary" onClick={() => setAddColumnOpen(true)}>
-                  + Column
-                </button>
-              </Can>
               <button type="button" className="btn btn-secondary" onClick={() => setColumnsPanelOpen(true)} disabled={columns.length === 0}>
-                Columns{hiddenColumnIds.size > 0 ? ` (${hiddenColumnIds.size} hidden)` : ""}
+                Configuration{hiddenColumnIds.size > 0 ? ` (${hiddenColumnIds.size} hidden)` : ""}
               </button>
               <Can permission="planning.column.manage">
                 <button
@@ -1305,7 +2017,18 @@ export function PlanningPage() {
                   disabled={creatingNextMum || !activeSheetId}
                   title="Automatically detect latest Mum number and create next Mum column group (Mum, Remarks, PKG, Weight, CBM)"
                 >
-                  {creatingNextMum ? "Creating Next Mum…" : "+ Next Mum"}
+                  {creatingNextMum ? `Creating Next ${grid?.sheet?.mum_group_label || "Mum"}…` : `+ Next ${grid?.sheet?.mum_group_label || "Mum"}`}
+                </button>
+              </Can>
+              <Can permission="planning.row.manage">
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={handleLoadMoreProducts}
+                  disabled={loadingMoreProducts || !activeSheetId}
+                  title="Pull the next 50 products from Product Master as new rows (already-loaded products are skipped)"
+                >
+                  {loadingMoreProducts ? "Loading…" : "Load More Products"}
                 </button>
               </Can>
             </div>
@@ -1318,7 +2041,8 @@ export function PlanningPage() {
                       column={itemColumn}
                       canManage={canManageColumns}
                       onRename={setItemHeaderTitle}
-                      onOpenConfigure={() => setConfigureColumn(itemColumn)}
+                      onSaveDescription={handleSaveItemDescription}
+                      itemDescription={grid?.sheet.item_description}
                       isLastFrozen={lastFrozenColumnId === null}
                     />
                     {orderedColumns.map((col) => (
@@ -1328,7 +2052,7 @@ export function PlanningPage() {
                         canManage={canManageColumns}
                         onRename={(name) => handleRenameColumn(col.id, name)}
                         onDelete={() => handleDeleteColumn(col.id)}
-                        onOpenConfigure={() => setConfigureColumn(col)}
+                        onSaveDescription={(text) => handleSaveColumnDescription(col.id, text)}
                         isFrozen={frozenColumnIds.has(col.id)}
                         isLastFrozen={col.id === lastFrozenColumnId}
                         stickyLeft={stickyLeftByColumnId.get(col.id)}
@@ -1349,11 +2073,7 @@ export function PlanningPage() {
                           label={row.label}
                           canEdit={canEditCells}
                           sourceType={itemColumn.source_type}
-                          enableDescription={itemColumn.enable_description}
-                          description={row.description}
                           onSave={(newLabel) => handleRenameRow(row.id, newLabel)}
-                          onOpenLinkPicker={() => setLinkPicker({ rowId: row.id, column: itemColumn })}
-                          onSaveDescription={(text) => handleSaveRowDescription(row.id, text)}
                           isLastFrozen={lastFrozenColumnId === null}
                         />
                         {orderedColumns.map((col) => {
@@ -1368,16 +2088,12 @@ export function PlanningPage() {
                               customTags={customTags}
                               canEdit={canEditCells}
                               sourceType={col.source_type}
-                              enableDescription={col.enable_description}
                               enableStatusColor={col.enable_status_color}
                               showMumHistory={isApprovalDateColumn(col.name)}
-                              sheetId={activeSheetId ?? undefined}
-                              rowId={row.id}
-                              description={cell?.description}
                               onSave={(value) => handleSaveCellValue(row.id, col.id, value)}
                               onOpenStatusPicker={(anchor) => setStatusPicker({ anchor, rowId: row.id, columnId: col.id })}
+                              onOpenMumHistory={(anchor) => setMumHistoryPopover({ anchor, rowId: row.id })}
                               onOpenLinkPicker={() => setLinkPicker({ rowId: row.id, column: col })}
-                              onSaveDescription={(text) => handleSaveCellDescription(row.id, col.id, text)}
                               isFrozen={frozenColumnIds.has(col.id)}
                               isLastFrozen={col.id === lastFrozenColumnId}
                               stickyLeft={stickyLeftByColumnId.get(col.id)}
@@ -1407,7 +2123,7 @@ export function PlanningPage() {
 
         {/* Columns panel: show/hide + freeze/unfreeze + color-status opt-in, all in one place (needed for hidden columns, since they have no visible header to un-hide from). */}
         {columnsPanelOpen && (
-          <SimpleModal title="Columns" onClose={() => setColumnsPanelOpen(false)}>
+          <SimpleModal title="Configuration" onClose={() => setColumnsPanelOpen(false)}>
             <div style={{ display: "flex", flexDirection: "column", gap: 2, maxHeight: "50vh", overflowY: "auto" }}>
               <div
                 style={{
@@ -1463,12 +2179,14 @@ export function PlanningPage() {
                     <input
                       type="checkbox"
                       checked={col.enable_status_color ?? false}
-                      disabled={togglingStatusColorId === col.id}
+                      disabled={!isPureMumColumn(col.name) || togglingStatusColorId === col.id}
                       onChange={() => handleToggleColumnStatusColor(col.id, !(col.enable_status_color ?? false))}
                       title={
-                        col.enable_status_color
-                          ? "Disable status colors for this column (hides the status-dot button)"
-                          : "Allow this column's cells to carry a CRM-style status color"
+                        !isPureMumColumn(col.name)
+                          ? "Status colors are only allowed on Mum N main columns"
+                          : col.enable_status_color
+                            ? "Disable status colors for this column"
+                            : "Allow this column's cells to carry a CRM-style status color"
                       }
                     />
                   </span>
@@ -1483,9 +2201,12 @@ export function PlanningPage() {
                 onClick={() => {
                   if (!activeSheetId) return;
                   setHiddenColumnIds(new Set());
-                  setFrozenColumnIds(new Set());
+                  const defaultFrozenIds = columns
+                    .filter((c) => isTestColumn(c.name) || isApprovalDateColumn(c.name))
+                    .map((c) => c.id);
+                  setFrozenColumnIds(new Set(defaultFrozenIds));
                   localStorage.removeItem(hiddenColumnsStorageKey(activeSheetId));
-                  localStorage.removeItem(frozenColumnsStorageKey(activeSheetId));
+                  localStorage.setItem(frozenColumnsStorageKey(activeSheetId), JSON.stringify(defaultFrozenIds));
                 }}
               >
                 Reset all
@@ -1535,80 +2256,46 @@ export function PlanningPage() {
           </SimpleModal>
         )}
 
-        {/* Add Column modal */}
-        {addColumnOpen && (
-          <SimpleModal title="Add Column" onClose={() => setAddColumnOpen(false)}>
-            <form onSubmit={handleAddColumn}>
+        {duplicateSheetSource && (
+          <SimpleModal
+            title={`Duplicate '${duplicateSheetSource.name}'`}
+            onClose={() => setDuplicateSheetSource(null)}
+          >
+            <form onSubmit={handleDuplicateSheet}>
+              <p className="muted" style={{ marginTop: 0, marginBottom: 16, fontSize: 13 }}>
+                Creates a new sheet with the exact same columns as{" "}
+                <strong>{duplicateSheetSource.name}</strong> -- Supplier Name, City, PKG QTY,
+                UNIT WEIGHT/PKG (KG), CBM/PKG (KG), every group and its NO. OF PKG / TOTAL WEIGHT
+                / TOTAL CBM totals, all with the same formulas and Product Master links. The only
+                thing you choose below is the new sheet's name and its group label -- e.g. "Chen"
+                instead of "{duplicateSheetSource.mum_group_label || "Mum"}", so the new sheet's
+                groups read "Chen 1", "Chen2 Remarks", "NO. OF PKG CHEN1" instead of "
+                {duplicateSheetSource.mum_group_label || "Mum"} 1", etc. Rows aren't copied -- the
+                new sheet starts empty, same as creating any other sheet.
+              </p>
               <TextField
-                id="new_column_name"
-                label="Column Name *"
+                id="duplicate_sheet_name"
+                label="New Sheet Name *"
                 required
-                placeholder="e.g. Supplier Name, Quantity, Delivery Date"
-                value={newColumnName}
-                onChange={setNewColumnName}
+                placeholder="e.g. Chennai branch"
+                value={duplicateSheetName}
+                onChange={setDuplicateSheetName}
               />
-              <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: "#334155", margin: "12px 0 6px" }}>
-                Data Type
-              </label>
-              <select
-                value={newColumnType}
-                onChange={(e) => setNewColumnType(e.target.value as PlanningColumnDataType)}
-                style={{ width: "100%", padding: 8, border: "1px solid #CBD5E1", borderRadius: 6, fontSize: 13 }}
-              >
-                <option value="text">Text</option>
-                <option value="number">Number</option>
-                <option value="date">Date</option>
-                <option value="boolean_yn">Y/N</option>
-              </select>
-              <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: "#334155", margin: "12px 0 6px" }}>
-                Insert Position (optional)
-              </label>
-              <select
-                value={newColumnPosition}
-                onChange={(e) => setNewColumnPosition(e.target.value)}
-                style={{ width: "100%", padding: 8, border: "1px solid #CBD5E1", borderRadius: 6, fontSize: 13 }}
-              >
-                <option value="">Append at the end</option>
-                {columns.map((col, idx) => (
-                  <option key={col.id} value={idx}>
-                    Before "{col.name}"
-                  </option>
-                ))}
-              </select>
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
-                <button type="button" className="btn btn-secondary" onClick={() => setAddColumnOpen(false)}>
-                  Cancel
-                </button>
-                <button type="submit" className="btn btn-primary">
-                  Add Column
-                </button>
-              </div>
-            </form>
-          </SimpleModal>
-        )}
-
-        {/* Add Row modal */}
-        {addRowOpen && (
-          <SimpleModal title="Add Row (pick a record)" onClose={() => setAddRowOpen(false)}>
-            <form onSubmit={handleAddRow}>
-              <AddLinkedRowPicker
-                sourceModule={itemColumn.source_module}
-                recordId={newRowRecordId}
-                onChange={setNewRowRecordId}
+              <TextField
+                id="duplicate_sheet_label"
+                label="Group Label *"
+                required
+                placeholder="e.g. Chen, MP, GJ"
+                hint={`The word used in place of "Mum" for this sheet's groups (e.g. "Chen 1", "NO. OF PKG CHEN1"). Leave as-is to keep the same label as the source sheet.`}
+                value={duplicateSheetLabel}
+                onChange={setDuplicateSheetLabel}
               />
               <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  onClick={() => {
-                    setAddRowOpen(false);
-                    setNewRowRecordId("");
-                  }}
-                >
+                <button type="button" className="btn btn-secondary" onClick={() => setDuplicateSheetSource(null)}>
                   Cancel
                 </button>
-                <button type="submit" className="btn btn-primary">
-                  Add Row
+                <button type="submit" className="btn btn-primary" disabled={duplicatingSheet}>
+                  {duplicatingSheet ? "Duplicating..." : "Duplicate Sheet"}
                 </button>
               </div>
             </form>
@@ -1621,6 +2308,16 @@ export function PlanningPage() {
             customTags={customTags}
             onClose={() => setStatusPicker(null)}
             onPick={(color, tagId) => handleSetCellStatus(statusPicker.rowId, statusPicker.columnId, color, tagId)}
+          />
+        )}
+
+        {mumHistoryPopover && activeSheetId && (
+          <MumStatusHistoryPopover
+            anchor={mumHistoryPopover.anchor}
+            sheetId={activeSheetId}
+            rowId={mumHistoryPopover.rowId}
+            visibleMumGroupNumbers={visibleMumGroupNumbers}
+            onClose={() => setMumHistoryPopover(null)}
           />
         )}
 
@@ -1652,7 +2349,7 @@ function ColumnHeader({
   canManage,
   onRename,
   onDelete,
-  onOpenConfigure,
+  onSaveDescription,
   isFrozen,
   isLastFrozen,
   stickyLeft,
@@ -1661,7 +2358,7 @@ function ColumnHeader({
   canManage: boolean;
   onRename: (name: string) => void;
   onDelete: () => void;
-  onOpenConfigure: () => void;
+  onSaveDescription: (text: string | null) => void;
   isFrozen: boolean;
   isLastFrozen: boolean;
   stickyLeft: number | undefined;
@@ -1669,6 +2366,8 @@ function ColumnHeader({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(column.name);
   const [hovered, setHovered] = useState(false);
+  const [descAnchor, setDescAnchor] = useState<HTMLElement | null>(null);
+  const hasDescription = !!column.description;
 
   function commit() {
     setEditing(false);
@@ -1729,10 +2428,10 @@ function ColumnHeader({
               fontWeight: 600,
               color: "#334155",
               textAlign: "center",
-              padding: "0 14px",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
+              padding: "0 4px",
+              whiteSpace: "normal",
+              wordBreak: "break-word",
+              lineHeight: "1.2",
               display: "block",
               width: "100%",
             }}
@@ -1757,6 +2456,14 @@ function ColumnHeader({
             {sourceBadge.label}
           </span>
         )}
+        {isPureMumColumn(column.name) && column.enable_description && hasDescription && !editing && !hovered && (
+          <span
+            title={`Description: ${column.description}`}
+            style={{ color: "#2563EB", fontSize: 11, marginLeft: 2, flexShrink: 0 }}
+          >
+            ✎
+          </span>
+        )}
         {canManage && !editing && hovered && (
           <div
             style={{
@@ -1769,27 +2476,47 @@ function ColumnHeader({
               gap: 2,
               background: "#F8FAFC",
               paddingLeft: 4,
+              zIndex: 3,
             }}
           >
-            <button
-              type="button"
-              onClick={onOpenConfigure}
-              title="Configure data source / formula / role lock"
-              style={{ border: "none", background: "transparent", cursor: "pointer", color: "#64748B", fontSize: 12, padding: "1px 3px" }}
-            >
-              ⚙
-            </button>
-            <button
-              type="button"
-              onClick={onDelete}
-              title="Delete column"
-              style={{ border: "none", background: "transparent", cursor: "pointer", color: "#EF4444", fontSize: 13, padding: "1px 3px" }}
-            >
-              ×
-            </button>
+            {isPureMumColumn(column.name) && (
+              <button
+                type="button"
+                onClick={(e) => setDescAnchor(descAnchor ? null : e.currentTarget)}
+                title={hasDescription ? `Description: ${column.description}` : "Add a note about this column"}
+                style={{
+                  border: "none",
+                  background: "transparent",
+                  cursor: "pointer",
+                  fontSize: 12,
+                  padding: "1px 3px",
+                  color: hasDescription ? "#2563EB" : "#94A3B8",
+                }}
+              >
+                ✎
+              </button>
+            )}
+            {!isSystemColumn(column.name) && (
+              <button
+                type="button"
+                onClick={onDelete}
+                title="Delete column"
+                style={{ border: "none", background: "transparent", cursor: "pointer", color: "#EF4444", fontSize: 13, padding: "1px 3px" }}
+              >
+                ×
+              </button>
+            )}
           </div>
         )}
       </div>
+      {descAnchor && (
+        <DescriptionPopover
+          anchor={descAnchor}
+          initialValue={column.description ?? ""}
+          onSave={(text) => onSaveDescription(text || null)}
+          onClose={() => setDescAnchor(null)}
+        />
+      )}
     </th>
   );
 }
@@ -1799,19 +2526,23 @@ function EditableItemHeader({
   column,
   canManage,
   onRename,
-  onOpenConfigure,
+  onSaveDescription,
+  itemDescription,
   isLastFrozen,
 }: {
   column: PlanningColumn;
   canManage: boolean;
   onRename: (newTitle: string) => void;
-  onOpenConfigure: () => void;
+  onSaveDescription: (text: string | null) => void;
+  itemDescription?: string | null;
   isLastFrozen?: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(column.name);
   const [hovered, setHovered] = useState(false);
+  const [descAnchor, setDescAnchor] = useState<HTMLElement | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const hasDescription = !!itemDescription;
 
   useEffect(() => {
     if (editing) inputRef.current?.focus();
@@ -1900,28 +2631,61 @@ function EditableItemHeader({
             {sourceBadge.label}
           </span>
         )}
+        {column.enable_description && hasDescription && !editing && !hovered && (
+          <span
+            title={`Description: ${itemDescription}`}
+            style={{ color: "#2563EB", fontSize: 11, marginLeft: 4, flexShrink: 0 }}
+          >
+            ✎
+          </span>
+        )}
         {canManage && !editing && hovered && (
-          <button
-            type="button"
-            onClick={onOpenConfigure}
-            title="Configure data source / formula / role lock"
+          <div
             style={{
               position: "absolute",
               right: 0,
               top: "50%",
               transform: "translateY(-50%)",
-              border: "none",
+              display: "flex",
+              alignItems: "center",
+              gap: 2,
               background: "#F8FAFC",
-              cursor: "pointer",
-              color: "#64748B",
-              fontSize: 12,
-              padding: "1px 4px",
+              paddingLeft: 4,
             }}
           >
-            ⚙
-          </button>
+            <button
+              type="button"
+              onClick={(e) => setDescAnchor(descAnchor ? null : e.currentTarget)}
+              title={
+                !column.enable_description
+                  ? "Enable Description in Columns panel to add a note"
+                  : hasDescription
+                    ? `Description: ${itemDescription}`
+                    : "Add a note about this column"
+              }
+              disabled={!column.enable_description}
+              style={{
+                border: "none",
+                background: "transparent",
+                cursor: column.enable_description ? "pointer" : "not-allowed",
+                fontSize: 12,
+                padding: "1px 3px",
+                color: !column.enable_description ? "#CBD5E1" : hasDescription ? "#2563EB" : "#94A3B8",
+              }}
+            >
+              ✎
+            </button>
+          </div>
         )}
       </div>
+      {descAnchor && (
+        <DescriptionPopover
+          anchor={descAnchor}
+          initialValue={itemDescription ?? ""}
+          onSave={(text) => onSaveDescription(text || null)}
+          onClose={() => setDescAnchor(null)}
+        />
+      )}
     </th>
   );
 }
@@ -1931,29 +2695,19 @@ function EditableRowLabel({
   label,
   canEdit,
   sourceType,
-  enableDescription,
-  description,
   onSave,
-  onOpenLinkPicker,
-  onSaveDescription,
   isLastFrozen,
 }: {
   label: string;
   canEdit: boolean;
   sourceType: PlanningColumnSourceType;
-  enableDescription?: boolean;
-  description?: string | null;
   onSave: (newLabel: string) => void;
-  onOpenLinkPicker: () => void;
-  onSaveDescription: (text: string | null) => void;
   isLastFrozen?: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(label);
-  const [descAnchor, setDescAnchor] = useState<HTMLElement | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const isManual = sourceType === "manual";
-  const hasDescription = !!description;
 
   useEffect(() => {
     if (editing) inputRef.current?.focus();
@@ -1991,7 +2745,7 @@ function EditableRowLabel({
         boxShadow: isLastFrozen ? "3px 0 6px -2px rgba(0,0,0,0.15)" : undefined,
       }}
     >
-      <div style={{ position: "relative", display: "flex", alignItems: "center", gap: 4, paddingRight: enableDescription ? 16 : 0 }}>
+      <div style={{ position: "relative", display: "flex", alignItems: "center", gap: 4 }}>
         {editing && canEdit && isManual ? (
           <input
             ref={inputRef}
@@ -2012,7 +2766,7 @@ function EditableRowLabel({
             onClick={() => canEdit && isManual && setEditing(true)}
             title={
               !isManual
-                ? `Computed (${sourceType}) — click the 🔗 to link this row to a record`
+                ? `Auto-filled from Product Master (${sourceType})`
                 : canEdit
                   ? "Click to edit Item label"
                   : undefined
@@ -2029,46 +2783,7 @@ function EditableRowLabel({
             {label}
           </span>
         )}
-        {sourceType === "linked_lookup" && canEdit && (
-          <button
-            type="button"
-            onClick={onOpenLinkPicker}
-            title="Link this row to a record"
-            style={{ border: "none", background: "transparent", cursor: "pointer", color: "#2563EB", fontSize: 11, flexShrink: 0 }}
-          >
-            🔗
-          </button>
-        )}
-        {enableDescription && !editing && (
-          <button
-            type="button"
-            className="planning-desc-btn"
-            onClick={(e) => setDescAnchor(descAnchor ? null : e.currentTarget)}
-            title={hasDescription ? `Description: ${description}` : "Add description"}
-            style={{
-              border: "none",
-              background: "transparent",
-              cursor: "pointer",
-              fontSize: 11,
-              flexShrink: 0,
-              color: hasDescription ? "#2563EB" : "#CBD5E1",
-              opacity: hasDescription ? 1 : 0.5,
-              lineHeight: 1,
-              padding: "1px 2px",
-            }}
-          >
-            ✎
-          </button>
-        )}
       </div>
-      {descAnchor && (
-        <DescriptionPopover
-          anchor={descAnchor}
-          initialValue={description ?? ""}
-          onSave={(text) => onSaveDescription(text || null)}
-          onClose={() => setDescAnchor(null)}
-        />
-      )}
     </td>
   );
 }
@@ -2378,9 +3093,9 @@ function ConfigureColumnModal({
           </div>
         )}
 
-        {/* Description feature — opt-in per column; when enabled, every cell in this
-            column shows a hover ✎ button the user can click to write a free-text note
-            independent of the cell's value/status. */}
+        {/* Description feature — opt-in per column; when enabled, the column
+            header shows a ✎ button the user can click to write a single
+            free-text note about the whole column. */}
         <div
           style={{
             marginTop: 16,
@@ -2401,10 +3116,10 @@ function ConfigureColumnModal({
               <strong>Description</strong>
               <br />
               <span className="muted" style={{ fontSize: 12 }}>
-                When checked, each cell in this column shows a{" "}
+                When checked, this column's header shows a{" "}
                 <span style={{ fontFamily: "monospace", fontWeight: 600 }}>✎</span> button on hover.
-                Clicking it opens a free-text note the user can write for that specific cell — independent
-                of the cell's value or status, purely for supplementary context.
+                Clicking it opens a free-text note about this column as a whole — independent
+                of any cell's value or status, purely for supplementary context.
               </span>
             </span>
           </label>
@@ -2461,65 +3176,7 @@ function ConfigureColumnModal({
   );
 }
 
-/**
- * Record picker shown inside the "Add Row" modal when the sheet's ITEM
- * column is configured as linked-lookup (Source Module + Field). Lets the
- * admin pick the actual record (e.g. a Product) in the same step as adding
- * the row, instead of typing an unrelated free-text label and only getting
- * real data into the column after a second, separate 🔗 link step.
- */
-function AddLinkedRowPicker({
-  sourceModule,
-  recordId,
-  onChange,
-}: {
-  sourceModule: string | null | undefined;
-  recordId: string;
-  onChange: (id: string) => void;
-}) {
-  const apiBase = SOURCE_MODULE_API[sourceModule || ""] || "";
 
-  const recordFetcher = useCallback(
-    async (term: string, signal: AbortSignal): Promise<DropdownOption[]> => {
-      if (!apiBase) return [];
-      const { data } = await apiGet<Record<string, unknown>[]>(
-        apiBase + toQueryString({ search: term, page: 1, page_size: 20 }),
-        { signal }
-      );
-      const labelField = SOURCE_MODULE_LABEL_FIELD[sourceModule || ""] || "name";
-      return data.map((d) => ({ value: String(d.id), label: String(d[labelField] ?? d.id) }));
-    },
-    [apiBase, sourceModule]
-  );
-
-  const recordLabel = useCallback(
-    async (id: string) => {
-      if (!apiBase) return id;
-      const { data } = await apiGet<Record<string, unknown>>(`${apiBase}/${id}`);
-      const labelField = SOURCE_MODULE_LABEL_FIELD[sourceModule || ""] || "name";
-      return String(data[labelField] ?? id);
-    },
-    [apiBase, sourceModule]
-  );
-
-  return (
-    <div>
-      <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: "#334155", marginBottom: 6 }}>
-        Select a record *
-      </label>
-      <SearchableDropdown
-        value={recordId}
-        onChange={(v) => onChange(v || "")}
-        placeholder="Search…"
-        fetchOptions={recordFetcher}
-        fetchLabelForValue={recordLabel}
-      />
-      <p style={{ fontSize: 12, color: "#64748B", marginTop: 6 }}>
-        ITEM is set to pull from Source Module + Field, so pick the record this row represents here.
-      </p>
-    </div>
-  );
-}
 
 /**
  * Link one row's cell (under a LINKED_LOOKUP column) to a specific record

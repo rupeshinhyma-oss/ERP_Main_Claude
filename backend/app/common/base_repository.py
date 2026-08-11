@@ -93,6 +93,26 @@ class BaseRepository(Generic[ModelT]):
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
+    async def get_by_ids(self, ids: list[uuid.UUID]) -> dict[uuid.UUID, ModelT]:
+        """
+        Fetch many rows by primary key in ONE query, keyed by id.
+
+        Exists specifically so callers that need N records (e.g. Shipment
+        Planning resolving every row's linked Product Master record for a
+        LINKED_LOOKUP column) can do it in a single round trip instead of
+        N sequential ``get_by_id`` calls -- the latter is the exact
+        pattern that turned "load the grid" into a multi-second-or-worse
+        hang once a sheet had 50+ rows each individually linked to a
+        record. Missing/soft-deleted ids are simply absent from the
+        returned dict rather than raising, mirroring ``get_by_id``'s
+        "None if not found" contract.
+        """
+        if not ids:
+            return {}
+        stmt = self._base_select().where(self.model.id.in_(ids))  # type: ignore[attr-defined]
+        result = await self.session.execute(stmt)
+        return {row.id: row for row in result.scalars().all()}
+
     async def list(
         self,
         *,

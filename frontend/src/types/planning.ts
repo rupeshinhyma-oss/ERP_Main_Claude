@@ -38,12 +38,20 @@ export interface PlanningSheet {
   item_source_module?: string | null;
   item_source_field?: string | null;
   item_formula_expression?: string | null;
-  /** When true, each ITEM cell shows a hover button to write a free-text note. */
+  /** When true, the ITEM column header shows a pencil button for a single note about the whole column. */
   item_enable_description?: boolean;
+  /** The ITEM column's single header-level free-text note (not per-row). */
+  item_description?: string | null;
   /** Persisted state of the "Load all records automatically" checkbox for the ITEM column. */
   item_auto_populate_enabled?: boolean;
   /** Persisted state of "How many records to load" for the ITEM column. null/undefined means "All". */
   item_auto_populate_limit?: number | null;
+  /**
+   * The word this sheet's group columns use, e.g. "Mum" in "Mum 1" /
+   * "NO. OF PKG MUM1", or "Chen" in "Chen 1" / "NO. OF PKG CHEN1".
+   * Defaults to "Mum" for every sheet created before this field existed.
+   */
+  mum_group_label?: string;
   created_by: string;
   created_at: string;
   updated_at: string;
@@ -62,8 +70,10 @@ export interface PlanningColumn {
   source_aggregate_fn?: PlanningAggregateFn | null;
   source_aggregate_filters?: Record<string, string> | null;
   formula_expression?: string | null;
-  /** When true, every cell in this column shows a hover button to write a free-text note. */
+  /** When true, the column header shows a pencil button for a single note about the whole column. */
   enable_description?: boolean;
+  /** The column's single header-level free-text note (not per-cell/per-row). */
+  description?: string | null;
   /** Persisted state of the "Load all records automatically" checkbox. */
   auto_populate_enabled?: boolean;
   /** Persisted state of "How many records to load". null/undefined means "All". */
@@ -85,8 +95,16 @@ export interface PlanningCell {
   status_color?: PlanningCellStatusColor | null;
   custom_status_tag_id?: string | null;
   linked_record_id?: string | null;
-  /** Free-text note shown via a hover button when the column's enable_description is on. */
+  /** Legacy per-cell free-text note (no longer editable from the UI; description now lives on the column header). */
   description?: string | null;
+  /**
+   * True only on the Approval Date column's cell when its `value` was
+   * auto-computed by the backend (nobody typed into this cell) rather
+   * than a real stored value -- lets the frontend safely override it with
+   * a hidden-column-aware recompute without ever touching a value
+   * someone actually typed themselves. Absent/undefined on every other column.
+   */
+  is_auto_approval_date?: boolean;
   updated_by?: string | null;
   updated_at?: string | null;
 }
@@ -97,13 +115,22 @@ export interface PlanningRow {
   label: string;
   position: number;
   linked_record_id?: string | null;
-  /** Free-text note shown via a hover button when the sheet's item_enable_description is on. */
+  /** Legacy per-row free-text note (no longer editable from the UI; description now lives on the ITEM column header). */
   description?: string | null;
   created_by: string;
   updated_by?: string | null;
   created_at: string;
   updated_at: string;
   cells: PlanningCell[];
+  /**
+   * Every Mum group's approval date for this row, keyed by group number
+   * as a STRING (e.g. "2", "3" -- JSON object keys are always strings).
+   * Backend-computed, hidden-column-unaware (the backend has no concept
+   * of a per-user hidden column) -- the frontend picks the first
+   * non-hidden group's date from this map for the Approval Date cell and
+   * for the eye/history popover. See GridCell's approvalDate recomputation.
+   */
+  mum_approval_dates?: Record<string, string>;
 }
 
 export interface PlanningGrid {

@@ -9,12 +9,18 @@ they just validate permissions, call the service, and shape the response.
 from __future__ import annotations
 
 import uuid
+from typing import Any
 
-from fastapi import APIRouter, Depends, Request, status
+from fastapi import APIRouter, Depends, Query, Request, WebSocket, WebSocketDisconnect, status
 
-from app.auth.service import CurrentUser
+from app.auth.dependencies import get_auth_service
+from app.auth.service import AuthService, CurrentUser
+from app.core.exceptions import UnauthorizedException
+from app.core.logging import get_logger
 from app.core.responses import build_success_response
+from app.planning import source_registry
 from app.planning.dependencies import get_planning_service
+from app.planning.ws_manager import connection_manager
 from app.planning.schemas import (
     MumColumnStatusHistoryEntry,
     PlanningCellDescriptionUpdate,
@@ -23,6 +29,7 @@ from app.planning.schemas import (
     PlanningCellValueUpdate,
     PlanningChangeLogRead,
     PlanningColumnCreate,
+    PlanningColumnDescriptionUpdate,
     PlanningColumnLinkRecord,
     PlanningColumnMove,
     PlanningColumnRead,
@@ -32,6 +39,7 @@ from app.planning.schemas import (
     PlanningColumnSourceConfigure,
     PlanningGridRead,
     PlanningItemAutoPopulate,
+    PlanningItemDescriptionUpdate,
     PlanningItemLinkRecord,
     PlanningItemSourceConfigure,
     PlanningRowCreate,
@@ -40,6 +48,7 @@ from app.planning.schemas import (
     PlanningRowRead,
     PlanningRowRename,
     PlanningSheetCreate,
+    PlanningSheetDuplicate,
     PlanningSheetRead,
     PlanningSheetRename,
     PlanningStatusTagCreate,
@@ -50,6 +59,80 @@ from app.planning.service import PlanningService
 from app.rbac.dependencies import require_permission
 
 router = APIRouter(prefix="/planning", tags=["Shipment Planning"])
+logger = get_logger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Live updates (WebSocket)
+# ---------------------------------------------------------------------------
+
+
+@router.websocket("/sheets/{sheet_id}/live")
+async def sheet_live_updates(
+    websocket: WebSocket,
+    sheet_id: uuid.UUID,
+    token: str = Query(..., description="Access token (same one used for Authorization: Bearer)."),
+    auth_service: AuthService = Depends(get_auth_service),
+) -> None:
+    """
+    Push every change made to this sheet to every other open tab, live.
+
+    Browsers can't set an ``Authorization`` header on a WebSocket
+    handshake, so the same access token normally sent as a Bearer header
+    is instead passed as ``?token=...`` here -- verified through the
+    exact same :meth:`AuthService.verify_access_token` path as every REST
+    request, so an expired/blacklisted/revoked token is rejected exactly
+    the same way.
+
+    Once connected, this socket only *receives* events (cell edits,
+    column/row changes, ...); the client keeps making its normal REST
+    calls to actually perform edits. See ``app.planning.ws_manager`` for
+    what triggers a broadcast and ``app.planning.service`` for the call
+    sites.
+    """
+    try:
+        current_user = await auth_service.verify_access_token(token)
+    except UnauthorizedException:
+        await websocket.close(code=4401, reason="Invalid or expired token.")
+        return
+
+    await connection_manager.connect(sheet_id, current_user.id, websocket)
+    try:
+        while True:
+            # This socket is push-only from the server's perspective, but we
+            # still need to await *something* on it so a client disconnect
+            # (browser tab closed, network drop) raises WebSocketDisconnect
+            # here instead of leaving a dead entry in the connection
+            # manager forever. Any inbound message is simply ignored.
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    except Exception:  # noqa: BLE001 - never let a socket-level error take down the process
+        logger.exception("Planning live-update socket errored.", extra={"sheet_id": str(sheet_id)})
+    finally:
+        connection_manager.disconnect(sheet_id, websocket)
+
+
+async def _broadcast(sheet_id: uuid.UUID, event_type: str, payload: dict, *, current_user: CurrentUser) -> None:
+    """
+    Fan out a change to every other tab watching this sheet.
+
+    Called after each write route's DB transaction has already committed
+    (``get_db_session`` commits when the route returns normally, but this
+    call happens inside the route body before the return -- the write
+    itself was already flushed to the DB by the service call above it, so
+    another tab reloading in response to this event will see consistent
+    data). Never raises: a broadcast failure must not turn a successful
+    write into a failed HTTP response for the user who made it.
+    """
+    try:
+        await connection_manager.broadcast(
+            sheet_id,
+            {"type": event_type, "payload": payload, "changed_by": str(current_user.id)},
+            exclude_user_id=current_user.id,
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception("Failed to broadcast planning live-update event.", extra={"sheet_id": str(sheet_id), "event_type": event_type})
 
 
 def _row_to_read_dict(row) -> dict:
@@ -97,6 +180,45 @@ async def create_sheet(
     )
     data = PlanningSheetRead.model_validate(sheet).model_dump(mode="json")
     return build_success_response(data=data, request_id=request.state.request_id, message="Sheet created.")
+
+
+@router.post(
+    "/sheets/{sheet_id}/duplicate",
+    status_code=status.HTTP_201_CREATED,
+    summary="Duplicate a sheet's exact column structure onto a new sheet, optionally renaming its group label",
+)
+async def duplicate_sheet(
+    sheet_id: uuid.UUID,
+    payload: PlanningSheetDuplicate,
+    request: Request,
+    service: PlanningService = Depends(get_planning_service),
+    current_user: CurrentUser = Depends(require_permission("planning.sheet.manage")),
+) -> dict:
+    """
+    Create a new sheet that starts with the exact same columns as ``sheet_id``.
+
+    Every column (Supplier Name, City, PKG QTY, UNIT WEIGHT/PKG (KG),
+    CBM/PKG (KG), every Mum group and its fixed NO. OF PKG / TOTAL
+    WEIGHT / TOTAL CBM totals, ...) is recreated with the same data type,
+    position, and source configuration. The one thing that's allowed to
+    change is the group label -- e.g. duplicating "Mum branch" with
+    ``mum_group_label="Chen"`` gives the new sheet "Chen 1" / "Chen1
+    Remarks" / "NO. OF PKG CHEN1" instead of "Mum 1" / etc., while
+    everything else (formulas, LINKED_LOOKUP wiring to Product Master,
+    approval-date and status-color behavior) keeps working exactly the
+    same on the new sheet. Rows are never copied -- the new sheet starts
+    empty and is populated from Product Master the normal way.
+    """
+    sheet = await service.duplicate_sheet(
+        sheet_id,
+        name=payload.name,
+        mum_group_label=payload.mum_group_label,
+        description=payload.description,
+        user_id=current_user.id,
+        username=current_user.username,
+    )
+    data = PlanningSheetRead.model_validate(sheet).model_dump(mode="json")
+    return build_success_response(data=data, request_id=request.state.request_id, message="Sheet duplicated.")
 
 
 @router.get("/sheets", summary="List planning sheets")
@@ -149,20 +271,72 @@ async def get_grid(
     grid = await service.get_grid(sheet_id)
     columns = grid["columns"]
     rows = grid["rows"]
+    sheet = grid["sheet"]
 
     # Aggregate columns yield the same value for the whole column, so compute
     # each one exactly once here rather than once per row -- avoids an
     # N-times-redundant query against the source module for a sheet with N rows.
     aggregate_cache: dict[uuid.UUID, str | None] = {}
+    # LINKED_LOOKUP columns: one bulk fetch per column (not one per cell).
+    # Keyed by (column_id, linked_record_id) -> resolved record, mirroring
+    # the same fix applied to the ITEM column via
+    # compute_row_item_displays_for_all_rows -- an admin-added
+    # LINKED_LOOKUP column has the exact same N+1 query risk ITEM did.
+    # Records are cached here and handed to compute_cell_display_value's
+    # prefetched_record param below, so the value-extraction logic itself
+    # (module.value_getter, str() conversion, etc.) still lives in exactly
+    # one place rather than being duplicated here.
+    linked_lookup_records: dict[tuple[uuid.UUID, uuid.UUID], Any] = {}
     for column in columns:
         if column.source_type == "aggregate":
             aggregate_cache[column.id] = await service.compute_cell_display_value(column, None)
+        elif column.source_type == "linked_lookup":
+            module = source_registry.get_source_module(column.source_module or "")
+            if module is None:
+                continue
+            record_ids = {
+                cell.linked_record_id
+                for row in rows
+                for cell in row.cells
+                if cell.column_id == column.id and cell.linked_record_id is not None
+            }
+            if not record_ids:
+                continue
+            repository = module.repository_factory(service.cell_repository.session)
+            records_by_id = await repository.get_by_ids(list(record_ids))
+            for record_id, record in records_by_id.items():
+                linked_lookup_records[(column.id, record_id)] = record
 
-    sheet = grid["sheet"]
+    approval_date_column_id = next(
+        (c.id for c in columns if c.name.strip().lower() == "approval date"), None
+    )
+
+    # Computed ONCE for the whole sheet -- see get_mum_group_approval_dates_for_all_rows's
+    # docstring for why the old per-row call here was the direct cause of
+    # "Loading grid..." never finishing on a sheet with many rows.
+    mum_approval_dates_by_row = await service.get_mum_group_approval_dates_for_all_rows(
+        sheet_id, columns=columns, rows=rows
+    )
+
+    # ITEM's own display value, batched the same way as the LINKED_LOOKUP
+    # columns above -- one query for every linked product on the sheet,
+    # not one per row. See compute_row_item_displays_for_all_rows's
+    # docstring for why this was the dominant cost behind the hang.
+    item_display_by_row = await service.compute_row_item_displays_for_all_rows(sheet, rows)
+
     row_reads = []
     for row in rows:
         cells_by_column_id = {cell.column_id: cell for cell in row.cells}
         cell_reads = []
+        # Every Mum group's approval date for this row, keyed by group
+        # number as a string (JSON-friendly) -- looked up from the
+        # sheet-wide computation above, reused below for the Approval
+        # Date column's fallback display, AND sent to the frontend as
+        # `mum_approval_dates` so it can recompute "the first non-hidden
+        # Mum's date" itself whenever the viewer's hidden-column selection
+        # changes, without another round-trip (hiding is a per-user
+        # browser preference the backend has no concept of).
+        mum_approval_dates = mum_approval_dates_by_row.get(row.id, {})
         # Iterate every column, not just columns with a stored cell:
         # FORMULA and AGGREGATE columns routinely have no PlanningCell row
         # at all for a given row (direct edits to them are rejected, and
@@ -172,8 +346,46 @@ async def get_grid(
             cell = cells_by_column_id.get(column.id)
             if column.source_type == "aggregate":
                 display_value = aggregate_cache.get(column.id)
+            elif column.source_type == "linked_lookup":
+                # Use the sheet-wide bulk-fetched record from above (see
+                # linked_lookup_records) instead of letting
+                # compute_cell_display_value do its own per-cell
+                # get_by_id -- the whole point of batching it above.
+                prefetched = (
+                    linked_lookup_records.get((column.id, cell.linked_record_id))
+                    if cell is not None and cell.linked_record_id is not None
+                    else None
+                )
+                display_value = await service.compute_cell_display_value(
+                    column,
+                    cell,
+                    row_id=row.id,
+                    prefetched_record=prefetched,
+                    prefetched_sibling_columns=columns,
+                    prefetched_row_cells=cells_by_column_id,
+                )
             else:
-                display_value = await service.compute_cell_display_value(column, cell, row_id=row.id)
+                display_value = await service.compute_cell_display_value(
+                    column,
+                    cell,
+                    row_id=row.id,
+                    prefetched_sibling_columns=columns,
+                    prefetched_row_cells=cells_by_column_id,
+                )
+            # Document: "the Approval column should show over the cell the
+            # date ... when that Mum ... got the blue number". The Approval
+            # Date column stays MANUAL (admins can still type over it), but
+            # when nobody has typed a value for this row, auto-show the
+            # earliest-numbered Mum group's approval date instead of a
+            # blank cell -- computed live from the change log, never
+            # persisted. This picks the globally-first Mum group
+            # regardless of what any one viewer has hidden; the frontend
+            # overrides it with a hidden-aware pick using
+            # `mum_approval_dates` right after the grid loads.
+            auto_approval_date: str | None = None
+            if column.id == approval_date_column_id and not display_value and mum_approval_dates:
+                auto_approval_date = mum_approval_dates[min(mum_approval_dates.keys())]
+                display_value = auto_approval_date
             if cell is not None:
                 cell_data = PlanningCellRead.model_validate(cell).model_dump(mode="json")
             else:
@@ -190,15 +402,37 @@ async def get_grid(
                     "updated_at": None,
                 }
             cell_data["display_value"] = display_value
+            # The frontend's grid cell renders MANUAL columns from `value`,
+            # not `display_value` (display_value is only read for
+            # computed/FORMULA/LINKED_LOOKUP/AGGREGATE columns) -- the
+            # Approval Date column is MANUAL, so the auto-computed date
+            # must also be surfaced as `value`, or it silently never
+            # renders even though the backend computed it correctly.
+            # Real typed-in values (the `cell is not None` case above)
+            # already have their own `value` from the DB and are left untouched.
+            is_auto_filled = auto_approval_date is not None and cell_data.get("value") in (None, "")
+            if is_auto_filled:
+                cell_data["value"] = auto_approval_date
+            # Explicit flag rather than making the frontend infer "was this
+            # auto-filled?" by comparing strings (a manually-typed date
+            # that happens to coincide with a Mum group's date would be
+            # misread as auto-filled and get overwritten by the hidden-aware
+            # recompute) -- unset entirely for every other column, so it
+            # never leaks into unrelated cells' shape.
+            if column.id == approval_date_column_id:
+                cell_data["is_auto_approval_date"] = is_auto_filled
             cell_reads.append(cell_data)
         row_data = PlanningRowRead.model_validate(row).model_dump(mode="json")
         row_data["cells"] = cell_reads
+        row_data["mum_approval_dates"] = {str(k): v for k, v in mum_approval_dates.items()}
         # ITEM is the sheet's built-in first column, not a row in `columns`
         # above -- when the admin has configured it as linked-lookup or
         # formula (see PlanningItemSourceConfigure), show the live computed
         # value instead of the raw stored label, same "never trust a stale
-        # value" behavior as every other dynamic column.
-        row_data["label"] = await service.compute_row_item_display(sheet, row)
+        # value" behavior as every other dynamic column. Looked up from
+        # the sheet-wide batch computed above (item_display_by_row), not
+        # recomputed per row here.
+        row_data["label"] = item_display_by_row.get(row.id, row.label)
         row_reads.append(row_data)
 
     data = {
@@ -237,6 +471,7 @@ async def add_column(
         username=current_user.username,
     )
     data = PlanningColumnRead.model_validate(column).model_dump(mode="json")
+    await _broadcast(sheet_id, "column_added", data, current_user=current_user)
     return build_success_response(data=data, request_id=request.state.request_id, message="Column added.")
 
 
@@ -253,6 +488,7 @@ async def rename_column(
         sheet_id, column_id, name=payload.name, user_id=current_user.id, username=current_user.username
     )
     data = PlanningColumnRead.model_validate(column).model_dump(mode="json")
+    await _broadcast(sheet_id, "column_renamed", data, current_user=current_user)
     return build_success_response(data=data, request_id=request.state.request_id, message="Column renamed.")
 
 
@@ -269,6 +505,7 @@ async def move_column(
         sheet_id, column_id, new_position=payload.position, user_id=current_user.id, username=current_user.username
     )
     data = PlanningColumnRead.model_validate(column).model_dump(mode="json")
+    await _broadcast(sheet_id, "column_moved", data, current_user=current_user)
     return build_success_response(data=data, request_id=request.state.request_id, message="Column moved.")
 
 
@@ -281,6 +518,7 @@ async def delete_column(
     current_user: CurrentUser = Depends(require_permission("planning.column.manage")),
 ) -> dict:
     await service.delete_column(sheet_id, column_id, user_id=current_user.id, username=current_user.username)
+    await _broadcast(sheet_id, "column_deleted", {"column_id": str(column_id)}, current_user=current_user)
     return build_success_response(data=None, request_id=request.state.request_id, message="Column deleted.")
 
 
@@ -350,6 +588,7 @@ async def configure_column_source(
         username=current_user.username,
     )
     data = PlanningColumnRead.model_validate(column).model_dump(mode="json")
+    await _broadcast(sheet_id, "column_source_configured", data, current_user=current_user)
     return build_success_response(data=data, request_id=request.state.request_id, message="Column source configured.")
 
 
@@ -431,10 +670,16 @@ async def auto_populate_rows_from_item_source(
     rows = await service.auto_populate_rows_from_item_source(
         sheet_id, limit=payload.limit, user_id=current_user.id, username=current_user.username
     )
+    # Batched the same way as get_grid -- one query for every linked
+    # record just created, not one per row. This route creates up to
+    # `limit` (often 50) rows in a single call, so the old per-row
+    # compute_row_item_display here was just as much a hang risk as the
+    # one in get_grid was.
+    item_display_by_row = await service.compute_row_item_displays_for_all_rows(grid["sheet"], rows)
     data = []
     for row in rows:
         row_data = PlanningRowRead.model_validate(_row_to_read_dict(row)).model_dump(mode="json")
-        row_data["label"] = await service.compute_row_item_display(grid["sheet"], row)
+        row_data["label"] = item_display_by_row.get(row.id, row.label)
         data.append(row_data)
     return build_success_response(
         data=data, request_id=request.state.request_id, message=f"Added {len(rows)} row(s)."
@@ -541,6 +786,7 @@ async def set_column_role_lock(
         sheet_id, column_id, role_ids=payload.role_ids, user_id=current_user.id, username=current_user.username
     )
     data = PlanningColumnRead.model_validate(column).model_dump(mode="json")
+    await _broadcast(sheet_id, "column_role_lock_changed", data, current_user=current_user)
     return build_success_response(data=data, request_id=request.state.request_id, message="Column role lock updated.")
 
 
@@ -566,27 +812,61 @@ async def set_column_status_color_enabled(
         sheet_id, column_id, enabled=payload.enable_status_color, user_id=current_user.id, username=current_user.username
     )
     data = PlanningColumnRead.model_validate(column).model_dump(mode="json")
+    await _broadcast(sheet_id, "column_status_color_toggled", data, current_user=current_user)
     return build_success_response(data=data, request_id=request.state.request_id, message="Column status-color setting updated.")
+
+
+@router.put(
+    "/sheets/{sheet_id}/columns/{column_id}/description",
+    summary="Set/clear a column's single header-level free-text note",
+)
+async def set_column_description(
+    sheet_id: uuid.UUID,
+    column_id: uuid.UUID,
+    payload: PlanningColumnDescriptionUpdate,
+    request: Request,
+    service: PlanningService = Depends(get_planning_service),
+    current_user: CurrentUser = Depends(require_permission("planning.column.manage")),
+) -> dict:
+    """
+    Set or clear the column header's description note.
+
+    One note per column (edited via the pencil icon on the column
+    header), not per cell -- distinct from the older per-cell
+    ``.../columns/{column_id}/value``-adjacent description mechanism,
+    which the frontend no longer surfaces in the UI but which still
+    exists for any note already written into a specific cell.
+    """
+    column = await service.set_column_description(
+        sheet_id, column_id, description=payload.description, user_id=current_user.id, username=current_user.username
+    )
+    data = PlanningColumnRead.model_validate(column).model_dump(mode="json")
+    await _broadcast(sheet_id, "column_description_changed", data, current_user=current_user)
+    return build_success_response(data=data, request_id=request.state.request_id, message="Column description updated.")
+
+
+@router.put(
+    "/sheets/{sheet_id}/item-description",
+    summary="Set/clear the sheet's built-in ITEM column header-level free-text note",
+)
+async def set_item_column_description(
+    sheet_id: uuid.UUID,
+    payload: PlanningItemDescriptionUpdate,
+    request: Request,
+    service: PlanningService = Depends(get_planning_service),
+    current_user: CurrentUser = Depends(require_permission("planning.column.manage")),
+) -> dict:
+    sheet = await service.set_item_column_description(
+        sheet_id, description=payload.description, user_id=current_user.id, username=current_user.username
+    )
+    data = PlanningSheetRead.model_validate(sheet).model_dump(mode="json")
+    await _broadcast(sheet_id, "item_description_changed", data, current_user=current_user)
+    return build_success_response(data=data, request_id=request.state.request_id, message="ITEM column description updated.")
 
 
 # ---------------------------------------------------------------------------
 # Rows (item lines, unlimited)
 # ---------------------------------------------------------------------------
-
-
-@router.post("/sheets/{sheet_id}/rows", status_code=status.HTTP_201_CREATED, summary="Add a row")
-async def add_row(
-    sheet_id: uuid.UUID,
-    payload: PlanningRowCreate,
-    request: Request,
-    service: PlanningService = Depends(get_planning_service),
-    current_user: CurrentUser = Depends(require_permission("planning.row.manage")),
-) -> dict:
-    row = await service.add_row(
-        sheet_id, label=payload.label, position=payload.position, user_id=current_user.id, username=current_user.username
-    )
-    data = PlanningRowRead.model_validate(_row_to_read_dict(row)).model_dump(mode="json")
-    return build_success_response(data=data, request_id=request.state.request_id, message="Row added.")
 
 
 @router.patch("/sheets/{sheet_id}/rows/{row_id}", summary="Rename a row")
@@ -600,6 +880,7 @@ async def rename_row(
 ) -> dict:
     row = await service.rename_row(sheet_id, row_id, label=payload.label, user_id=current_user.id, username=current_user.username)
     data = PlanningRowRead.model_validate(_row_to_read_dict(row)).model_dump(mode="json")
+    await _broadcast(sheet_id, "row_renamed", data, current_user=current_user)
     return build_success_response(data=data, request_id=request.state.request_id, message="Row renamed.")
 
 
@@ -622,6 +903,7 @@ async def set_row_description(
         sheet_id, row_id, description=payload.description, user_id=current_user.id, username=current_user.username
     )
     data = PlanningRowRead.model_validate(_row_to_read_dict(row)).model_dump(mode="json")
+    await _broadcast(sheet_id, "row_description_changed", data, current_user=current_user)
     return build_success_response(data=data, request_id=request.state.request_id, message="Row description updated.")
 
 
@@ -638,6 +920,7 @@ async def move_row(
         sheet_id, row_id, new_position=payload.position, user_id=current_user.id, username=current_user.username
     )
     data = PlanningRowRead.model_validate(_row_to_read_dict(row)).model_dump(mode="json")
+    await _broadcast(sheet_id, "row_moved", data, current_user=current_user)
     return build_success_response(data=data, request_id=request.state.request_id, message="Row moved.")
 
 
@@ -650,6 +933,7 @@ async def delete_row(
     current_user: CurrentUser = Depends(require_permission("planning.row.manage")),
 ) -> dict:
     await service.delete_row(sheet_id, row_id, user_id=current_user.id, username=current_user.username)
+    await _broadcast(sheet_id, "row_deleted", {"row_id": str(row_id)}, current_user=current_user)
     return build_success_response(data=None, request_id=request.state.request_id, message="Row deleted.")
 
 
@@ -706,7 +990,27 @@ async def set_cell_value(
     )
     data = PlanningCellRead.model_validate(cell).model_dump(mode="json")
     data["display_value"] = cell.value  # only MANUAL columns reach here; locked columns are rejected earlier
-    return build_success_response(data=data, request_id=request.state.request_id, message="Cell updated.")
+    # This is a real, directly-typed value (this endpoint IS the "someone
+    # typed into a cell" path), never a backend auto-fill -- explicit
+    # False so the frontend's hidden-column-aware Approval Date override
+    # never mistakes a value the person just typed for an auto-computed one.
+    data["is_auto_approval_date"] = False
+    # Recompute every FORMULA column on this row (e.g. NO. OF PKG / TOTAL
+    # WEIGHT / TOTAL CBM columns that reference the Mum column just typed
+    # into), plus the Approval Date column's auto-computed date. Included
+    # in BOTH the broadcast to other tabs AND this response: the acting
+    # user's own tab is deliberately excluded from receiving its own
+    # broadcast (see _broadcast's exclude_user_id), so without this in the
+    # direct response, the person who actually typed the value would see
+    # their own derived columns (Approval Date, formula totals) go stale
+    # until their next manual reload -- everyone else gets it live via
+    # the socket, but the actor themselves would not.
+    derived = await service.get_row_formula_display_values(sheet_id, row_id)
+    payload_out = {"cell": data, "row_id": str(row_id), "derived_values": derived}
+    await _broadcast(sheet_id, "cell_value_changed", payload_out, current_user=current_user)
+    return build_success_response(
+        data={"cell": data, "derived_values": derived}, request_id=request.state.request_id, message="Cell updated."
+    )
 
 
 @router.put("/sheets/{sheet_id}/rows/{row_id}/columns/{column_id}/status", summary="Set/clear a cell's CRM-style status tag")
@@ -734,6 +1038,7 @@ async def set_cell_status(
         username=current_user.username,
     )
     data = PlanningCellRead.model_validate(cell).model_dump(mode="json")
+    await _broadcast(sheet_id, "cell_status_changed", {"cell": data, "row_id": str(row_id)}, current_user=current_user)
     return build_success_response(data=data, request_id=request.state.request_id, message="Cell status updated.")
 
 
@@ -759,6 +1064,7 @@ async def set_cell_description(
         sheet_id, row_id, column_id, description=payload.description, user_id=current_user.id, username=current_user.username
     )
     data = PlanningCellRead.model_validate(cell).model_dump(mode="json")
+    await _broadcast(sheet_id, "cell_description_changed", {"cell": data, "row_id": str(row_id)}, current_user=current_user)
     return build_success_response(data=data, request_id=request.state.request_id, message="Cell description updated.")
 
 

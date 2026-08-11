@@ -21,6 +21,64 @@ class ProductRepository(BaseRepository[Product]):
         """Bind to a DB session, operating on the ``Product`` model."""
         super().__init__(session, Product)
 
+    async def get_by_id(self, id_: uuid.UUID) -> Product | None:
+        """Fetch a single product by primary key, with its primary supplier's name/city attached."""
+        product = await super().get_by_id(id_)
+        if product is not None:
+            await self.attach_planning_supplier_info([product])
+        return product
+
+    async def get_by_ids(self, ids: list[uuid.UUID]) -> dict[uuid.UUID, Product]:
+        """Fetch many products by primary key, with each one's primary supplier's name/city attached."""
+        records_by_id = await super().get_by_ids(ids)
+        if records_by_id:
+            await self.attach_planning_supplier_info(list(records_by_id.values()))
+        return records_by_id
+
+    async def attach_planning_supplier_info(self, products: list[Product]) -> None:
+        """
+        Attach each product's primary supplier's name/city as transient attributes.
+
+        "Primary supplier" = the earliest-linked ``SupplierProductLink`` row
+        for that product (a product can be linked to several suppliers,
+        but Shipment Planning's Supplier Name / City columns need exactly
+        one supplier per item -- the exact item has the exact supplier).
+        Sets ``_planning_supplier_name`` / ``_planning_supplier_city`` on
+        each product in place (``None`` when the product has no linked
+        supplier yet); read back via
+        ``app.planning.source_registry``'s product value_getter.
+
+        One query total regardless of how many products are passed in,
+        so this is safe to call for a whole sheet's worth of rows without
+        turning "load the grid" into N+1 queries.
+        """
+        if not products:
+            return
+        from sqlalchemy import select
+
+        from app.masters.cities.models import City
+        from app.suppliers.models import Supplier, SupplierProductLink
+
+        product_ids = [p.id for p in products]
+        stmt = (
+            select(SupplierProductLink.product_id, Supplier.company_name, City.name)
+            .join(Supplier, Supplier.id == SupplierProductLink.supplier_id)
+            .outerjoin(City, City.id == Supplier.city_id)
+            .where(SupplierProductLink.product_id.in_(product_ids))
+            .order_by(SupplierProductLink.product_id, SupplierProductLink.created_at)
+        )
+        result = await self.session.execute(stmt)
+        # First row per product_id (ordered by created_at above) is the primary supplier.
+        primary_by_product: dict[uuid.UUID, tuple[str, str | None]] = {}
+        for product_id, company_name, city_name in result.all():
+            if product_id not in primary_by_product:
+                primary_by_product[product_id] = (company_name, city_name)
+
+        for product in products:
+            name, city = primary_by_product.get(product.id, (None, None))
+            product._planning_supplier_name = name
+            product._planning_supplier_city = city
+
     def _apply_search(self, stmt, term: str | None):
         """Apply a flexible, space-normalized case-insensitive search across searchable_fields."""
         if not term:

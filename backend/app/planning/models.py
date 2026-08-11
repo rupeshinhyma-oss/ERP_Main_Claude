@@ -174,8 +174,13 @@ class PlanningSheet(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Base):
     item_enable_description: Mapped[bool] = mapped_column(
         default=False,
         nullable=False,
-        doc="When set, every row's ITEM cell shows a description button (pencil icon on hover) "
-        "for a free-text note independent of the row's label/value.",
+        doc="When set, the ITEM column header shows a description button (pencil icon) for a "
+        "single free-text note about the ITEM column as a whole -- not per-row.",
+    )
+    item_description: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        doc="The ITEM column's single header-level free-text note, mirrors PlanningColumn.description.",
     )
     item_auto_populate_enabled: Mapped[bool] = mapped_column(
         default=False,
@@ -188,6 +193,18 @@ class PlanningSheet(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Base):
         nullable=True,
         doc="Persisted state of the ITEM column's 'How many records to load' selector. NULL means 'All'.",
     )
+
+    # --- Mum-group label (the "Mum" in "Mum 1" / "NO. OF PKG MUM1" / etc.) ---
+    # Every sheet's Mum-series columns (main Mum<n> column, its Remarks
+    # companion, and the three fixed-formula totals NO. OF PKG / TOTAL
+    # WEIGHT / TOTAL CBM) are matched by the backend via this label, not a
+    # hardcoded "Mum" string -- so a sheet duplicated from "Mum branch" as
+    # "Chennai branch" can use "Chen" (or "MP", or anything else) for its
+    # own groups while keeping the exact same fixed-formula/approval-date/
+    # status-history behavior. See app.planning.service's
+    # mum_label_pattern()/is_fixed_mum_derived_column() helpers, which read
+    # this field instead of matching the literal word "Mum".
+    mum_group_label: Mapped[str] = mapped_column(String(50), nullable=False, default="Mum")
 
     created_by: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("users.id"), nullable=False)
 
@@ -307,8 +324,15 @@ class PlanningColumn(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Base)
     enable_description: Mapped[bool] = mapped_column(
         default=False,
         nullable=False,
-        doc="When set, every cell in this column shows a description button (pencil icon on "
-        "hover) for a free-text note independent of the cell's value/status.",
+        doc="When set, the column header shows a description button (pencil icon) for a "
+        "single free-text note about the whole column -- not per-cell.",
+    )
+    description: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        doc="The column's single header-level free-text note, shown/edited via the pencil "
+        "button on the column header when enable_description is set. One note per column, "
+        "not per cell/row.",
     )
     auto_populate_enabled: Mapped[bool] = mapped_column(
         default=False,

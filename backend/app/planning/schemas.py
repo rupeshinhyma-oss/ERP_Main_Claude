@@ -42,11 +42,47 @@ class PlanningSheetRead(BaseModel):
     item_source_field: str | None = None
     item_formula_expression: str | None = None
     item_enable_description: bool = False
+    item_description: str | None = None
     item_auto_populate_enabled: bool = False
     item_auto_populate_limit: int | None = None
+    mum_group_label: str = Field(
+        default="Mum",
+        description="The word this sheet's group columns use, e.g. 'Mum' in 'Mum 1' / "
+        "'NO. OF PKG MUM1', or 'Chen' in 'Chen 1' / 'NO. OF PKG CHEN1'. Set once at sheet "
+        "creation/duplication; every fixed-formula, approval-date, and status-history "
+        "feature reads this instead of assuming the literal word 'Mum'.",
+    )
     created_by: uuid.UUID
     created_at: datetime
     updated_at: datetime
+
+
+class PlanningSheetDuplicate(BaseModel):
+    """
+    Payload to duplicate an existing sheet's exact structure onto a new one.
+
+    Copies every column (name, data type, position, and full source
+    config -- LINKED_LOOKUP module/field, AGGREGATE fn/filters, or FIXED
+    formula) from the source sheet onto a brand-new sheet, remapping the
+    old sheet's Mum-group label to ``mum_group_label`` wherever it
+    appears in a column name (e.g. every "Mum 1" / "Mum1 Remarks" / "NO.
+    OF PKG MUM1" becomes "Chen 1" / "Chen1 Remarks" / "NO. OF PKG CHEN1").
+    Non-Mum-group columns (Supplier Name, City, PKG QTY, ...) are copied
+    with their names unchanged. Rows are never copied -- the new sheet
+    starts from Product Master the same way every sheet does (ITEM
+    auto-populate), so it doesn't inherit the source sheet's row set.
+    """
+
+    name: str = Field(..., min_length=1, max_length=150, description="Name for the new sheet, e.g. 'Chennai branch'.")
+    mum_group_label: str = Field(
+        default="Mum",
+        min_length=1,
+        max_length=50,
+        description="The word the new sheet's groups should use, e.g. 'Chen' or 'MP'. "
+        "Every 'Mum' occurrence in a copied column's name is replaced with this "
+        "(case-preserving: 'MUM' -> 'CHEN', 'Mum' -> 'Chen', 'mum' -> 'chen').",
+    )
+    description: str | None = Field(default=None)
 
 
 class PlanningItemSourceConfigure(BaseModel):
@@ -134,6 +170,7 @@ class PlanningColumnRead(BaseModel):
     source_aggregate_filters: dict | None = None
     formula_expression: str | None = None
     enable_description: bool = False
+    description: str | None = None
     auto_populate_enabled: bool = False
     auto_populate_limit: int | None = None
     enable_status_color: bool = False
@@ -317,6 +354,23 @@ class PlanningCellDescriptionUpdate(BaseModel):
 
 class PlanningRowDescriptionUpdate(BaseModel):
     """Set or clear a row's ITEM-cell free-text description. Mirrors PlanningCellDescriptionUpdate for the built-in ITEM column."""
+
+    description: str | None = Field(default=None, max_length=10000)
+
+
+class PlanningColumnDescriptionUpdate(BaseModel):
+    """
+    Set or clear a column's single header-level free-text note.
+
+    Lives on the column header (pencil icon), not per-cell -- one note
+    describes the whole column (e.g. "Mum 3 covers the July batch").
+    """
+
+    description: str | None = Field(default=None, max_length=10000)
+
+
+class PlanningItemDescriptionUpdate(BaseModel):
+    """Set or clear the sheet's built-in ITEM column header-level note. Mirrors PlanningColumnDescriptionUpdate."""
 
     description: str | None = Field(default=None, max_length=10000)
 

@@ -26,10 +26,76 @@ evaluate any node type not on the allow-list below.
 from __future__ import annotations
 
 import ast
+import hashlib
 import operator
+import re
 from typing import Any
 
 from app.core.exceptions import BadRequestException
+
+# Real planning column names routinely contain spaces, slashes, parentheses,
+# and other characters that aren't valid in a bare Python identifier (e.g.
+# "PKG QTY", "UNIT WEIGHT/PKG (KG)", "Mum 1") -- but the AST-based grammar
+# below only ever recognizes bare identifiers as variables. Rather than
+# requiring admins to rename every column to an identifier-safe name before
+# it can be used in a formula, every public entry point in this module
+# accepts formulas written with the *actual* column names (optionally
+# wrapped in square brackets, e.g. "[Mum 1] * [PKG QTY]", to disambiguate
+# from surrounding text) and transparently mangles each real name into a
+# safe synthetic identifier before handing the expression to `ast.parse`,
+# unmangling error messages back to the original names afterwards.
+_BRACKETED_REF = re.compile(r"\[([^\[\]]+)\]")
+
+
+def _mangle(name: str) -> str:
+    """Turn an arbitrary column name into a safe, unique Python identifier."""
+    digest = hashlib.sha1(name.encode("utf-8")).hexdigest()[:10]
+    return f"_col_{digest}"
+
+
+def _rewrite_expression(expression: str, *, known_column_names: set[str] | None) -> tuple[str, dict[str, str]]:
+    """
+    Replace every ``[Column Name]`` reference (and, for backward
+    compatibility, every bare identifier that exactly matches a known
+    column name) with a mangled safe identifier.
+
+    Returns the rewritten expression plus a mapping of mangled-name ->
+    original-name, so callers can translate variables back for error
+    messages and for building the ``row_values`` dict passed to
+    :func:`evaluate_formula`.
+    """
+    mapping: dict[str, str] = {}
+
+    def _replace_bracketed(match: re.Match) -> str:
+        original = match.group(1)
+        mangled = _mangle(original)
+        mapping[mangled] = original
+        return mangled
+
+    rewritten = _BRACKETED_REF.sub(_replace_bracketed, expression)
+
+    # Backward compatibility: a formula written as "Mum40 * Rate" (no
+    # brackets, column names that already happen to be valid identifiers)
+    # continues to work exactly as before -- only rewrite bare names when
+    # we actually know the sheet's column names, so plain identifiers
+    # that aren't column names (a typo, say) still surface as "unknown
+    # column reference" rather than silently mangling into nonsense.
+    if known_column_names:
+        # Sort longest-first so a column named "Mum1" doesn't get
+        # partially matched inside a longer identifier like "Mum10".
+        for name in sorted(known_column_names, key=len, reverse=True):
+            if not name.isidentifier():
+                continue
+            pattern = re.compile(rf"(?<![\w\]]){re.escape(name)}(?!\w)")
+            mangled = _mangle(name)
+
+            def _sub(match: re.Match, _mangled: str = mangled, _name: str = name) -> str:
+                mapping[_mangled] = _name
+                return _mangled
+
+            rewritten = pattern.sub(_sub, rewritten)
+
+    return rewritten, mapping
 
 _ALLOWED_BINOPS: dict[type, Any] = {
     ast.Add: operator.add,
@@ -102,16 +168,40 @@ def validate_formula_syntax(expression: str, *, known_column_names: set[str] | N
     being saved may reference a sibling column added moments before this
     validation runs); pass it to also catch references to columns that
     don't exist on the sheet at all.
+
+    Column names containing spaces or other non-identifier characters
+    (e.g. "PKG QTY") must be wrapped in square brackets: ``[PKG QTY] * 2``.
+    Names that already happen to be valid identifiers (e.g. "Mum40") can
+    be written bare, unchanged from the original behavior.
     """
     if not expression or not expression.strip():
         raise FormulaError("Formula expression cannot be empty.")
     if len(expression) > _MAX_EXPRESSION_LENGTH:
         raise FormulaError(f"Formula expression exceeds the {_MAX_EXPRESSION_LENGTH}-character limit.")
+    rewritten, mapping = _rewrite_expression(expression, known_column_names=known_column_names)
     try:
-        tree = ast.parse(expression, mode="eval")
+        tree = ast.parse(rewritten, mode="eval")
     except SyntaxError as exc:
         raise FormulaError(f"Formula has invalid syntax: {exc.msg}") from exc
-    _validate_node(tree, known_names=known_column_names)
+    # Only mangled names that actually correspond to a *known* column are
+    # allowed -- a bracketed reference to a nonexistent column must still
+    # fail here as "unknown column reference", not be silently accepted
+    # just because it went through the mangling step.
+    known_mangled = (
+        {_mangle(n) for n in known_column_names} if known_column_names else None
+    )
+    try:
+        _validate_node(tree, known_names=known_mangled)
+    except FormulaError as exc:
+        raise _unmangle_error(exc, mapping) from exc
+
+
+def _unmangle_error(exc: FormulaError, mapping: dict[str, str]) -> FormulaError:
+    """Rewrite a mangled identifier back to its original column name inside an error message."""
+    message = str(exc)
+    for mangled, original in mapping.items():
+        message = message.replace(repr(mangled), repr(original))
+    return FormulaError(message)
 
 
 def evaluate_formula(expression: str, *, row_values: dict[str, float]) -> float:
@@ -122,13 +212,30 @@ def evaluate_formula(expression: str, *, row_values: dict[str, float]) -> float:
     column in the same row (non-numeric/empty cells are simply absent, so
     referencing one raises a clear "unknown column reference" style error
     rather than silently defaulting to zero and producing a misleading
-    result).
+    result). Column names with spaces/special characters are written in
+    the expression as ``[Column Name]``; see :func:`_rewrite_expression`.
     """
+    rewritten, mapping = _rewrite_expression(expression, known_column_names=set(row_values.keys()))
     try:
-        tree = ast.parse(expression, mode="eval")
+        tree = ast.parse(rewritten, mode="eval")
     except SyntaxError as exc:
         raise FormulaError(f"Formula has invalid syntax: {exc.msg}") from exc
-    _validate_node(tree, known_names=set(row_values.keys()))
+
+    # Build a mangled-name -> value lookup: every mangled reference maps
+    # back to an original column name, which is then looked up in
+    # row_values exactly as before.
+    mangled_values: dict[str, float] = {}
+    for mangled, original in mapping.items():
+        if original in row_values:
+            mangled_values[mangled] = row_values[original]
+    # Bare identifiers that were never bracketed/rewritten (the original
+    # "Mum40 * Rate" style, no spaces) still resolve directly against
+    # row_values, unchanged from the original behavior.
+    known_names = set(mangled_values) | set(row_values.keys())
+    try:
+        _validate_node(tree, known_names=known_names)
+    except FormulaError as exc:
+        raise _unmangle_error(exc, mapping) from exc
 
     def _eval(node: ast.AST) -> float:
         if isinstance(node, ast.Expression):
@@ -148,12 +255,18 @@ def evaluate_formula(expression: str, *, row_values: dict[str, float]) -> float:
         if isinstance(node, ast.Constant):
             return node.value
         if isinstance(node, ast.Name):
-            if node.id not in row_values:
-                raise FormulaError(f"Column {node.id!r} referenced in formula has no numeric value on this row.")
-            return row_values[node.id]
+            if node.id in mangled_values:
+                return mangled_values[node.id]
+            if node.id in row_values:
+                return row_values[node.id]
+            original = mapping.get(node.id, node.id)
+            raise FormulaError(f"Column {original!r} referenced in formula has no numeric value on this row.")
         raise FormulaError(f"{type(node).__name__!r} is not allowed in formulas.")
 
-    result = _eval(tree)
+    try:
+        result = _eval(tree)
+    except FormulaError as exc:
+        raise _unmangle_error(exc, mapping) from exc
     if not isinstance(result, (int, float)):
         raise FormulaError("Formula did not evaluate to a number.")
     return float(result)

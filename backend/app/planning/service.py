@@ -15,6 +15,7 @@ row/column) inside one logical operation.
 
 from __future__ import annotations
 
+import re
 import uuid
 from decimal import Decimal
 from typing import Any
@@ -47,6 +48,135 @@ from app.planning.repository import (
 
 MODULE_NAME = "planning"
 
+# Sentinel for compute_cell_display_value's optional `prefetched_record`
+# param -- see that method's docstring for why this can't just default to
+# `None` (None is itself a meaningful "resolved to nothing" value).
+_UNSET = object()
+
+
+def _is_pure_mum_column(name: str, *, label: str = "Mum") -> bool:
+    cleaned = name.strip().lower()
+    if "remark" in cleaned or cleaned.startswith(("no. of pkg", "total")):
+        return False
+    return bool(re.match(rf"^{re.escape(label.lower())}\s*\d+$", cleaned, re.IGNORECASE))
+
+
+def mum_num_from_column_name(col_name: str, *, label: str = "Mum") -> int | None:
+    """
+    Return the group number if ``col_name`` is that sheet's main group
+    column (e.g. "Mum 3" when ``label`` is "Mum", or "Chen 3" when
+    ``label`` is "Chen"), else None.
+
+    Excludes the "NO. OF PKG"/"TOTAL ..." derived totals and the
+    "<label>N Remarks" companion, the same as the previous hardcoded
+    "mum" version -- this is a drop-in, label-aware replacement for what
+    used to be inline ``_get_mum_num`` closures duplicated at each call
+    site.
+    """
+    cleaned = col_name.strip().lower()
+    if cleaned.startswith(("no. of pkg", "total")):
+        return None
+    match = re.search(rf"{re.escape(label.lower())}\s*(\d+)", cleaned, re.IGNORECASE)
+    return int(match.group(1)) if match else None
+
+
+# --- Fixed (non-editable) formulas for the Mum-group package/weight/CBM totals ---
+#
+# "NO. OF PKG MUM<n>", "TOTAL WEIGHT MUM<n>", and "TOTAL CBM MUM<n>" are not
+# admin-written FORMULA columns (an admin could previously type any
+# expression here, including a wrong one -- e.g. the historical bug where
+# the frontend wired "NO. OF PKG" as `Mum N * PKG QTY` instead of dividing).
+# These three are always computed the one fixed, correct way, straight from
+# the row's linked Product Master record, and the admin-supplied
+# formula_expression text is never consulted for them:
+#
+#   NO. OF PKG MUM<n>    = Mum<n> / PKG QTY
+#   TOTAL WEIGHT MUM<n>  = NO. OF PKG MUM<n> * UNIT WEIGHT/PKG (KG)
+#   TOTAL CBM MUM<n>     = NO. OF PKG MUM<n> * CBM/PKG (KG)
+#
+# PKG QTY / UNIT WEIGHT/PKG (KG) / CBM/PKG (KG) are themselves sourced live
+# from Product Master (packaging_quantity / packaging_gross_weight /
+# packaging_unit_cbm) via the row's linked_record_id -- never typed in --
+# so editing an item in Product Master changes these totals immediately,
+# with no per-column config for an admin to get wrong.
+_MUM_PKG_COUNT_RE_TEMPLATE = r"^no\.?\s*of\s*pkg\s*{label}\s*(\d+)$"
+_MUM_TOTAL_WEIGHT_RE_TEMPLATE = r"^total\s*weight\s*{label}\s*(\d+)$"
+_MUM_TOTAL_CBM_RE_TEMPLATE = r"^total\s*cbm\s*{label}\s*(\d+)$"
+
+
+def _mum_derived_kind_and_group(name: str, *, label: str = "Mum") -> tuple[str, int] | None:
+    """
+    Return ("pkg_count" | "total_weight" | "total_cbm", mum_group_number) if
+    ``name`` is one of the three fixed Mum-derived totals for that sheet's
+    group label, else None.
+
+    ``label`` defaults to "Mum" (the original, hardcoded behavior) but is
+    always passed explicitly by real callers as the owning sheet's
+    ``mum_group_label`` -- see PlanningSheet.mum_group_label -- so a
+    sheet duplicated with a different label (e.g. "Chen") gets working
+    "NO. OF PKG CHEN1" / "TOTAL WEIGHT CHEN1" / "TOTAL CBM CHEN1" totals
+    without touching this function.
+    """
+    cleaned = name.strip()
+    escaped_label = re.escape(label)
+    for kind, template in (
+        ("pkg_count", _MUM_PKG_COUNT_RE_TEMPLATE),
+        ("total_weight", _MUM_TOTAL_WEIGHT_RE_TEMPLATE),
+        ("total_cbm", _MUM_TOTAL_CBM_RE_TEMPLATE),
+    ):
+        match = re.match(template.format(label=escaped_label), cleaned, re.IGNORECASE)
+        if match:
+            return kind, int(match.group(1))
+    return None
+
+
+def is_fixed_mum_derived_column(name: str, *, label: str = "Mum") -> bool:
+    """True for any column name matching one of the three fixed Mum-derived totals."""
+    return _mum_derived_kind_and_group(name, label=label) is not None
+
+
+def _format_date_dd_mm_yyyy(val: Any) -> str:
+    if val is None:
+        return ""
+    if hasattr(val, "strftime"):
+        return val.strftime("%d/%m/%Y")
+    val_str = str(val).strip()
+    match = re.match(r"^(\d{4})-(\d{2})-(\d{2})", val_str)
+    if match:
+        return f"{match.group(3)}/{match.group(2)}/{match.group(1)}"
+    return val_str
+
+
+def _relabel_mum_word(text: str, *, old_label: str, new_label: str) -> str:
+    """
+    Replace every occurrence of ``old_label`` in ``text`` with
+    ``new_label``, preserving each occurrence's original case pattern
+    (all-caps, capitalized, or lowercase) -- so duplicating "Mum branch"
+    (label "Mum") into a "Chen" sheet turns "Mum 1" into "Chen 1",
+    "Mum1 Remarks" into "Chen1 Remarks", and "NO. OF PKG MUM1" into
+    "NO. OF PKG CHEN1" in one pass, without a separate rule per casing.
+
+    Matched with lookaround (not ``\\b``) on either side, because ``\\b``
+    doesn't fall between a letter and an immediately-following digit
+    (both count as "word characters") -- with plain ``\\b`` this would
+    correctly relabel "Mum 1" but silently miss "Mum1 Remarks" and
+    "NO. OF PKG MUM1", which is exactly how the group's own column names
+    are actually written. Still never matches "Mum" as a substring of
+    some unrelated longer word, since a letter immediately before/after
+    still blocks the match.
+    """
+    pattern = re.compile(rf"(?<![A-Za-z]){re.escape(old_label)}(?![A-Za-z])", re.IGNORECASE)
+
+    def _replace(match: re.Match) -> str:
+        found = match.group(0)
+        if found.isupper():
+            return new_label.upper()
+        if found[0].isupper():
+            return new_label[:1].upper() + new_label[1:]
+        return new_label.lower()
+
+    return pattern.sub(_replace, text)
+
 
 class PlanningService:
     """Owns all business rules for the Shipment Planning grid."""
@@ -77,6 +207,24 @@ class PlanningService:
         # Planning needs to ask "what roles does this user have" for the
         # per-column role-lock feature.
         self.user_role_repository = user_role_repository
+        # Request-scoped cache: sheet_id -> mum_group_label. Populated by
+        # _get_mum_group_label, which many recursive per-cell/per-row calls
+        # (compute_cell_display_value, its FORMULA branch, approval-date
+        # grouping, status history) need on every call but which never
+        # changes mid-request -- avoids turning "load a 50-row grid" into
+        # 50+ extra sheet lookups just to find out which word ("Mum",
+        # "Chen", ...) that sheet's groups use.
+        self._mum_group_label_cache: dict[uuid.UUID, str] = {}
+
+    async def _get_mum_group_label(self, sheet_id: uuid.UUID) -> str:
+        """Return the sheet's configured Mum-group label (e.g. "Mum", "Chen"), request-cached."""
+        cached = self._mum_group_label_cache.get(sheet_id)
+        if cached is not None:
+            return cached
+        sheet = await self.sheet_repository.get_by_id(sheet_id)
+        label = (sheet.mum_group_label if sheet is not None else None) or "Mum"
+        self._mum_group_label_cache[sheet_id] = label
+        return label
 
     # --- internal: dual-write to change log + shared audit log -----------------
 
@@ -138,7 +286,15 @@ class PlanningService:
             raise NotFoundException("Planning sheet not found.")
         return sheet
 
-    async def create_sheet(self, *, name: str, description: str | None, user_id: uuid.UUID, username: str) -> PlanningSheet:
+    async def create_sheet(
+        self,
+        *,
+        name: str,
+        description: str | None,
+        user_id: uuid.UUID,
+        username: str,
+        auto_populate: bool = True,
+    ) -> PlanningSheet:
         name = name.strip()
         if not name:
             raise BadRequestException("Sheet name is required.")
@@ -146,7 +302,15 @@ class PlanningService:
             raise ConflictException(f"A sheet named {name!r} already exists.")
         position = await self.sheet_repository.next_position()
         sheet = await self.sheet_repository.create(
-            name=name, description=description, position=position, created_by=user_id
+            name=name,
+            description=description,
+            position=position,
+            created_by=user_id,
+            item_source_type=PlanningColumnSourceType.LINKED_LOOKUP,
+            item_source_module="product",
+            item_source_field="product_name",
+            item_auto_populate_enabled=True,
+            item_auto_populate_limit=50,
         )
         await self._record_change(
             action=PlanningChangeAction.SHEET_CREATED,
@@ -156,7 +320,141 @@ class PlanningService:
             new_value=name,
             description=f"Created sheet '{name}'.",
         )
+        if auto_populate:
+            try:
+                await self.auto_populate_rows_from_item_source(
+                    sheet.id, limit=50, user_id=user_id, username=username
+                )
+            except (BadRequestException, ConflictException):
+                pass
         return sheet
+
+    async def duplicate_sheet(
+        self,
+        source_sheet_id: uuid.UUID,
+        *,
+        name: str,
+        mum_group_label: str,
+        description: str | None,
+        user_id: uuid.UUID,
+        username: str,
+    ) -> PlanningSheet:
+        """
+        Create a new sheet with the exact same column structure as an existing one.
+
+        Copies every column from ``source_sheet_id`` (name, data type,
+        position, and full source config -- LINKED_LOOKUP module/field,
+        AGGREGATE fn/filters, or the fixed Mum-derived FORMULA) onto the
+        new sheet, remapping the source sheet's Mum-group label to
+        ``mum_group_label`` wherever it appears in a column name (see
+        ``_relabel_mum_word``) -- e.g. duplicating "Mum branch" (label
+        "Mum") as "Chennai branch" with ``mum_group_label="Chen"`` turns
+        "Mum 1" / "Mum1 Remarks" / "NO. OF PKG MUM1" into "Chen 1" /
+        "Chen1 Remarks" / "NO. OF PKG CHEN1", while "Supplier Name",
+        "City", "PKG QTY", etc. are copied unchanged since they don't
+        contain the group label at all.
+
+        The new sheet's ITEM column always starts as the normal
+        LINKED_LOOKUP-onto-Product-Name default (see ``create_sheet``)
+        regardless of how the source sheet's ITEM was configured, and
+        rows are never copied -- exactly like creating any other new
+        sheet, it starts empty and gets populated from Product Master
+        via the usual auto-populate/"Load More Products" flow. Copying
+        rows too would mean the new branch starts out pointing at the
+        same items as the source branch, which is virtually never what
+        "start a new branch with the same column layout" means in
+        practice.
+        """
+        source_sheet = await self.get_sheet_or_raise(source_sheet_id)
+        name = name.strip()
+        if not name:
+            raise BadRequestException("Sheet name is required.")
+        mum_group_label = mum_group_label.strip()
+        if not mum_group_label:
+            raise BadRequestException("Mum group label is required.")
+        if await self.sheet_repository.get_by_name(name):
+            raise ConflictException(f"A sheet named {name!r} already exists.")
+
+        new_sheet = await self.create_sheet(
+            name=name, description=description, user_id=user_id, username=username, auto_populate=False
+        )
+        # create_sheet() always defaults mum_group_label to "Mum" via the
+        # ORM column default -- overwrite it with the requested one before
+        # any columns are copied, since column-name remapping below and
+        # every fixed-formula/approval-date feature on the new sheet reads
+        # this field.
+        new_sheet = await self.sheet_repository.update(new_sheet, mum_group_label=mum_group_label)
+
+        source_columns = await self.column_repository.list_for_sheet(source_sheet_id)
+        source_label = source_sheet.mum_group_label
+
+        # Two passes: first create every column with its (possibly
+        # relabeled) name/data_type/position, THEN configure sources --
+        # a FORMULA column's fixed-Mum-derived branch and any ordinary
+        # FORMULA column's expression can reference a sibling by name, so
+        # every column must already exist (with its final name) before
+        # any source config that might reference one is applied.
+        created_columns: list[PlanningColumn] = []
+        for source_column in source_columns:
+            new_name = _relabel_mum_word(source_column.name, old_label=source_label, new_label=mum_group_label)
+            created_columns.append(
+                await self.column_repository.create(
+                    sheet_id=new_sheet.id,
+                    name=new_name,
+                    data_type=source_column.data_type,
+                    position=source_column.position,
+                    created_by=user_id,
+                    enable_status_color=source_column.enable_status_color,
+                )
+            )
+
+        for source_column, new_column in zip(source_columns, created_columns):
+            if source_column.source_type == PlanningColumnSourceType.MANUAL:
+                continue  # already MANUAL by default -- nothing to configure
+            formula_expression = source_column.formula_expression
+            if formula_expression and source_label != mum_group_label:
+                # Relabel any "Mum"/"[Mum N]" text inside a copied
+                # FORMULA's expression too -- covers both the fixed
+                # Mum-derived totals' stored label text and an ordinary
+                # admin-written formula that happens to reference a
+                # renamed Mum-series sibling column by name.
+                formula_expression = _relabel_mum_word(
+                    formula_expression, old_label=source_label, new_label=mum_group_label
+                )
+            try:
+                await self.configure_column_source(
+                    new_sheet.id,
+                    new_column.id,
+                    source_type=source_column.source_type,
+                    source_module=source_column.source_module,
+                    source_field=source_column.source_field,
+                    source_aggregate_fn=source_column.source_aggregate_fn,
+                    source_aggregate_filters=source_column.source_aggregate_filters,
+                    formula_expression=formula_expression,
+                    enable_description=source_column.enable_description,
+                    auto_populate_enabled=False,  # never auto-populate/auto-link on the new (empty) sheet
+                    auto_populate_limit=source_column.auto_populate_limit,
+                    user_id=user_id,
+                    username=username,
+                )
+            except (BadRequestException, FormulaError):
+                # A column whose config can't carry over as-is (e.g. an
+                # ordinary FORMULA referencing a column that didn't exist
+                # yet at copy time) is left MANUAL rather than aborting
+                # the whole duplication -- the admin can reconfigure it
+                # from the column's own Configure Source modal afterward.
+                pass
+
+        await self._record_change(
+            action=PlanningChangeAction.SHEET_CREATED,
+            sheet_id=new_sheet.id,
+            user_id=user_id,
+            username=username,
+            new_value=name,
+            description=f"Duplicated sheet '{source_sheet.name}' as '{name}' "
+            f"(group label '{source_label}' -> '{mum_group_label}').",
+        )
+        return await self.get_sheet_or_raise(new_sheet.id)
 
     async def rename_sheet(self, sheet_id: uuid.UUID, *, name: str, user_id: uuid.UUID, username: str) -> PlanningSheet:
         sheet = await self.get_sheet_or_raise(sheet_id)
@@ -222,24 +520,25 @@ class PlanningService:
         "the admin can add unlimited columns and name them whatever" has
         no special case to fall through to.
         """
-        await self.get_sheet_or_raise(sheet_id)
+        sheet = await self.get_sheet_or_raise(sheet_id)
         name = name.strip()
         if not name:
             raise BadRequestException("Column name is required.")
-        if await self.column_repository.get_by_name(sheet_id, name):
-            raise ConflictException(f"A column named {name!r} already exists on this sheet.")
-
         existing_columns = await self.column_repository.list_for_sheet(sheet_id)
         target_position = position if position is not None else len(existing_columns)
         target_position = max(0, min(target_position, len(existing_columns)))
 
         await self.column_repository.shift_positions_after(sheet_id, target_position, delta=1)
+        is_mum_main_col = bool(
+            re.match(rf"^{re.escape(sheet.mum_group_label)}\s*\d+$", name.strip(), re.IGNORECASE)
+        )
         column = await self.column_repository.create(
             sheet_id=sheet_id,
             name=name,
             data_type=data_type,
             position=target_position,
             created_by=user_id,
+            enable_status_color=is_mum_main_col,
         )
         await self._record_change(
             action=PlanningChangeAction.COLUMN_ADDED,
@@ -311,6 +610,10 @@ class PlanningService:
         self, sheet_id: uuid.UUID, column_id: uuid.UUID, *, user_id: uuid.UUID, username: str
     ) -> None:
         column = await self._get_column_or_raise(sheet_id, column_id)
+        col_name_lower = column.name.strip().lower()
+        if col_name_lower in ("item", "test(y/n)", "approval date") or "test (y/n)" in col_name_lower:
+            raise BadRequestException(f"System column '{column.name}' cannot be deleted.")
+
         name = column.name
         position = column.position
         await self.column_repository.delete(column)
@@ -464,6 +767,7 @@ class PlanningService:
         in a half-configured state that would fail later at read time.
         """
         column = await self._get_column_or_raise(sheet_id, column_id)
+        sheet = await self.get_sheet_or_raise(sheet_id)
         await self.check_column_role_lock(column_id, user_id=user_id)
 
         if source_type == PlanningColumnSourceType.MANUAL:
@@ -532,28 +836,60 @@ class PlanningService:
             )
 
         elif source_type == PlanningColumnSourceType.FORMULA:
-            if not formula_expression or not formula_expression.strip():
-                raise BadRequestException("formula_expression is required for FORMULA columns.")
-            sibling_columns = await self.column_repository.list_for_sheet(sheet_id)
-            known_names = {c.name for c in sibling_columns if c.id != column_id}
-            try:
-                validate_formula_syntax(formula_expression, known_column_names=known_names)
-            except FormulaError:
-                raise  # already a BadRequestException subclass; re-raise as-is with its own message
-            updated = await self.column_repository.update(
-                column,
-                source_type=source_type,
-                source_module=None,
-                source_field=None,
-                source_aggregate_fn=None,
-                source_aggregate_filters=None,
-                formula_expression=formula_expression.strip(),
-                is_locked=True,
-                enable_description=enable_description,
-                auto_populate_enabled=auto_populate_enabled,
-                auto_populate_limit=auto_populate_limit,
-                updated_by=user_id,
-            )
+            mum_derived = _mum_derived_kind_and_group(column.name, label=sheet.mum_group_label)
+            if mum_derived is not None:
+                # NO. OF PKG <LABEL><n> / TOTAL WEIGHT <LABEL><n> / TOTAL
+                # CBM <LABEL><n> always use the one fixed backend formula
+                # (see is_fixed_mum_derived_column) -- an admin cannot
+                # type a different expression for these three, so
+                # formula_expression is intentionally ignored here rather
+                # than validated. The stored text is a fixed, human-
+                # readable label only; compute_cell_display_value never
+                # reads it back.
+                kind, group_number = mum_derived
+                label = sheet.mum_group_label
+                fixed_labels = {
+                    "pkg_count": f"[{label} {group_number}] / [PKG QTY]  (fixed)",
+                    "total_weight": f"NO. OF PKG {label.upper()}{group_number} * [UNIT WEIGHT/PKG (KG)]  (fixed)",
+                    "total_cbm": f"NO. OF PKG {label.upper()}{group_number} * [CBM/PKG (KG)]  (fixed)",
+                }
+                updated = await self.column_repository.update(
+                    column,
+                    source_type=source_type,
+                    source_module=None,
+                    source_field=None,
+                    source_aggregate_fn=None,
+                    source_aggregate_filters=None,
+                    formula_expression=fixed_labels[kind],
+                    is_locked=True,
+                    enable_description=enable_description,
+                    auto_populate_enabled=auto_populate_enabled,
+                    auto_populate_limit=auto_populate_limit,
+                    updated_by=user_id,
+                )
+            else:
+                if not formula_expression or not formula_expression.strip():
+                    raise BadRequestException("formula_expression is required for FORMULA columns.")
+                sibling_columns = await self.column_repository.list_for_sheet(sheet_id)
+                known_names = {c.name for c in sibling_columns if c.id != column_id}
+                try:
+                    validate_formula_syntax(formula_expression, known_column_names=known_names)
+                except FormulaError:
+                    raise  # already a BadRequestException subclass; re-raise as-is with its own message
+                updated = await self.column_repository.update(
+                    column,
+                    source_type=source_type,
+                    source_module=None,
+                    source_field=None,
+                    source_aggregate_fn=None,
+                    source_aggregate_filters=None,
+                    formula_expression=formula_expression.strip(),
+                    is_locked=True,
+                    enable_description=enable_description,
+                    auto_populate_enabled=auto_populate_enabled,
+                    auto_populate_limit=auto_populate_limit,
+                    updated_by=user_id,
+                )
         else:
             raise BadRequestException(f"Unknown source_type {source_type!r}.")
 
@@ -906,8 +1242,67 @@ class PlanningService:
         display = await self.compute_cell_display_value(pseudo_column, pseudo_cell, row_id=row.id)
         return display if display else row.label
 
+    async def compute_row_item_displays_for_all_rows(
+        self, sheet: PlanningSheet, rows: list[PlanningRow]
+    ) -> dict[uuid.UUID, str]:
+        """
+        Same result as calling ``compute_row_item_display`` once per row,
+        but for LINKED_LOOKUP sheets (the default for every sheet now --
+        see ``create_sheet``) it fetches every linked Product Master (or
+        other module) record in ONE query instead of one ``get_by_id``
+        per row.
+
+        For a sheet auto-populated with 50 products, the per-row version
+        made 50 separate database round trips just to resolve the ITEM
+        column's display value -- the dominant cost behind "Loading
+        grid..." never finishing. MANUAL and FORMULA sheets fall through
+        to the ordinary per-row path unchanged (MANUAL has nothing to
+        batch; FORMULA's cost is sibling-cell arithmetic, not a DB query
+        per row, so batching wouldn't help there).
+        """
+        if sheet.item_source_type != PlanningColumnSourceType.LINKED_LOOKUP:
+            return {row.id: await self.compute_row_item_display(sheet, row) for row in rows}
+
+        module = source_registry.get_source_module(sheet.item_source_module or "")
+        if module is None:
+            return {row.id: row.label for row in rows}
+
+        linked_ids = [row.linked_record_id for row in rows if row.linked_record_id is not None]
+        repository = module.repository_factory(self.cell_repository.session)
+        records_by_id = await repository.get_by_ids(linked_ids)
+
+        result: dict[uuid.UUID, str] = {}
+        for row in rows:
+            record = records_by_id.get(row.linked_record_id) if row.linked_record_id is not None else None
+            pseudo_column = PlanningColumn(
+                sheet_id=sheet.id,
+                source_type=sheet.item_source_type,
+                source_module=sheet.item_source_module,
+                source_field=sheet.item_source_field,
+                source_aggregate_fn=None,
+                source_aggregate_filters=None,
+                formula_expression=sheet.item_formula_expression,
+            )
+            pseudo_cell = (
+                PlanningCell(row_id=row.id, column_id=uuid.uuid4(), linked_record_id=row.linked_record_id)
+                if row.linked_record_id is not None
+                else None
+            )
+            display = await self.compute_cell_display_value(
+                pseudo_column, pseudo_cell, row_id=row.id, prefetched_record=record
+            )
+            result[row.id] = display if display else row.label
+        return result
+
     async def compute_cell_display_value(
-        self, column: PlanningColumn, cell: PlanningCell | None, *, row_id: uuid.UUID | None = None
+        self,
+        column: PlanningColumn,
+        cell: PlanningCell | None,
+        *,
+        row_id: uuid.UUID | None = None,
+        prefetched_record: Any = _UNSET,
+        prefetched_sibling_columns: Any = _UNSET,
+        prefetched_row_cells: Any = _UNSET,
     ) -> str | None:
         """
         Return the effective display value for one cell, computing it live for non-manual columns.
@@ -924,6 +1319,17 @@ class PlanningService:
         of its own -- direct edits to it are rejected -- so ``cell`` is
         routinely ``None`` for these columns even though the row's other
         (sibling) cell values it needs are very much present.
+
+        ``prefetched_record`` lets a caller that already bulk-fetched
+        every linked record for a whole sheet in one query (see
+        ``compute_row_item_displays_for_all_rows``) hand the already-
+        resolved record straight in, instead of this method doing its own
+        ``get_by_id`` -- the difference between one query total for 50
+        rows and 50 separate ones. Left as the sentinel ``_UNSET`` (not
+        ``None``) for ordinary single-cell callers, since ``None`` is a
+        legitimate "this row isn't linked to anything" value that must
+        still fall through to the normal per-cell lookup path below it,
+        not be mistaken for "already resolved, and it's nothing."
         """
         if column.source_type == PlanningColumnSourceType.MANUAL:
             return cell.value if cell else None
@@ -934,8 +1340,11 @@ class PlanningService:
             module = source_registry.get_source_module(column.source_module or "")
             if module is None:
                 return None
-            repository = module.repository_factory(self.cell_repository.session)
-            record = await repository.get_by_id(cell.linked_record_id)
+            if prefetched_record is not _UNSET:
+                record = prefetched_record
+            else:
+                repository = module.repository_factory(self.cell_repository.session)
+                record = await repository.get_by_id(cell.linked_record_id)
             if record is None:
                 return None
             value = module.value_getter(record, column.source_field or "")
@@ -981,11 +1390,37 @@ class PlanningService:
 
         if column.source_type == PlanningColumnSourceType.FORMULA:
             effective_row_id = row_id if row_id is not None else (cell.row_id if cell else None)
-            if not column.formula_expression or effective_row_id is None:
+            if effective_row_id is None:
                 return None
-            row_cells = await self.cell_repository.list_for_rows([effective_row_id])
-            cells_by_column_id = {rc.column_id: rc for rc in row_cells}
-            sibling_columns = await self.column_repository.list_for_sheet(column.sheet_id)
+
+            # Fixed formula, never the admin-typed formula_expression text --
+            # see is_fixed_mum_derived_column's module-level docstring.
+            mum_label = await self._get_mum_group_label(column.sheet_id)
+            mum_derived = _mum_derived_kind_and_group(column.name, label=mum_label)
+            if mum_derived is not None:
+                return await self._compute_mum_derived_value(
+                    column,
+                    kind_and_group=mum_derived,
+                    label=mum_label,
+                    row_id=effective_row_id,
+                    prefetched_sibling_columns=prefetched_sibling_columns,
+                    prefetched_row_cells=prefetched_row_cells,
+                )
+
+            if not column.formula_expression:
+                return None
+
+            if prefetched_row_cells is not _UNSET:
+                cells_by_column_id = prefetched_row_cells
+            else:
+                row_cells = await self.cell_repository.list_for_rows([effective_row_id])
+                cells_by_column_id = {rc.column_id: rc for rc in row_cells}
+
+            if prefetched_sibling_columns is not _UNSET:
+                sibling_columns = prefetched_sibling_columns
+            else:
+                sibling_columns = await self.column_repository.list_for_sheet(column.sheet_id)
+
             row_values: dict[str, float] = {}
             for sibling in sibling_columns:
                 # A formula can name any sibling column, not just MANUAL
@@ -1006,7 +1441,14 @@ class PlanningService:
                     # each other.
                     continue
                 sibling_cell = cells_by_column_id.get(sibling.id)
-                raw_value = await self.compute_cell_display_value(sibling, sibling_cell, row_id=effective_row_id)
+                raw_value = await self.compute_cell_display_value(
+                    sibling,
+                    sibling_cell,
+                    row_id=effective_row_id,
+                    prefetched_record=prefetched_record,
+                    prefetched_sibling_columns=sibling_columns,
+                    prefetched_row_cells=cells_by_column_id,
+                )
                 if raw_value is None:
                     continue
                 try:
@@ -1020,6 +1462,161 @@ class PlanningService:
             return str(result)
 
         return None
+
+    async def _compute_mum_derived_value(
+        self,
+        column: PlanningColumn,
+        *,
+        kind_and_group: tuple[str, int],
+        row_id: uuid.UUID,
+        label: str = "Mum",
+        prefetched_sibling_columns: Any = _UNSET,
+        prefetched_row_cells: Any = _UNSET,
+    ) -> str | None:
+        """
+        Compute one of the three fixed Mum-derived totals for one row.
+
+        Fixed backend formula (see the module-level comment above
+        ``is_fixed_mum_derived_column``), never the free-text
+        ``formula_expression`` grammar:
+
+            NO. OF PKG <LABEL><n>   = <Label> <n> / PKG QTY
+            TOTAL WEIGHT <LABEL><n> = NO. OF PKG <LABEL><n> * UNIT WEIGHT/PKG (KG)
+            TOTAL CBM <LABEL><n>    = NO. OF PKG <LABEL><n> * CBM/PKG (KG)
+
+        ``label`` is the owning sheet's ``mum_group_label`` (default
+        "Mum", matching the original hardcoded behavior) -- passed in by
+        the caller (see ``compute_cell_display_value``) rather than
+        looked up again here, since that caller already resolved it via
+        the request-scoped ``_get_mum_group_label`` cache.
+
+        PKG QTY / UNIT WEIGHT/PKG (KG) / CBM/PKG (KG) are read live off the
+        row's linked Product Master record (via whichever sibling column
+        on this sheet is configured as a LINKED_LOOKUP onto that Product
+        field), so a later edit in Product Master is reflected immediately.
+        Returns None (an empty cell, not an error) if the Mum column, the
+        item's PKG QTY, or the item's per-package weight/CBM aren't
+        available yet -- e.g. the item hasn't been linked to a Product
+        Master record, or that product has no packaging data filled in.
+        """
+        kind, group_number = kind_and_group
+
+        if prefetched_sibling_columns is not _UNSET:
+            sibling_columns = prefetched_sibling_columns
+        else:
+            sibling_columns = await self.column_repository.list_for_sheet(column.sheet_id)
+
+        if prefetched_row_cells is not _UNSET:
+            cells_by_column_id = prefetched_row_cells
+        else:
+            row_cells = await self.cell_repository.list_for_rows([row_id])
+            cells_by_column_id = {rc.column_id: rc for rc in row_cells}
+
+        def _find_sibling(predicate) -> PlanningColumn | None:
+            return next((c for c in sibling_columns if c.id != column.id and predicate(c)), None)
+
+        mum_col = _find_sibling(
+            lambda c: re.match(rf"^{re.escape(label)}\s*{group_number}$", c.name.strip(), re.IGNORECASE)
+        )
+        pkg_qty_col = _find_sibling(
+            lambda c: c.source_type == PlanningColumnSourceType.LINKED_LOOKUP
+            and c.source_module == "product"
+            and c.source_field == "packaging_quantity"
+        )
+        unit_weight_col = _find_sibling(
+            lambda c: c.source_type == PlanningColumnSourceType.LINKED_LOOKUP
+            and c.source_module == "product"
+            and c.source_field == "packaging_gross_weight"
+        )
+        cbm_col = _find_sibling(
+            lambda c: c.source_type == PlanningColumnSourceType.LINKED_LOOKUP
+            and c.source_module == "product"
+            and c.source_field == "packaging_unit_cbm"
+        )
+
+        async def _numeric_value(sibling_column: PlanningColumn | None) -> float | None:
+            if sibling_column is None:
+                return None
+            sibling_cell = cells_by_column_id.get(sibling_column.id)
+            raw = await self.compute_cell_display_value(
+                sibling_column,
+                sibling_cell,
+                row_id=row_id,
+                prefetched_sibling_columns=sibling_columns,
+                prefetched_row_cells=cells_by_column_id,
+            )
+            if raw is None:
+                return None
+            try:
+                return float(raw)
+            except ValueError:
+                return None
+
+        mum_value = await _numeric_value(mum_col)
+        pkg_qty = await _numeric_value(pkg_qty_col)
+        if mum_value is None or pkg_qty is None or pkg_qty == 0:
+            return None
+        pkg_count = mum_value / pkg_qty
+
+        if kind == "pkg_count":
+            return str(pkg_count)
+
+        if kind == "total_weight":
+            unit_weight = await _numeric_value(unit_weight_col)
+            if unit_weight is None:
+                return None
+            return str(pkg_count * unit_weight)
+
+        if kind == "total_cbm":
+            cbm_per_pkg = await _numeric_value(cbm_col)
+            if cbm_per_pkg is None:
+                return None
+            return str(pkg_count * cbm_per_pkg)
+
+        return None
+
+    async def get_row_formula_display_values(self, sheet_id: uuid.UUID, row_id: uuid.UUID) -> dict[str, Any]:
+        """
+        Recompute every FORMULA (and other non-manual) column's display value for one row.
+
+        Used after a manual cell edit to tell every other connected tab
+        what its dependent computed columns (e.g. "NO. OF PKG MUM1",
+        "TOTAL WEIGHT MUM1", "TOTAL CBM MUM1") now show, without those
+        tabs having to reload the whole grid -- keyed by column_id (as a
+        string, JSON-friendly) so the frontend can patch each cell directly.
+
+        The Approval Date column is the one deliberate exception: it's a
+        MANUAL column (admins can still type over it), but when empty it
+        auto-displays a Mum group's approval date (see
+        ``get_mum_group_approval_dates_for_row``) -- typing into a Mum
+        column changes that, so it must be included here too, or another
+        viewer's Approval Date cell would only catch up on their next full
+        reload instead of updating live like everything else.
+
+        The return value also carries a special ``"__mum_approval_dates__"``
+        key (a str(group_number) -> iso_date dict, never a real column id
+        since column ids are UUIDs) so the frontend can redo its own
+        hidden-aware "first visible Mum group" pick live, exactly as it
+        does on initial grid load -- hiding is a per-user browser
+        preference the backend has no concept of.
+        """
+        columns = await self.column_repository.list_for_sheet(sheet_id)
+        row_cells = await self.cell_repository.list_for_rows([row_id])
+        cells_by_column_id = {rc.column_id: rc for rc in row_cells}
+        mum_approval_dates = await self.get_mum_group_approval_dates_for_row(sheet_id, row_id)
+        result: dict[str, Any] = {"__mum_approval_dates__": {str(k): v for k, v in mum_approval_dates.items()}}
+        for column in columns:
+            is_approval_date = column.name.strip().lower() == "approval date"
+            if column.source_type == PlanningColumnSourceType.MANUAL and not is_approval_date:
+                continue
+            cell = cells_by_column_id.get(column.id)
+            if is_approval_date and (cell is None or not cell.value):
+                result[str(column.id)] = (
+                    mum_approval_dates[min(mum_approval_dates.keys())] if mum_approval_dates else None
+                )
+            else:
+                result[str(column.id)] = await self.compute_cell_display_value(column, cell, row_id=row_id)
+        return result
 
     # --- Rows (item lines, unlimited) ---------------------------------------------
 
@@ -1141,6 +1738,14 @@ class PlanningService:
             raise ForbiddenException(f"Column '{column.name}' is locked and cannot be edited directly.")
 
         cell = await self.cell_repository.get_by_row_and_column(row_id, column_id)
+        col_name_cleaned = column.name.strip().lower()
+        if col_name_cleaned.startswith("test") and "y/n" in col_name_cleaned:
+            if value is not None and value.strip():
+                val_upper = value.strip().upper()
+                if val_upper not in ("Y", "N"):
+                    raise BadRequestException("Only 'Y' or 'N' is allowed for TEST(Y/N).")
+                value = val_upper
+
         old_value = cell.value if cell else None
         if cell is None:
             cell = await self.cell_repository.create(row_id=row_id, column_id=column_id, value=value, updated_by=user_id)
@@ -1160,15 +1765,37 @@ class PlanningService:
                 new_value=value,
                 description=f"Changed '{row.label}' / '{column.name}' from {old_value!r} to {value!r}.",
             )
-            # Document: "if an user first puts any data or number into that
-            # Color status first turn it into Blue automatically" -- every
-            # value change re-triggers this (not just the first one), even
-            # overriding a status the user set manually before, per the
-            # confirmed requirement. Clearing a cell (value is empty/None)
-            # does not set a color. Silently skipped on columns that don't
-            # allow status colors at all, rather than raising -- typing a
-            # value should never be blocked by an unrelated column setting.
-            if value is not None and value.strip() and column.enable_status_color:
+            # Document: "When in Mum N Column if written 0 Clear the status itself. No color show only 0."
+            mum_label = await self._get_mum_group_label(sheet_id)
+            is_mum_col = _is_pure_mum_column(column.name, label=mum_label)
+            if is_mum_col:
+                if value is not None and value.strip() == "0":
+                    try:
+                        cell = await self.set_cell_status(
+                            sheet_id,
+                            row_id,
+                            column_id,
+                            status_color=None,
+                            custom_status_tag_id=None,
+                            user_id=user_id,
+                            username=username,
+                        )
+                    except BadRequestException:
+                        pass
+                elif value is not None and value.strip():
+                    try:
+                        cell = await self.set_cell_status(
+                            sheet_id,
+                            row_id,
+                            column_id,
+                            status_color=PlanningCellStatusColor.BLUE_ORDERED,
+                            custom_status_tag_id=None,
+                            user_id=user_id,
+                            username=username,
+                        )
+                    except BadRequestException:
+                        pass
+            elif value is not None and value.strip() and column.enable_status_color:
                 try:
                     cell = await self.set_cell_status(
                         sheet_id,
@@ -1180,7 +1807,7 @@ class PlanningService:
                         username=username,
                     )
                 except BadRequestException:
-                    pass  # enable_status_color was checked above, but re-check defensively; never block the value save on this.
+                    pass
         return cell
 
     async def set_cell_status(
@@ -1203,6 +1830,11 @@ class PlanningService:
         """
         row = await self._get_row_or_raise(sheet_id, row_id)
         column = await self._get_column_or_raise(sheet_id, column_id)
+
+        mum_label = await self._get_mum_group_label(sheet_id)
+        is_mum_col = _is_pure_mum_column(column.name, label=mum_label)
+        if is_mum_col and not column.enable_status_color:
+            column = await self.column_repository.update(column, enable_status_color=True, updated_by=user_id)
 
         if status_color is not None and not column.enable_status_color:
             raise BadRequestException(
@@ -1330,6 +1962,58 @@ class PlanningService:
             )
         return row
 
+    async def set_column_description(
+        self, sheet_id: uuid.UUID, column_id: uuid.UUID, *, description: str | None, user_id: uuid.UUID, username: str
+    ) -> PlanningColumn:
+        """
+        Set or clear a column's single header-level free-text note.
+
+        Unlike ``set_cell_description``, there is exactly one of these per
+        column (shown via the pencil button on the column header), not
+        one per row -- the whole column shares a single note.
+        """
+        column = await self._get_column_or_raise(sheet_id, column_id)
+        mum_label = await self._get_mum_group_label(sheet_id)
+        if not _is_pure_mum_column(column.name, label=mum_label):
+            raise BadRequestException(f"Column descriptions are only allowed on {mum_label} N columns.")
+        old_description = column.description
+
+        column = await self.column_repository.update(column, description=description, updated_by=user_id)
+
+        if old_description != description:
+            await self._record_change(
+                action=PlanningChangeAction.CELL_DESCRIPTION_CHANGED,
+                sheet_id=sheet_id,
+                user_id=user_id,
+                username=username,
+                column_id=column_id,
+                old_value=old_description,
+                new_value=description,
+                description=f"Updated description on column '{column.name}'.",
+            )
+        return column
+
+    async def set_item_column_description(
+        self, sheet_id: uuid.UUID, *, description: str | None, user_id: uuid.UUID, username: str
+    ) -> PlanningSheet:
+        """Set or clear the sheet's built-in ITEM column header-level note. Mirrors set_column_description."""
+        sheet = await self.get_sheet_or_raise(sheet_id)
+        old_description = sheet.item_description
+
+        sheet = await self.sheet_repository.update(sheet, item_description=description)
+
+        if old_description != description:
+            await self._record_change(
+                action=PlanningChangeAction.CELL_DESCRIPTION_CHANGED,
+                sheet_id=sheet_id,
+                user_id=user_id,
+                username=username,
+                old_value=old_description,
+                new_value=description,
+                description="Updated description on the ITEM column.",
+            )
+        return sheet
+
     # --- Status tags (admin-defined custom colors beyond the 3 built-ins) ---------
 
     async def list_status_tags(self) -> list[PlanningStatusTag]:
@@ -1361,43 +2045,203 @@ class PlanningService:
         """
         Build the Approval Date column's hover-history feed for one row.
 
-        Document: "When Mum 45 was blue and when Mum 46 was blue and other
-        color too" -- a chronological list of every status-color change on
-        that row's Mum-series columns (name starts with "mum",
-        case-insensitive; e.g. "Mum45", "MUM 47", "mum46 remarks" all
-        match), each entry showing which column, old/new color, and when.
-
-        Built from the existing PlanningChangeLog rather than a new
-        tracking mechanism -- CELL_STATUS_CHANGED events already carry
-        everything this needs; this method is purely a filtered,
-        column-name-resolved view over data already being recorded by
-        set_cell_status (including the auto-blue-on-value-entry path in
-        set_cell_value, which calls set_cell_status internally).
+        A chronological list of every status-color change on that row's Mum-series columns
+        (e.g. "Mum 1", "Mum 2", "Mum 3", ...), showing column, old/new color, time, and user.
+        Includes a fallback for existing cells with Mum values that were created prior to status logging.
         """
         await self._get_row_or_raise(sheet_id, row_id)
         columns = await self.column_repository.list_for_sheet(sheet_id)
-        mum_column_names = {c.id: c.name for c in columns if c.name.strip().lower().startswith("mum")}
+        mum_label = await self._get_mum_group_label(sheet_id)
+        label_lower = mum_label.strip().lower()
+        mum_column_names = {
+            c.id: c.name for c in columns
+            if c.name.strip().lower().startswith(label_lower)
+            and not c.name.strip().lower().startswith(("no. of pkg", "total"))
+        }
         if not mum_column_names:
             return []
 
         entries = await self.change_log_repository.list_for_row(row_id, limit=limit)
         results = []
+        recorded_col_ids = set()
+
         for entry in entries:
-            if entry.action != PlanningChangeAction.CELL_STATUS_CHANGED:
-                continue
-            if entry.column_id not in mum_column_names:
-                continue
-            results.append(
-                {
-                    "column_id": entry.column_id,
-                    "column_name": mum_column_names[entry.column_id],
-                    "old_status": entry.old_value,
-                    "new_status": entry.new_value,
-                    "changed_at": entry.created_at,
-                    "changed_by_username": entry.changed_by_username_snapshot,
-                }
-            )
+            if entry.action == PlanningChangeAction.CELL_STATUS_CHANGED and entry.column_id in mum_column_names:
+                recorded_col_ids.add(entry.column_id)
+                results.append(
+                    {
+                        "column_id": str(entry.column_id),
+                        "column_name": mum_column_names[entry.column_id],
+                        "old_status": entry.old_value,
+                        "new_status": entry.new_value,
+                        "changed_at": entry.created_at.isoformat() if hasattr(entry.created_at, "isoformat") else str(entry.created_at),
+                        "changed_by_username": entry.changed_by_username_snapshot,
+                    }
+                )
+
+        # Fallback for existing cells that have Mum values (e.g. 9, 7, 5) but no change_log status entry yet
+        for col_id, col_name in mum_column_names.items():
+            if col_id not in recorded_col_ids:
+                cell = await self.cell_repository.get_by_row_and_column(row_id, col_id)
+                if cell and cell.value and cell.value.strip():
+                    status = cell.status_color.value if cell.status_color else PlanningCellStatusColor.BLUE_ORDERED.value
+                    ts = cell.updated_at or cell.created_at
+                    results.append(
+                        {
+                            "column_id": str(col_id),
+                            "column_name": col_name,
+                            "old_status": None,
+                            "new_status": status,
+                            "changed_at": ts.isoformat() if hasattr(ts, "isoformat") else str(ts),
+                            "changed_by_username": "system",
+                        }
+                    )
+
         return results
+
+    async def get_mum_group_approval_dates_for_all_rows(
+        self, sheet_id: uuid.UUID, *, columns: list[PlanningColumn], rows: list[PlanningRow]
+    ) -> dict[uuid.UUID, dict[int, str]]:
+        """
+        Same result as calling ``get_mum_group_approval_dates_for_row`` once
+        per row, but computed for every row on the sheet in ONE pass --
+        one column list and one change-log fetch total, not one of each
+        per row.
+
+        This is a required fast-path, not an optional micro-optimization:
+        ``get_grid`` calls the per-row version for every row in the sheet,
+        and that method itself re-fetches every column plus up to 200
+        change-log entries from the database on every single call. For a
+        sheet auto-populated with 50 products (see the ITEM
+        auto-populate default), that was 50+ *sequential* round trips
+        just for this one piece of the response, before any of the other
+        per-cell computation even started -- the exact cause of "Loading
+        grid..." never finishing. Callers pass in the already-loaded
+        ``columns``/``rows`` (get_grid loads both once already) so this
+        adds only one additional query for the whole sheet, not per row.
+        """
+        mum_label = await self._get_mum_group_label(sheet_id)
+        mum_cols: list[tuple[int, uuid.UUID]] = []
+        for c in columns:
+            num = mum_num_from_column_name(c.name, label=mum_label)
+            if num is not None:
+                mum_cols.append((num, c.id))
+
+        if not mum_cols:
+            return {row.id: {} for row in rows}
+
+        # One change-log fetch for the WHOLE sheet (not per row): every
+        # entry already carries its own row_id, so a single pass below
+        # buckets them by (row_id, column_id) instead of asking the
+        # database separately for each row's slice of the same table.
+        # limit=200 per row, scaled by row count, is a generous ceiling --
+        # status-color changes on Mum columns are infrequent relative to
+        # other planning activity, so this rarely gets close to that ceiling
+        # in practice even for a sheet with many rows.
+        entries = await self.change_log_repository.list_for_sheet(sheet_id, limit=max(200, len(rows) * 20))
+        blue_by_row_and_col: dict[tuple[uuid.UUID, uuid.UUID], Any] = {}
+        for entry in entries:
+            if (
+                entry.action == PlanningChangeAction.CELL_STATUS_CHANGED
+                and entry.new_value == PlanningCellStatusColor.BLUE_ORDERED.value
+                and entry.row_id is not None
+                and entry.column_id is not None
+            ):
+                key = (entry.row_id, entry.column_id)
+                if key not in blue_by_row_and_col or entry.created_at < blue_by_row_and_col[key]:
+                    blue_by_row_and_col[key] = entry.created_at
+
+        result: dict[uuid.UUID, dict[int, str]] = {}
+        for row in rows:
+            # row.cells is already eagerly loaded by row_repository.list_for_sheet
+            # (selectinload) -- no additional query needed per cell here,
+            # unlike the old per-row version's cell_repository.get_by_row_and_column.
+            cells_by_column_id = {cell.column_id: cell for cell in row.cells}
+            row_result: dict[int, str] = {}
+            for num, col_id in mum_cols:
+                blue_at = blue_by_row_and_col.get((row.id, col_id))
+                if blue_at is not None:
+                    row_result[num] = _format_date_dd_mm_yyyy(blue_at)
+                    continue
+                cell = cells_by_column_id.get(col_id)
+                if cell and cell.value and cell.value.strip():
+                    ts = cell.updated_at or cell.created_at
+                    if ts:
+                        row_result[num] = _format_date_dd_mm_yyyy(ts)
+            result[row.id] = row_result
+        return result
+
+    async def get_mum_group_approval_dates_for_row(self, sheet_id: uuid.UUID, row_id: uuid.UUID) -> dict[int, str]:
+        """
+        Return {mum_group_number: iso_date_string} for every Mum group on
+        this row that has turned blue or has a value -- one entry per
+        group number, keyed by the same number used everywhere else
+        (frontend's ``mumGroupNumber``, the eye popover, delete/hide
+        cascade).
+
+        This is the data source both ``get_latest_mum_approval_date_for_row``
+        (below) and the frontend build on: "hidden" is a per-user,
+        browser-local view preference the backend has no concept of, so
+        the backend cannot itself decide to "skip hidden Mum 3" -- instead
+        it hands back every group's date, and the frontend (which DOES
+        know which groups are hidden) picks the first non-hidden one,
+        exactly mirroring how the eye popover already filters its list.
+        """
+        columns = await self.column_repository.list_for_sheet(sheet_id)
+        mum_label = await self._get_mum_group_label(sheet_id)
+
+        mum_cols: list[tuple[int, uuid.UUID]] = []
+        for c in columns:
+            num = mum_num_from_column_name(c.name, label=mum_label)
+            if num is not None:
+                mum_cols.append((num, c.id))
+
+        if not mum_cols:
+            return {}
+
+        entries = await self.change_log_repository.list_for_row(row_id, limit=200)
+        blue_by_col: dict[uuid.UUID, Any] = {}
+        for entry in entries:
+            if (
+                entry.action == PlanningChangeAction.CELL_STATUS_CHANGED
+                and entry.new_value == PlanningCellStatusColor.BLUE_ORDERED.value
+            ):
+                if entry.column_id not in blue_by_col or entry.created_at < blue_by_col[entry.column_id]:
+                    blue_by_col[entry.column_id] = entry.created_at
+
+        result: dict[int, str] = {}
+        for num, col_id in mum_cols:
+            if col_id in blue_by_col:
+                changed_at = blue_by_col[col_id]
+                result[num] = _format_date_dd_mm_yyyy(changed_at)
+                continue
+            cell = await self.cell_repository.get_by_row_and_column(row_id, col_id)
+            if cell and cell.value and cell.value.strip():
+                ts = cell.updated_at or cell.created_at
+                if ts:
+                    result[num] = _format_date_dd_mm_yyyy(ts)
+        return result
+
+    async def get_latest_mum_approval_date_for_row(self, sheet_id: uuid.UUID, row_id: uuid.UUID) -> str | None:
+        """
+        Return an ISO date string for the approval date of the row.
+
+        Shows the date when the FIRST active (non-deleted) Mum-series column
+        (Mum 1, or Mum 2 if Mum 1 was deleted) turned blue (BLUE_ORDERED) or has a value.
+
+        This is a thin convenience wrapper around
+        ``get_mum_group_approval_dates_for_row`` for callers that don't
+        need per-group breakdown (e.g. the initial grid load, before the
+        frontend has hidden-column state to apply) -- it has no concept of
+        hidden columns, so a viewer with Mum 1 hidden still briefly sees
+        Mum 1's date here until the frontend's own hidden-aware
+        recalculation (using the per-group dict) overrides it.
+        """
+        dates = await self.get_mum_group_approval_dates_for_row(sheet_id, row_id)
+        if not dates:
+            return None
+        first_group_num = min(dates.keys())
+        return dates[first_group_num]
 
     async def get_column_history(self, sheet_id: uuid.UUID, column_id: uuid.UUID, *, limit: int = 100):
         await self._get_column_or_raise(sheet_id, column_id)

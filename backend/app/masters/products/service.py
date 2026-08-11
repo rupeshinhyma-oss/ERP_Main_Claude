@@ -34,6 +34,7 @@ from app.masters.products.models import Product
 from app.masters.products.repository import ProductRepository
 from app.masters.products.validators import validate_product_row
 from app.masters.uom.repository import UomRepository
+from app.planning.ws_manager import notify_source_record_changed
 
 
 class ProductService:
@@ -201,6 +202,11 @@ class ProductService:
         if changes:
             await self.repository.update(product, **changes)
         await self._invalidate_cache()
+        # Best-effort, never raises: tells any already-open Shipment
+        # Planning tab whose ITEM column (or any other LINKED_LOOKUP/
+        # AGGREGATE column) is linked to this exact product to refresh it
+        # live, instead of only picking up the change on next reload.
+        await notify_source_record_changed("product", product.id)
         return product
 
     async def activate(self, product_id: uuid.UUID) -> Product:

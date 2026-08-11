@@ -44,6 +44,26 @@ def _default_getter(record: Any, field_key: str) -> Any:
     return getattr(record, field_key, None)
 
 
+def _product_getter(record: Any, field_key: str) -> Any:
+    """
+    Value getter for the Product Master source module.
+
+    ``supplier_name`` and ``supplier_city`` are not real columns on
+    ``Product`` -- they're transient attributes
+    (``_planning_supplier_name`` / ``_planning_supplier_city``) that
+    ``ProductRepository`` attaches in bulk after fetching, by resolving
+    each product's primary linked supplier (see
+    ``ProductRepository.attach_planning_supplier_info``). Falling back to
+    plain ``getattr`` for every other field keeps this a drop-in
+    replacement for ``_default_getter``.
+    """
+    if field_key == "supplier_name":
+        return getattr(record, "_planning_supplier_name", None)
+    if field_key == "supplier_city":
+        return getattr(record, "_planning_supplier_city", None)
+    return getattr(record, field_key, None)
+
+
 def _build_product_module() -> SourceModule:
     from app.masters.products.repository import ProductRepository
 
@@ -52,9 +72,18 @@ def _build_product_module() -> SourceModule:
         SourceField("product_name", "Product Name", is_numeric=False),
         SourceField("uom_id", "UOM (ID)", is_numeric=False),
         SourceField("license_certificate_required", "License/Certificate Required", is_numeric=False),
+        # --- Supplier info, resolved via the product's primary linked supplier ---
+        # "Primary" = the first SupplierProductLink created for this product
+        # (see ProductRepository.attach_planning_supplier_info) -- a product
+        # can have multiple linked suppliers, but Shipment Planning only
+        # ever needs the one exact supplier for that exact item.
+        SourceField("supplier_name", "Supplier Name", is_numeric=False),
+        SourceField("supplier_city", "City", is_numeric=False),
+        # --- Packaging attributes, used by the fixed NO. OF PKG / TOTAL WEIGHT / TOTAL CBM formulas ---
+        SourceField("packaging_quantity", "PKG QTY", is_numeric=True),
         SourceField("packaging_net_weight", "Packaging Net Weight", is_numeric=True),
-        SourceField("packaging_gross_weight", "Packaging Gross Weight", is_numeric=True),
-        SourceField("packaging_unit_cbm", "Packaging Unit CBM", is_numeric=True),
+        SourceField("packaging_gross_weight", "UNIT WEIGHT/PKG (KG)", is_numeric=True),
+        SourceField("packaging_unit_cbm", "CBM/PKG (KG)", is_numeric=True),
         SourceField("current_stock", "Current Stock", is_numeric=True),
         SourceField("standard_cost", "Standard Cost", is_numeric=True),
         SourceField("standard_price", "Standard Price", is_numeric=True),
@@ -66,7 +95,7 @@ def _build_product_module() -> SourceModule:
         label="Product Master",
         repository_factory=lambda session: ProductRepository(session),
         fields=fields,
-        value_getter=_default_getter,
+        value_getter=_product_getter,
     )
 
 

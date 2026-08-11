@@ -60,6 +60,7 @@ class Product(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
     organization_id: Mapped[uuid.UUID | None] = mapped_column(
         GUID(), ForeignKey("master_companies.id", ondelete="SET NULL"), nullable=True, index=True
     )
+    organization_ids: Mapped[list | None] = mapped_column(JSON, nullable=True)  # list[str] of organization UUIDs
 
     # --- Tax & Compliance ---------------------------------------------------------
     refund_vat_percent: Mapped[float] = mapped_column(Numeric(5, 2), default=0.0, nullable=False)

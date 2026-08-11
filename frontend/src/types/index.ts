@@ -156,6 +156,7 @@ export interface Product extends MasterRecord {
   uom_id: string;
   secondary_uom_id?: string | null;
   organization_id?: string | null;
+  organization_ids?: string[] | null;
   refund_vat_percent?: number | null;
   license_certificate_required?: string | null;
   conversion_factor?: number | null;
@@ -420,6 +421,7 @@ export interface Supplier {
   visited_factory_office?: boolean;
   visit_remarks?: string | null;
   visit_media?: string[] | null;
+  media_urls?: string | null;
   overall_remarks?: string | null;
   is_active?: boolean;
   dealing_officer_id?: string | null;

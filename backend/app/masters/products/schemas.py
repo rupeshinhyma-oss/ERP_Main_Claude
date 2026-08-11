@@ -26,6 +26,7 @@ class ProductCreate(BaseModel):
     uom_id: uuid.UUID
     secondary_uom_id: uuid.UUID | None = None
     organization_id: uuid.UUID | None = None
+    organization_ids: list[uuid.UUID] | None = None
 
     refund_vat_percent: float | None = Field(default=None, ge=0, le=100)
     license_certificate_required: str | None = None
@@ -76,6 +77,7 @@ class ProductUpdate(BaseModel):
     uom_id: uuid.UUID | None = None
     secondary_uom_id: uuid.UUID | None = None
     organization_id: uuid.UUID | None = None
+    organization_ids: list[uuid.UUID] | None = None
 
     refund_vat_percent: float | None = Field(default=None, ge=0, le=100)
     license_certificate_required: str | None = None
@@ -129,6 +131,7 @@ class ProductRead(BaseModel):
     uom_id: uuid.UUID
     secondary_uom_id: uuid.UUID | None
     organization_id: uuid.UUID | None = None
+    organization_ids: list[uuid.UUID] | None = None
 
     refund_vat_percent: float = 0.0
     license_certificate_required: str | None = None

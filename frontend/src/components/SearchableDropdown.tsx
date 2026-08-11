@@ -19,6 +19,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchController } from "@/lib/hooks";
+import { autoTitleCase } from "@/components/fields";
 
 export interface DropdownOption {
   value: string;
@@ -119,7 +120,8 @@ export function SearchableDropdown({
     if (onTextChange) onTextChange(opt.label);
   }
 
-  function handleInput(next: string) {
+  function handleInput(raw: string) {
+    const next = allowCustomText ? autoTitleCase(raw) : raw;
     setInputValue(next);
     const term = next.trim();
     if (onTextChange) onTextChange(next);
@@ -579,6 +581,7 @@ export function SearchableDropdownMultiPanel({
   const [options, setOptions] = useState<DropdownOption[]>([]);
   const [selected, setSelected] = useState<DropdownOption[]>([]);
   const [loading, setLoading] = useState(false);
+  const [showEyeModal, setShowEyeModal] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const search = useSearchController();
@@ -654,11 +657,15 @@ export function SearchableDropdownMultiPanel({
     onChange(next.map((s) => s.value));
   }
 
-  const displayText = selected.length === 0
-    ? placeholder
-    : selected.map((s) => s.label).join(", ");
+  function removeItem(val: string) {
+    const next = selected.filter((s) => s.value !== val);
+    setSelected(next);
+    onChange(next.map((s) => s.value));
+  }
 
   const selectedValues = new Set(selected.map((s) => s.value));
+  const firstThree = selected.slice(0, 3);
+  const extraCount = selected.length - 3;
 
   return (
     <div ref={containerRef} style={{ position: "relative" }}>
@@ -670,8 +677,9 @@ export function SearchableDropdownMultiPanel({
         style={{
           border: "1px solid var(--color-border-strong, #cbd5e1)",
           borderRadius: "var(--radius-sm, 6px)",
-          padding: "9px 32px 9px 11px",
-          minHeight: "42px",
+          padding: "7px 32px 7px 11px",
+          minHeight: "40px",
+          maxHeight: "40px",
           background: "#ffffff",
           cursor: "pointer",
           fontSize: "13.5px",
@@ -681,11 +689,45 @@ export function SearchableDropdownMultiPanel({
           justifyContent: "space-between",
           userSelect: "none",
           position: "relative",
+          overflow: "hidden",
         }}
       >
-        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
-          {displayText}
-        </span>
+        <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, display: "flex", alignItems: "center", gap: "6px" }}>
+          {selected.length === 0 ? (
+            <span>{placeholder}</span>
+          ) : (
+            <>
+              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {firstThree.map((s) => s.label).join(", ")}
+              </span>
+              {extraCount > 0 && (
+                <span
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowEyeModal(true);
+                  }}
+                  style={{
+                    background: "#0284c7",
+                    color: "#ffffff",
+                    fontSize: "11.5px",
+                    fontWeight: 700,
+                    padding: "2px 8px",
+                    borderRadius: "12px",
+                    flexShrink: 0,
+                    cursor: "pointer",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "3px",
+                    boxShadow: "0 1px 2px rgba(0,0,0,0.1)",
+                  }}
+                  title="Click to view all selected items"
+                >
+                  +{extraCount} more 👁️
+                </span>
+              )}
+            </>
+          )}
+        </div>
         <span style={{
           position: "absolute",
           right: "10px",
@@ -806,6 +848,118 @@ export function SearchableDropdownMultiPanel({
               </button>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Eye Symbol Modal Popover for viewing all selected items */}
+      {showEyeModal && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            zIndex: 100000,
+            background: "rgba(15, 23, 42, 0.45)",
+            backdropFilter: "blur(3px)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+          onClick={() => setShowEyeModal(false)}
+        >
+          <div
+            style={{
+              background: "#ffffff",
+              borderRadius: "12px",
+              padding: "20px",
+              width: "90%",
+              maxWidth: "480px",
+              maxHeight: "80vh",
+              display: "flex",
+              flexDirection: "column",
+              boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.25)",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: "16px",
+                borderBottom: "1px solid #e2e8f0",
+                paddingBottom: "12px",
+              }}
+            >
+              <h4 style={{ margin: 0, fontSize: "15px", fontWeight: 700, color: "#0f172a", display: "flex", alignItems: "center", gap: "8px" }}>
+                <span>👁️</span> All Selected ({selected.length})
+              </h4>
+              <button
+                type="button"
+                onClick={() => setShowEyeModal(false)}
+                style={{
+                  background: "#f1f5f9",
+                  border: "none",
+                  borderRadius: "50%",
+                  width: "28px",
+                  height: "28px",
+                  cursor: "pointer",
+                  fontWeight: 700,
+                  color: "#64748b",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: "14px",
+                }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div style={{ overflowY: "auto", flex: 1, display: "flex", flexWrap: "wrap", gap: "8px", padding: "4px" }}>
+              {selected.map((s) => (
+                <span
+                  key={s.value}
+                  style={{
+                    background: "#0061f2",
+                    color: "#ffffff",
+                    fontSize: "13px",
+                    fontWeight: 600,
+                    padding: "6px 10px",
+                    borderRadius: "6px",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "8px",
+                  }}
+                >
+                  {s.label}
+                  <button
+                    type="button"
+                    onClick={() => removeItem(s.value)}
+                    style={{
+                      background: "rgba(255,255,255,0.25)",
+                      border: "none",
+                      borderRadius: "50%",
+                      color: "#ffffff",
+                      fontSize: "11px",
+                      fontWeight: "bold",
+                      cursor: "pointer",
+                      width: "18px",
+                      height: "18px",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      padding: 0,
+                    }}
+                  >
+                    ✕
+                  </button>
+                </span>
+              ))}
+            </div>
+          </div>
         </div>
       )}
     </div>

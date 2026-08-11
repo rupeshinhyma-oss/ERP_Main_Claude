@@ -73,7 +73,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     settings.validate_production_secrets()
 
     # Eagerly initialize the engine to fail fast on misconfiguration.
-    get_engine()
+    engine = get_engine()
+    try:
+        from sqlalchemy import text
+        async with engine.begin() as conn:
+            await conn.execute(text("ALTER TABLE products ADD COLUMN organization_ids JSON;"))
+    except Exception:
+        pass
 
     # Start the background queue worker (Phase 4).
     worker = get_worker()
@@ -141,7 +147,9 @@ def create_application() -> FastAPI:
     uploads_dir = Path("uploads")
     uploads_dir.mkdir(exist_ok=True)
     (uploads_dir / "products").mkdir(exist_ok=True)
+    (uploads_dir / "suppliers").mkdir(exist_ok=True)
     app.mount("/uploads", StaticFiles(directory=uploads_dir), name="uploads")
+    app.mount("/static/uploads", StaticFiles(directory=uploads_dir), name="static_uploads")
 
     # ---------------------------------------------------------------
     # Optional same-origin frontend serving.

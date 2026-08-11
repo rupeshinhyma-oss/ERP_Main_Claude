@@ -25,7 +25,8 @@ import {
   SearchableDropdownMultiPanel,
   type DropdownOption,
 } from "@/components/SearchableDropdown";
-import { SelectField, TextAreaField, TextField } from "@/components/fields";
+import { SelectField, TextAreaField, TextField, autoTitleCase } from "@/components/fields";
+import { useLookup } from "@/lib/lookups";
 import {
   apiDelete,
   apiGet,
@@ -257,6 +258,7 @@ export function SuppliersPage() {
   const [defaultChinaId, setDefaultChinaId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [uploadingMedia, setUploadingMedia] = useState(false);
+  const existingSuppliers = useLookup<Supplier>("/suppliers", 500);
 
   const mediaList = useMemo(() => {
     return form.visit_media_input
@@ -371,8 +373,10 @@ export function SuppliersPage() {
     };
   }, [contactCountryId]);
 
-  const setField = (id: keyof typeof EMPTY_SUPPLIER_FORM, value: string) =>
-    setForm((prev) => ({ ...prev, [id]: value }));
+  const setField = (id: keyof typeof EMPTY_SUPPLIER_FORM, value: string) => {
+    const formatted = autoTitleCase(value, id as string);
+    setForm((prev) => ({ ...prev, [id]: formatted }));
+  };
 
   /* --- Bounded name resolver for the chip columns --- */
   const resolver = useMemo(() => {
@@ -1156,7 +1160,7 @@ export function SuppliersPage() {
                   </h3>
                   {/* Row 1: Company Name + Product Category (2 columns) */}
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "18px", marginBottom: "18px" }}>
-                    <div className="field">
+                    <div className="field" style={{ position: "relative" }}>
                       <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>Name of Company *</label>
                       <SearchableDropdown
                         value={form.company_name}
@@ -1167,6 +1171,50 @@ export function SuppliersPage() {
                         fetchOptions={companyNameFetcher}
                         fetchLabelForValue={async (v) => v}
                       />
+                      {(() => {
+                        const typed = (form.company_name || "").trim();
+                        if (!typed) return null;
+                        const cleanTyped = typed.toLowerCase().replace(/[\s-]/g, "");
+
+                        const matches = existingSuppliers.items.filter((s) => {
+                          if (currentSupplierId && s.id === currentSupplierId) return false;
+                          const sName = (s.company_name || "").toLowerCase().replace(/[\s-]/g, "");
+                          return sName.includes(cleanTyped);
+                        }).slice(0, 5);
+
+                        const exact = existingSuppliers.items.find((s) => {
+                          if (currentSupplierId && s.id === currentSupplierId) return false;
+                          const sName = (s.company_name || "").toLowerCase().replace(/[\s-]/g, "");
+                          return sName === cleanTyped;
+                        });
+
+                        return (
+                          <>
+                            {exact && (
+                              <div style={{ marginTop: "6px", fontSize: "12.5px", color: "#dc2626", fontWeight: 600, display: "flex", alignItems: "center", gap: "5px" }}>
+                                <span>⚠️</span> Supplier "{exact.company_name}" already exists!
+                              </div>
+                            )}
+                            {matches.length > 0 && !exact && (
+                              <div style={{ position: "absolute", top: "100%", left: 0, right: 0, zIndex: 100, background: "#ffffff", border: "1px solid #cbd5e0", borderRadius: "6px", boxShadow: "0 4px 12px rgba(0,0,0,0.15)", maxHeight: "160px", overflowY: "auto", marginTop: "2px" }}>
+                                <div style={{ padding: "6px 12px", fontSize: "11px", fontWeight: 700, color: "#64748b", background: "#f8fafc", borderBottom: "1px solid #f1f5f9" }}>
+                                  Existing Similar Suppliers:
+                                </div>
+                                {matches.map((s) => (
+                                  <div
+                                    key={s.id}
+                                    style={{ padding: "8px 12px", fontSize: "12.5px", cursor: "pointer", borderBottom: "1px solid #f8fafc", display: "flex", justifyContent: "space-between", background: "#fff" }}
+                                    onClick={() => setField("company_name", s.company_name)}
+                                  >
+                                    <span style={{ fontWeight: 600, color: "#1e293b" }}>{s.company_name}</span>
+                                    <span style={{ color: "#64748b", fontSize: "11.5px" }}>{s.supplier_type || "Supplier"}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </>
+                        );
+                      })()}
                     </div>
                     <div className="field">
                       <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>Product Category (multiple)</label>

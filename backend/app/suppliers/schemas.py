@@ -263,6 +263,8 @@ class SupplierListItemRead(BaseModel):
     sub_category_ids: list[uuid.UUID] = Field(default_factory=list)
     product_ids: list[uuid.UUID] = Field(default_factory=list)
     secondary_products_description: str | None = None
+    visit_media: list[str] | None = None
+    media_urls: str | None = None
 
 
 class ImportSummaryRead(BaseModel):

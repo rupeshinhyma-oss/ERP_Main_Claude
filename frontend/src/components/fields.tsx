@@ -29,6 +29,43 @@ function renderLabel(label: ReactNode) {
   return label;
 }
 
+export function autoTitleCase(text: string, id?: string, type?: string): string {
+  if (!text) return "";
+
+  const lowerId = (id || "").toLowerCase();
+  const lowerType = (type || "text").toLowerCase();
+
+  if (
+    lowerType === "email" ||
+    lowerType === "password" ||
+    lowerType === "number" ||
+    lowerType === "url" ||
+    lowerType === "tel" ||
+    lowerType === "select" ||
+    lowerId.endsWith("_id") ||
+    lowerId.includes("type") ||
+    lowerId.includes("status") ||
+    lowerId.includes("salutation") ||
+    lowerId.includes("gender") ||
+    lowerId.includes("email") ||
+    lowerId.includes("website") ||
+    lowerId.includes("url") ||
+    lowerId.includes("password") ||
+    lowerId.includes("phone") ||
+    lowerId.includes("calling") ||
+    lowerId.includes("whatsapp") ||
+    lowerId.includes("wechat") ||
+    text.includes("@") ||
+    text.startsWith("http://") ||
+    text.startsWith("https://")
+  ) {
+    return text;
+  }
+
+  // Auto capitalize first letter of each word
+  return text.replace(/\b[a-z]/g, (char) => char.toUpperCase());
+}
+
 export function TextField({
   id,
   label,
@@ -48,6 +85,7 @@ export function TextField({
   max,
   className,
   autoComplete = "off",
+  disableAutoCapitalize,
 }: BaseFieldProps & {
   value: string;
   onChange: (value: string) => void;
@@ -63,7 +101,14 @@ export function TextField({
   max?: string | number;
   className?: string;
   autoComplete?: string;
+  disableAutoCapitalize?: boolean;
 }) {
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const raw = e.target.value;
+    const formatted = disableAutoCapitalize ? raw : autoTitleCase(raw, id, type);
+    onChange(formatted);
+  };
+
   return (
     <div className="field" style={style}>
       <label htmlFor={id}>{renderLabel(label)}</label>
@@ -71,7 +116,7 @@ export function TextField({
         id={id}
         type={type}
         value={value}
-        onChange={(e) => onChange(e.target.value)}
+        onChange={handleChange}
         required={required}
         maxLength={maxLength}
         minLength={minLength}
@@ -94,24 +139,32 @@ export function TextAreaField({
   label,
   value,
   onChange,
-  rows,
+  rows = 3,
   placeholder,
   hint,
   style,
+  disableAutoCapitalize,
 }: BaseFieldProps & {
   value: string;
   onChange: (value: string) => void;
   rows?: number;
   placeholder?: string;
+  disableAutoCapitalize?: boolean;
 }) {
+  const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const raw = e.target.value;
+    const formatted = disableAutoCapitalize ? raw : autoTitleCase(raw, id, "textarea");
+    onChange(formatted);
+  };
+
   return (
     <div className="field" style={style}>
       <label htmlFor={id}>{renderLabel(label)}</label>
       <textarea
         id={id}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
         rows={rows}
+        value={value}
+        onChange={handleChange}
         placeholder={placeholder}
       />
       {hint && <span className="hint">{hint}</span>}
@@ -529,4 +582,333 @@ export function numOrNull(value: string | undefined): number | null {
   if (value === undefined || value === null || value.trim() === "") return null;
   const parsed = parseFloat(value);
   return Number.isNaN(parsed) ? null : parsed;
+}
+
+export function MultiSelectField({
+  id,
+  label,
+  values,
+  options,
+  onChange,
+  placeholder = "-- Select --",
+  hint,
+  style,
+}: BaseFieldProps & {
+  values: string[];
+  options: { id: string; name: string }[];
+  onChange: (newValues: string[]) => void;
+  placeholder?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [showEyeModal, setShowEyeModal] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const toggleOption = (optId: string) => {
+    if (values.includes(optId)) {
+      onChange(values.filter((v) => v !== optId));
+    } else {
+      onChange([...values, optId]);
+    }
+  };
+
+  const selectedOptions = options.filter((opt) => values.includes(opt.id));
+  const visibleOptions = selectedOptions.slice(0, 3);
+  const extraCount = selectedOptions.length - 3;
+
+  const filteredOptions = options.filter((opt) =>
+    opt.name.toLowerCase().includes(searchTerm.trim().toLowerCase())
+  );
+
+  return (
+    <div className="field" style={{ ...style, position: "relative" }} ref={containerRef}>
+      <label htmlFor={id}>{renderLabel(label)}</label>
+
+      <div
+        id={id}
+        tabIndex={0}
+        onClick={() => setOpen((prev) => !prev)}
+        style={{
+          border: "1px solid var(--color-border-strong)",
+          borderRadius: "var(--radius-sm)",
+          padding: "6px 11px",
+          minHeight: "40px",
+          maxHeight: "40px",
+          fontSize: "13.5px",
+          background: "var(--color-surface)",
+          color: "var(--color-text)",
+          cursor: "pointer",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          userSelect: "none",
+          overflow: "hidden",
+        }}
+      >
+        <div style={{ display: "flex", gap: "4px", alignItems: "center", flex: 1, overflow: "hidden" }}>
+          {selectedOptions.length === 0 ? (
+            <span style={{ color: "var(--color-muted)" }}>{placeholder}</span>
+          ) : (
+            <>
+              {visibleOptions.map((opt) => (
+                <span
+                  key={opt.id}
+                  style={{
+                    background: "#eff6ff",
+                    color: "#1d4ed8",
+                    border: "1px solid #bfdbfe",
+                    borderRadius: "4px",
+                    padding: "2px 6px",
+                    fontSize: "12px",
+                    fontWeight: 600,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "4px",
+                    whiteSpace: "nowrap",
+                  }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    toggleOption(opt.id);
+                  }}
+                >
+                  {opt.name}
+                  <span style={{ cursor: "pointer", color: "#3b82f6", fontWeight: 700 }}>×</span>
+                </span>
+              ))}
+              {extraCount > 0 && (
+                <span
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowEyeModal(true);
+                  }}
+                  style={{
+                    background: "#0284c7",
+                    color: "#ffffff",
+                    fontSize: "11.5px",
+                    fontWeight: 700,
+                    padding: "2px 8px",
+                    borderRadius: "12px",
+                    flexShrink: 0,
+                    cursor: "pointer",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "3px",
+                    boxShadow: "0 1px 2px rgba(0,0,0,0.1)",
+                  }}
+                  title="Click to view all selected items"
+                >
+                  +{extraCount} more 👁️
+                </span>
+              )}
+            </>
+          )}
+        </div>
+        <span style={{ fontSize: "10px", color: "var(--color-muted)", marginLeft: "6px" }}>
+          {open ? "▲" : "▼"}
+        </span>
+      </div>
+
+      {open && (
+        <div
+          style={{
+            position: "absolute",
+            top: "calc(100% + 2px)",
+            left: 0,
+            right: 0,
+            zIndex: 9999,
+            background: "#ffffff",
+            border: "1px solid #cbd5e0",
+            borderRadius: "6px",
+            boxShadow: "0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)",
+            maxHeight: "260px",
+            display: "flex",
+            flexDirection: "column",
+            overflow: "hidden",
+          }}
+        >
+          {options.length > 5 && (
+            <div style={{ padding: "6px", borderBottom: "1px solid #e2e8f0", background: "#f8fafc" }}>
+              <input
+                type="text"
+                placeholder="Search..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                onClick={(e) => e.stopPropagation()}
+                style={{
+                  width: "100%",
+                  padding: "6px 8px",
+                  fontSize: "12.5px",
+                  border: "1px solid #cbd5e1",
+                  borderRadius: "4px",
+                  outline: "none",
+                }}
+              />
+            </div>
+          )}
+
+          <div style={{ overflowY: "auto", flex: 1, padding: "4px 0" }}>
+            {filteredOptions.length === 0 ? (
+              <div style={{ padding: "8px 12px", fontSize: "12.5px", color: "#94a3b8" }}>No matches found</div>
+            ) : (
+              filteredOptions.map((opt) => {
+                const isChecked = values.includes(opt.id);
+                return (
+                  <div
+                    key={opt.id}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      toggleOption(opt.id);
+                    }}
+                    style={{
+                      padding: "7px 12px",
+                      fontSize: "13px",
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "8px",
+                      background: isChecked ? "#f0f9ff" : "transparent",
+                      color: isChecked ? "#0284c7" : "#1e293b",
+                      fontWeight: isChecked ? 600 : 400,
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={isChecked}
+                      onChange={() => {}}
+                      style={{ cursor: "pointer" }}
+                    />
+                    <span>{opt.name}</span>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Eye Symbol Modal Popover for viewing all selected items */}
+      {showEyeModal && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            zIndex: 100000,
+            background: "rgba(15, 23, 42, 0.45)",
+            backdropFilter: "blur(3px)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+          onClick={() => setShowEyeModal(false)}
+        >
+          <div
+            style={{
+              background: "#ffffff",
+              borderRadius: "12px",
+              padding: "20px",
+              width: "90%",
+              maxWidth: "480px",
+              maxHeight: "80vh",
+              display: "flex",
+              flexDirection: "column",
+              boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.25)",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: "16px",
+                borderBottom: "1px solid #e2e8f0",
+                paddingBottom: "12px",
+              }}
+            >
+              <h4 style={{ margin: 0, fontSize: "15px", fontWeight: 700, color: "#0f172a", display: "flex", alignItems: "center", gap: "8px" }}>
+                <span>👁️</span> All Selected ({selectedOptions.length})
+              </h4>
+              <button
+                type="button"
+                onClick={() => setShowEyeModal(false)}
+                style={{
+                  background: "#f1f5f9",
+                  border: "none",
+                  borderRadius: "50%",
+                  width: "28px",
+                  height: "28px",
+                  cursor: "pointer",
+                  fontWeight: 700,
+                  color: "#64748b",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: "14px",
+                }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div style={{ overflowY: "auto", flex: 1, display: "flex", flexWrap: "wrap", gap: "8px", padding: "4px" }}>
+              {selectedOptions.map((opt) => (
+                <span
+                  key={opt.id}
+                  style={{
+                    background: "#0061f2",
+                    color: "#ffffff",
+                    fontSize: "13px",
+                    fontWeight: 600,
+                    padding: "6px 10px",
+                    borderRadius: "6px",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "8px",
+                  }}
+                >
+                  {opt.name}
+                  <button
+                    type="button"
+                    onClick={() => toggleOption(opt.id)}
+                    style={{
+                      background: "rgba(255,255,255,0.25)",
+                      border: "none",
+                      borderRadius: "50%",
+                      color: "#ffffff",
+                      fontSize: "11px",
+                      fontWeight: "bold",
+                      cursor: "pointer",
+                      width: "18px",
+                      height: "18px",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      padding: 0,
+                    }}
+                  >
+                    ✕
+                  </button>
+                </span>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {hint && <span className="hint">{hint}</span>}
+    </div>
+  );
 }

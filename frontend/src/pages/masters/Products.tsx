@@ -18,6 +18,7 @@ import { MasterPage, type FormState, type MasterPageHandle } from "@/components/
 import { SideDrawer, DetailFieldGrid } from "@/components/SideDrawer";
 import { StatusBadge } from "@/components/ui";
 import {
+  MultiSelectField,
   SelectField,
   StatusSelectField,
   TextAreaField,
@@ -48,6 +49,7 @@ const EMPTY: FormState = {
   uom_id: "",
   secondary_uom_id: "",
   organization_id: "",
+  organization_ids_json: "[]",
   refund_vat_percent: "",
   license_certificate_required: "",
   conversion_factor: "",
@@ -86,10 +88,16 @@ function computeCbm(length: string, width: string, height: string): string {
 
 export function resolveImageUrl(url: string | null | undefined): string {
   if (!url) return "";
-  if (url.startsWith("data:") || url.startsWith("http://") || url.startsWith("https://")) {
-    return url;
+  let clean = url.trim();
+  if ((clean.startsWith('"') && clean.endsWith('"')) || (clean.startsWith("'") && clean.endsWith("'"))) {
+    clean = clean.slice(1, -1).trim();
   }
-  return `http://localhost:8000${url.startsWith("/") ? "" : "/"}${url}`;
+  if (!clean) return "";
+  if (clean.startsWith("data:") || clean.startsWith("http://") || clean.startsWith("https://")) {
+    return encodeURI(clean);
+  }
+  const fullUrl = `http://localhost:8000${clean.startsWith("/") ? "" : "/"}${clean}`;
+  return encodeURI(fullUrl);
 }
 
 export function ProductsPage() {
@@ -305,7 +313,16 @@ export function ProductsPage() {
         },
         {
           header: "Organization",
-          render: (p) => organizations.items.find((x) => x.id === p.organization_id)?.name ?? "—",
+          render: (p) => {
+            const orgIds = p.organization_ids && p.organization_ids.length > 0
+              ? p.organization_ids
+              : (p.organization_id ? [p.organization_id] : []);
+            if (!orgIds.length) return "—";
+            const names = orgIds
+              .map((id) => organizations.items.find((x) => x.id === id)?.name)
+              .filter(Boolean);
+            return names.length > 0 ? names.join(", ") : "—";
+          },
         },
         {
           header: "Pkg Qty",
@@ -364,6 +381,13 @@ export function ProductsPage() {
           uom_id: str(item?.uom_id),
           secondary_uom_id: str(item?.secondary_uom_id),
           organization_id: str(item?.organization_id),
+          organization_ids_json: JSON.stringify(
+            item
+              ? (item.organization_ids && item.organization_ids.length > 0
+                  ? item.organization_ids
+                  : (item.organization_id ? [item.organization_id] : []))
+              : []
+          ),
           refund_vat_percent: str(item?.refund_vat_percent),
           license_certificate_required: str(item?.license_certificate_required),
           conversion_factor: str(item?.conversion_factor),
@@ -419,7 +443,18 @@ export function ProductsPage() {
           hsn_id: f.hsn_id || null,
           uom_id: f.uom_id,
           secondary_uom_id: secUomId,
-          organization_id: f.organization_id || null,
+          organization_id: (() => {
+            try {
+              const list = JSON.parse(f.organization_ids_json || "[]");
+              return list[0] || null;
+            } catch {
+              return f.organization_id || null;
+            }
+          })(),
+          organization_ids: (() => {
+            try { return JSON.parse(f.organization_ids_json || "[]"); }
+            catch { return []; }
+          })(),
           refund_vat_percent: numOrNull(f.refund_vat_percent) ?? 0,
           license_certificate_required: nullIfBlank(f.license_certificate_required),
           conversion_factor: numOrNull(f.conversion_factor),
@@ -581,14 +616,20 @@ export function ProductsPage() {
                 ))}
               </SelectField>
               <TextField id="refund_vat_percent" label="Refund VAT %" type="number" step="0.01" min={0} max={100} placeholder="Auto from HSN or manual" value={f.refund_vat_percent} onChange={(v) => set("refund_vat_percent", v)} />
-              <SelectField id="organization_id" label="Organization" value={f.organization_id} onChange={(v) => set("organization_id", v)}>
-                <option value="">-- Select Organization --</option>
-                {organizations.items.map((org) => (
-                  <option key={org.id} value={org.id}>
-                    {org.name}
-                  </option>
-                ))}
-              </SelectField>
+              <MultiSelectField
+                id="organization_ids_json"
+                label="Organization"
+                placeholder="-- Select Organizations --"
+                values={(() => {
+                  try { return JSON.parse(f.organization_ids_json || "[]"); }
+                  catch { return []; }
+                })()}
+                options={organizations.items.map((org) => ({ id: org.id, name: org.name }))}
+                onChange={(newVals) => {
+                  set("organization_ids_json", JSON.stringify(newVals));
+                  set("organization_id", newVals[0] || "");
+                }}
+              />
             </div>
 
             <div className="form-grid" style={{ gridTemplateColumns: "1fr 1fr", gap: "20px" }}>
@@ -842,7 +883,6 @@ export function ProductsPage() {
   const brand = p ? brands.items.find((b) => b.id === p.brand_id) : undefined;
   const hsn = p ? hsnCodes.items.find((h) => h.id === p.hsn_id) : undefined;
   const uom = p ? uoms.items.find((u) => u.id === p.uom_id) : undefined;
-  const org = p ? organizations.items.find((o) => o.id === p.organization_id) : undefined;
 
   const length = p ? p.length_cm ?? p.length : null;
   const width = p ? p.width_cm ?? p.width : null;
@@ -900,7 +940,19 @@ export function ProductsPage() {
                 { label: "Category", value: cat ? cat.name : "—" },
                 { label: "Sub Category", value: subCat ? subCat.name : "—" },
                 { label: "HSN Code", value: hsn ? hsn.code : "—" },
-                { label: "Organization", value: org ? org.name : "—" },
+                {
+                  label: "Organization",
+                  value: (() => {
+                    const orgIds = p.organization_ids && p.organization_ids.length > 0
+                      ? p.organization_ids
+                      : (p.organization_id ? [p.organization_id] : []);
+                    if (!orgIds.length) return "—";
+                    const names = orgIds
+                      .map((id) => organizations.items.find((x) => x.id === id)?.name)
+                      .filter(Boolean);
+                    return names.length > 0 ? names.join(", ") : "—";
+                  })(),
+                },
                 {
                   label: "Refund VAT % / GST %",
                   value: (

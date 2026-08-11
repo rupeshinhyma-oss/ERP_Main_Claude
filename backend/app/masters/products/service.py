@@ -158,6 +158,9 @@ class ProductService:
         if field_values.get("refund_vat_percent") is None:
             field_values["refund_vat_percent"] = 0.0
 
+        if "organization_ids" in field_values and field_values["organization_ids"] is not None:
+            field_values["organization_ids"] = [str(x) for x in field_values["organization_ids"]]
+
         product = await self.repository.create(**field_values)
         await self._invalidate_cache()
         return product
@@ -190,6 +193,9 @@ class ProductService:
         h = field_values.get("height_cm") if "height_cm" in field_values else (field_values.get("height") or product.height_cm or product.height)
         if l is not None and w is not None and h is not None:
             field_values["packaging_unit_cbm"] = round((float(l) * float(w) * float(h)) / 1000000.0, 6)
+
+        if "organization_ids" in field_values and field_values["organization_ids"] is not None:
+            field_values["organization_ids"] = [str(x) for x in field_values["organization_ids"]]
 
         changes = {k: v for k, v in field_values.items() if v is not None}
         if changes:

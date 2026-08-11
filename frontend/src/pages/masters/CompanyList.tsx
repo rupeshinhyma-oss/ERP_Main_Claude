@@ -26,6 +26,7 @@ export function CompanyListPage() {
       breadcrumbTrail={["Master Data", "Organization List"]}
       newButtonLabel="+ ADD NEW ORGANIZATION"
       searchPlaceholder="Search organization name or Sr. No..."
+      hideQuickAdd={true}
       columnHeaders={["ORGANIZATION NAME", "STATUS"]}
       columns={[
         { header: "ORGANIZATION NAME", render: (c) => <span className="cell-primary">{c.name}</span> },

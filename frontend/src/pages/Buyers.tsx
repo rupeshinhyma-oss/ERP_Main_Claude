@@ -392,12 +392,36 @@ export function BuyersPage() {
 
         {/* Top filters */}
         <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
-          <input
-            placeholder="Search company name…"
-            value={searchInput}
-            onChange={(e) => setSearchInput(e.target.value)}
-            style={{ padding: 8, border: "1px solid #CBD5E1", borderRadius: 6, fontSize: 13, minWidth: 220 }}
-          />
+          <div style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
+            <input
+              placeholder="Search company name…"
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              style={{ padding: "8px 36px 8px 8px", border: "1px solid #CBD5E1", borderRadius: 6, fontSize: 13, minWidth: 220 }}
+            />
+            {searchInput && (
+              <button
+                type="button"
+                onClick={() => setSearchInput("")}
+                title="Clear search"
+                style={{
+                  position: "absolute",
+                  right: "8px",
+                  background: "none",
+                  border: "none",
+                  cursor: "pointer",
+                  color: "#94a3b8",
+                  fontSize: "16px",
+                  lineHeight: 1,
+                  padding: "0 2px",
+                  display: "flex",
+                  alignItems: "center",
+                }}
+              >
+                ×
+              </button>
+            )}
+          </div>
           <select value={buyerTypeFilter} onChange={(e) => { setCurrentPage(1); setBuyerTypeFilter(e.target.value); }} style={selectStyle}>
             <option value="">All Buyer Types</option>
             <option value="manufacturer">Manufacturer</option>

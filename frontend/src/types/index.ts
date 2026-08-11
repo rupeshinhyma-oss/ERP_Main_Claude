@@ -82,8 +82,6 @@ export interface MasterRecord {
 export interface Country extends MasterRecord {
   name: string;
   code: string;
-  iso2?: string | null;
-  iso3?: string | null;
   phone_code?: string | null;
   nationality?: string | null;
   currency?: string | null;
@@ -126,6 +124,12 @@ export interface Brand extends MasterRecord {
   name: string;
   code: string;
   logo_url?: string | null;
+  description?: string | null;
+}
+
+export interface SupplierType extends MasterRecord {
+  name: string;
+  code: string;
   description?: string | null;
 }
 

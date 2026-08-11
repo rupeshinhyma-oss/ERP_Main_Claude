@@ -15,8 +15,6 @@ class CountryCreate(BaseModel):
 
     name: str = Field(..., min_length=1, max_length=150)
     code: str = Field(..., min_length=1, max_length=10)
-    iso2: str | None = Field(default=None, max_length=2)
-    iso3: str | None = Field(default=None, max_length=3)
     phone_code: str | None = Field(default=None, max_length=10)
     nationality: str | None = Field(default=None, max_length=100)
     currency: str | None = Field(default=None, max_length=10)
@@ -28,8 +26,6 @@ class CountryUpdate(BaseModel):
 
     name: str | None = Field(default=None, min_length=1, max_length=150)
     code: str | None = Field(default=None, min_length=1, max_length=10)
-    iso2: str | None = Field(default=None, max_length=2)
-    iso3: str | None = Field(default=None, max_length=3)
     phone_code: str | None = Field(default=None, max_length=10)
     nationality: str | None = Field(default=None, max_length=100)
     currency: str | None = Field(default=None, max_length=10)
@@ -44,8 +40,6 @@ class CountryRead(BaseModel):
     id: uuid.UUID
     name: str
     code: str
-    iso2: str | None
-    iso3: str | None
     phone_code: str | None
     nationality: str | None
     currency: str | None

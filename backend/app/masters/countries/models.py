@@ -24,8 +24,7 @@ class Country(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
 
     name: Mapped[str] = mapped_column(String(150), unique=True, nullable=False, index=True)
     code: Mapped[str] = mapped_column(String(10), unique=True, nullable=False, index=True)  # ISO country code
-    iso2: Mapped[str | None] = mapped_column(String(2), nullable=True, index=True)
-    iso3: Mapped[str | None] = mapped_column(String(3), nullable=True, index=True)
+
     phone_code: Mapped[str | None] = mapped_column(String(10), nullable=True)
     nationality: Mapped[str | None] = mapped_column(String(100), nullable=True)
     currency: Mapped[str | None] = mapped_column(String(10), nullable=True)  # currency code, e.g. "INR"

@@ -590,7 +590,8 @@ export function SearchableDropdownMultiPanel({
   useEffect(() => {
     if (!values || values.length === 0) return;
     if (fetchOptions && options.length === 0) {
-      void fetchOptions("").then((found) => {
+      const ac = new AbortController();
+      void fetchOptions("", ac.signal).then((found) => {
         if (found && found.length > 0) {
           setOptions(found);
         }

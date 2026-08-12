@@ -50,6 +50,7 @@ const EMPTY: FormState = {
   secondary_uom_id: "",
   organization_id: "",
   organization_ids_json: "[]",
+  supplier_id: "",
   refund_vat_percent: "",
   license_certificate_required: "",
   conversion_factor: "",
@@ -74,6 +75,7 @@ const EMPTY: FormState = {
   images_json: "[]",
   image_url: "",
 };
+
 
 /** L x W x H in cm -> cubic metres, to 6dp. Blank unless all three are set. */
 function computeCbm(length: string, width: string, height: string): string {
@@ -107,7 +109,9 @@ export function ProductsPage() {
   const hsnCodes = useLookup<Hsn>("/masters/hsn", 250);
   const uoms = useLookup<Uom>("/masters/uom", 250);
   const organizations = useLookup<{ id: string; name: string }>("/masters/company-list", 250);
+  const suppliers = useLookup<{ id: string; company_name: string }>("/suppliers", 500);
   const existingProducts = useLookup<Product>("/masters/products", 1000);
+
 
   const [categoryFilter, setCategoryFilter] = useState("");
   const [subCategoryFilter, setSubCategoryFilter] = useState("");
@@ -253,6 +257,7 @@ export function ProductsPage() {
       columnHeaders={[
         "Product Name (As Per Tally)",
         "Product Code",
+        "Supplier Company Name",
         "Brand",
         "Sub Category",
         "HSN Code",
@@ -292,6 +297,11 @@ export function ProductsPage() {
           ),
         },
         { header: "Product Code", render: (p) => p.product_code },
+        {
+          header: "Supplier Company Name",
+          render: (p) => p.supplier_company_name || suppliers.items.find((s) => s.id === p.supplier_id)?.company_name || "—",
+        },
+
         {
           header: "Brand",
           render: (p) => brands.items.find((x) => x.id === p.brand_id)?.name ?? "—",
@@ -388,6 +398,7 @@ export function ProductsPage() {
                   : (item.organization_id ? [item.organization_id] : []))
               : []
           ),
+          supplier_id: str(item?.supplier_id),
           refund_vat_percent: str(item?.refund_vat_percent),
           license_certificate_required: str(item?.license_certificate_required),
           conversion_factor: str(item?.conversion_factor),
@@ -425,6 +436,9 @@ export function ProductsPage() {
 
         if (!f.category_id) throw new Error("Please select a Category.");
         if (!f.uom_id) throw new Error("Please select a Primary UOM.");
+        if (numOrNull(f.packaging_quantity) === null) throw new Error("Packaging Quantity (unit) is required.");
+        if (numOrNull(f.packaging_net_weight) === null) throw new Error("Packaging Net Weight (kg) is required.");
+        if (numOrNull(f.packaging_gross_weight) === null) throw new Error("Packaging Gross Weight (kg) is required.");
 
         // A secondary UOM identical to the primary carries no information.
         let secUomId: string | null = f.secondary_uom_id || null;
@@ -455,6 +469,8 @@ export function ProductsPage() {
           hsn_id: f.hsn_id || null,
           uom_id: f.uom_id,
           secondary_uom_id: secUomId,
+          supplier_id: f.supplier_id || null,
+
           organization_id: (() => {
             try {
               const list = JSON.parse(f.organization_ids_json || "[]");
@@ -628,6 +644,19 @@ export function ProductsPage() {
                 ))}
               </SelectField>
               <TextField id="refund_vat_percent" label="Refund VAT %" type="number" step="0.01" min={0} max={100} placeholder="Auto from HSN or manual" value={f.refund_vat_percent} onChange={(v) => set("refund_vat_percent", v)} />
+              <SelectField
+                id="supplier_id"
+                label="Supplier Company Name"
+                value={f.supplier_id}
+                onChange={(v) => set("supplier_id", v)}
+              >
+                <option value="">-- Select Supplier Company Name --</option>
+                {suppliers.items.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.company_name}
+                  </option>
+                ))}
+              </SelectField>
               <MultiSelectField
                 id="organization_ids_json"
                 label="Organization"
@@ -679,10 +708,11 @@ export function ProductsPage() {
                   </option>
                 ))}
               </SelectField>
-              <TextField id="packaging_quantity" label="Packaging Quantity (unit)" type="number" step="0.001" min={0} value={f.packaging_quantity} onChange={(v) => set("packaging_quantity", v)} />
-              <TextField id="packaging_net_weight" label="Packaging Net Weight (kg)" type="number" step="0.001" min={0} value={f.packaging_net_weight} onChange={(v) => set("packaging_net_weight", v)} />
-              <TextField id="packaging_gross_weight" label="Packaging Gross Weight (kg)" type="number" step="0.001" min={0} value={f.packaging_gross_weight} onChange={(v) => set("packaging_gross_weight", v)} />
+              <TextField id="packaging_quantity" label="Packaging Quantity (unit) *" required type="number" step="0.001" min={0} value={f.packaging_quantity} onChange={(v) => set("packaging_quantity", v)} />
+              <TextField id="packaging_net_weight" label="Packaging Net Weight (kg) *" required type="number" step="0.001" min={0} value={f.packaging_net_weight} onChange={(v) => set("packaging_net_weight", v)} />
+              <TextField id="packaging_gross_weight" label="Packaging Gross Weight (kg) *" required type="number" step="0.001" min={0} value={f.packaging_gross_weight} onChange={(v) => set("packaging_gross_weight", v)} />
             </div>
+
 
             <div className="section-title" style={{ marginTop: "16px" }}>Dimensions For CBM</div>
             <div className="form-grid" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>

@@ -27,6 +27,7 @@ class ProductCreate(BaseModel):
     secondary_uom_id: uuid.UUID | None = None
     organization_id: uuid.UUID | None = None
     organization_ids: list[uuid.UUID] | None = None
+    supplier_id: uuid.UUID | None = None
 
     refund_vat_percent: float | None = Field(default=None, ge=0, le=100)
     license_certificate_required: str | None = None
@@ -35,9 +36,10 @@ class ProductCreate(BaseModel):
     description: str | None = None
     images: list[str] | None = None
 
-    packaging_quantity: float | None = Field(default=None, ge=0)
-    packaging_net_weight: float | None = Field(default=None, ge=0)
-    packaging_gross_weight: float | None = Field(default=None, ge=0)
+    packaging_quantity: float = Field(..., ge=0, description="Packaging Quantity (unit) is mandatory")
+    packaging_net_weight: float = Field(..., ge=0, description="Packaging Net Weight (kg) is mandatory")
+    packaging_gross_weight: float = Field(..., ge=0, description="Packaging Gross Weight (kg) is mandatory")
+
     weight: float | None = Field(default=None, ge=0)
     length: float | None = Field(default=None, ge=0)
     width: float | None = Field(default=None, ge=0)
@@ -78,6 +80,7 @@ class ProductUpdate(BaseModel):
     secondary_uom_id: uuid.UUID | None = None
     organization_id: uuid.UUID | None = None
     organization_ids: list[uuid.UUID] | None = None
+    supplier_id: uuid.UUID | None = None
 
     refund_vat_percent: float | None = Field(default=None, ge=0, le=100)
     license_certificate_required: str | None = None
@@ -132,6 +135,9 @@ class ProductRead(BaseModel):
     secondary_uom_id: uuid.UUID | None
     organization_id: uuid.UUID | None = None
     organization_ids: list[uuid.UUID] | None = None
+    supplier_id: uuid.UUID | None = None
+    supplier_company_name: str | None = None
+
 
     refund_vat_percent: float = 0.0
     license_certificate_required: str | None = None

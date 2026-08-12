@@ -161,6 +161,9 @@ export interface Product extends MasterRecord {
   secondary_uom_id?: string | null;
   organization_id?: string | null;
   organization_ids?: string[] | null;
+  supplier_id?: string | null;
+  supplier_company_name?: string | null;
+
   refund_vat_percent?: number | null;
   license_certificate_required?: string | null;
   conversion_factor?: number | null;

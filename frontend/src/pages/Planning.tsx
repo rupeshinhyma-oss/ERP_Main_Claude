@@ -78,7 +78,8 @@ const ITEM_COL_WIDTH = 240;
  * exactly as it appears in the source Excel sheet -- still matches).
  */
 function isApprovalDateColumn(columnName: string): boolean {
-  return columnName.trim().toLowerCase() === "approval date";
+  const name = (columnName || "").trim().toLowerCase();
+  return name === "approval date" || name === "approval_date";
 }
 
 /**
@@ -1201,10 +1202,6 @@ export function PlanningPage() {
     return name.startsWith("test");
   }
 
-  function isApprovalDateColumn(colName: string): boolean {
-    const name = colName.trim().toLowerCase();
-    return name === "approval date" || name === "approval_date";
-  }
 
   function isMumMainColumn(colName: string): boolean {
     const name = colName.trim().toLowerCase();

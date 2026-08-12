@@ -4,11 +4,13 @@
  *  - Top Filter Bar matching Suppliers & Product Master design.
  *  - Single-row toolbar: Items/Page, 📌 Freeze Columns popover (fixed header, scrollable middle list, fixed footer "Clear All Freezes"), Search Input ✕.
  *  - Contiguous sticky column snapping on left edge.
- *  - Squeezed compact form drawer to fit 1 screen without unnecessary scrolling.
+ *  - Full-page Add/Edit Form view matching Product Master layout (utilizing full screen width with ← BACK button).
  *  - Auto-synced Primary Contact -> Contacts sub-panel.
  *  - 1-Way Status Lock ("Existing" status cannot be changed back to "New").
  *  - Delete protection: records with "Existing" status OR "Yes" potential cannot be deleted.
  *  - 3-Way Duplicate Alert (Company Name + Calling Number + WhatsApp Number).
+ *  - Dynamic Buyer Types Master integration extracted from /masters/buyer-types.
+ *  - Real-time Company Name Autocomplete Suggestions.
  */
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -16,13 +18,13 @@ import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { Banner, Can } from "@/components/ui";
 import { Pagination } from "@/components/Pagination";
-import { SearchableDropdown, SearchableDropdownMulti } from "@/components/SearchableDropdown";
+import { SearchableDropdownMulti, type DropdownOption } from "@/components/SearchableDropdown";
 import { SelectField, TextAreaField, TextField } from "@/components/fields";
 import { SideDrawer } from "@/components/SideDrawer";
 import { apiDelete, apiGet, apiPatch, apiPost, toQueryString } from "@/lib/api";
 import { useLookup } from "@/lib/lookups";
 import type { Country, ProductCategory, ProductSubCategory } from "@/types";
-import type { Buyer, BuyerContact, BuyerGrade, BuyerPotential } from "@/types/buyers";
+import type { Buyer, BuyerContact } from "@/types/buyers";
 
 const MAX_CHIPS = 5;
 
@@ -70,6 +72,16 @@ const selectStyle: React.CSSProperties = {
   color: "#0f172a",
 };
 
+const sectionTitleStyle: React.CSSProperties = {
+  fontSize: "15px",
+  fontWeight: 700,
+  color: "#1e293b",
+  borderBottom: "2px solid #e2e8f0",
+  paddingBottom: "6px",
+  marginTop: "8px",
+  marginBottom: "14px",
+};
+
 export function BuyersPage() {
   const [rows, setRows] = useState<Buyer[]>([]);
   const [totalRecords, setTotalRecords] = useState(0);
@@ -83,6 +95,11 @@ export function BuyersPage() {
   const countries = useLookup<Country>("/masters/countries", 250);
   const categories = useLookup<ProductCategory>("/masters/product-categories", 250);
   const subCategories = useLookup<ProductSubCategory>("/masters/product-sub-categories", 500);
+  const buyerTypes = useLookup<{ id: string; name: string }>("/masters/buyer-types", 250);
+
+  /* Company Name Suggestions State */
+  const [companySuggestions, setCompanySuggestions] = useState<string[]>([]);
+  const [showCompanySuggestions, setShowCompanySuggestions] = useState(false);
 
   /* Top Filters */
   const [searchInput, setSearchInput] = useState("");
@@ -227,7 +244,7 @@ export function BuyersPage() {
       setLoading(true);
       setError(null);
       try {
-        const params: Record<string, unknown> = {
+        const params: Record<string, string | number | boolean | null | undefined> = {
           search: effectiveSearch,
           page: currentPage,
           page_size: pageSize,
@@ -293,6 +310,27 @@ export function BuyersPage() {
     return found ? found.id : "";
   }, [countries.items]);
 
+  /* Search Fetchers for Multi-Select Dropdowns */
+  const searchFetcher = useCallback(
+    (apiBase: string) =>
+      async (term: string, signal: AbortSignal): Promise<DropdownOption[]> => {
+        const { data } = await apiGet<{ id: string; name: string }[]>(
+          apiBase + toQueryString({ search: term, page: 1, page_size: 20, sort_order: "asc", status: "active" }),
+          { signal }
+        );
+        return (data || []).map((d) => ({ value: d.id, label: d.name }));
+      },
+    []
+  );
+
+  const fetchNameLabel = useCallback(
+    (apiBase: string) => async (id: string) => {
+      const { data } = await apiGet<{ name: string }>(`${apiBase}/${id}`);
+      return data.name;
+    },
+    []
+  );
+
   /* Chip Render Helper */
   function renderChips(ids: string[] | undefined, itemsList: Array<{ id: string; name: string }>) {
     if (!ids || !ids.length) return <span style={{ color: "#94a3b8" }}>—</span>;
@@ -349,6 +387,7 @@ export function BuyersPage() {
     setCategoryIds([]);
     setSubCategoryIds([]);
     setContacts([]);
+    setShowCompanySuggestions(false);
   }
 
   async function openEdit(buyer: Buyer) {
@@ -378,6 +417,7 @@ export function BuyersPage() {
     });
     setCategoryIds(buyer.category_ids || []);
     setSubCategoryIds(buyer.sub_category_ids || []);
+    setShowCompanySuggestions(false);
     try {
       const { data } = await apiGet<BuyerContact[]>(`/buyers/${buyer.id}/contacts`);
       setContacts(data || []);
@@ -392,6 +432,32 @@ export function BuyersPage() {
       if (id === "potential" && value !== "no") next.potential_reason = "";
       return next;
     });
+
+    /* Live company name suggestions */
+    if (id === "company_name") {
+      const query = value.trim().toLowerCase();
+      if (query.length > 0) {
+        const matches = Array.from(new Set(rows.map((r) => r.company_name))).filter((name) =>
+          name.toLowerCase().includes(query)
+        );
+        setCompanySuggestions(matches);
+        setShowCompanySuggestions(matches.length > 0);
+      } else {
+        setCompanySuggestions([]);
+        setShowCompanySuggestions(false);
+      }
+    }
+  }
+
+  function selectCompanySuggestion(name: string) {
+    setField("company_name", name);
+    setShowCompanySuggestions(false);
+    const existing = rows.find((r) => r.company_name.toLowerCase() === name.toLowerCase());
+    if (existing && modalMode === "create") {
+      if (window.confirm(`Buyer "${name}" already exists in Master. Would you like to open it to edit?`)) {
+        openEdit(existing);
+      }
+    }
   }
 
   function addEmail() {
@@ -419,13 +485,27 @@ export function BuyersPage() {
 
     const existingBuyer = rows.find((b) => b.id === editingId);
     const payload = {
-      ...form,
       version: existingBuyer?.version,
-      buyer_type: form.buyer_type || null,
-      city: form.city || null,
+      company_name: form.company_name.trim(),
+      country_id: form.country_id,
+      buyer_type: form.buyer_type.trim() || null,
+      city: form.city.trim() || null,
+      address: form.address.trim() || null,
+      contact_salutation: form.contact_salutation.trim() || null,
+      contact_full_name: form.contact_full_name.trim() || null,
+      contact_designation: form.contact_designation.trim() || null,
+      contact_calling_number: form.contact_calling_number.trim() || null,
+      contact_whatsapp_number: form.contact_whatsapp_number.trim() || null,
+      emails: form.emails,
+      tax_id_number: form.tax_id_number.trim() || null,
+      website: form.website.trim() || null,
       current_status: form.current_status || null,
+      product_range: form.product_range.trim() || null,
       potential: form.potential || null,
+      potential_reason: form.potential_reason.trim() || null,
       buyer_grade: form.buyer_grade || null,
+      currently_buying_from: form.currently_buying_from.trim() || null,
+      overall_remarks: form.overall_remarks.trim() || null,
       category_ids: categoryIds,
       sub_category_ids: subCategoryIds,
     };
@@ -560,6 +640,364 @@ export function BuyersPage() {
     return null;
   }, [form.company_name, form.contact_calling_number, form.contact_whatsapp_number, rows, modalMode, editingId]);
 
+  /* ------------------------------------------------------------------------- */
+  /* RENDER: FULL PAGE ADD / EDIT BUYER FORM (Product Master Style)           */
+  /* ------------------------------------------------------------------------- */
+  if (modalMode) {
+    return (
+      <AppShell activeKey="buyers">
+        <main className="page" style={{ padding: "20px", maxWidth: "1600px", margin: "0 auto" }}>
+          <Breadcrumb trail={["Buyer Profiles", modalMode === "create" ? "Add Buyer" : "Edit Buyer"]} />
+
+          {/* Form Header */}
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
+            <div>
+              <h1 style={{ fontSize: "22px", fontWeight: 700, color: "#0F172A", margin: 0 }}>
+                {modalMode === "create" ? "Add Buyer (Client) Data Form" : `Edit Buyer Profile: ${form.company_name}`}
+              </h1>
+              <div style={{ fontSize: "13px", color: "#64748b", marginTop: "4px" }}>
+                Fill in company details, contact information, product categories, and sales potential attributes.
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setModalMode(null)}
+              style={{
+                padding: "8px 16px",
+                borderRadius: "6px",
+                border: "1px solid #cbd5e1",
+                background: "#ffffff",
+                color: "#1e293b",
+                fontWeight: 600,
+                fontSize: "13px",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
+              }}
+            >
+              ← BACK
+            </button>
+          </div>
+
+          <Banner error={error} />
+
+          {/* Full Width Form Card */}
+          <div
+            style={{
+              background: "#ffffff",
+              borderRadius: "8px",
+              border: "1px solid #cbd5e1",
+              padding: "24px 28px",
+              boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
+            }}
+          >
+            <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+              {duplicateWarning && (
+                <div style={{ padding: "12px 16px", borderRadius: "6px", background: "#fef2f2", border: "1px solid #fca5a5", color: "#991b1b", fontSize: "13.5px", fontWeight: 600 }}>
+                  {duplicateWarning}
+                </div>
+              )}
+
+              {/* 1. Identity & Business Profile */}
+              <div>
+                <div style={sectionTitleStyle}>Identity &amp; Business Profile</div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "16px" }}>
+                  
+                  {/* Company Name with Live Typeahead Suggestions */}
+                  <div style={{ position: "relative" }}>
+                    <TextField
+                      id="company_name"
+                      label="Name of Company *"
+                      required
+                      placeholder="Name of Company"
+                      value={form.company_name}
+                      onChange={(v) => setField("company_name", v)}
+                    />
+                    {showCompanySuggestions && (
+                      <div
+                        style={{
+                          position: "absolute",
+                          top: "100%",
+                          left: 0,
+                          right: 0,
+                          zIndex: 50,
+                          background: "#ffffff",
+                          border: "1px solid #cbd5e1",
+                          borderRadius: "6px",
+                          boxShadow: "0 8px 16px rgba(0,0,0,0.1)",
+                          maxHeight: "160px",
+                          overflowY: "auto",
+                          marginTop: "2px",
+                        }}
+                      >
+                        <div style={{ padding: "6px 10px", fontSize: "11px", fontWeight: 700, color: "#64748b", background: "#f8fafc", borderBottom: "1px solid #f1f5f9" }}>
+                          Existing Company Suggestions
+                        </div>
+                        {companySuggestions.map((sug) => (
+                          <div
+                            key={sug}
+                            onClick={() => selectCompanySuggestion(sug)}
+                            style={{
+                              padding: "8px 12px",
+                              fontSize: "13px",
+                              cursor: "pointer",
+                              color: "#0f172a",
+                              borderBottom: "1px solid #f1f5f9",
+                            }}
+                            onMouseDown={(e) => e.preventDefault()}
+                          >
+                            🏢 <strong>{sug}</strong> <span style={{ fontSize: "11px", color: "#2563eb", marginLeft: "6px" }}>(Existing in Master)</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Dynamic Buyer Type extracted from Buyer Types Master */}
+                  <SelectField id="buyer_type" label="Buyer Type" value={form.buyer_type} onChange={(v) => setField("buyer_type", v)}>
+                    <option value="">-- Select Buyer Type --</option>
+                    {buyerTypes.items.map((bt) => (
+                      <option key={bt.id} value={bt.name.toLowerCase()}>
+                        {bt.name}
+                      </option>
+                    ))}
+                    {/* Fallback defaults */}
+                    {!buyerTypes.items.some((bt) => bt.name.toLowerCase() === "manufacturer") && <option value="manufacturer">Manufacturer</option>}
+                    {!buyerTypes.items.some((bt) => bt.name.toLowerCase() === "dealer / trader" || bt.name.toLowerCase() === "trader") && <option value="trader">Trader</option>}
+                  </SelectField>
+
+                  <TextField id="tax_id_number" label="Tax ID Number (TIN / GST)" placeholder="e.g. Tax / GST / TIN Number" value={form.tax_id_number} onChange={(v) => setField("tax_id_number", v)} />
+                </div>
+              </div>
+
+              {/* 2. Classification & Product Categories */}
+              <div>
+                <div style={sectionTitleStyle}>Classification &amp; Product Interest</div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
+                  <div>
+                    <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155", display: "block", marginBottom: "6px" }}>Product Category (multiple)</label>
+                    <SearchableDropdownMulti
+                      values={categoryIds}
+                      onChange={setCategoryIds}
+                      placeholder="Select categories…"
+                      fetchOptions={searchFetcher("/masters/product-categories")}
+                      fetchLabelForValue={fetchNameLabel("/masters/product-categories")}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155", display: "block", marginBottom: "6px" }}>Product Sub Category (multiple)</label>
+                    <SearchableDropdownMulti
+                      values={subCategoryIds}
+                      onChange={setSubCategoryIds}
+                      placeholder="Select sub-categories…"
+                      fetchOptions={searchFetcher("/masters/product-sub-categories")}
+                      fetchLabelForValue={fetchNameLabel("/masters/product-sub-categories")}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* 3. Location Details */}
+              <div>
+                <div style={sectionTitleStyle}>Location Details</div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", marginBottom: "16px" }}>
+                  <SelectField id="country_id" label="Country *" required value={form.country_id} onChange={(v) => setField("country_id", v)}>
+                    <option value="">-- Select Country --</option>
+                    {countries.items.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </SelectField>
+                  <TextField id="city" label="City" placeholder="City name" value={form.city} onChange={(v) => setField("city", v)} />
+                </div>
+                <TextAreaField id="address" label="Address" rows={2} placeholder="Full postal address details…" value={form.address} onChange={(v) => setField("address", v)} />
+              </div>
+
+              {/* 4. Primary Contact Person */}
+              <div>
+                <div style={sectionTitleStyle}>Primary Contact Person</div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr 2fr", gap: "16px", marginBottom: "16px" }}>
+                  <SelectField id="contact_salutation" label="Title" value={form.contact_salutation} onChange={(v) => setField("contact_salutation", v)}>
+                    <option value="">Select</option>
+                    <option value="Mr.">Mr.</option>
+                    <option value="Mrs.">Mrs.</option>
+                    <option value="Ms.">Ms.</option>
+                  </SelectField>
+                  <TextField id="contact_full_name" label="Full Name" placeholder="Contact Person Full Name" value={form.contact_full_name} onChange={(v) => setField("contact_full_name", v)} />
+                  <TextField id="contact_designation" label="Designation" placeholder="e.g. Purchase Manager / Owner" value={form.contact_designation} onChange={(v) => setField("contact_designation", v)} />
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
+                  <TextField id="contact_calling_number" label="Calling Number (with country code, max 10 digits)" placeholder="+256 700000000" value={form.contact_calling_number} onChange={(v) => setField("contact_calling_number", v)} />
+                  <TextField id="contact_whatsapp_number" label="WhatsApp Number (with country code, max 10 digits)" placeholder="+256 700000000" value={form.contact_whatsapp_number} onChange={(v) => setField("contact_whatsapp_number", v)} />
+                </div>
+              </div>
+
+              {/* 5. Online & Digital Channels */}
+              <div>
+                <div style={sectionTitleStyle}>Digital Channels &amp; Emails</div>
+                <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "16px" }}>
+                  <div>
+                    <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155", display: "block", marginBottom: "6px" }}>Email IDs (Multiple)</label>
+                    <div style={{ display: "flex", gap: "10px" }}>
+                      <input
+                        type="email"
+                        placeholder="Enter email address and click + Add"
+                        value={emailInput}
+                        onChange={(e) => setEmailInput(e.target.value)}
+                        style={{ flex: 1, padding: "8px 12px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px" }}
+                      />
+                      <button type="button" onClick={addEmail} style={{ padding: "8px 16px", borderRadius: "6px", background: "#e2e8f0", border: "1px solid #cbd5e1", fontWeight: 700, cursor: "pointer", fontSize: "13px" }}>
+                        + Add Email
+                      </button>
+                    </div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginTop: "10px" }}>
+                      {form.emails.map((em) => (
+                        <span key={em} style={{ padding: "4px 10px", borderRadius: "16px", background: "#f1f5f9", border: "1px solid #e2e8f0", fontSize: "12.5px", display: "inline-flex", alignItems: "center", gap: "8px" }}>
+                          <a href={`mailto:${em}`} style={{ color: "#2563eb", fontWeight: 500 }}>{em}</a>
+                          <button type="button" onClick={() => removeEmail(em)} style={{ border: "none", background: "none", cursor: "pointer", color: "#ef4444", fontWeight: 700 }}>✕</button>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                  <TextField id="website" label="Website" placeholder="https://company.com" value={form.website} onChange={(v) => setField("website", v)} />
+                </div>
+              </div>
+
+              {/* 6. Pipeline Status & Potential */}
+              <div>
+                <div style={sectionTitleStyle}>Sales Pipeline Status &amp; Potential</div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "16px" }}>
+                  <SelectField id="current_status" label="Current Status" value={form.current_status} onChange={(v) => setField("current_status", v)}>
+                    <option value="">-- Select Status --</option>
+                    {/* Document 1-Way Lock Rule: Cannot set 'new' if already 'existing' */}
+                    {rows.find((b) => b.id === editingId)?.current_status !== "existing" && <option value="new">New</option>}
+                    <option value="existing">Existing</option>
+                  </SelectField>
+
+                  <SelectField id="potential" label="Potential" value={form.potential} onChange={(v) => setField("potential", v)}>
+                    <option value="">-- Select Potential --</option>
+                    <option value="yes">Yes</option>
+                    <option value="no">No</option>
+                  </SelectField>
+
+                  <SelectField id="buyer_grade" label="Client Grade" value={form.buyer_grade} onChange={(v) => setField("buyer_grade", v)}>
+                    <option value="">-- Select Grade --</option>
+                    <option value="A">Grade A</option>
+                    <option value="B">Grade B</option>
+                    <option value="C">Grade C</option>
+                  </SelectField>
+                </div>
+
+                {/* Conditional Potential Reason */}
+                {form.potential === "no" && (
+                  <div style={{ marginTop: "14px" }}>
+                    <TextAreaField id="potential_reason" label="If Potential is No, Reason *" rows={2} placeholder="Specify detailed reason why potential is No…" value={form.potential_reason} onChange={(v) => setField("potential_reason", v)} />
+                  </div>
+                )}
+              </div>
+
+              {/* 7. Product Range & Remarks */}
+              <div>
+                <div style={sectionTitleStyle}>Product Range &amp; Remarks</div>
+                <TextAreaField id="product_range" label="Product Range (Manufactured or Supplied)" rows={2} placeholder="Products they supply or manufacture…" value={form.product_range} onChange={(v) => setField("product_range", v)} />
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", marginTop: "14px" }}>
+                  <TextAreaField id="currently_buying_from" label="Currently Buying From" rows={2} placeholder="Competitors or suppliers they currently buy from…" value={form.currently_buying_from} onChange={(v) => setField("currently_buying_from", v)} />
+                  <TextAreaField id="overall_remarks" label="Overall Observation / Remarks" rows={2} placeholder="General observation remarks…" value={form.overall_remarks} onChange={(v) => setField("overall_remarks", v)} />
+                </div>
+              </div>
+
+              {/* 8. Additional Contacts Sub-Panel (Only in Edit Mode) */}
+              {modalMode === "edit" && editingId && (
+                <div>
+                  <div style={sectionTitleStyle}>Additional Contact Persons ({contacts.length})</div>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
+                    <div style={{ fontSize: "13px", color: "#64748b" }}>
+                      Main form contact is automatically saved as Primary. You can add extra team contacts below.
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setContactFormOpen((v) => !v)}
+                      style={{ padding: "6px 14px", fontSize: "12.5px", borderRadius: "6px", background: "#f1f5f9", border: "1px solid #cbd5e1", cursor: "pointer", fontWeight: 600 }}
+                    >
+                      {contactFormOpen ? "Cancel Contact" : "+ Add Contact Person"}
+                    </button>
+                  </div>
+
+                  {contactFormOpen && (
+                    <div style={{ background: "#f8fafc", padding: "16px", borderRadius: "8px", marginBottom: "16px", border: "1px solid #cbd5e1" }}>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr 2fr", gap: "12px", marginBottom: "12px" }}>
+                        <SelectField id="contact_salutation_sub" label="Title" value={contactForm.salutation} onChange={(v) => setContactForm((prev) => ({ ...prev, salutation: v }))}>
+                          <option value="">Select</option>
+                          <option value="Mr.">Mr.</option>
+                          <option value="Mrs.">Mrs.</option>
+                          <option value="Ms.">Ms.</option>
+                        </SelectField>
+                        <TextField id="contact_name_sub" label="Full Name *" required placeholder="Contact Name" value={contactForm.person_name} onChange={(v) => setContactForm((prev) => ({ ...prev, person_name: v }))} />
+                        <TextField id="contact_designation_sub" label="Designation" placeholder="Designation" value={contactForm.designation} onChange={(v) => setContactForm((prev) => ({ ...prev, designation: v }))} />
+                      </div>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "12px", marginBottom: "12px" }}>
+                        <TextField id="contact_calling_sub" label="Calling Number" placeholder="Calling #" value={contactForm.calling_number} onChange={(v) => setContactForm((prev) => ({ ...prev, calling_number: v }))} />
+                        <TextField id="contact_whatsapp_sub" label="WhatsApp Number" placeholder="WhatsApp #" value={contactForm.whatsapp_number} onChange={(v) => setContactForm((prev) => ({ ...prev, whatsapp_number: v }))} />
+                        <TextField id="contact_email_sub" label="Email" placeholder="email@domain.com" value={contactForm.email} onChange={(v) => setContactForm((prev) => ({ ...prev, email: v }))} />
+                      </div>
+                      <button type="button" onClick={handleAddContact} style={{ padding: "8px 18px", borderRadius: "6px", background: "#2563eb", color: "#fff", border: "none", fontWeight: 600, fontSize: "13px", cursor: "pointer" }}>
+                        Save Contact
+                      </button>
+                    </div>
+                  )}
+
+                  <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                    {contacts.length === 0 ? (
+                      <div style={{ fontSize: "13px", color: "#94a3b8", fontStyle: "italic" }}>No additional contact persons added yet.</div>
+                    ) : (
+                      contacts.map((c) => (
+                        <div key={c.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", background: "#f8fafc", borderRadius: "6px", border: "1px solid #e2e8f0", fontSize: "13px" }}>
+                          <div>
+                            <strong>{c.salutation} {c.person_name}</strong> {c.designation ? `(${c.designation})` : ""} {c.is_primary && <span style={{ color: "#2563eb", fontWeight: 700, marginLeft: "6px" }}>[Primary Contact]</span>}
+                            <div style={{ color: "#64748b", marginTop: "2px", fontSize: "12.5px" }}>
+                              📞 {c.calling_number || "—"} | 💬 {c.whatsapp_number || "—"} | ✉️ {c.email || "—"}
+                            </div>
+                          </div>
+                          {!c.is_primary && (
+                            <button type="button" onClick={() => handleDeleteContact(c.id)} style={{ border: "none", background: "none", color: "#ef4444", fontWeight: 700, cursor: "pointer" }}>
+                              Delete ✕
+                            </button>
+                          )}
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Form Action Buttons */}
+              <div style={{ borderTop: "2px solid #e2e8f0", paddingTop: "16px", marginTop: "12px", display: "flex", justifyContent: "flex-end", gap: "12px" }}>
+                <button
+                  type="button"
+                  onClick={() => setModalMode(null)}
+                  style={{ padding: "9px 20px", borderRadius: "6px", border: "1px solid #cbd5e1", background: "#ffffff", fontWeight: 600, fontSize: "13.5px", cursor: "pointer" }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  style={{ padding: "9px 24px", borderRadius: "6px", background: "#2563eb", color: "#ffffff", border: "none", fontWeight: 600, fontSize: "13.5px", cursor: "pointer" }}
+                >
+                  {modalMode === "create" ? "Save Buyer Profile" : "Update Buyer Profile"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </main>
+      </AppShell>
+    );
+  }
+
+  /* ------------------------------------------------------------------------- */
+  /* RENDER: MAIN BUYER MASTER LIST VIEW                                        */
+  /* ------------------------------------------------------------------------- */
   return (
     <AppShell activeKey="buyers">
       <main className="page" style={{ padding: "20px", maxWidth: "1600px", margin: "0 auto" }}>
@@ -644,8 +1082,13 @@ export function BuyersPage() {
                 <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", display: "block", marginBottom: "4px" }}>Buyer Type</label>
                 <select value={buyerTypeFilter} onChange={(e) => { setCurrentPage(1); setBuyerTypeFilter(e.target.value); }} style={{ ...selectStyle, width: "100%" }}>
                   <option value="">All Buyer Types</option>
-                  <option value="manufacturer">Manufacturer</option>
-                  <option value="trader">Trader</option>
+                  {buyerTypes.items.map((bt) => (
+                    <option key={bt.id} value={bt.name.toLowerCase()}>
+                      {bt.name}
+                    </option>
+                  ))}
+                  {!buyerTypes.items.some((bt) => bt.name.toLowerCase() === "manufacturer") && <option value="manufacturer">Manufacturer</option>}
+                  {!buyerTypes.items.some((bt) => bt.name.toLowerCase() === "dealer / trader" || bt.name.toLowerCase() === "trader") && <option value="trader">Trader</option>}
                 </select>
               </div>
               <div>
@@ -1023,10 +1466,13 @@ export function BuyersPage() {
           {/* Pagination */}
           <div style={{ padding: "12px 20px", borderTop: "1px solid #e2e8f0" }}>
             <Pagination
-              currentPage={currentPage}
-              totalPages={Math.ceil(totalRecords / pageSize) || 1}
+              pagination={{
+                current_page: currentPage,
+                total_pages: Math.ceil(totalRecords / pageSize) || 1,
+                total_records: totalRecords,
+                page_size: pageSize,
+              }}
               pageSize={pageSize}
-              totalRecords={totalRecords}
               onPageChange={setCurrentPage}
             />
           </div>
@@ -1034,7 +1480,11 @@ export function BuyersPage() {
 
         {/* View Details Drawer */}
         {detailBuyer && (
-          <SideDrawer title={`Buyer Profile: ${detailBuyer.company_name}`} isOpen={Boolean(detailBuyer)} onClose={() => setDetailBuyer(null)} width="650px">
+          <SideDrawer
+            open={Boolean(detailBuyer)}
+            title={`Buyer Profile: ${detailBuyer.company_name}`}
+            onClose={() => setDetailBuyer(null)}
+          >
             <div style={{ display: "flex", flexDirection: "column", gap: "16px", padding: "12px" }}>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", background: "#f8fafc", padding: "16px", borderRadius: "8px" }}>
                 <div><strong>Company Name:</strong> {detailBuyer.company_name}</div>
@@ -1087,235 +1537,6 @@ export function BuyersPage() {
                 </div>
               )}
             </div>
-          </SideDrawer>
-        )}
-
-        {/* Compact Form Drawer */}
-        {modalMode && (
-          <SideDrawer
-            title={modalMode === "create" ? "Add Buyer (Client) Data Form" : `Edit Buyer Profile: ${form.company_name}`}
-            isOpen={Boolean(modalMode)}
-            onClose={() => setModalMode(null)}
-            width="750px"
-          >
-            <form onSubmit={handleSubmit} style={{ padding: "12px", display: "flex", flexDirection: "column", gap: "16px" }}>
-              {duplicateWarning && (
-                <div style={{ padding: "10px 14px", borderRadius: "6px", background: "#fef2f2", border: "1px solid #fca5a5", color: "#991b1b", fontSize: "13px", fontWeight: 600 }}>
-                  {duplicateWarning}
-                </div>
-              )}
-
-              {/* Company & Type */}
-              <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "12px" }}>
-                <TextField id="company_name" label="Name of Company *" required placeholder="Company Name" value={form.company_name} onChange={(v) => setField("company_name", v)} />
-                <SelectField id="buyer_type" label="Buyer Type" value={form.buyer_type} onChange={(v) => setField("buyer_type", v)}>
-                  <option value="">-- Select --</option>
-                  <option value="manufacturer">Manufacturer</option>
-                  <option value="trader">Trader</option>
-                </SelectField>
-              </div>
-
-              {/* Categories & Sub-Categories */}
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
-                <div>
-                  <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155", display: "block", marginBottom: "4px" }}>Product Category (multiple)</label>
-                  <SearchableDropdownMulti
-                    values={categoryIds}
-                    onChange={setCategoryIds}
-                    placeholder="Select categories…"
-                    options={categories.items.map((c) => ({ value: c.id, label: c.name }))}
-                  />
-                </div>
-                <div>
-                  <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155", display: "block", marginBottom: "4px" }}>Product Sub Category (multiple)</label>
-                  <SearchableDropdownMulti
-                    values={subCategoryIds}
-                    onChange={setSubCategoryIds}
-                    placeholder="Select sub-categories…"
-                    options={subCategories.items
-                      .filter((sc) => categoryIds.length === 0 || categoryIds.includes(sc.category_id))
-                      .map((sc) => ({ value: sc.id, label: sc.name }))}
-                  />
-                </div>
-              </div>
-
-              {/* Country & City */}
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
-                <SelectField id="country_id" label="Country *" required value={form.country_id} onChange={(v) => setField("country_id", v)}>
-                  <option value="">-- Select Country --</option>
-                  {countries.items.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
-                  ))}
-                </SelectField>
-                <TextField id="city" label="City" placeholder="Enter City" value={form.city} onChange={(v) => setField("city", v)} />
-              </div>
-
-              <TextAreaField id="address" label="Address" rows={2} placeholder="Full address details…" value={form.address} onChange={(v) => setField("address", v)} />
-
-              {/* Primary Contact Section */}
-              <div style={{ borderTop: "1px solid #e2e8f0", paddingTop: "12px" }}>
-                <div style={{ fontWeight: 700, fontSize: "14px", color: "#1e293b", marginBottom: "10px" }}>Primary Contact Person</div>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr 2fr", gap: "10px" }}>
-                  <SelectField id="contact_salutation" label="Title" value={form.contact_salutation} onChange={(v) => setField("contact_salutation", v)}>
-                    <option value="">Select</option>
-                    <option value="Mr.">Mr.</option>
-                    <option value="Mrs.">Mrs.</option>
-                    <option value="Ms.">Ms.</option>
-                  </SelectField>
-                  <TextField id="contact_full_name" label="Full Name" placeholder="Contact Person Name" value={form.contact_full_name} onChange={(v) => setField("contact_full_name", v)} />
-                  <TextField id="contact_designation" label="Designation" placeholder="e.g. Purchase Manager" value={form.contact_designation} onChange={(v) => setField("contact_designation", v)} />
-                </div>
-
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", marginTop: "8px" }}>
-                  <TextField id="contact_calling_number" label="Calling Number (max 10 digits)" placeholder="+256 700000000" value={form.contact_calling_number} onChange={(v) => setField("contact_calling_number", v)} />
-                  <TextField id="contact_whatsapp_number" label="WhatsApp Number (max 10 digits)" placeholder="+256 700000000" value={form.contact_whatsapp_number} onChange={(v) => setField("contact_whatsapp_number", v)} />
-                </div>
-              </div>
-
-              {/* Email IDs & Website */}
-              <div style={{ borderTop: "1px solid #e2e8f0", paddingTop: "12px" }}>
-                <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "10px" }}>
-                  <div>
-                    <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155", display: "block", marginBottom: "4px" }}>Email IDs (Multiple)</label>
-                    <div style={{ display: "flex", gap: "8px" }}>
-                      <input
-                        type="email"
-                        placeholder="add email and click +"
-                        value={emailInput}
-                        onChange={(e) => setEmailInput(e.target.value)}
-                        style={{ flex: 1, padding: "7px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px" }}
-                      />
-                      <button type="button" onClick={addEmail} style={{ padding: "7px 12px", borderRadius: "6px", background: "#e2e8f0", border: "1px solid #cbd5e1", fontWeight: 700, cursor: "pointer" }}>
-                        + Add
-                      </button>
-                    </div>
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginTop: "6px" }}>
-                      {form.emails.map((em) => (
-                        <span key={em} style={{ padding: "2px 8px", borderRadius: "12px", background: "#f1f5f9", fontSize: "12px", display: "flex", alignItems: "center", gap: "6px" }}>
-                          <a href={`mailto:${em}`} style={{ color: "#2563eb" }}>{em}</a>
-                          <button type="button" onClick={() => removeEmail(em)} style={{ border: "none", background: "none", cursor: "pointer", color: "#ef4444" }}>✕</button>
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                  <TextField id="website" label="Website" placeholder="https://company.com" value={form.website} onChange={(v) => setField("website", v)} />
-                </div>
-              </div>
-
-              {/* Status, Potential & Grade */}
-              <div style={{ borderTop: "1px solid #e2e8f0", paddingTop: "12px", display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: "10px" }}>
-                <SelectField
-                  id="current_status"
-                  label="Current Status"
-                  value={form.current_status}
-                  onChange={(v) => setField("current_status", v)}
-                >
-                  <option value="">-- Select --</option>
-                  {/* Document 1-Way Lock Rule: Cannot set 'new' if already 'existing' */}
-                  {rows.find((b) => b.id === editingId)?.current_status !== "existing" && <option value="new">New</option>}
-                  <option value="existing">Existing</option>
-                </SelectField>
-
-                <SelectField id="potential" label="Potential" value={form.potential} onChange={(v) => setField("potential", v)}>
-                  <option value="">-- Select --</option>
-                  <option value="yes">Yes</option>
-                  <option value="no">No</option>
-                </SelectField>
-
-                <SelectField id="buyer_grade" label="Client Grade" value={form.buyer_grade} onChange={(v) => setField("buyer_grade", v)}>
-                  <option value="">-- Select --</option>
-                  <option value="A">Grade A</option>
-                  <option value="B">Grade B</option>
-                  <option value="C">Grade C</option>
-                </SelectField>
-
-                <TextField id="tax_id_number" label="Tax ID (TIN/GST)" placeholder="Tax ID" value={form.tax_id_number} onChange={(v) => setField("tax_id_number", v)} />
-              </div>
-
-              {/* Conditional Potential Reason */}
-              {form.potential === "no" && (
-                <TextAreaField id="potential_reason" label="If Potential is No, Reason *" required rows={2} placeholder="Specify reason why potential is No…" value={form.potential_reason} onChange={(v) => setField("potential_reason", v)} />
-              )}
-
-              <TextAreaField id="product_range" label="Product Range (Manufactured or Supplied)" rows={2} placeholder="Products they supply…" value={form.product_range} onChange={(v) => setField("product_range", v)} />
-
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
-                <TextAreaField id="currently_buying_from" label="Currently Buying From" rows={2} placeholder="Competitor details…" value={form.currently_buying_from} onChange={(v) => setField("currently_buying_from", v)} />
-                <TextAreaField id="overall_remarks" label="Overall Observation / Remarks" rows={2} placeholder="General remarks…" value={form.overall_remarks} onChange={(v) => setField("overall_remarks", v)} />
-              </div>
-
-              {/* Additional Contacts Sub-Panel (Only in Edit Mode) */}
-              {modalMode === "edit" && editingId && (
-                <div style={{ borderTop: "2px solid #e2e8f0", paddingTop: "14px", marginTop: "8px" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
-                    <div style={{ fontWeight: 700, fontSize: "14px", color: "#0f172a" }}>Additional Contact Persons ({contacts.length})</div>
-                    <button
-                      type="button"
-                      onClick={() => setContactFormOpen((v) => !v)}
-                      style={{ padding: "4px 10px", fontSize: "12px", borderRadius: "4px", background: "#f1f5f9", border: "1px solid #cbd5e1", cursor: "pointer", fontWeight: 600 }}
-                    >
-                      {contactFormOpen ? "Cancel Contact" : "+ Add Contact Person"}
-                    </button>
-                  </div>
-
-                  {contactFormOpen && (
-                    <div style={{ background: "#f8fafc", padding: "12px", borderRadius: "6px", marginBottom: "12px", border: "1px solid #cbd5e1" }}>
-                      <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr 2fr", gap: "8px", marginBottom: "8px" }}>
-                        <SelectField id="contact_salutation_sub" label="Title" value={contactForm.salutation} onChange={(v) => setContactForm((prev) => ({ ...prev, salutation: v }))}>
-                          <option value="">Select</option>
-                          <option value="Mr.">Mr.</option>
-                          <option value="Mrs.">Mrs.</option>
-                          <option value="Ms.">Ms.</option>
-                        </SelectField>
-                        <TextField id="contact_name_sub" label="Full Name *" required placeholder="Contact Name" value={contactForm.person_name} onChange={(v) => setContactForm((prev) => ({ ...prev, person_name: v }))} />
-                        <TextField id="contact_designation_sub" label="Designation" placeholder="Designation" value={contactForm.designation} onChange={(v) => setContactForm((prev) => ({ ...prev, designation: v }))} />
-                      </div>
-                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px", marginBottom: "8px" }}>
-                        <TextField id="contact_calling_sub" label="Calling Number" placeholder="Calling #" value={contactForm.calling_number} onChange={(v) => setContactForm((prev) => ({ ...prev, calling_number: v }))} />
-                        <TextField id="contact_whatsapp_sub" label="WhatsApp Number" placeholder="WhatsApp #" value={contactForm.whatsapp_number} onChange={(v) => setContactForm((prev) => ({ ...prev, whatsapp_number: v }))} />
-                        <TextField id="contact_email_sub" label="Email" placeholder="email@domain.com" value={contactForm.email} onChange={(v) => setContactForm((prev) => ({ ...prev, email: v }))} />
-                      </div>
-                      <button type="button" onClick={handleAddContact} style={{ padding: "6px 14px", borderRadius: "4px", background: "#2563eb", color: "#fff", border: "none", fontWeight: 600, fontSize: "12.5px", cursor: "pointer" }}>
-                        Save Contact
-                      </button>
-                    </div>
-                  )}
-
-                  <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-                    {contacts.length === 0 ? (
-                      <div style={{ fontSize: "12.5px", color: "#94a3b8" }}>No additional contacts added yet.</div>
-                    ) : (
-                      contacts.map((c) => (
-                        <div key={c.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 12px", background: "#f8fafc", borderRadius: "6px", border: "1px solid #e2e8f0", fontSize: "12.5px" }}>
-                          <div>
-                            <strong>{c.salutation} {c.person_name}</strong> {c.designation ? `(${c.designation})` : ""} {c.is_primary && <span style={{ color: "#2563eb", fontWeight: 700 }}>[Primary]</span>}
-                            <br />
-                            <span style={{ color: "#64748b" }}>📞 {c.calling_number || "—"} | 💬 {c.whatsapp_number || "—"} | ✉️ {c.email || "—"}</span>
-                          </div>
-                          {!c.is_primary && (
-                            <button type="button" onClick={() => handleDeleteContact(c.id)} style={{ border: "none", background: "none", color: "#ef4444", fontWeight: 700, cursor: "pointer" }}>
-                              Delete ✕
-                            </button>
-                          )}
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* Submit Buttons */}
-              <div style={{ borderTop: "1px solid #e2e8f0", paddingTop: "12px", display: "flex", justifyContent: "flex-end", gap: "10px" }}>
-                <button type="button" onClick={() => setModalMode(null)} style={{ padding: "8px 16px", borderRadius: "6px", border: "1px solid #cbd5e1", background: "#ffffff", fontWeight: 600, cursor: "pointer" }}>
-                  Cancel
-                </button>
-                <button type="submit" style={{ padding: "8px 20px", borderRadius: "6px", background: "#2563eb", color: "#ffffff", border: "none", fontWeight: 600, cursor: "pointer" }}>
-                  {modalMode === "create" ? "Save Buyer Profile" : "Update Buyer Profile"}
-                </button>
-              </div>
-            </form>
           </SideDrawer>
         )}
       </main>

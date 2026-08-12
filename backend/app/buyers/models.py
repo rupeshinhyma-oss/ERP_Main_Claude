@@ -78,9 +78,7 @@ class Buyer(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
     __tablename__ = "buyers"
 
     company_name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)  # "Name of Company*"
-    buyer_type: Mapped[BuyerType | None] = mapped_column(
-        SAEnum(BuyerType, name="buyer_type", native_enum=False, length=20), nullable=True
-    )
+    buyer_type: Mapped[str | None] = mapped_column(String(150), nullable=True)
 
     country_id: Mapped[uuid.UUID] = mapped_column(
         GUID(), ForeignKey("countries.id", ondelete="RESTRICT"), nullable=False, index=True

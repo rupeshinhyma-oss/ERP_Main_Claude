@@ -45,6 +45,7 @@ export const NAV_SECTIONS: NavSection[] = [
       { key: "masters-subcategories", label: "Sub Categories", path: "/masters/subcategories", icon: "folder", permission: "subcategory.view" },
       { key: "masters-brands", label: "Brands", path: "/masters/brands", icon: "tag", permission: "brand.view" },
       { key: "masters-supplier-types", label: "Supplier Types", path: "/masters/supplier-types", icon: "tag", permission: "supplier.view" },
+      { key: "masters-buyer-types", label: "Buyer Types", path: "/masters/buyer-types", icon: "tag", permission: "buyer.view" },
     ],
   },
 
@@ -111,6 +112,7 @@ export const PAGE_TITLES: Record<string, string> = {
   "masters-hsn": "HSN Codes",
   "masters-brands": "Brands",
   "masters-supplier-types": "Supplier Types",
+  "masters-buyer-types": "Buyer Types",
 
   "masters-categories": "Categories",
   "masters-subcategories": "Sub Categories",

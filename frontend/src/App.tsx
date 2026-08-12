@@ -37,6 +37,7 @@ import { UomPage } from "@/pages/masters/Uom";
 import { HsnPage } from "@/pages/masters/Hsn";
 import { BrandsPage } from "@/pages/masters/Brands";
 import { SupplierTypesPage } from "@/pages/masters/SupplierTypes";
+import { BuyerTypesPage } from "@/pages/masters/BuyerTypes";
 import { CategoriesPage } from "@/pages/masters/Categories";
 import { SubCategoriesPage } from "@/pages/masters/SubCategories";
 import { ProductsPage } from "@/pages/masters/Products";
@@ -84,6 +85,7 @@ export function App() {
       <Route path="/masters/hsn" element={<HsnPage />} />
       <Route path="/masters/brands" element={<BrandsPage />} />
       <Route path="/masters/supplier-types" element={<SupplierTypesPage />} />
+      <Route path="/masters/buyer-types" element={<BuyerTypesPage />} />
       <Route path="/masters/categories" element={<CategoriesPage />} />
       <Route path="/masters/subcategories" element={<SubCategoriesPage />} />
       <Route path="/masters/products" element={<ProductsPage />} />

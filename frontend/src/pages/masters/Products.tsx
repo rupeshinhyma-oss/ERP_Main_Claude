@@ -713,6 +713,14 @@ export function ProductsPage() {
                 onChange={(newVals) => {
                   set("organization_ids_json", JSON.stringify(newVals));
                   set("organization_id", newVals[0] || "");
+
+                  // Automatically check / pre-select all branches belonging to the selected organization(s)
+                  const selectedOrgs = organizations.items.filter((org) => newVals.includes(org.id));
+                  const autoBranchIds: string[] = selectedOrgs.flatMap((org) => {
+                    const branches: any[] = (org as any).branches || [];
+                    return branches.map((b: any) => b.id || `${org.id}_${b.name}`);
+                  });
+                  set("branch_ids_json", JSON.stringify(autoBranchIds));
                 }}
               />
 

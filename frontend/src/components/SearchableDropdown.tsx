@@ -746,10 +746,44 @@ export function SearchableDropdownMultiPanel({
           {selected.length === 0 ? (
             <span>{placeholder}</span>
           ) : (
-            <>
-              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {firstThree.map((s) => s.label).join(", ")}
-              </span>
+            <div style={{ display: "flex", flexWrap: "nowrap", gap: "5px", overflow: "hidden", alignItems: "center" }}>
+              {firstThree.map((s) => (
+                <span
+                  key={s.value}
+                  style={{
+                    background: "#0061f2",
+                    color: "#ffffff",
+                    padding: "3px 9px",
+                    borderRadius: "4px",
+                    fontSize: "12px",
+                    fontWeight: 600,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "5px",
+                    whiteSpace: "nowrap",
+                    flexShrink: 0,
+                    boxShadow: "0 1px 2px rgba(0,0,0,0.1)",
+                  }}
+                >
+                  {s.label}
+                  <span
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      removeItem(s.value);
+                    }}
+                    style={{
+                      cursor: "pointer",
+                      marginLeft: "2px",
+                      opacity: 0.85,
+                      fontSize: "11px",
+                      fontWeight: 700,
+                    }}
+                    title="Remove"
+                  >
+                    ✕
+                  </span>
+                </span>
+              ))}
               {extraCount > 0 && (
                 <span
                   onClick={(e) => {
@@ -757,11 +791,11 @@ export function SearchableDropdownMultiPanel({
                     setShowEyeModal(true);
                   }}
                   style={{
-                    background: "#0284c7",
+                    background: "#1e40af",
                     color: "#ffffff",
                     fontSize: "11.5px",
                     fontWeight: 700,
-                    padding: "2px 8px",
+                    padding: "3px 9px",
                     borderRadius: "12px",
                     flexShrink: 0,
                     cursor: "pointer",
@@ -775,7 +809,7 @@ export function SearchableDropdownMultiPanel({
                   +{extraCount} more 👁️
                 </span>
               )}
-            </>
+            </div>
           )}
         </div>
         <span style={{

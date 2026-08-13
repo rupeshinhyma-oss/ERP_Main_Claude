@@ -10,6 +10,6 @@ MODULE_NAME = "buyer"
 # upper bound; a lower bound of 6 is assumed here to reject obviously
 # invalid entries (e.g. a lone "0") without being stricter than specified.
 PHONE_MIN_DIGITS = 6
-PHONE_MAX_DIGITS = 10
+PHONE_MAX_DIGITS = 15
 
 DEFAULT_SALUTATIONS = ("Mr.", "Mrs.", "Ms.")

@@ -121,8 +121,22 @@ class BuyerCreate(BaseModel):
     @field_validator("buyer_type", "current_status", "potential", "buyer_grade", mode="before")
     @classmethod
     def empty_str_to_none(cls, v: Any) -> Any:
-        if isinstance(v, str) and not v.strip():
-            return None
+        if isinstance(v, str):
+            cleaned = v.strip()
+            if not cleaned or cleaned.lower() in ("select", "-- select --", "-- select status --", "-- select potential --", "-- select grade --"):
+                return None
+            # Handle "Grade A", "Grade B", "Grade C"
+            if cleaned.lower().startswith("grade "):
+                grade_letter = cleaned[6:].strip().upper()
+                if grade_letter in ("A", "B", "C"):
+                    return grade_letter
+            # Handle case mismatch e.g. "New" -> "new", "Yes" -> "yes"
+            lower_v = cleaned.lower()
+            if lower_v in ("new", "existing", "yes", "no"):
+                return lower_v
+            if cleaned.upper() in ("A", "B", "C"):
+                return cleaned.upper()
+            return cleaned
         return v
 
 
@@ -161,8 +175,22 @@ class BuyerUpdate(BaseModel):
     @field_validator("buyer_type", "current_status", "potential", "buyer_grade", mode="before")
     @classmethod
     def empty_str_to_none(cls, v: Any) -> Any:
-        if isinstance(v, str) and not v.strip():
-            return None
+        if isinstance(v, str):
+            cleaned = v.strip()
+            if not cleaned or cleaned.lower() in ("select", "-- select --", "-- select status --", "-- select potential --", "-- select grade --"):
+                return None
+            # Handle "Grade A", "Grade B", "Grade C"
+            if cleaned.lower().startswith("grade "):
+                grade_letter = cleaned[6:].strip().upper()
+                if grade_letter in ("A", "B", "C"):
+                    return grade_letter
+            # Handle case mismatch e.g. "New" -> "new", "Yes" -> "yes"
+            lower_v = cleaned.lower()
+            if lower_v in ("new", "existing", "yes", "no"):
+                return lower_v
+            if cleaned.upper() in ("A", "B", "C"):
+                return cleaned.upper()
+            return cleaned
         return v
 
 

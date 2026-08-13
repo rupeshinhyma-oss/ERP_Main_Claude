@@ -304,7 +304,17 @@ export function SuppliersPage() {
 
   const getFreezeStyle = useCallback((colIdx: number, isHeader = false): React.CSSProperties => {
     const dir = pinnedCols[colIdx];
-    if (!dir) return {};
+    const headerTopStyle: React.CSSProperties = isHeader
+      ? {
+          position: "sticky",
+          top: 0,
+          zIndex: dir ? 30 : 15,
+          backgroundColor: "#f8fafc",
+          boxShadow: "0 2px 4px rgba(0, 0, 0, 0.06)",
+        }
+      : {};
+
+    if (!dir) return headerTopStyle;
 
     const lefts = displayOrder.filter((idx) => pinnedCols[idx] === "left");
     const rights = displayOrder.filter((idx) => pinnedCols[idx] === "right");
@@ -315,9 +325,10 @@ export function SuppliersPage() {
     if (dir === "left") {
       const left = colLeftOffsets[colIdx] ?? 0;
       return {
+        ...headerTopStyle,
         position: "sticky",
         left: `${left}px`,
-        zIndex: isHeader ? 12 : 10,
+        zIndex: isHeader ? 35 : 10,
         backgroundColor: isHeader ? "#f8fafc" : "#ffffff",
         boxShadow: isLastLeft ? "3px 0 6px -2px rgba(0, 0, 0, 0.15)" : "none",
         borderRight: isLastLeft ? "2px solid #cbd5e1" : undefined,
@@ -326,9 +337,10 @@ export function SuppliersPage() {
 
     const right = colRightOffsets[colIdx] ?? 0;
     return {
+      ...headerTopStyle,
       position: "sticky",
       right: `${right}px`,
-      zIndex: isHeader ? 12 : 10,
+      zIndex: isHeader ? 35 : 10,
       backgroundColor: isHeader ? "#f8fafc" : "#ffffff",
       boxShadow: isFirstRight ? "-3px 0 6px -2px rgba(0, 0, 0, 0.15)" : "none",
       borderLeft: isFirstRight ? "2px solid #cbd5e1" : undefined,
@@ -2739,8 +2751,8 @@ export function SuppliersPage() {
               </div>
             </div>
 
-            <div className="table-scroll">
-              <table ref={tableRef}>
+            <div className="table-scroll" style={{ maxHeight: "calc(100vh - 220px)", overflowY: "auto", overflowX: "auto" }}>
+              <table ref={tableRef} style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0 }}>
 
                 <thead>
                   <tr>
@@ -2924,7 +2936,7 @@ export function SuppliersPage() {
                                         title="Edit Supplier"
                                       >
                                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 2 2h14a2 2 0 0 2 2v-7" />
+                                          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
                                           <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
                                         </svg>
                                       </button>

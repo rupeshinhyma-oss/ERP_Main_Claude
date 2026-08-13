@@ -36,6 +36,36 @@ function isVideoUrl(url: string | null | undefined): boolean {
   return Boolean(clean.match(/\.(mp4|webm|ogg|mov|avi|mkv|m4v|3gp|flv)$/i));
 }
 
+function downloadMediaFile(url: string | null | undefined, filenamePrefix = "media") {
+  if (!url) return;
+  const fullUrl = resolveImageUrl(url);
+  const isVid = isVideoUrl(url);
+  const ext = url.split(".").pop()?.split("?")[0] || (isVid ? "mp4" : "jpg");
+  const fileName = `${filenamePrefix}_${Date.now()}.${ext}`;
+
+  fetch(fullUrl)
+    .then((res) => res.blob())
+    .then((blob) => {
+      const blobUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = blobUrl;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(blobUrl);
+    })
+    .catch(() => {
+      const link = document.createElement("a");
+      link.href = fullUrl;
+      link.target = "_blank";
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    });
+}
+
 function getSupplierMedia(supplier: Supplier): string[] {
   let rawItems: string[] = [];
 
@@ -719,29 +749,52 @@ export function ProductGalleryPage() {
                   </div>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "10px", padding: "0 4px" }}>
                     <span style={{ fontSize: "12px", color: "#64748b", fontWeight: 500 }}>
-                      Media {selectedImageIndex + 1} of {detailImgList.length}
+                      Media {selectedImageIndex + 1} of {detailImgList.length} {activeIsVideo ? "(Video)" : "(Photo)"}
                     </span>
-                    <button
-                      type="button"
-                      onClick={() => handleDeletePhoto(selectedImageIndex)}
-                      style={{
-                        background: "#fee2e2",
-                        color: "#dc2626",
-                        border: "1px solid #fca5a5",
-                        borderRadius: "6px",
-                        padding: "4px 10px",
-                        fontSize: "12px",
-                        fontWeight: 600,
-                        cursor: "pointer",
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: "4px",
-                        transition: "all 0.15s ease",
-                      }}
-                      title="Delete this media from product"
-                    >
-                      🗑️ Delete Media
-                    </button>
+                    <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                      <button
+                        type="button"
+                        onClick={() => downloadMediaFile(activeMedia, `product_${p.product_code || "media"}`)}
+                        style={{
+                          background: "#eff6ff",
+                          color: "#2563eb",
+                          border: "1px solid #93c5fd",
+                          borderRadius: "6px",
+                          padding: "4px 12px",
+                          fontSize: "12px",
+                          fontWeight: 600,
+                          cursor: "pointer",
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "4px",
+                          transition: "all 0.15s ease",
+                        }}
+                        title={`Download ${activeIsVideo ? "video" : "photo"}`}
+                      >
+                        📥 Download {activeIsVideo ? "Video" : "Photo"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDeletePhoto(selectedImageIndex)}
+                        style={{
+                          background: "#fee2e2",
+                          color: "#dc2626",
+                          border: "1px solid #fca5a5",
+                          borderRadius: "6px",
+                          padding: "4px 10px",
+                          fontSize: "12px",
+                          fontWeight: 600,
+                          cursor: "pointer",
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "4px",
+                          transition: "all 0.15s ease",
+                        }}
+                        title="Delete this media from product"
+                      >
+                        🗑️ Delete Media
+                      </button>
+                    </div>
                   </div>
                   {detailImgList.length > 1 && (
                     <div style={{ display: "flex", gap: "10px", justifyContent: "center", flexWrap: "wrap", marginTop: "12px" }}>
@@ -865,6 +918,28 @@ export function ProductGalleryPage() {
                     <span style={{ fontSize: "12px", color: "#0369a1", fontWeight: 600 }}>
                       Visit Media {selectedImageIndex + 1} of {suppMedia.length} {activeSuppIsVideo ? "(Video)" : "(Image)"}
                     </span>
+                    <button
+                      type="button"
+                      onClick={() => downloadMediaFile(activeSuppMedia, `supplier_visit_${supp.company_name.replace(/[^a-zA-Z0-9]/g, "_")}`)}
+                      style={{
+                        background: "#0284c7",
+                        color: "#ffffff",
+                        border: "none",
+                        borderRadius: "6px",
+                        padding: "5px 14px",
+                        fontSize: "12px",
+                        fontWeight: 600,
+                        cursor: "pointer",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "5px",
+                        boxShadow: "0 1px 2px rgba(0,0,0,0.1)",
+                        transition: "all 0.15s ease",
+                      }}
+                      title={`Download ${activeSuppIsVideo ? "video" : "photo"}`}
+                    >
+                      📥 Download {activeSuppIsVideo ? "Video" : "Photo"}
+                    </button>
                   </div>
                   {suppMedia.length > 1 && (
                     <div style={{ display: "flex", gap: "10px", justifyContent: "center", flexWrap: "wrap", marginTop: "12px" }}>

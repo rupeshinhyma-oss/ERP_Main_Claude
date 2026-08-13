@@ -1,16 +1,21 @@
 /**
  * Buyer (Client) Profiles.
  * Implements the "Add Buyer (Client) Data Form" specification document:
- *  - Top Filter Bar matching Suppliers & Product Master design.
+ *  - Top Filter Bar matching Suppliers & Product Master design with Funnel Icon Button, Imp/Exp, and Bulk Actions.
  *  - Single-row toolbar: Items/Page, 📌 Freeze Columns popover (fixed header, scrollable middle list, fixed footer "Clear All Freezes"), Search Input ✕.
- *  - Contiguous sticky column snapping on left edge.
- *  - Full-page Add/Edit Form view matching Product Master layout (utilizing full screen width with ← BACK button).
+ *  - Contiguous sticky column snapping on left edge with header zIndex & background layering fix.
+ *  - Tabbed Add/Edit View matching Supplier Master layout:
+ *      * Tab 1: 👤 Profile (Identity, Location, Primary Contact, Pipeline Status, Product Range)
+ *      * Tab 2: 📇 Contacts (Full Team Contact Persons Management with Add/Edit/Delete actions)
+ *  - Single-select dropdowns (Buyer Type, Country, Status, Potential, Grade, Title) use SelectField with top "Search / Type here..." search bar inside dropdown popup menu.
+ *  - Multi-select dropdowns (Product Category, Sub Category) use SearchableDropdownMultiPanel with top "Search / Type here..." search bar & checkboxes panel that STAYS OPEN while selecting multiple items.
  *  - Auto-synced Primary Contact -> Contacts sub-panel.
  *  - 1-Way Status Lock ("Existing" status cannot be changed back to "New").
  *  - Delete protection: records with "Existing" status OR "Yes" potential cannot be deleted.
  *  - 3-Way Duplicate Alert (Company Name + Calling Number + WhatsApp Number).
  *  - Dynamic Buyer Types Master integration extracted from /masters/buyer-types.
  *  - Real-time Company Name Autocomplete Suggestions.
+ *  - Bulk Actions (Bulk Activate, Bulk Deactivate, Bulk Delete).
  */
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -18,15 +23,28 @@ import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { Banner, Can } from "@/components/ui";
 import { Pagination } from "@/components/Pagination";
-import { SearchableDropdownMulti, type DropdownOption } from "@/components/SearchableDropdown";
-import { SelectField, TextAreaField, TextField } from "@/components/fields";
-import { SideDrawer } from "@/components/SideDrawer";
-import { apiDelete, apiGet, apiPatch, apiPost, toQueryString } from "@/lib/api";
+import { SearchableDropdown, SearchableDropdownMultiPanel, type DropdownOption } from "@/components/SearchableDropdown";
+import { EmailTagInput, SelectField, TextAreaField, TextField } from "@/components/fields";
+import { SideDrawer, DetailFieldGrid } from "@/components/SideDrawer";
+import { ImpExpDropdown, BulkActionsDropdown, ImportSummaryPanel } from "@/components/ImportWizard";
+import { apiDelete, apiGet, apiPatch, apiPost, downloadExport, toQueryString } from "@/lib/api";
 import { useLookup } from "@/lib/lookups";
-import type { Country, ProductCategory, ProductSubCategory } from "@/types";
+import type { Country, ImportHeader, ImportSummary, ProductCategory, ProductSubCategory } from "@/types";
 import type { Buyer, BuyerContact } from "@/types/buyers";
 
-const MAX_CHIPS = 5;
+const BUYER_IMPORT_HEADERS: ImportHeader[] = [
+  { key: "company_name", label: "Company Name", required: true },
+  { key: "buyer_type", label: "Buyer Type", required: false },
+  { key: "country", label: "Country", required: true },
+  { key: "city", label: "City", required: false },
+  { key: "address", label: "Address", required: false },
+  { key: "contact_full_name", label: "Contact Person Name", required: false },
+  { key: "contact_calling_number", label: "Calling Number", required: false },
+  { key: "contact_whatsapp_number", label: "WhatsApp Number", required: false },
+  { key: "emails", label: "Emails", required: false },
+  { key: "tax_id_number", label: "Tax ID Number", required: false },
+  { key: "website", label: "Website", required: false },
+];
 
 const EMPTY_BUYER_FORM = {
   company_name: "",
@@ -63,7 +81,7 @@ const EMPTY_CONTACT_FORM = {
 
 type ModalMode = "create" | "edit" | null;
 
-const selectStyle: React.CSSProperties = {
+const selectFilterStyle: React.CSSProperties = {
   padding: "8px 12px",
   borderRadius: 6,
   border: "1px solid #cbd5e1",
@@ -82,6 +100,99 @@ const sectionTitleStyle: React.CSSProperties = {
   marginBottom: "14px",
 };
 
+function PhoneGroupField({
+  id,
+  label,
+  value,
+  onChange,
+  hint,
+  placeholder = "700000000",
+}: {
+  id: string;
+  label: React.ReactNode;
+  value: string;
+  onChange: (fullValue: string) => void;
+  hint?: React.ReactNode;
+  placeholder?: string;
+}) {
+  let prefix = "";
+  let number = "";
+
+  const trimmed = (value || "").trim();
+  if (trimmed.startsWith("+")) {
+    const spaceIdx = trimmed.indexOf(" ");
+    if (spaceIdx !== -1) {
+      prefix = trimmed.slice(0, spaceIdx);
+      number = trimmed.slice(spaceIdx + 1).trim();
+    } else {
+      prefix = trimmed;
+      number = "";
+    }
+  } else {
+    prefix = "";
+    number = trimmed;
+  }
+
+  const handlePrefixChange = (newPrefix: string) => {
+    let cleanPrefix = newPrefix.trim();
+    if (cleanPrefix && !cleanPrefix.startsWith("+")) {
+      cleanPrefix = "+" + cleanPrefix;
+    }
+    const combined = number ? `${cleanPrefix} ${number}` : cleanPrefix;
+    onChange(combined);
+  };
+
+  const handleNumberChange = (newNumber: string) => {
+    const cleanNum = newNumber.replace(/[^\d\s-]/g, "");
+    const combined = prefix ? `${prefix} ${cleanNum}` : cleanNum;
+    onChange(combined);
+  };
+
+  return (
+    <div className="field">
+      <label htmlFor={id}>{label}</label>
+      <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+        <input
+          type="text"
+          value={prefix}
+          placeholder="+256"
+          onChange={(e) => handlePrefixChange(e.target.value)}
+          style={{
+            width: "85px",
+            padding: "8px 10px",
+            fontSize: "13.5px",
+            fontWeight: 700,
+            borderRadius: "6px",
+            border: "1px solid #cbd5e1",
+            background: "#f8fafc",
+            color: "#0f172a",
+            textAlign: "center",
+            outline: "none",
+          }}
+          title="Country Code Prefix"
+        />
+        <input
+          id={id}
+          type="text"
+          value={number}
+          placeholder={placeholder}
+          onChange={(e) => handleNumberChange(e.target.value)}
+          style={{
+            flex: 1,
+            padding: "8px 11px",
+            fontSize: "13.5px",
+            borderRadius: "6px",
+            border: "1px solid #cbd5e1",
+            outline: "none",
+            background: "#ffffff",
+          }}
+        />
+      </div>
+      {hint && <span className="hint" style={{ marginTop: "4px" }}>{hint}</span>}
+    </div>
+  );
+}
+
 export function BuyersPage() {
   const [rows, setRows] = useState<Buyer[]>([]);
   const [totalRecords, setTotalRecords] = useState(0);
@@ -91,11 +202,18 @@ export function BuyersPage() {
   const [error, setError] = useState<unknown>(null);
   const [reloadCounter, setReloadCounter] = useState(0);
 
+  /* Import / Export State */
+  const [importSummary, setImportSummary] = useState<ImportSummary | null>(null);
+  const [importError, setImportError] = useState<string | null>(null);
+
   /* Lookups for filter labels & options */
   const countries = useLookup<Country>("/masters/countries", 250);
   const categories = useLookup<ProductCategory>("/masters/product-categories", 250);
   const subCategories = useLookup<ProductSubCategory>("/masters/product-sub-categories", 500);
   const buyerTypes = useLookup<{ id: string; name: string }>("/masters/buyer-types", 250);
+
+  /* Modal state for viewing full list of categories/subcategories via Eye Icon */
+  const [chipModalData, setChipModalData] = useState<{ title: string; items: string[] } | null>(null);
 
   /* Company Name Suggestions State */
   const [companySuggestions, setCompanySuggestions] = useState<string[]>([]);
@@ -119,16 +237,20 @@ export function BuyersPage() {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [detailBuyer, setDetailBuyer] = useState<Buyer | null>(null);
 
-  /* Form & Contacts Modal State */
+  /* Form & Tabs State */
   const [modalMode, setModalMode] = useState<ModalMode>(null);
+  const [editTab, setEditTab] = useState<"profile" | "contacts">("profile");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState(EMPTY_BUYER_FORM);
   const [categoryIds, setCategoryIds] = useState<string[]>([]);
   const [subCategoryIds, setSubCategoryIds] = useState<string[]>([]);
-  const [emailInput, setEmailInput] = useState("");
+  const [formCityId, setFormCityId] = useState<string | null>(null);
+  const [whatsappSameAsCalling, setWhatsappSameAsCalling] = useState(false);
 
+  /* Contacts State */
   const [contacts, setContacts] = useState<BuyerContact[]>([]);
   const [contactFormOpen, setContactFormOpen] = useState(false);
+  const [editingContactId, setEditingContactId] = useState<string | null>(null);
   const [contactForm, setContactForm] = useState(EMPTY_CONTACT_FORM);
 
   /* Freeze Columns State */
@@ -226,7 +348,7 @@ export function BuyersPage() {
     const ro = new ResizeObserver(() => updateOffsets());
     ro.observe(tableEl);
     return () => ro.disconnect();
-  }, [displayOrder, pinnedCols, rows]);
+  }, [displayOrder, pinnedCols, rows, loading]);
 
   /* Debounce Search Input */
   useEffect(() => {
@@ -310,12 +432,13 @@ export function BuyersPage() {
     return found ? found.id : "";
   }, [countries.items]);
 
-  /* Search Fetchers for Multi-Select Dropdowns */
+  /* Search Fetchers for Dropdowns */
   const searchFetcher = useCallback(
-    (apiBase: string) =>
+    (apiBase: string, extraParamsFn?: () => Record<string, string>) =>
       async (term: string, signal: AbortSignal): Promise<DropdownOption[]> => {
+        const extra = extraParamsFn ? extraParamsFn() : {};
         const { data } = await apiGet<{ id: string; name: string }[]>(
-          apiBase + toQueryString({ search: term, page: 1, page_size: 20, sort_order: "asc", status: "active" }),
+          apiBase + toQueryString({ search: term, page: 1, page_size: 50, sort_order: "asc", status: "active", ...extra }),
           { signal }
         );
         return (data || []).map((d) => ({ value: d.id, label: d.name }));
@@ -331,68 +454,112 @@ export function BuyersPage() {
     []
   );
 
-  /* Chip Render Helper */
-  function renderChips(ids: string[] | undefined, itemsList: Array<{ id: string; name: string }>) {
+  /* Chip Render Helper (Max 3 Chips + Eye Icon Modal for full view) */
+  function renderChips(
+    ids: string[] | undefined,
+    itemsList: Array<{ id: string; name: string }>,
+    fieldTitle = "Selected Items"
+  ) {
     if (!ids || !ids.length) return <span style={{ color: "#94a3b8" }}>—</span>;
     const names = ids.map((id) => itemsList.find((x) => x.id === id)?.name || id);
-    const shown = names.slice(0, MAX_CHIPS);
+    const MAX_SHOW = 3;
+    const shown = names.slice(0, MAX_SHOW);
     const remaining = names.length - shown.length;
+
     return (
-      <div style={{ display: "flex", flexWrap: "wrap", gap: "4px" }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: "4px", alignItems: "center" }}>
         {shown.map((n, i) => (
           <span
             key={`${n}-${i}`}
             style={{
-              padding: "2px 8px",
+              padding: "2px 7px",
               borderRadius: "4px",
-              background: "#e2e8f0",
+              background: "#f1f5f9",
               fontSize: "11.5px",
-              fontWeight: 500,
+              fontWeight: 600,
               color: "#334155",
+              border: "1px solid #cbd5e1",
+              whiteSpace: "nowrap",
             }}
           >
             {n}
           </span>
         ))}
-        {remaining > 0 && (
+        {remaining > 0 ? (
           <button
             type="button"
-            title={names.join(", ")}
-            onClick={() => alert(`All selected items:\n\n${names.join("\n")}`)}
+            title={`Click to view all ${names.length} items`}
+            onClick={() => setChipModalData({ title: fieldTitle, items: names })}
             style={{
-              padding: "2px 6px",
+              padding: "2px 7px",
               borderRadius: "4px",
-              background: "#cbd5e1",
+              background: "#dbeafe",
+              color: "#1d4ed8",
+              border: "1px solid #93c5fd",
               fontSize: "11px",
               fontWeight: 700,
-              color: "#0f172a",
-              border: "none",
               cursor: "pointer",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "3px",
+              transition: "all 0.15s ease",
             }}
           >
-            +{remaining} more
+            👁️ +{remaining}
           </button>
-        )}
+        ) : names.length >= 2 ? (
+          <button
+            type="button"
+            title="Click to view full list"
+            onClick={() => setChipModalData({ title: fieldTitle, items: names })}
+            style={{
+              padding: "2px 5px",
+              borderRadius: "4px",
+              background: "#f8fafc",
+              color: "#64748b",
+              border: "1px solid #cbd5e1",
+              fontSize: "11px",
+              cursor: "pointer",
+              display: "inline-flex",
+              alignItems: "center",
+            }}
+          >
+            👁️
+          </button>
+        ) : null}
       </div>
     );
   }
 
   function openCreate() {
+    const initCountryId = defaultUgandaId || (countries.items[0]?.id ?? "");
+    const initCountry = countries.items.find((c) => c.id === initCountryId);
+    const initPhoneCode = initCountry?.phone_code ? `+${initCountry.phone_code.trim().replace(/^\+/, "")} ` : "";
+
     setModalMode("create");
+    setEditTab("profile");
     setEditingId(null);
+    setWhatsappSameAsCalling(false);
     setForm({
       ...EMPTY_BUYER_FORM,
-      country_id: defaultUgandaId || (countries.items[0]?.id ?? ""),
+      country_id: initCountryId,
+      contact_calling_number: initPhoneCode,
+      contact_whatsapp_number: initPhoneCode,
     });
     setCategoryIds([]);
     setSubCategoryIds([]);
+    setFormCityId(null);
     setContacts([]);
     setShowCompanySuggestions(false);
   }
 
   async function openEdit(buyer: Buyer) {
     setModalMode("edit");
+    setEditTab("profile");
     setEditingId(buyer.id);
+    setWhatsappSameAsCalling(
+      Boolean(buyer.contact_calling_number && buyer.contact_calling_number === buyer.contact_whatsapp_number)
+    );
     setForm({
       company_name: buyer.company_name,
       buyer_type: buyer.buyer_type || "",
@@ -417,6 +584,7 @@ export function BuyersPage() {
     });
     setCategoryIds(buyer.category_ids || []);
     setSubCategoryIds(buyer.sub_category_ids || []);
+    setFormCityId(null);
     setShowCompanySuggestions(false);
     try {
       const { data } = await apiGet<BuyerContact[]>(`/buyers/${buyer.id}/contacts`);
@@ -430,6 +598,38 @@ export function BuyersPage() {
     setForm((prev) => {
       const next = { ...prev, [id]: value };
       if (id === "potential" && value !== "no") next.potential_reason = "";
+      if (id === "country_id") {
+        next.city = "";
+        setFormCityId(null);
+
+        const selCountry = countries.items.find((c) => c.id === value);
+        if (selCountry?.phone_code) {
+          const rawCode = selCountry.phone_code.trim().replace(/^\+/, "");
+          const newPrefix = `+${rawCode} `;
+
+          const updateNumber = (currNum: string) => {
+            if (!currNum || /^\+?\d*\s*$/.test(currNum.trim())) {
+              return newPrefix;
+            }
+            const spaceIdx = currNum.indexOf(" ");
+            if (spaceIdx !== -1) {
+              return newPrefix + currNum.slice(spaceIdx + 1).trim();
+            }
+            return newPrefix + currNum.replace(/^\+\d+/, "").trim();
+          };
+
+          next.contact_calling_number = updateNumber(prev.contact_calling_number);
+          if (whatsappSameAsCalling) {
+            next.contact_whatsapp_number = next.contact_calling_number;
+          } else {
+            next.contact_whatsapp_number = updateNumber(prev.contact_whatsapp_number);
+          }
+        }
+      }
+
+      if (id === "contact_calling_number" && whatsappSameAsCalling) {
+        next.contact_whatsapp_number = value;
+      }
       return next;
     });
 
@@ -460,26 +660,42 @@ export function BuyersPage() {
     }
   }
 
-  function addEmail() {
-    const trimmed = emailInput.trim();
-    if (!trimmed) return;
-    if (!form.emails.includes(trimmed)) setForm((f) => ({ ...f, emails: [...f.emails, trimmed] }));
-    setEmailInput("");
-  }
-
-  function removeEmail(email: string) {
-    setForm((f) => ({ ...f, emails: f.emails.filter((e) => e !== email) }));
+  function focusAndScrollField(elementId: string, errorMsg: string) {
+    setError(new Error(errorMsg));
+    const el = document.getElementById(elementId);
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      setTimeout(() => el.focus(), 300);
+    } else {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+
+    // 1. Required field validation
     if (!form.company_name.trim()) {
-      setError(new Error("Company Name is required."));
+      focusAndScrollField("company_name", "Company Name is required.");
       return;
     }
     if (!form.country_id) {
-      setError(new Error("Country is required."));
+      focusAndScrollField("country_id", "Country is required.");
+      return;
+    }
+
+    // 2. Real-time Field-level Duplicate checks
+    if (fieldDuplicates.companyWarning) {
+      focusAndScrollField("company_name", fieldDuplicates.companyWarning);
+      return;
+    }
+    if (fieldDuplicates.callingWarning) {
+      focusAndScrollField("contact_calling_number", fieldDuplicates.callingWarning);
+      return;
+    }
+    if (fieldDuplicates.whatsappWarning) {
+      focusAndScrollField("contact_whatsapp_number", fieldDuplicates.whatsappWarning);
       return;
     }
 
@@ -499,11 +715,11 @@ export function BuyersPage() {
       emails: form.emails,
       tax_id_number: form.tax_id_number.trim() || null,
       website: form.website.trim() || null,
-      current_status: form.current_status || null,
+      current_status: form.current_status ? form.current_status.toLowerCase() : null,
       product_range: form.product_range.trim() || null,
-      potential: form.potential || null,
-      potential_reason: form.potential_reason.trim() || null,
-      buyer_grade: form.buyer_grade || null,
+      potential: form.potential ? form.potential.toLowerCase() : null,
+      potential_reason: form.potential?.toLowerCase() === "no" ? (form.potential_reason.trim() || null) : null,
+      buyer_grade: form.buyer_grade ? form.buyer_grade.replace(/^Grade\s+/i, "").trim() : null,
       currently_buying_from: form.currently_buying_from.trim() || null,
       overall_remarks: form.overall_remarks.trim() || null,
       category_ids: categoryIds,
@@ -530,6 +746,7 @@ export function BuyersPage() {
       setModalMode(null);
     } catch (err) {
       setError(err);
+      window.scrollTo({ top: 0, behavior: "smooth" });
     }
   }
 
@@ -555,20 +772,51 @@ export function BuyersPage() {
     }
   }
 
-  async function handleAddContact(e: React.FormEvent) {
+  /* Contact Person Handlers */
+  function openAddContact() {
+    setEditingContactId(null);
+    setContactForm({
+      ...EMPTY_CONTACT_FORM,
+      country_id: form.country_id || defaultUgandaId,
+    });
+    setContactFormOpen(true);
+  }
+
+  function openEditContact(c: BuyerContact) {
+    setEditingContactId(c.id);
+    setContactForm({
+      salutation: c.salutation || "",
+      person_name: c.person_name || "",
+      designation: c.designation || "",
+      country_id: c.country_id || form.country_id || defaultUgandaId,
+      calling_number: c.calling_number || "",
+      whatsapp_number: c.whatsapp_number || "",
+      email: c.email || "",
+    });
+    setContactFormOpen(true);
+  }
+
+  async function handleSaveContact(e: React.FormEvent) {
     e.preventDefault();
     if (!editingId) return;
     if (!contactForm.person_name.trim()) {
       alert("Contact Full Name is required.");
       return;
     }
+    const payload = {
+      ...contactForm,
+      country_id: contactForm.country_id || form.country_id,
+    };
     try {
-      const { data } = await apiPost<BuyerContact>(`/buyers/${editingId}/contacts`, {
-        ...contactForm,
-        country_id: contactForm.country_id || form.country_id,
-      });
-      setContacts((prev) => [...prev, data]);
+      if (editingContactId) {
+        const { data: updatedContact } = await apiPatch<BuyerContact>(`/buyers/${editingId}/contacts/${editingContactId}`, payload);
+        setContacts((prev) => prev.map((c) => (c.id === editingContactId ? updatedContact : c)));
+      } else {
+        const { data: newContact } = await apiPost<BuyerContact>(`/buyers/${editingId}/contacts`, payload);
+        setContacts((prev) => [...prev, newContact]);
+      }
       setContactForm(EMPTY_CONTACT_FORM);
+      setEditingContactId(null);
       setContactFormOpen(false);
     } catch (err) {
       setError(err);
@@ -586,62 +834,157 @@ export function BuyersPage() {
     }
   }
 
-  /* Sticky cell style generator */
-  const getFreezeStyle = (colIdx: number): React.CSSProperties => {
-    const isLeft = pinnedCols[colIdx] === "left";
-    const isRight = pinnedCols[colIdx] === "right";
-    if (!isLeft && !isRight) return {};
+  /* Bulk Actions Handlers */
+  async function handleBulkActivate() {
+    if (!selectedIds.length) return;
+    try {
+      await Promise.all(selectedIds.map((id) => apiPost(`/buyers/${id}/activate`)));
+      setRows((prev) => prev.map((r) => (selectedIds.includes(r.id) ? { ...r, is_active: true } : r)));
+      setSelectedIds([]);
+    } catch (err) {
+      setError(err);
+    }
+  }
 
-    const lefts = displayOrder.filter((idx) => pinnedCols[idx] === "left");
-    const isLastLeft = isLeft && lefts[lefts.length - 1] === colIdx;
-    const rights = displayOrder.filter((idx) => pinnedCols[idx] === "right");
-    const isFirstRight = isRight && rights[0] === colIdx;
+  async function handleBulkDeactivate() {
+    if (!selectedIds.length) return;
+    try {
+      await Promise.all(selectedIds.map((id) => apiPost(`/buyers/${id}/deactivate`)));
+      setRows((prev) => prev.map((r) => (selectedIds.includes(r.id) ? { ...r, is_active: false } : r)));
+      setSelectedIds([]);
+    } catch (err) {
+      setError(err);
+    }
+  }
 
-    return {
-      position: "sticky",
-      left: isLeft ? `${colLeftOffsets[colIdx] ?? 0}px` : undefined,
-      right: isRight ? `${colRightOffsets[colIdx] ?? 0}px` : undefined,
-      zIndex: isLeft || isRight ? 10 : 1,
-      background: "#ffffff",
-      borderRight: isLastLeft ? "2px solid #cbd5e1" : undefined,
-      borderLeft: isFirstRight ? "2px solid #cbd5e1" : undefined,
-      boxShadow: isLastLeft
-        ? "4px 0 8px -2px rgba(0,0,0,0.1)"
-        : isFirstRight
-        ? "-4px 0 8px -2px rgba(0,0,0,0.1)"
-        : undefined,
-    };
-  };
+  async function handleBulkDelete() {
+    if (!selectedIds.length) return;
 
-  /* Duplicate warning logic */
-  const duplicateWarning = useMemo(() => {
+    const restricted = rows.filter(
+      (r) => selectedIds.includes(r.id) && (r.current_status === "existing" || r.potential === "yes")
+    );
+    if (restricted.length > 0) {
+      alert(
+        `Cannot delete ${restricted.length} selected buyer(s)!\n\n` +
+          `Document Rule: Buyers with Current Status 'Existing' or Potential 'Yes' cannot be deleted. You can deactivate them instead.`
+      );
+      return;
+    }
+
+    if (!window.confirm(`Delete ${selectedIds.length} selected buyer(s)? This action cannot be undone.`)) return;
+    try {
+      await Promise.all(selectedIds.map((id) => apiDelete(`/buyers/${id}`)));
+      setRows((prev) => prev.filter((r) => !selectedIds.includes(r.id)));
+      setTotalRecords((prev) => Math.max(0, prev - selectedIds.length));
+      setSelectedIds([]);
+    } catch (err) {
+      setError(err);
+    }
+  }
+
+  async function handleExport(format: "csv" | "xlsx") {
+    try {
+      await downloadExport("/buyers", format, "buyers");
+    } catch (err) {
+      setError(err);
+    }
+  }
+
+  /* Sticky cell style generator with proper zIndex & background layering (Row 1 Header frozen top: 0 permanently) */
+  const getFreezeStyle = useCallback(
+    (colIdx: number, isHeader = false): React.CSSProperties => {
+      const dir = pinnedCols[colIdx];
+      const headerTopStyle: React.CSSProperties = isHeader
+        ? {
+            position: "sticky",
+            top: 0,
+            zIndex: dir ? 30 : 15,
+            backgroundColor: "#f8fafc",
+            boxShadow: "0 2px 4px rgba(0, 0, 0, 0.06)",
+          }
+        : {};
+
+      if (!dir) return headerTopStyle;
+
+      const lefts = displayOrder.filter((idx) => pinnedCols[idx] === "left");
+      const rights = displayOrder.filter((idx) => pinnedCols[idx] === "right");
+
+      const isLastLeft = dir === "left" && colIdx === lefts[lefts.length - 1];
+      const isFirstRight = dir === "right" && colIdx === rights[0];
+
+      if (dir === "left") {
+        const left = colLeftOffsets[colIdx] ?? 0;
+        return {
+          ...headerTopStyle,
+          position: "sticky",
+          left: `${left}px`,
+          zIndex: isHeader ? 35 : 10,
+          backgroundColor: isHeader ? "#f8fafc" : "#ffffff",
+          boxShadow: isLastLeft ? "inset -2px 0 0 0 #64748b, 4px 0 8px -2px rgba(0, 0, 0, 0.15)" : "none",
+          borderRight: isLastLeft ? "2px solid #64748b" : undefined,
+        };
+      }
+
+      const right = colRightOffsets[colIdx] ?? 0;
+      return {
+        ...headerTopStyle,
+        position: "sticky",
+        right: `${right}px`,
+        zIndex: isHeader ? 35 : 10,
+        backgroundColor: isHeader ? "#f8fafc" : "#ffffff",
+        boxShadow: isFirstRight ? "inset 2px 0 0 0 #64748b, -4px 0 8px -2px rgba(0, 0, 0, 0.15)" : "none",
+        borderLeft: isFirstRight ? "2px solid #64748b" : undefined,
+      };
+    },
+    [pinnedCols, colLeftOffsets, colRightOffsets, displayOrder]
+  );
+
+  /* Real-time Field-level Duplicate Warnings */
+  const fieldDuplicates = useMemo(() => {
     const cleanCompany = form.company_name.trim().toLowerCase().replace(/[\s-]/g, "");
     const cleanCalling = form.contact_calling_number.trim().replace(/\D/g, "");
     const cleanWhatsapp = form.contact_whatsapp_number.trim().replace(/\D/g, "");
 
-    if (!cleanCompany && !cleanCalling && !cleanWhatsapp) return null;
+    let companyWarning: string | null = null;
+    let callingWarning: string | null = null;
+    let whatsappWarning: string | null = null;
 
-    const match = rows.find((r) => {
-      if (modalMode === "edit" && r.id === editingId) return false;
+    if (!cleanCompany && !cleanCalling && !cleanWhatsapp) {
+      return { companyWarning, callingWarning, whatsappWarning };
+    }
+
+    for (const r of rows) {
+      if (modalMode === "edit" && r.id === editingId) continue;
+
       const rComp = r.company_name.toLowerCase().replace(/[\s-]/g, "");
       const rCall = (r.contact_calling_number || "").replace(/\D/g, "");
       const rWhats = (r.contact_whatsapp_number || "").replace(/\D/g, "");
 
-      const compMatch = cleanCompany && rComp === cleanCompany;
-      const callMatch = cleanCalling && rCall && rCall === cleanCalling;
-      const whatsMatch = cleanWhatsapp && rWhats && rWhats === cleanWhatsapp;
+      // 1. Company Name Warning
+      if (cleanCompany && !companyWarning && rComp === cleanCompany) {
+        companyWarning = `Company name '${r.company_name}' already exists in Master.`;
+      }
 
-      return (compMatch && (callMatch || whatsMatch)) || (compMatch && !cleanCalling && !cleanWhatsapp);
-    });
+      // 2. Calling Number Warning (matches calling or whatsapp of any existing buyer)
+      if (cleanCalling && cleanCalling.length >= 6 && !callingWarning) {
+        if ((rCall && rCall === cleanCalling) || (rWhats && rWhats === cleanCalling)) {
+          callingWarning = `Calling number already exists (used by '${r.company_name}').`;
+        }
+      }
 
-    if (match) {
-      return `⚠️ Duplicate Buyer Detected! Buyer "${match.company_name}" already exists in Master.`;
+      // 3. WhatsApp Number Warning (matches calling or whatsapp of any existing buyer)
+      if (cleanWhatsapp && cleanWhatsapp.length >= 6 && !whatsappWarning) {
+        if ((rCall && rCall === cleanWhatsapp) || (rWhats && rWhats === cleanWhatsapp)) {
+          whatsappWarning = `WhatsApp number already exists (used by '${r.company_name}').`;
+        }
+      }
     }
-    return null;
+
+    return { companyWarning, callingWarning, whatsappWarning };
   }, [form.company_name, form.contact_calling_number, form.contact_whatsapp_number, rows, modalMode, editingId]);
 
   /* ------------------------------------------------------------------------- */
-  /* RENDER: FULL PAGE ADD / EDIT BUYER FORM (Product Master Style)           */
+  /* RENDER: TABBED ADD / EDIT BUYER FORM (Supplier & Product Master Style)    */
   /* ------------------------------------------------------------------------- */
   if (modalMode) {
     return (
@@ -650,13 +993,13 @@ export function BuyersPage() {
           <Breadcrumb trail={["Buyer Profiles", modalMode === "create" ? "Add Buyer" : "Edit Buyer"]} />
 
           {/* Form Header */}
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
             <div>
               <h1 style={{ fontSize: "22px", fontWeight: 700, color: "#0F172A", margin: 0 }}>
-                {modalMode === "create" ? "Add Buyer (Client) Data Form" : `Edit Buyer Profile: ${form.company_name}`}
+                {modalMode === "create" ? "Add Buyer (Client) Profile" : `Edit Buyer Profile: ${form.company_name}`}
               </h1>
               <div style={{ fontSize: "13px", color: "#64748b", marginTop: "4px" }}>
-                Fill in company details, contact information, product categories, and sales potential attributes.
+                Complete company profile details and manage contact persons.
               </div>
             </div>
             <button
@@ -676,13 +1019,13 @@ export function BuyersPage() {
                 gap: "6px",
               }}
             >
-              ← BACK
+              ← BACK TO BUYERS
             </button>
           </div>
 
           <Banner error={error} />
 
-          {/* Full Width Form Card */}
+          {/* Main Workspace Card */}
           <div
             style={{
               background: "#ffffff",
@@ -692,303 +1035,624 @@ export function BuyersPage() {
               boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
             }}
           >
-            <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-              {duplicateWarning && (
-                <div style={{ padding: "12px 16px", borderRadius: "6px", background: "#fef2f2", border: "1px solid #fca5a5", color: "#991b1b", fontSize: "13.5px", fontWeight: 600 }}>
-                  {duplicateWarning}
-                </div>
+            {/* Top Navigation Tabs */}
+            <div style={{ display: "flex", gap: "24px", borderBottom: "2px solid #e2e8f0", marginBottom: "24px" }}>
+              <button
+                type="button"
+                onClick={() => setEditTab("profile")}
+                style={{
+                  padding: "10px 18px",
+                  background: "none",
+                  border: "none",
+                  borderBottom: editTab === "profile" ? "3px solid #2563eb" : "3px solid transparent",
+                  color: editTab === "profile" ? "#2563eb" : "#64748b",
+                  fontWeight: editTab === "profile" ? 700 : 600,
+                  fontSize: "14.5px",
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  marginBottom: "-2px",
+                }}
+              >
+                <span style={{ fontSize: "16px" }}>👤</span> Profile
+              </button>
+
+              {modalMode === "edit" && (
+                <button
+                  type="button"
+                  onClick={() => setEditTab("contacts")}
+                  style={{
+                    padding: "10px 18px",
+                    background: "none",
+                    border: "none",
+                    borderBottom: editTab === "contacts" ? "3px solid #2563eb" : "3px solid transparent",
+                    color: editTab === "contacts" ? "#2563eb" : "#64748b",
+                    fontWeight: editTab === "contacts" ? 700 : 600,
+                    fontSize: "14.5px",
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
+                    marginBottom: "-2px",
+                  }}
+                >
+                  <span style={{ fontSize: "16px" }}>📇</span> Contacts
+                  <span
+                    style={{
+                      background: editTab === "contacts" ? "#dbeafe" : "#f1f5f9",
+                      color: editTab === "contacts" ? "#1d4ed8" : "#64748b",
+                      fontSize: "12px",
+                      fontWeight: 700,
+                      padding: "2px 8px",
+                      borderRadius: "12px",
+                    }}
+                  >
+                    {contacts.length}
+                  </span>
+                </button>
               )}
+            </div>
 
-              {/* 1. Identity & Business Profile */}
-              <div>
-                <div style={sectionTitleStyle}>Identity &amp; Business Profile</div>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "16px" }}>
-                  
-                  {/* Company Name with Live Typeahead Suggestions */}
-                  <div style={{ position: "relative" }}>
-                    <TextField
-                      id="company_name"
-                      label="Name of Company *"
-                      required
-                      placeholder="Name of Company"
-                      value={form.company_name}
-                      onChange={(v) => setField("company_name", v)}
-                    />
-                    {showCompanySuggestions && (
-                      <div
-                        style={{
-                          position: "absolute",
-                          top: "100%",
-                          left: 0,
-                          right: 0,
-                          zIndex: 50,
-                          background: "#ffffff",
-                          border: "1px solid #cbd5e1",
-                          borderRadius: "6px",
-                          boxShadow: "0 8px 16px rgba(0,0,0,0.1)",
-                          maxHeight: "160px",
-                          overflowY: "auto",
-                          marginTop: "2px",
-                        }}
-                      >
-                        <div style={{ padding: "6px 10px", fontSize: "11px", fontWeight: 700, color: "#64748b", background: "#f8fafc", borderBottom: "1px solid #f1f5f9" }}>
-                          Existing Company Suggestions
-                        </div>
-                        {companySuggestions.map((sug) => (
-                          <div
-                            key={sug}
-                            onClick={() => selectCompanySuggestion(sug)}
-                            style={{
-                              padding: "8px 12px",
-                              fontSize: "13px",
-                              cursor: "pointer",
-                              color: "#0f172a",
-                              borderBottom: "1px solid #f1f5f9",
-                            }}
-                            onMouseDown={(e) => e.preventDefault()}
-                          >
-                            🏢 <strong>{sug}</strong> <span style={{ fontSize: "11px", color: "#2563eb", marginLeft: "6px" }}>(Existing in Master)</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Dynamic Buyer Type extracted from Buyer Types Master */}
-                  <SelectField id="buyer_type" label="Buyer Type" value={form.buyer_type} onChange={(v) => setField("buyer_type", v)}>
-                    <option value="">-- Select Buyer Type --</option>
-                    {buyerTypes.items.map((bt) => (
-                      <option key={bt.id} value={bt.name.toLowerCase()}>
-                        {bt.name}
-                      </option>
-                    ))}
-                    {/* Fallback defaults */}
-                    {!buyerTypes.items.some((bt) => bt.name.toLowerCase() === "manufacturer") && <option value="manufacturer">Manufacturer</option>}
-                    {!buyerTypes.items.some((bt) => bt.name.toLowerCase() === "dealer / trader" || bt.name.toLowerCase() === "trader") && <option value="trader">Trader</option>}
-                  </SelectField>
-
-                  <TextField id="tax_id_number" label="Tax ID Number (TIN / GST)" placeholder="e.g. Tax / GST / TIN Number" value={form.tax_id_number} onChange={(v) => setField("tax_id_number", v)} />
-                </div>
-              </div>
-
-              {/* 2. Classification & Product Categories */}
-              <div>
-                <div style={sectionTitleStyle}>Classification &amp; Product Interest</div>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
-                  <div>
-                    <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155", display: "block", marginBottom: "6px" }}>Product Category (multiple)</label>
-                    <SearchableDropdownMulti
-                      values={categoryIds}
-                      onChange={setCategoryIds}
-                      placeholder="Select categories…"
-                      fetchOptions={searchFetcher("/masters/product-categories")}
-                      fetchLabelForValue={fetchNameLabel("/masters/product-categories")}
-                    />
-                  </div>
-                  <div>
-                    <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155", display: "block", marginBottom: "6px" }}>Product Sub Category (multiple)</label>
-                    <SearchableDropdownMulti
-                      values={subCategoryIds}
-                      onChange={setSubCategoryIds}
-                      placeholder="Select sub-categories…"
-                      fetchOptions={searchFetcher("/masters/product-sub-categories")}
-                      fetchLabelForValue={fetchNameLabel("/masters/product-sub-categories")}
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* 3. Location Details */}
-              <div>
-                <div style={sectionTitleStyle}>Location Details</div>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", marginBottom: "16px" }}>
-                  <SelectField id="country_id" label="Country *" required value={form.country_id} onChange={(v) => setField("country_id", v)}>
-                    <option value="">-- Select Country --</option>
-                    {countries.items.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </SelectField>
-                  <TextField id="city" label="City" placeholder="City name" value={form.city} onChange={(v) => setField("city", v)} />
-                </div>
-                <TextAreaField id="address" label="Address" rows={2} placeholder="Full postal address details…" value={form.address} onChange={(v) => setField("address", v)} />
-              </div>
-
-              {/* 4. Primary Contact Person */}
-              <div>
-                <div style={sectionTitleStyle}>Primary Contact Person</div>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr 2fr", gap: "16px", marginBottom: "16px" }}>
-                  <SelectField id="contact_salutation" label="Title" value={form.contact_salutation} onChange={(v) => setField("contact_salutation", v)}>
-                    <option value="">Select</option>
-                    <option value="Mr.">Mr.</option>
-                    <option value="Mrs.">Mrs.</option>
-                    <option value="Ms.">Ms.</option>
-                  </SelectField>
-                  <TextField id="contact_full_name" label="Full Name" placeholder="Contact Person Full Name" value={form.contact_full_name} onChange={(v) => setField("contact_full_name", v)} />
-                  <TextField id="contact_designation" label="Designation" placeholder="e.g. Purchase Manager / Owner" value={form.contact_designation} onChange={(v) => setField("contact_designation", v)} />
-                </div>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
-                  <TextField id="contact_calling_number" label="Calling Number (with country code, max 10 digits)" placeholder="+256 700000000" value={form.contact_calling_number} onChange={(v) => setField("contact_calling_number", v)} />
-                  <TextField id="contact_whatsapp_number" label="WhatsApp Number (with country code, max 10 digits)" placeholder="+256 700000000" value={form.contact_whatsapp_number} onChange={(v) => setField("contact_whatsapp_number", v)} />
-                </div>
-              </div>
-
-              {/* 5. Online & Digital Channels */}
-              <div>
-                <div style={sectionTitleStyle}>Digital Channels &amp; Emails</div>
-                <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "16px" }}>
-                  <div>
-                    <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155", display: "block", marginBottom: "6px" }}>Email IDs (Multiple)</label>
-                    <div style={{ display: "flex", gap: "10px" }}>
-                      <input
-                        type="email"
-                        placeholder="Enter email address and click + Add"
-                        value={emailInput}
-                        onChange={(e) => setEmailInput(e.target.value)}
-                        style={{ flex: 1, padding: "8px 12px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px" }}
+            {/* TAB 1: PROFILE FORM */}
+            {editTab === "profile" && (
+              <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+                {/* 1. Identity & Business Profile */}
+                <div>
+                  <div style={sectionTitleStyle}>Identity &amp; Business Profile</div>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "16px" }}>
+                    
+                    {/* Company Name with Live Typeahead Suggestions */}
+                    <div style={{ position: "relative" }}>
+                      <TextField
+                        id="company_name"
+                        label="Name of Company *"
+                        required
+                        placeholder="Name of Company"
+                        value={form.company_name}
+                        onChange={(v) => setField("company_name", v)}
+                        hint={
+                          fieldDuplicates.companyWarning ? (
+                            <span style={{ color: "#dc2626", fontWeight: 600, fontSize: "12px" }}>
+                              ⚠️ {fieldDuplicates.companyWarning}
+                            </span>
+                          ) : undefined
+                        }
                       />
-                      <button type="button" onClick={addEmail} style={{ padding: "8px 16px", borderRadius: "6px", background: "#e2e8f0", border: "1px solid #cbd5e1", fontWeight: 700, cursor: "pointer", fontSize: "13px" }}>
-                        + Add Email
-                      </button>
+                      {showCompanySuggestions && (
+                        <div
+                          style={{
+                            position: "absolute",
+                            top: "100%",
+                            left: 0,
+                            right: 0,
+                            zIndex: 50,
+                            background: "#ffffff",
+                            border: "1px solid #cbd5e1",
+                            borderRadius: "6px",
+                            boxShadow: "0 8px 16px rgba(0,0,0,0.1)",
+                            maxHeight: "160px",
+                            overflowY: "auto",
+                            marginTop: "2px",
+                          }}
+                        >
+                          <div style={{ padding: "6px 10px", fontSize: "11px", fontWeight: 700, color: "#64748b", background: "#f8fafc", borderBottom: "1px solid #f1f5f9" }}>
+                            Existing Company Suggestions
+                          </div>
+                          {companySuggestions.map((sug) => (
+                            <div
+                              key={sug}
+                              onClick={() => selectCompanySuggestion(sug)}
+                              style={{
+                                padding: "8px 12px",
+                                fontSize: "13px",
+                                cursor: "pointer",
+                                color: "#0f172a",
+                                borderBottom: "1px solid #f1f5f9",
+                              }}
+                              onMouseDown={(e) => e.preventDefault()}
+                            >
+                              🏢 <strong>{sug}</strong> <span style={{ fontSize: "11px", color: "#2563eb", marginLeft: "6px" }}>(Existing in Master)</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginTop: "10px" }}>
-                      {form.emails.map((em) => (
-                        <span key={em} style={{ padding: "4px 10px", borderRadius: "16px", background: "#f1f5f9", border: "1px solid #e2e8f0", fontSize: "12.5px", display: "inline-flex", alignItems: "center", gap: "8px" }}>
-                          <a href={`mailto:${em}`} style={{ color: "#2563eb", fontWeight: 500 }}>{em}</a>
-                          <button type="button" onClick={() => removeEmail(em)} style={{ border: "none", background: "none", cursor: "pointer", color: "#ef4444", fontWeight: 700 }}>✕</button>
-                        </span>
+
+                    {/* Buyer Type Dropdown with Search / Type here... */}
+                    <SelectField
+                      id="buyer_type"
+                      label="Buyer Type"
+                      value={form.buyer_type}
+                      onChange={(v) => setField("buyer_type", v)}
+                    >
+                      <option value="">-- Select Buyer Type --</option>
+                      {buyerTypes.items.map((bt) => (
+                        <option key={bt.id} value={bt.name.toLowerCase()}>
+                          {bt.name}
+                        </option>
                       ))}
+                      {!buyerTypes.items.some((bt) => bt.name.toLowerCase() === "manufacturer") && (
+                        <option value="manufacturer">Manufacturer</option>
+                      )}
+                      {!buyerTypes.items.some((bt) => bt.name.toLowerCase() === "dealer / trader" || bt.name.toLowerCase() === "trader") && (
+                        <option value="trader">Dealer / Trader</option>
+                      )}
+                      {!buyerTypes.items.some((bt) => bt.name.toLowerCase() === "agent") && (
+                        <option value="agent">Agent</option>
+                      )}
+                      {!buyerTypes.items.some((bt) => bt.name.toLowerCase() === "importer") && (
+                        <option value="importer">Importer</option>
+                      )}
+                    </SelectField>
+
+                    <TextField id="tax_id_number" label="Tax ID Number (TIN / GST)" placeholder="e.g. Tax / GST / TIN Number" value={form.tax_id_number} onChange={(v) => setField("tax_id_number", v)} />
+                  </div>
+                </div>
+
+                {/* 2. Classification & Product Categories (MultiPanel: Multi-Select with Search & Checkboxes that stay open) */}
+                <div>
+                  <div style={sectionTitleStyle}>Classification &amp; Product Interest</div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
+                    <div>
+                      <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155", display: "block", marginBottom: "6px" }}>Product Category (multiple)</label>
+                      <SearchableDropdownMultiPanel
+                        values={categoryIds}
+                        onChange={(newCatIds) => {
+                          setCategoryIds(newCatIds);
+                          // Auto-prune any subCategoryIds that no longer belong to selected categories
+                          if (newCatIds.length > 0) {
+                            setSubCategoryIds((prevSubIds) => {
+                              const validCategorySubIds = subCategories.items
+                                .filter((sc) => newCatIds.includes(sc.category_id))
+                                .map((sc) => sc.id);
+                              return prevSubIds.filter((id) => validCategorySubIds.includes(id));
+                            });
+                          }
+                        }}
+                        placeholder="-- Select Categories --"
+                        fetchOptions={searchFetcher("/masters/product-categories")}
+                        fetchLabelForValue={fetchNameLabel("/masters/product-categories")}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155", display: "block", marginBottom: "6px" }}>Product Sub Category (multiple)</label>
+                      <SearchableDropdownMultiPanel
+                        values={subCategoryIds}
+                        onChange={setSubCategoryIds}
+                        placeholder="-- Select Sub Categories --"
+                        fetchOptions={async (query) => {
+                          const q = query.trim().toLowerCase();
+                          let items = subCategories.items;
+                          if (categoryIds.length > 0) {
+                            items = items.filter((sc) => categoryIds.includes(sc.category_id));
+                          }
+                          if (q) {
+                            items = items.filter(
+                              (sc) => sc.name.toLowerCase().includes(q) || (sc.code && sc.code.toLowerCase().includes(q))
+                            );
+                          }
+                          return items.map((sc) => ({ value: sc.id, label: sc.name }));
+                        }}
+                        fetchLabelForValue={fetchNameLabel("/masters/product-sub-categories")}
+                      />
                     </div>
                   </div>
-                  <TextField id="website" label="Website" placeholder="https://company.com" value={form.website} onChange={(v) => setField("website", v)} />
                 </div>
-              </div>
 
-              {/* 6. Pipeline Status & Potential */}
+                {/* 3. Location Details */}
+                <div>
+                  <div style={sectionTitleStyle}>Location Details</div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", marginBottom: "16px" }}>
+                    <SelectField
+                      id="country_id"
+                      label="Country *"
+                      required
+                      value={form.country_id}
+                      onChange={(v) => setField("country_id", v)}
+                    >
+                      <option value="">-- Select Country --</option>
+                      {countries.items.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </SelectField>
+                    <div>
+                      <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155", display: "block", marginBottom: "6px" }}>City</label>
+                      <SearchableDropdown
+                        value={formCityId}
+                        onChange={(v, label) => {
+                          setFormCityId(v);
+                          setField("city", label || v || "");
+                        }}
+                        allowCustomText={true}
+                        onTextChange={(text) => {
+                          setField("city", text);
+                          setFormCityId(null);
+                        }}
+                        placeholder="Search or type city..."
+                        fetchOptions={searchFetcher("/masters/cities", (): Record<string, string> => {
+                          return form.country_id ? { country_id: form.country_id } : {};
+                        })}
+                        fetchLabelForValue={fetchNameLabel("/masters/cities")}
+                      />
+                    </div>
+                  </div>
+                  <TextAreaField id="address" label="Address" rows={2} placeholder="Full postal address details…" value={form.address} onChange={(v) => setField("address", v)} />
+                </div>
+
+                {/* 4. Primary Contact Person */}
+                <div>
+                  <div style={sectionTitleStyle}>Primary Contact Person</div>
+                  <div style={{ display: "grid", gridTemplateColumns: "110px 1fr 1fr", gap: "16px", marginBottom: "16px" }}>
+                    <SelectField
+                      id="contact_salutation"
+                      label="Title"
+                      value={form.contact_salutation}
+                      onChange={(v) => setField("contact_salutation", v)}
+                    >
+                      <option value="">Title</option>
+                      <option value="Mr.">Mr.</option>
+                      <option value="Mrs.">Mrs.</option>
+                      <option value="Ms.">Ms.</option>
+                    </SelectField>
+                    <TextField id="contact_full_name" label="Full Name" placeholder="Contact Person Full Name" value={form.contact_full_name} onChange={(v) => setField("contact_full_name", v)} />
+                    <TextField id="contact_designation" label="Designation" placeholder="e.g. Purchase Manager / Owner" value={form.contact_designation} onChange={(v) => setField("contact_designation", v)} />
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
+                    <PhoneGroupField
+                      id="contact_calling_number"
+                      label="Calling Number (with country code, max 15 digits)"
+                      placeholder="700000000"
+                      value={form.contact_calling_number}
+                      onChange={(v) => setField("contact_calling_number", v)}
+                      hint={
+                        fieldDuplicates.callingWarning ? (
+                          <span style={{ color: "#dc2626", fontWeight: 600, fontSize: "12px" }}>
+                            ⚠️ {fieldDuplicates.callingWarning}
+                          </span>
+                        ) : undefined
+                      }
+                    />
+                    <PhoneGroupField
+                      id="contact_whatsapp_number"
+                      label={
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                          <span>WhatsApp Number (with country code, max 15 digits)</span>
+                          <label style={{ fontSize: "11px", color: "#64748b", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                            <input
+                              type="checkbox"
+                              checked={whatsappSameAsCalling}
+                              onChange={(e) => {
+                                const checked = e.target.checked;
+                                setWhatsappSameAsCalling(checked);
+                                if (checked) {
+                                  setField("contact_whatsapp_number", form.contact_calling_number);
+                                }
+                              }}
+                            />
+                            Same as calling
+                          </label>
+                        </div>
+                      }
+                      placeholder="700000000"
+                      value={form.contact_whatsapp_number}
+                      onChange={(v) => {
+                        setWhatsappSameAsCalling(false);
+                        setField("contact_whatsapp_number", v);
+                      }}
+                      hint={
+                        fieldDuplicates.whatsappWarning ? (
+                          <span style={{ color: "#dc2626", fontWeight: 600, fontSize: "12px" }}>
+                            ⚠️ {fieldDuplicates.whatsappWarning}
+                          </span>
+                        ) : undefined
+                      }
+                    />
+                  </div>
+                </div>
+
+                {/* 5. Online & Digital Channels */}
+                <div>
+                  <div style={sectionTitleStyle}>Digital Channels &amp; Emails</div>
+                  <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "16px" }}>
+                    <EmailTagInput
+                      id="emails"
+                      label="Email IDs (Multiple)"
+                      emails={form.emails}
+                      onChange={(newEmails) => setForm((prev) => ({ ...prev, emails: newEmails }))}
+                      placeholder="Type email address and press Enter..."
+                    />
+                    <TextField id="website" label="Website" placeholder="https://company.com" value={form.website} onChange={(v) => setField("website", v)} />
+                  </div>
+                </div>
+
+                {/* 6. Pipeline Status & Potential */}
+                <div>
+                  <div style={sectionTitleStyle}>Sales Pipeline Status &amp; Potential</div>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "16px" }}>
+                    <SelectField
+                      id="current_status"
+                      label="Current Status"
+                      value={form.current_status}
+                      onChange={(v) => setField("current_status", v)}
+                    >
+                      <option value="">-- Select Status --</option>
+                      {(!rows.find((b) => b.id === editingId) || rows.find((b) => b.id === editingId)?.current_status !== "existing") && (
+                        <option value="new">New</option>
+                      )}
+                      <option value="existing">Existing</option>
+                    </SelectField>
+
+                    <SelectField
+                      id="potential"
+                      label="Potential"
+                      value={form.potential}
+                      onChange={(v) => setField("potential", v)}
+                    >
+                      <option value="">-- Select Potential --</option>
+                      <option value="yes">Yes</option>
+                      <option value="no">No</option>
+                    </SelectField>
+
+                    <SelectField
+                      id="buyer_grade"
+                      label="Client Grade"
+                      value={form.buyer_grade}
+                      onChange={(v) => setField("buyer_grade", v)}
+                    >
+                      <option value="">-- Select Grade --</option>
+                      <option value="A">Grade A</option>
+                      <option value="B">Grade B</option>
+                      <option value="C">Grade C</option>
+                    </SelectField>
+                  </div>
+
+                  {/* Conditional Potential Reason */}
+                  {form.potential === "no" && (
+                    <div style={{ marginTop: "14px" }}>
+                      <TextAreaField id="potential_reason" label="If Potential is No, Reason *" rows={2} placeholder="Specify detailed reason why potential is No…" value={form.potential_reason} onChange={(v) => setField("potential_reason", v)} />
+                    </div>
+                  )}
+                </div>
+
+                {/* 7. Product Range & Remarks */}
+                <div>
+                  <div style={sectionTitleStyle}>Product Range &amp; Remarks</div>
+                  <TextAreaField id="product_range" label="Product Range (Manufactured or Supplied)" rows={2} placeholder="Products they supply or manufacture…" value={form.product_range} onChange={(v) => setField("product_range", v)} />
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", marginTop: "14px" }}>
+                    <TextAreaField id="currently_buying_from" label="Currently Buying From" rows={2} placeholder="Competitors or suppliers they currently buy from…" value={form.currently_buying_from} onChange={(v) => setField("currently_buying_from", v)} />
+                    <TextAreaField id="overall_remarks" label="Overall Observation / Remarks" rows={2} placeholder="General observation remarks…" value={form.overall_remarks} onChange={(v) => setField("overall_remarks", v)} />
+                  </div>
+                </div>
+
+                {/* Form Action Buttons */}
+                <div style={{ borderTop: "2px solid #e2e8f0", paddingTop: "16px", marginTop: "12px", display: "flex", justifyContent: "flex-end", gap: "12px" }}>
+                  <button
+                    type="button"
+                    onClick={() => setModalMode(null)}
+                    style={{ padding: "9px 20px", borderRadius: "6px", border: "1px solid #cbd5e1", background: "#ffffff", fontWeight: 600, fontSize: "13.5px", cursor: "pointer" }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    style={{ padding: "9px 24px", borderRadius: "6px", background: "#2563eb", color: "#ffffff", border: "none", fontWeight: 600, fontSize: "13.5px", cursor: "pointer" }}
+                  >
+                    {modalMode === "create" ? "Save Buyer Profile" : "Update Buyer Profile"}
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {/* TAB 2: CONTACTS MANAGEMENT TAB (Matching Supplier Contacts Tab Layout) */}
+            {editTab === "contacts" && modalMode === "edit" && (
               <div>
-                <div style={sectionTitleStyle}>Sales Pipeline Status &amp; Potential</div>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "16px" }}>
-                  <SelectField id="current_status" label="Current Status" value={form.current_status} onChange={(v) => setField("current_status", v)}>
-                    <option value="">-- Select Status --</option>
-                    {/* Document 1-Way Lock Rule: Cannot set 'new' if already 'existing' */}
-                    {rows.find((b) => b.id === editingId)?.current_status !== "existing" && <option value="new">New</option>}
-                    <option value="existing">Existing</option>
-                  </SelectField>
-
-                  <SelectField id="potential" label="Potential" value={form.potential} onChange={(v) => setField("potential", v)}>
-                    <option value="">-- Select Potential --</option>
-                    <option value="yes">Yes</option>
-                    <option value="no">No</option>
-                  </SelectField>
-
-                  <SelectField id="buyer_grade" label="Client Grade" value={form.buyer_grade} onChange={(v) => setField("buyer_grade", v)}>
-                    <option value="">-- Select Grade --</option>
-                    <option value="A">Grade A</option>
-                    <option value="B">Grade B</option>
-                    <option value="C">Grade C</option>
-                  </SelectField>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
+                  <div>
+                    <h3 style={{ fontSize: "17px", fontWeight: 700, color: "#0f172a", margin: 0 }}>
+                      Buyer Contact Persons ({contacts.length})
+                    </h3>
+                    <div style={{ fontSize: "13px", color: "#64748b", marginTop: "3px" }}>
+                      Manage contact persons, designations, numbers, and email addresses for {form.company_name}.
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={openAddContact}
+                    style={{
+                      background: "#2563eb",
+                      color: "#ffffff",
+                      padding: "9px 18px",
+                      borderRadius: "6px",
+                      fontWeight: 600,
+                      fontSize: "13.5px",
+                      border: "none",
+                      cursor: "pointer",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "6px",
+                    }}
+                  >
+                    + Add New Contact
+                  </button>
                 </div>
 
-                {/* Conditional Potential Reason */}
-                {form.potential === "no" && (
-                  <div style={{ marginTop: "14px" }}>
-                    <TextAreaField id="potential_reason" label="If Potential is No, Reason *" rows={2} placeholder="Specify detailed reason why potential is No…" value={form.potential_reason} onChange={(v) => setField("potential_reason", v)} />
+                {/* Contacts List Table */}
+                <div style={{ border: "1px solid #e2e8f0", borderRadius: "8px", overflow: "hidden", background: "#ffffff" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px" }}>
+                    <thead>
+                      <tr style={{ background: "#f8fafc", borderBottom: "1px solid #e2e8f0", color: "#475569" }}>
+                        <th style={{ padding: "12px 16px", textAlign: "left", fontWeight: 700 }}>NAME / DESIGNATION</th>
+                        <th style={{ padding: "12px 16px", textAlign: "left", fontWeight: 700 }}>CALLING / WHATSAPP</th>
+                        <th style={{ padding: "12px 16px", textAlign: "left", fontWeight: 700 }}>EMAIL</th>
+                        <th style={{ padding: "12px 16px", textAlign: "left", fontWeight: 700 }}>TAG</th>
+                        <th style={{ padding: "12px 16px", textAlign: "right", fontWeight: 700 }}>ACTION</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {contacts.length === 0 ? (
+                        <tr>
+                          <td colSpan={5} style={{ textAlign: "center", padding: "32px", color: "#94a3b8", fontStyle: "italic" }}>
+                            No contact persons added yet. Click "+ Add New Contact" to add key contacts.
+                          </td>
+                        </tr>
+                      ) : (
+                        contacts.map((c) => (
+                          <tr key={c.id} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                            <td style={{ padding: "12px 16px" }}>
+                              <div style={{ fontWeight: 700, color: "#0f172a" }}>
+                                {c.salutation} {c.person_name}
+                              </div>
+                              <div style={{ fontSize: "12px", color: "#64748b", marginTop: "2px" }}>
+                                {c.designation || "No Designation"}
+                              </div>
+                            </td>
+                            <td style={{ padding: "12px 16px" }}>
+                              <div style={{ color: "#334155" }}>📞 {c.calling_number || "—"}</div>
+                              <div style={{ color: "#334155", marginTop: "2px" }}>💬 {c.whatsapp_number || "—"}</div>
+                            </td>
+                            <td style={{ padding: "12px 16px" }}>
+                              {c.email ? (
+                                <a href={`mailto:${c.email}`} style={{ color: "#2563eb", textDecoration: "none", fontWeight: 500 }}>
+                                  ✉️ {c.email}
+                                </a>
+                              ) : (
+                                <span style={{ color: "#94a3b8" }}>—</span>
+                              )}
+                            </td>
+                            <td style={{ padding: "12px 16px" }}>
+                              {c.is_primary ? (
+                                <span style={{ padding: "3px 8px", borderRadius: "12px", background: "#dbeafe", color: "#1d4ed8", fontSize: "11.5px", fontWeight: 700 }}>
+                                  Primary Contact
+                                </span>
+                              ) : (
+                                <span style={{ padding: "3px 8px", borderRadius: "12px", background: "#f1f5f9", color: "#64748b", fontSize: "11.5px" }}>
+                                  Team Member
+                                </span>
+                              )}
+                            </td>
+                            <td style={{ padding: "12px 16px", textAlign: "right" }}>
+                              <div style={{ display: "inline-flex", gap: "8px" }}>
+                                <button
+                                  type="button"
+                                  onClick={() => openEditContact(c)}
+                                  style={{ padding: "4px 10px", fontSize: "12px", borderRadius: "4px", border: "1px solid #cbd5e1", background: "#ffffff", color: "#0f172a", cursor: "pointer", fontWeight: 600 }}
+                                >
+                                  Edit
+                                </button>
+                                {!c.is_primary && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteContact(c.id)}
+                                    style={{ padding: "4px 10px", fontSize: "12px", borderRadius: "4px", border: "1px solid #fee2e2", background: "#fff1f2", color: "#e11d48", cursor: "pointer", fontWeight: 600 }}
+                                  >
+                                    Delete
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* SIDE DRAWER FOR ADD / EDIT CONTACT */}
+                {contactFormOpen && (
+                  <div style={{ position: "fixed", inset: 0, zIndex: 9999, display: "flex", justifyContent: "flex-end" }}>
+                    <div
+                      onClick={() => setContactFormOpen(false)}
+                      style={{ position: "absolute", inset: 0, background: "rgba(15, 23, 42, 0.45)", backdropFilter: "blur(2px)" }}
+                    />
+                    <div
+                      style={{
+                        position: "relative",
+                        width: "480px",
+                        maxWidth: "92vw",
+                        height: "100%",
+                        background: "#ffffff",
+                        boxShadow: "-8px 0 30px rgba(0,0,0,0.18)",
+                        display: "flex",
+                        flexDirection: "column",
+                        zIndex: 10000,
+                      }}
+                    >
+                      <div style={{ padding: "18px 24px", borderBottom: "1px solid #e2e8f0", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <h3 style={{ fontSize: "17px", fontWeight: 700, margin: 0, color: "#0f172a" }}>
+                          {editingContactId ? "Edit Contact Person" : "Add Contact Person"}
+                        </h3>
+                        <button
+                          type="button"
+                          onClick={() => setContactFormOpen(false)}
+                          style={{ border: "none", background: "none", fontSize: "18px", color: "#64748b", cursor: "pointer" }}
+                        >
+                          ✕
+                        </button>
+                      </div>
+
+                      <form onSubmit={handleSaveContact} style={{ padding: "24px", display: "flex", flexDirection: "column", gap: "16px", flex: 1, overflowY: "auto" }}>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: "12px" }}>
+                          <SelectField
+                            id="salutation"
+                            label="Title"
+                            value={contactForm.salutation}
+                            onChange={(v) => setContactForm((prev) => ({ ...prev, salutation: v }))}
+                          >
+                            <option value="">Select</option>
+                            <option value="Mr.">Mr.</option>
+                            <option value="Mrs.">Mrs.</option>
+                            <option value="Ms.">Ms.</option>
+                          </SelectField>
+                          <TextField id="person_name" label="Full Name *" required placeholder="Contact Name" value={contactForm.person_name} onChange={(v) => setContactForm((prev) => ({ ...prev, person_name: v }))} />
+                        </div>
+
+                        <TextField id="designation" label="Designation" placeholder="e.g. Purchase Director" value={contactForm.designation} onChange={(v) => setContactForm((prev) => ({ ...prev, designation: v }))} />
+
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+                          <TextField id="calling_number" label="Calling Number" placeholder="+256 700000000" value={contactForm.calling_number} onChange={(v) => setContactForm((prev) => ({ ...prev, calling_number: v }))} />
+                          <TextField id="whatsapp_number" label="WhatsApp Number" placeholder="+256 700000000" value={contactForm.whatsapp_number} onChange={(v) => setContactForm((prev) => ({ ...prev, whatsapp_number: v }))} />
+                        </div>
+
+                        <TextField id="email" label="Email Address" type="email" placeholder="contact@company.com" value={contactForm.email} onChange={(v) => setContactForm((prev) => ({ ...prev, email: v }))} />
+
+                        <SelectField
+                          id="country_id"
+                          label="Country"
+                          value={contactForm.country_id}
+                          onChange={(v) => setContactForm((prev) => ({ ...prev, country_id: v }))}
+                        >
+                          <option value="">-- Select Country --</option>
+                          {countries.items.map((c) => (
+                            <option key={c.id} value={c.id}>
+                              {c.name}
+                            </option>
+                          ))}
+                        </SelectField>
+
+                        <div style={{ borderTop: "1px solid #e2e8f0", paddingTop: "16px", marginTop: "auto", display: "flex", justifyContent: "flex-end", gap: "12px" }}>
+                          <button
+                            type="button"
+                            onClick={() => setContactFormOpen(false)}
+                            style={{ padding: "8px 16px", borderRadius: "6px", border: "1px solid #cbd5e1", background: "#ffffff", fontWeight: 600, fontSize: "13px", cursor: "pointer" }}
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            type="submit"
+                            style={{ padding: "8px 20px", borderRadius: "6px", background: "#2563eb", color: "#ffffff", border: "none", fontWeight: 600, fontSize: "13px", cursor: "pointer" }}
+                          >
+                            {editingContactId ? "Update Contact" : "Save Contact"}
+                          </button>
+                        </div>
+                      </form>
+                    </div>
                   </div>
                 )}
               </div>
-
-              {/* 7. Product Range & Remarks */}
-              <div>
-                <div style={sectionTitleStyle}>Product Range &amp; Remarks</div>
-                <TextAreaField id="product_range" label="Product Range (Manufactured or Supplied)" rows={2} placeholder="Products they supply or manufacture…" value={form.product_range} onChange={(v) => setField("product_range", v)} />
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", marginTop: "14px" }}>
-                  <TextAreaField id="currently_buying_from" label="Currently Buying From" rows={2} placeholder="Competitors or suppliers they currently buy from…" value={form.currently_buying_from} onChange={(v) => setField("currently_buying_from", v)} />
-                  <TextAreaField id="overall_remarks" label="Overall Observation / Remarks" rows={2} placeholder="General observation remarks…" value={form.overall_remarks} onChange={(v) => setField("overall_remarks", v)} />
-                </div>
-              </div>
-
-              {/* 8. Additional Contacts Sub-Panel (Only in Edit Mode) */}
-              {modalMode === "edit" && editingId && (
-                <div>
-                  <div style={sectionTitleStyle}>Additional Contact Persons ({contacts.length})</div>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
-                    <div style={{ fontSize: "13px", color: "#64748b" }}>
-                      Main form contact is automatically saved as Primary. You can add extra team contacts below.
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setContactFormOpen((v) => !v)}
-                      style={{ padding: "6px 14px", fontSize: "12.5px", borderRadius: "6px", background: "#f1f5f9", border: "1px solid #cbd5e1", cursor: "pointer", fontWeight: 600 }}
-                    >
-                      {contactFormOpen ? "Cancel Contact" : "+ Add Contact Person"}
-                    </button>
-                  </div>
-
-                  {contactFormOpen && (
-                    <div style={{ background: "#f8fafc", padding: "16px", borderRadius: "8px", marginBottom: "16px", border: "1px solid #cbd5e1" }}>
-                      <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr 2fr", gap: "12px", marginBottom: "12px" }}>
-                        <SelectField id="contact_salutation_sub" label="Title" value={contactForm.salutation} onChange={(v) => setContactForm((prev) => ({ ...prev, salutation: v }))}>
-                          <option value="">Select</option>
-                          <option value="Mr.">Mr.</option>
-                          <option value="Mrs.">Mrs.</option>
-                          <option value="Ms.">Ms.</option>
-                        </SelectField>
-                        <TextField id="contact_name_sub" label="Full Name *" required placeholder="Contact Name" value={contactForm.person_name} onChange={(v) => setContactForm((prev) => ({ ...prev, person_name: v }))} />
-                        <TextField id="contact_designation_sub" label="Designation" placeholder="Designation" value={contactForm.designation} onChange={(v) => setContactForm((prev) => ({ ...prev, designation: v }))} />
-                      </div>
-                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "12px", marginBottom: "12px" }}>
-                        <TextField id="contact_calling_sub" label="Calling Number" placeholder="Calling #" value={contactForm.calling_number} onChange={(v) => setContactForm((prev) => ({ ...prev, calling_number: v }))} />
-                        <TextField id="contact_whatsapp_sub" label="WhatsApp Number" placeholder="WhatsApp #" value={contactForm.whatsapp_number} onChange={(v) => setContactForm((prev) => ({ ...prev, whatsapp_number: v }))} />
-                        <TextField id="contact_email_sub" label="Email" placeholder="email@domain.com" value={contactForm.email} onChange={(v) => setContactForm((prev) => ({ ...prev, email: v }))} />
-                      </div>
-                      <button type="button" onClick={handleAddContact} style={{ padding: "8px 18px", borderRadius: "6px", background: "#2563eb", color: "#fff", border: "none", fontWeight: 600, fontSize: "13px", cursor: "pointer" }}>
-                        Save Contact
-                      </button>
-                    </div>
-                  )}
-
-                  <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                    {contacts.length === 0 ? (
-                      <div style={{ fontSize: "13px", color: "#94a3b8", fontStyle: "italic" }}>No additional contact persons added yet.</div>
-                    ) : (
-                      contacts.map((c) => (
-                        <div key={c.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", background: "#f8fafc", borderRadius: "6px", border: "1px solid #e2e8f0", fontSize: "13px" }}>
-                          <div>
-                            <strong>{c.salutation} {c.person_name}</strong> {c.designation ? `(${c.designation})` : ""} {c.is_primary && <span style={{ color: "#2563eb", fontWeight: 700, marginLeft: "6px" }}>[Primary Contact]</span>}
-                            <div style={{ color: "#64748b", marginTop: "2px", fontSize: "12.5px" }}>
-                              📞 {c.calling_number || "—"} | 💬 {c.whatsapp_number || "—"} | ✉️ {c.email || "—"}
-                            </div>
-                          </div>
-                          {!c.is_primary && (
-                            <button type="button" onClick={() => handleDeleteContact(c.id)} style={{ border: "none", background: "none", color: "#ef4444", fontWeight: 700, cursor: "pointer" }}>
-                              Delete ✕
-                            </button>
-                          )}
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* Form Action Buttons */}
-              <div style={{ borderTop: "2px solid #e2e8f0", paddingTop: "16px", marginTop: "12px", display: "flex", justifyContent: "flex-end", gap: "12px" }}>
-                <button
-                  type="button"
-                  onClick={() => setModalMode(null)}
-                  style={{ padding: "9px 20px", borderRadius: "6px", border: "1px solid #cbd5e1", background: "#ffffff", fontWeight: 600, fontSize: "13.5px", cursor: "pointer" }}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  style={{ padding: "9px 24px", borderRadius: "6px", background: "#2563eb", color: "#ffffff", border: "none", fontWeight: 600, fontSize: "13.5px", cursor: "pointer" }}
-                >
-                  {modalMode === "create" ? "Save Buyer Profile" : "Update Buyer Profile"}
-                </button>
-              </div>
-            </form>
+            )}
           </div>
         </main>
       </AppShell>
@@ -1003,34 +1667,40 @@ export function BuyersPage() {
       <main className="page" style={{ padding: "20px", maxWidth: "1600px", margin: "0 auto" }}>
         <Breadcrumb trail={["Buyer Profiles"]} />
 
-        {/* Page Header */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+        {/* Page Header matching Supplier Master Top Header Bar */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, flexWrap: "wrap", gap: "12px" }}>
           <div>
             <h1 style={{ fontSize: 22, fontWeight: 700, color: "#0F172A", margin: 0 }}>Buyer (Client) Master</h1>
             <div style={{ fontSize: 13, color: "#64748b", marginTop: 4 }}>
               Manage client accounts, contact persons, potential ratings, and sales pipeline statuses.
             </div>
           </div>
-          <div style={{ display: "flex", gap: "10px" }}>
+
+          {/* Action Header Button Bar matching Supplier Master */}
+          <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+            {/* Funnel Filter Icon Button */}
             <button
               type="button"
               onClick={() => setIsFilterPanelOpen((v) => !v)}
               style={{
-                padding: "8px 14px",
+                padding: "8px 12px",
                 borderRadius: "6px",
-                border: "1px solid #cbd5e1",
-                background: isFilterPanelOpen ? "#e2e8f0" : "#ffffff",
-                color: "#1e293b",
-                fontWeight: 600,
-                fontSize: "13.5px",
+                background: isFilterPanelOpen ? "#4f46e5" : "#475569",
+                color: "#ffffff",
+                border: "none",
                 cursor: "pointer",
-                display: "flex",
+                display: "inline-flex",
                 alignItems: "center",
-                gap: "6px",
+                justifyContent: "center",
               }}
+              title="Toggle Filter Options"
             >
-              🔍 {isFilterPanelOpen ? "Hide Filters" : "Filter Records"}
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
+              </svg>
             </button>
+
+            {/* Add New Buyer */}
             <Can permission="buyer.create">
               <button
                 type="button"
@@ -1050,10 +1720,32 @@ export function BuyersPage() {
                 + ADD NEW BUYER
               </button>
             </Can>
+
+            {/* Import / Export Dropdown */}
+            <Can permission="buyer.import">
+              <ImpExpDropdown
+                apiBase="/buyers"
+                entityName="buyer"
+                importHeaders={BUYER_IMPORT_HEADERS}
+                onSummary={setImportSummary}
+                onError={setImportError}
+                onComplete={() => reload()}
+                onExportCsv={() => handleExport("csv")}
+              />
+            </Can>
+
+            {/* Bulk Actions Dropdown (Bulk Activate, Bulk Deactivate, Bulk Delete) */}
+            <BulkActionsDropdown
+              selectedCount={selectedIds.length}
+              onBulkActivate={handleBulkActivate}
+              onBulkDeactivate={handleBulkDeactivate}
+              onBulkDelete={handleBulkDelete}
+            />
           </div>
         </div>
 
         <Banner error={error} />
+        <ImportSummaryPanel summary={importSummary} error={importError} />
 
         {/* Top Filters Panel */}
         {isFilterPanelOpen && (
@@ -1080,7 +1772,7 @@ export function BuyersPage() {
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: "12px" }}>
               <div>
                 <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", display: "block", marginBottom: "4px" }}>Buyer Type</label>
-                <select value={buyerTypeFilter} onChange={(e) => { setCurrentPage(1); setBuyerTypeFilter(e.target.value); }} style={{ ...selectStyle, width: "100%" }}>
+                <select value={buyerTypeFilter} onChange={(e) => { setCurrentPage(1); setBuyerTypeFilter(e.target.value); }} style={{ ...selectFilterStyle, width: "100%" }}>
                   <option value="">All Buyer Types</option>
                   {buyerTypes.items.map((bt) => (
                     <option key={bt.id} value={bt.name.toLowerCase()}>
@@ -1093,7 +1785,7 @@ export function BuyersPage() {
               </div>
               <div>
                 <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", display: "block", marginBottom: "4px" }}>Current Status</label>
-                <select value={statusFilter} onChange={(e) => { setCurrentPage(1); setStatusFilter(e.target.value); }} style={{ ...selectStyle, width: "100%" }}>
+                <select value={statusFilter} onChange={(e) => { setCurrentPage(1); setStatusFilter(e.target.value); }} style={{ ...selectFilterStyle, width: "100%" }}>
                   <option value="">All Statuses</option>
                   <option value="new">New</option>
                   <option value="existing">Existing</option>
@@ -1101,7 +1793,7 @@ export function BuyersPage() {
               </div>
               <div>
                 <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", display: "block", marginBottom: "4px" }}>Potential</label>
-                <select value={potentialFilter} onChange={(e) => { setCurrentPage(1); setPotentialFilter(e.target.value); }} style={{ ...selectStyle, width: "100%" }}>
+                <select value={potentialFilter} onChange={(e) => { setCurrentPage(1); setPotentialFilter(e.target.value); }} style={{ ...selectFilterStyle, width: "100%" }}>
                   <option value="">Any Potential</option>
                   <option value="yes">Yes</option>
                   <option value="no">No</option>
@@ -1109,7 +1801,7 @@ export function BuyersPage() {
               </div>
               <div>
                 <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", display: "block", marginBottom: "4px" }}>Client Grade</label>
-                <select value={gradeFilter} onChange={(e) => { setCurrentPage(1); setGradeFilter(e.target.value); }} style={{ ...selectStyle, width: "100%" }}>
+                <select value={gradeFilter} onChange={(e) => { setCurrentPage(1); setGradeFilter(e.target.value); }} style={{ ...selectFilterStyle, width: "100%" }}>
                   <option value="">Any Grade</option>
                   <option value="A">Grade A</option>
                   <option value="B">Grade B</option>
@@ -1118,7 +1810,7 @@ export function BuyersPage() {
               </div>
               <div>
                 <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", display: "block", marginBottom: "4px" }}>Country</label>
-                <select value={countryFilter} onChange={(e) => { setCurrentPage(1); setCountryFilter(e.target.value); }} style={{ ...selectStyle, width: "100%" }}>
+                <select value={countryFilter} onChange={(e) => { setCurrentPage(1); setCountryFilter(e.target.value); }} style={{ ...selectFilterStyle, width: "100%" }}>
                   <option value="">Any Country</option>
                   {countries.items.map((c) => (
                     <option key={c.id} value={c.id}>
@@ -1129,7 +1821,7 @@ export function BuyersPage() {
               </div>
               <div>
                 <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", display: "block", marginBottom: "4px" }}>Product Category</label>
-                <select value={categoryFilter} onChange={(e) => { setCurrentPage(1); setCategoryFilter(e.target.value); setSubCategoryFilter(""); }} style={{ ...selectStyle, width: "100%" }}>
+                <select value={categoryFilter} onChange={(e) => { setCurrentPage(1); setCategoryFilter(e.target.value); setSubCategoryFilter(""); }} style={{ ...selectFilterStyle, width: "100%" }}>
                   <option value="">All Categories</option>
                   {categories.items.map((c) => (
                     <option key={c.id} value={c.id}>
@@ -1140,7 +1832,7 @@ export function BuyersPage() {
               </div>
               <div>
                 <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", display: "block", marginBottom: "4px" }}>Sub Category</label>
-                <select value={subCategoryFilter} onChange={(e) => { setCurrentPage(1); setSubCategoryFilter(e.target.value); }} style={{ ...selectStyle, width: "100%" }}>
+                <select value={subCategoryFilter} onChange={(e) => { setCurrentPage(1); setSubCategoryFilter(e.target.value); }} style={{ ...selectFilterStyle, width: "100%" }}>
                   <option value="">All Sub-Categories</option>
                   {subCategories.items
                     .filter((sc) => !categoryFilter || sc.category_id === categoryFilter)
@@ -1153,11 +1845,11 @@ export function BuyersPage() {
               </div>
               <div>
                 <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", display: "block", marginBottom: "4px" }}>Date From</label>
-                <input type="date" value={dateFromFilter} onChange={(e) => { setCurrentPage(1); setDateFromFilter(e.target.value); }} style={{ ...selectStyle, width: "100%" }} />
+                <input type="date" value={dateFromFilter} onChange={(e) => { setCurrentPage(1); setDateFromFilter(e.target.value); }} style={{ ...selectFilterStyle, width: "100%" }} />
               </div>
               <div>
                 <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", display: "block", marginBottom: "4px" }}>Date To</label>
-                <input type="date" value={dateToFilter} onChange={(e) => { setCurrentPage(1); setDateToFilter(e.target.value); }} style={{ ...selectStyle, width: "100%" }} />
+                <input type="date" value={dateToFilter} onChange={(e) => { setCurrentPage(1); setDateToFilter(e.target.value); }} style={{ ...selectFilterStyle, width: "100%" }} />
               </div>
             </div>
           </div>
@@ -1293,8 +1985,8 @@ export function BuyersPage() {
           </div>
 
           {/* Table */}
-          <div style={{ overflowX: "auto" }}>
-            <table ref={tableRef} style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px" }}>
+          <div className="table-scroll" style={{ maxHeight: "calc(100vh - 220px)", overflowY: "auto", overflowX: "auto" }}>
+            <table ref={tableRef} style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: "13px" }}>
               <thead>
                 <tr style={{ background: "#f8fafc", borderBottom: "1px solid #e2e8f0" }}>
                   {displayOrder.map((colIdx) => {
@@ -1325,7 +2017,7 @@ export function BuyersPage() {
                           fontWeight: 700,
                           color: "#475569",
                           whiteSpace: "nowrap",
-                          ...getFreezeStyle(colIdx),
+                          ...getFreezeStyle(colIdx, true),
                         }}
                       >
                         {headers[colIdx]}
@@ -1376,8 +2068,8 @@ export function BuyersPage() {
                         </a>
                       ),
                       3: r.buyer_type ? r.buyer_type.toUpperCase() : "—",
-                      4: renderChips(r.category_ids, categories.items),
-                      5: renderChips(r.sub_category_ids, subCategories.items),
+                      4: renderChips(r.category_ids, categories.items, "Product Categories"),
+                      5: renderChips(r.sub_category_ids, subCategories.items, "Product Sub-Categories"),
                       6: countryName,
                       7: (
                         <span
@@ -1410,31 +2102,52 @@ export function BuyersPage() {
                       9: r.buyer_grade ? `Grade ${r.buyer_grade}` : "—",
                       10: r.created_at ? new Date(r.created_at).toLocaleDateString() : "—",
                       11: (
-                        <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                        <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
                           <button
                             type="button"
                             onClick={() => openEdit(r)}
-                            style={{ padding: "4px 8px", fontSize: "12px", borderRadius: "4px", border: "1px solid #cbd5e1", background: "#f8fafc", cursor: "pointer", color: "#0f172a" }}
+                            title="Edit Buyer"
+                            style={{
+                              background: "#0061f2",
+                              color: "#ffffff",
+                              padding: "6px 9px",
+                              borderRadius: "4px",
+                              border: "none",
+                              cursor: "pointer",
+                              display: "inline-flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                            }}
                           >
-                            Edit
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                            </svg>
                           </button>
                           <button
                             type="button"
                             onClick={() => handleDelete(r)}
                             title={cannotDelete ? "Cannot delete buyer with Existing status or Yes potential (document rule)" : "Delete buyer"}
+                            disabled={cannotDelete}
                             style={{
-                              padding: "4px 8px",
-                              fontSize: "12px",
+                              background: cannotDelete ? "#cbd5e1" : "#ef4444",
+                              color: "#ffffff",
+                              padding: "6px 9px",
                               borderRadius: "4px",
-                              border: "1px solid #fee2e2",
-                              background: cannotDelete ? "#f1f5f9" : "#fff1f2",
+                              border: "none",
                               cursor: cannotDelete ? "not-allowed" : "pointer",
-                              color: cannotDelete ? "#94a3b8" : "#e11d48",
-                              fontWeight: 600,
+                              display: "inline-flex",
+                              alignItems: "center",
+                              justifyContent: "center",
                               opacity: cannotDelete ? 0.6 : 1,
                             }}
                           >
-                            Delete
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <polyline points="3 6 5 6 21 6" />
+                              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                              <line x1="10" y1="11" x2="10" y2="17" />
+                              <line x1="14" y1="11" x2="14" y2="17" />
+                            </svg>
                           </button>
                         </div>
                       ),
@@ -1449,7 +2162,7 @@ export function BuyersPage() {
                               padding: "10px 14px",
                               textAlign: colIdx === 0 || colIdx === 1 ? "center" : "left",
                               whiteSpace: colIdx === 2 ? "normal" : "nowrap",
-                              ...getFreezeStyle(colIdx),
+                              ...getFreezeStyle(colIdx, false),
                             }}
                           >
                             {rowCells[colIdx]}
@@ -1482,62 +2195,165 @@ export function BuyersPage() {
         {detailBuyer && (
           <SideDrawer
             open={Boolean(detailBuyer)}
-            title={`Buyer Profile: ${detailBuyer.company_name}`}
+            title={`Buyer Detail #${detailBuyer.company_name}`}
+            subtitle={`Buyer Type: ${detailBuyer.buyer_type ? detailBuyer.buyer_type.toUpperCase() : "—"} | Status: ${detailBuyer.current_status ? detailBuyer.current_status.toUpperCase() : "NEW"}`}
             onClose={() => setDetailBuyer(null)}
+            onEdit={() => {
+              const b = detailBuyer;
+              setDetailBuyer(null);
+              openEdit(b);
+            }}
+            editLabel="✏️ Edit Buyer"
           >
-            <div style={{ display: "flex", flexDirection: "column", gap: "16px", padding: "12px" }}>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", background: "#f8fafc", padding: "16px", borderRadius: "8px" }}>
-                <div><strong>Company Name:</strong> {detailBuyer.company_name}</div>
-                <div><strong>Buyer Type:</strong> {detailBuyer.buyer_type || "—"}</div>
-                <div><strong>Country:</strong> {countries.items.find((c) => c.id === detailBuyer.country_id)?.name || "—"}</div>
-                <div><strong>City:</strong> {detailBuyer.city || "—"}</div>
-                <div><strong>Current Status:</strong> {detailBuyer.current_status || "—"}</div>
-                <div><strong>Potential:</strong> {detailBuyer.potential || "—"}</div>
-                <div><strong>Client Grade:</strong> {detailBuyer.buyer_grade || "—"}</div>
-                <div><strong>Tax ID (TIN/GST):</strong> {detailBuyer.tax_id_number || "—"}</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+              {/* Identity & Product Interest */}
+              <DetailFieldGrid
+                fields={[
+                  { label: "Company Name", value: detailBuyer.company_name, fullWidth: true },
+                  { label: "Buyer Type", value: detailBuyer.buyer_type ? detailBuyer.buyer_type.toUpperCase() : "—" },
+                  { label: "Country", value: countries.items.find((c) => c.id === detailBuyer.country_id)?.name || "—" },
+                  { label: "City", value: detailBuyer.city || "—" },
+                  { label: "Tax ID (TIN / GST)", value: detailBuyer.tax_id_number || "—" },
+                  {
+                    label: "Product Categories",
+                    value: renderChips(detailBuyer.category_ids, categories.items, "Product Categories"),
+                    fullWidth: true,
+                  },
+                  {
+                    label: "Product Sub-Categories",
+                    value: renderChips(detailBuyer.sub_category_ids, subCategories.items, "Product Sub-Categories"),
+                    fullWidth: true,
+                  },
+                  { label: "Currently Buying From", value: detailBuyer.currently_buying_from || "—", fullWidth: true },
+                  { label: "Product Range & Remarks", value: detailBuyer.overall_remarks || detailBuyer.product_range || "—", fullWidth: true },
+                ]}
+              />
+
+              {/* Primary Contact Information */}
+              <div style={{ background: "#f8fafc", padding: "16px", borderRadius: "10px", border: "1px solid #e2e8f0" }}>
+                <h4 style={{ fontSize: "14px", fontWeight: 700, margin: "0 0 12px 0", color: "#0f172a" }}>
+                  Primary Contact Information
+                </h4>
+                <DetailFieldGrid
+                  fields={[
+                    {
+                      label: "Full Name",
+                      value: `${detailBuyer.contact_salutation || ""} ${detailBuyer.contact_full_name || ""}`.trim() || "—",
+                    },
+                    { label: "Designation", value: detailBuyer.contact_designation || "—" },
+                    { label: "Calling Number", value: detailBuyer.contact_calling_number || "—" },
+                    { label: "WhatsApp Number", value: detailBuyer.contact_whatsapp_number || "—" },
+                    {
+                      label: "Email Addresses",
+                      value:
+                        detailBuyer.emails && detailBuyer.emails.length ? (
+                          <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                            {detailBuyer.emails.map((em) => (
+                              <a key={em} href={`mailto:${em}`} style={{ color: "#2563eb", textDecoration: "none", fontWeight: 500 }}>
+                                ✉️ {em}
+                              </a>
+                            ))}
+                          </div>
+                        ) : (
+                          "—"
+                        ),
+                      fullWidth: true,
+                    },
+                    {
+                      label: "Website",
+                      value: detailBuyer.website ? (
+                        <a
+                          href={detailBuyer.website.startsWith("http") ? detailBuyer.website : `https://${detailBuyer.website}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          style={{ color: "#2563eb", textDecoration: "none", fontWeight: 500 }}
+                        >
+                          🌐 {detailBuyer.website}
+                        </a>
+                      ) : (
+                        "—"
+                      ),
+                    },
+                    { label: "Postal Address", value: detailBuyer.address || "—", fullWidth: true },
+                  ]}
+                />
               </div>
 
-              <div>
-                <strong>Primary Contact Person:</strong>
-                <div style={{ marginTop: "4px", fontSize: "13px", color: "#334155" }}>
-                  {detailBuyer.contact_salutation} {detailBuyer.contact_full_name || "—"} ({detailBuyer.contact_designation || "No designation"})
-                  <br />
-                  📞 Calling: {detailBuyer.contact_calling_number || "—"} | 💬 WhatsApp: {detailBuyer.contact_whatsapp_number || "—"}
-                </div>
-              </div>
-
-              <div>
-                <strong>Emails:</strong>
-                <div style={{ marginTop: "4px" }}>
-                  {detailBuyer.emails && detailBuyer.emails.length > 0 ? (
-                    detailBuyer.emails.map((em) => (
-                      <a key={em} href={`mailto:${em}`} style={{ display: "block", color: "#2563eb", fontSize: "13px" }}>
-                        {em}
-                      </a>
-                    ))
-                  ) : (
-                    <span style={{ color: "#94a3b8" }}>No emails listed</span>
-                  )}
-                </div>
-              </div>
-
-              {detailBuyer.website && (
-                <div>
-                  <strong>Website:</strong>{" "}
-                  <a href={detailBuyer.website.startsWith("http") ? detailBuyer.website : `https://${detailBuyer.website}`} target="_blank" rel="noreferrer" style={{ color: "#2563eb" }}>
-                    {detailBuyer.website}
-                  </a>
-                </div>
-              )}
-
-              {detailBuyer.address && (
-                <div>
-                  <strong>Address:</strong>
-                  <div style={{ whiteSpace: "pre-wrap", fontSize: "13px", color: "#475569", marginTop: "4px" }}>{detailBuyer.address}</div>
-                </div>
-              )}
+              {/* Sales Pipeline & Rating */}
+              <DetailFieldGrid
+                fields={[
+                  { label: "Client Grade", value: detailBuyer.buyer_grade ? `Grade ${detailBuyer.buyer_grade}` : "—" },
+                  { label: "Current Status", value: detailBuyer.current_status ? detailBuyer.current_status.toUpperCase() : "—" },
+                  { label: "Potential Status", value: detailBuyer.potential ? detailBuyer.potential.toUpperCase() : "—" },
+                  { label: "Reason for Potential", value: detailBuyer.potential_reason || "—", fullWidth: true },
+                ]}
+              />
             </div>
           </SideDrawer>
+        )}
+
+        {chipModalData && (
+          <div
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(15, 23, 42, 0.5)",
+              backdropFilter: "blur(2px)",
+              zIndex: 9999,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: "20px",
+            }}
+            onClick={() => setChipModalData(null)}
+          >
+            <div
+              style={{
+                background: "#ffffff",
+                borderRadius: "12px",
+                padding: "20px 24px",
+                maxWidth: "420px",
+                width: "100%",
+                boxShadow: "0 20px 25px -5px rgba(0,0,0,0.2), 0 10px 10px -5px rgba(0,0,0,0.04)",
+                border: "1px solid #e2e8f0",
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px", borderBottom: "1px solid #f1f5f9", paddingBottom: "10px" }}>
+                <h3 style={{ margin: 0, fontSize: "16px", fontWeight: 700, color: "#0f172a", display: "flex", alignItems: "center", gap: "8px" }}>
+                  <span>👁️</span> {chipModalData.title} ({chipModalData.items.length})
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => setChipModalData(null)}
+                  style={{ background: "#f1f5f9", border: "none", borderRadius: "50%", width: "28px", height: "28px", fontSize: "14px", cursor: "pointer", color: "#64748b", display: "flex", alignItems: "center", justifyContent: "center" }}
+                >
+                  ✕
+                </button>
+              </div>
+              <div style={{ maxHeight: "280px", overflowY: "auto", display: "flex", flexDirection: "column", gap: "6px", paddingRight: "4px" }}>
+                {chipModalData.items.map((item, i) => (
+                  <div
+                    key={i}
+                    style={{
+                      padding: "8px 12px",
+                      borderRadius: "6px",
+                      background: "#f8fafc",
+                      border: "1px solid #e2e8f0",
+                      fontSize: "13px",
+                      fontWeight: 600,
+                      color: "#1e293b",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "8px",
+                    }}
+                  >
+                    <span style={{ color: "#2563eb", fontWeight: 700 }}>•</span> {item}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
         )}
       </main>
     </AppShell>

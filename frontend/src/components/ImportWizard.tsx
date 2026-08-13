@@ -38,6 +38,8 @@ import type {
   SheetRow,
 } from "@/types";
 
+export type { ColumnMapping, ImportDuplicate, ImportHeader, ImportSummary, SheetRow };
+
 /* ------------------------------------------------------------------ */
 /* Header name normalization + fuzzy auto-match                        */
 /* ------------------------------------------------------------------ */

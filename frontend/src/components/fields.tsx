@@ -138,6 +138,171 @@ export function TextAreaField({
   );
 }
 
+export function EmailTagInput({
+  id,
+  label,
+  emails,
+  onChange,
+  placeholder = "Type email and press Enter...",
+}: {
+  id?: string;
+  label?: React.ReactNode;
+  emails: string[];
+  onChange: (emails: string[]) => void;
+  placeholder?: string;
+}) {
+  const [inputValue, setInputValue] = useState("");
+  const [errorMsg, setErrorMsg] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+  const commitEmail = (raw: string) => {
+    const clean = raw.trim();
+    if (!clean) {
+      setErrorMsg("");
+      return;
+    }
+
+    const parts = clean.split(/[\s,]+/).map((p) => p.trim()).filter(Boolean);
+    let hasInvalid = false;
+    const updated = [...emails];
+
+    for (const p of parts) {
+      if (EMAIL_REGEX.test(p)) {
+        if (!updated.includes(p)) {
+          updated.push(p);
+        }
+      } else {
+        hasInvalid = true;
+      }
+    }
+
+    if (hasInvalid) {
+      setErrorMsg("Please Enter A Valid Email Address.");
+    } else {
+      setErrorMsg("");
+    }
+
+    onChange(updated);
+    setInputValue("");
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter" || e.key === "," || e.key === " ") {
+      e.preventDefault();
+      commitEmail(inputValue);
+    } else if (e.key === "Backspace" && !inputValue && emails.length > 0) {
+      setErrorMsg("");
+      onChange(emails.slice(0, -1));
+    }
+  };
+
+  const handleBlur = () => {
+    if (inputValue.trim()) {
+      commitEmail(inputValue);
+    }
+  };
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setInputValue(e.target.value);
+    if (errorMsg) setErrorMsg("");
+  };
+
+  const removeTag = (indexToRemove: number) => {
+    if (errorMsg) setErrorMsg("");
+    onChange(emails.filter((_, idx) => idx !== indexToRemove));
+  };
+
+  return (
+    <div className="field">
+      {label && <label htmlFor={id}>{renderLabel(label)}</label>}
+      <div
+        onClick={() => inputRef.current?.focus()}
+        style={{
+          display: "flex",
+          flexWrap: "wrap",
+          gap: "6px",
+          alignItems: "center",
+          padding: "6px 10px",
+          borderRadius: "6px",
+          border: errorMsg ? "1px solid #ef4444" : "1px solid #cbd5e1",
+          background: "#ffffff",
+          minHeight: "38px",
+          cursor: "text",
+          transition: "all 0.15s ease",
+        }}
+      >
+        {emails.map((email, idx) => (
+          <span
+            key={`${email}-${idx}`}
+            style={{
+              background: "#2563eb",
+              color: "#ffffff",
+              borderRadius: "4px",
+              padding: "3px 8px 3px 10px",
+              fontSize: "12.5px",
+              fontWeight: 600,
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "6px",
+              boxShadow: "0 1px 2px rgba(0,0,0,0.1)",
+            }}
+          >
+            {email}
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                removeTag(idx);
+              }}
+              style={{
+                background: "none",
+                border: "none",
+                color: "#ffffff",
+                fontWeight: 700,
+                fontSize: "12px",
+                cursor: "pointer",
+                padding: "0 2px",
+                lineHeight: 1,
+                opacity: 0.85,
+              }}
+              title="Remove email"
+            >
+              ✕
+            </button>
+          </span>
+        ))}
+        <input
+          ref={inputRef}
+          id={id}
+          type="text"
+          value={inputValue}
+          placeholder={emails.length === 0 ? placeholder : "Add another email..."}
+          onChange={handleInputChange}
+          onKeyDown={handleKeyDown}
+          onBlur={handleBlur}
+          style={{
+            border: "none",
+            outline: "none",
+            background: "transparent",
+            flex: 1,
+            minWidth: "160px",
+            fontSize: "13px",
+            color: "#0f172a",
+            padding: "2px 0",
+          }}
+        />
+      </div>
+      {errorMsg && (
+        <div style={{ color: "#dc2626", fontSize: "12px", fontWeight: 600, marginTop: "4px" }}>
+          {errorMsg}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function SelectField({
   id,
   label,
@@ -196,7 +361,7 @@ export function SelectField({
   function toggleOpen() {
     const nextState = !open;
     setOpen(nextState);
-    if (nextState && options.length > 5) {
+    if (nextState) {
       setSearchTerm("");
       setTimeout(() => searchInputRef.current?.focus(), 50);
     }
@@ -256,8 +421,8 @@ export function SelectField({
             overflow: "hidden",
           }}
         >
-          {/* Search Bar — only shown for longer lists */}
-          {options.length > 5 && (
+          {/* Search Bar — shown for all lists */}
+          {options.length > 0 && (
           <div style={{ padding: "8px", borderBottom: "1px solid #f1f5f9", background: "#f8fafc" }}>
             <input
               ref={searchInputRef}

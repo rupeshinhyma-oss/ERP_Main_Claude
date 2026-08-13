@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
@@ -91,7 +92,7 @@ class BuyerCreate(BaseModel):
     sub_category_ids: list[uuid.UUID] = Field(
         default_factory=list, description="Product Sub Category, potential products for buying from us (multiple)."
     )
-    buyer_type: BuyerType | None = None
+    buyer_type: str | None = None
     country_id: uuid.UUID  # default Uganda applied by the caller (frontend/route), not forced here
     city: str | None = Field(default=None, max_length=150)
     address: str | None = None
@@ -101,7 +102,7 @@ class BuyerCreate(BaseModel):
     contact_designation: str | None = Field(default=None, max_length=150)
     contact_calling_number: str | None = Field(default=None, max_length=20)
     contact_whatsapp_number: str | None = Field(default=None, max_length=20)
-    emails: list[EmailStr] = Field(default_factory=list, description="Email ID (multiple emails).")
+    emails: list[str] = Field(default_factory=list, description="Email ID (multiple emails).")
 
     tax_id_number: str | None = Field(default=None, max_length=100)
     website: str | None = Field(default=None, max_length=500)
@@ -117,6 +118,27 @@ class BuyerCreate(BaseModel):
     _validate_calling = field_validator("contact_calling_number")(_phone_validator("Calling number"))
     _validate_whatsapp = field_validator("contact_whatsapp_number")(_phone_validator("WhatsApp number"))
 
+    @field_validator("buyer_type", "current_status", "potential", "buyer_grade", mode="before")
+    @classmethod
+    def empty_str_to_none(cls, v: Any) -> Any:
+        if isinstance(v, str):
+            cleaned = v.strip()
+            if not cleaned or cleaned.lower() in ("select", "-- select --", "-- select status --", "-- select potential --", "-- select grade --"):
+                return None
+            # Handle "Grade A", "Grade B", "Grade C"
+            if cleaned.lower().startswith("grade "):
+                grade_letter = cleaned[6:].strip().upper()
+                if grade_letter in ("A", "B", "C"):
+                    return grade_letter
+            # Handle case mismatch e.g. "New" -> "new", "Yes" -> "yes"
+            lower_v = cleaned.lower()
+            if lower_v in ("new", "existing", "yes", "no"):
+                return lower_v
+            if cleaned.upper() in ("A", "B", "C"):
+                return cleaned.upper()
+            return cleaned
+        return v
+
 
 class BuyerUpdate(BaseModel):
     """Payload to update an existing buyer profile. All fields optional (partial update)."""
@@ -124,7 +146,7 @@ class BuyerUpdate(BaseModel):
     company_name: str | None = Field(default=None, min_length=1, max_length=255)
     category_ids: list[uuid.UUID] | None = None
     sub_category_ids: list[uuid.UUID] | None = None
-    buyer_type: BuyerType | None = None
+    buyer_type: str | None = None
     country_id: uuid.UUID | None = None
     city: str | None = Field(default=None, max_length=150)
     address: str | None = None
@@ -134,7 +156,7 @@ class BuyerUpdate(BaseModel):
     contact_designation: str | None = Field(default=None, max_length=150)
     contact_calling_number: str | None = Field(default=None, max_length=20)
     contact_whatsapp_number: str | None = Field(default=None, max_length=20)
-    emails: list[EmailStr] | None = None
+    emails: list[str] | None = None
 
     tax_id_number: str | None = Field(default=None, max_length=100)
     website: str | None = Field(default=None, max_length=500)
@@ -149,6 +171,27 @@ class BuyerUpdate(BaseModel):
 
     _validate_calling = field_validator("contact_calling_number")(_phone_validator("Calling number"))
     _validate_whatsapp = field_validator("contact_whatsapp_number")(_phone_validator("WhatsApp number"))
+
+    @field_validator("buyer_type", "current_status", "potential", "buyer_grade", mode="before")
+    @classmethod
+    def empty_str_to_none(cls, v: Any) -> Any:
+        if isinstance(v, str):
+            cleaned = v.strip()
+            if not cleaned or cleaned.lower() in ("select", "-- select --", "-- select status --", "-- select potential --", "-- select grade --"):
+                return None
+            # Handle "Grade A", "Grade B", "Grade C"
+            if cleaned.lower().startswith("grade "):
+                grade_letter = cleaned[6:].strip().upper()
+                if grade_letter in ("A", "B", "C"):
+                    return grade_letter
+            # Handle case mismatch e.g. "New" -> "new", "Yes" -> "yes"
+            lower_v = cleaned.lower()
+            if lower_v in ("new", "existing", "yes", "no"):
+                return lower_v
+            if cleaned.upper() in ("A", "B", "C"):
+                return cleaned.upper()
+            return cleaned
+        return v
 
 
 class BuyerGradeUpdate(BaseModel):
@@ -170,7 +213,7 @@ class BuyerRead(BaseModel):
 
     id: uuid.UUID
     company_name: str
-    buyer_type: BuyerType | None
+    buyer_type: str | None
     country_id: uuid.UUID
     city: str | None
     address: str | None
@@ -208,7 +251,7 @@ class BuyerListItemRead(BaseModel):
 
     id: uuid.UUID
     company_name: str
-    buyer_type: BuyerType | None
+    buyer_type: str | None
     country_id: uuid.UUID
     current_status: BuyerCurrentStatus | None
     potential: BuyerPotential | None

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
@@ -136,12 +137,23 @@ class SupplierCreate(BaseModel):
     overall_remarks: str | None = None
     is_active: bool = True
 
-    @field_validator("supplier_type", mode="before")
+    @field_validator("supplier_type", "supplier_grade", "current_status", "potential", mode="before")
     @classmethod
-    def _normalize_supplier_type(cls, value: str | None) -> str | None:
+    def _normalize_enum_fields(cls, value: Any) -> Any:
         if isinstance(value, str):
-            val_clean = value.strip().lower()
-            return val_clean if val_clean else None
+            cleaned = value.strip()
+            if not cleaned or cleaned.lower() in ("select", "-- select --", "-- select status --", "-- select potential --", "-- select grade --", "-- select type --"):
+                return None
+            if cleaned.lower().startswith("grade "):
+                grade_letter = cleaned[6:].strip().upper()
+                if grade_letter in ("A", "B", "C"):
+                    return grade_letter
+            lower_v = cleaned.lower()
+            if lower_v in ("new", "existing", "yes", "no", "manufacturer", "trader"):
+                return lower_v
+            if cleaned.upper() in ("A", "B", "C"):
+                return cleaned.upper()
+            return cleaned
         return value
 
     _validate_calling = field_validator("contact_calling_number")(_phone_validator("Calling number"))
@@ -186,12 +198,23 @@ class SupplierUpdate(BaseModel):
     overall_remarks: str | None = None
     is_active: bool | None = None
 
-    @field_validator("supplier_type", mode="before")
+    @field_validator("supplier_type", "supplier_grade", "current_status", "potential", mode="before")
     @classmethod
-    def _normalize_supplier_type(cls, value: str | None) -> str | None:
+    def _normalize_enum_fields(cls, value: Any) -> Any:
         if isinstance(value, str):
-            val_clean = value.strip().lower()
-            return val_clean if val_clean else None
+            cleaned = value.strip()
+            if not cleaned or cleaned.lower() in ("select", "-- select --", "-- select status --", "-- select potential --", "-- select grade --", "-- select type --"):
+                return None
+            if cleaned.lower().startswith("grade "):
+                grade_letter = cleaned[6:].strip().upper()
+                if grade_letter in ("A", "B", "C"):
+                    return grade_letter
+            lower_v = cleaned.lower()
+            if lower_v in ("new", "existing", "yes", "no", "manufacturer", "trader"):
+                return lower_v
+            if cleaned.upper() in ("A", "B", "C"):
+                return cleaned.upper()
+            return cleaned
         return value
 
     _validate_calling = field_validator("contact_calling_number")(_phone_validator("Calling number"))

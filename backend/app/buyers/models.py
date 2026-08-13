@@ -24,7 +24,7 @@ import uuid
 from datetime import datetime, timezone
 from enum import Enum
 
-from sqlalchemy import JSON, Boolean, ForeignKey, String, Text, UniqueConstraint
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -78,9 +78,7 @@ class Buyer(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
     __tablename__ = "buyers"
 
     company_name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)  # "Name of Company*"
-    buyer_type: Mapped[BuyerType | None] = mapped_column(
-        SAEnum(BuyerType, name="buyer_type", native_enum=False, length=20), nullable=True
-    )
+    buyer_type: Mapped[str | None] = mapped_column(String(150), nullable=True)
 
     country_id: Mapped[uuid.UUID] = mapped_column(
         GUID(), ForeignKey("countries.id", ondelete="RESTRICT"), nullable=False, index=True
@@ -213,7 +211,7 @@ class BuyerCategoryLink(Base, UUIDPrimaryKeyMixin):
     category_id: Mapped[uuid.UUID] = mapped_column(
         GUID(), ForeignKey("product_categories.id", ondelete="RESTRICT"), nullable=False, index=True
     )
-    created_at: Mapped[datetime] = mapped_column(default=_utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False)
 
     buyer: Mapped[Buyer] = relationship(back_populates="category_links")
 
@@ -239,7 +237,7 @@ class BuyerSubCategoryLink(Base, UUIDPrimaryKeyMixin):
     sub_category_id: Mapped[uuid.UUID] = mapped_column(
         GUID(), ForeignKey("product_sub_categories.id", ondelete="RESTRICT"), nullable=False, index=True
     )
-    created_at: Mapped[datetime] = mapped_column(default=_utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False)
 
     buyer: Mapped[Buyer] = relationship(back_populates="sub_category_links")
 

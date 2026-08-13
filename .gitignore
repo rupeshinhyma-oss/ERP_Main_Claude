@@ -27,3 +27,8 @@ venv/
 Thumbs.db
 .vscode/
 .idea/
+
+# Uploads
+backend/uploads/
+uploads/
+

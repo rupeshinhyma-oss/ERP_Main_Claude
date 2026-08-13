@@ -200,7 +200,7 @@ export async function apiCall<T>(
     if (body.errors && body.errors.length > 0) {
       const details = body.errors
         .map((e) => (e.field ? `${e.field}: ${e.message}` : e.message))
-        .filter(Boolean)
+        .filter((msg) => Boolean(msg) && msg !== message)
         .join("; ");
       if (details) {
         message = `${message} (${details})`;
@@ -285,16 +285,8 @@ export function toQueryString(
   return parts.length ? `?${parts.join("&")}` : "";
 }
 
-/** Extract a displayable message from any thrown value. */
 export function errorMessage(err: unknown): string {
   if (err instanceof ApiError) {
-    if (err.errors && err.errors.length > 0) {
-      const details = err.errors
-        .map((e) => e.message || (e.field ? `${e.field}: invalid` : null))
-        .filter(Boolean)
-        .join("; ");
-      if (details) return `${err.message}: ${details}`;
-    }
     return err.message;
   }
   if (err instanceof Error && err.message) return err.message;

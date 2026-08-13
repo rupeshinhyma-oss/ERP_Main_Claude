@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -75,6 +75,102 @@ class PlanningRowRepository(BaseRepository[PlanningRow]):
         )
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
+
+    async def _linked_record_ids_for_organization(self, organization_id: uuid.UUID) -> set[uuid.UUID] | None:
+        """
+        Resolve which Product Master IDs belong to ``organization_id``.
+
+        The Organization filter (see ``list_page_for_sheet``/``count_for_sheet``)
+        is never a real column on ``planning_rows`` -- it's read straight off
+        the row's linked Product Master record's ``organization_ids`` (a JSON
+        array of organization UUIDs, multi-select on the Product Master form;
+        see ``app.masters.products.models.Product.organization_ids``), the
+        exact same "extract from Product Master, never store a stale copy"
+        pattern every other Shipment Planning lookup column already uses
+        (see ``app.planning.source_registry``). Membership is checked in
+        Python rather than via a dialect-specific JSON operator so this stays
+        correct on both the Postgres deployment and the SQLite test suite
+        (see ``app.database.base``'s dual-dialect ``GUID`` type for the same
+        portability concern elsewhere in this codebase).
+
+        Returns ``None`` (meaning "no organization filter") only if
+        ``organization_id`` wasn't actually passed by the caller -- callers
+        that DO pass one always get a concrete (possibly empty) set back,
+        since "no products belong to this org" should filter every row out,
+        not disable the filter.
+        """
+        from app.masters.products.models import Product
+
+        stmt = select(Product.id, Product.organization_ids).where(Product.deleted_at.is_(None))
+        result = await self.session.execute(stmt)
+        org_str = str(organization_id)
+        matching_ids: set[uuid.UUID] = set()
+        for product_id, organization_ids in result.all():
+            if organization_ids and org_str in [str(x) for x in organization_ids]:
+                matching_ids.add(product_id)
+        return matching_ids
+
+    async def list_page_for_sheet(
+        self,
+        sheet_id: uuid.UUID,
+        *,
+        offset: int = 0,
+        limit: int | None = 50,
+        organization_id: uuid.UUID | None = None,
+    ) -> list[PlanningRow]:
+        """
+        Same ordering/eager-loading as ``list_for_sheet``, but only one page.
+
+        Added for the grid-read endpoint (``PlanningService.get_grid``),
+        which used to call ``list_for_sheet`` and pull every row on the
+        sheet on every load -- the dominant cost once a sheet has more
+        than ~100 rows. Every OTHER caller of ``list_for_sheet`` (moving a
+        row, computing next_position, auto-populate de-dupe, etc.) still
+        needs the FULL unpaginated list and is deliberately left calling
+        the original method unchanged.
+
+        ``organization_id`` (optional) restricts the page to rows whose
+        linked Product Master record belongs to that organization -- see
+        ``_linked_record_ids_for_organization``. Applied server-side (not
+        left to the frontend to filter the already-loaded page) so the
+        filter searches the WHOLE sheet, not just whichever page happens
+        to be loaded already.
+        """
+        stmt = (
+            select(PlanningRow)
+            .where(PlanningRow.sheet_id == sheet_id, PlanningRow.deleted_at.is_(None))
+            .options(selectinload(PlanningRow.cells))
+        )
+        if organization_id is not None:
+            matching_ids = await self._linked_record_ids_for_organization(organization_id)
+            if not matching_ids:
+                return []
+            stmt = stmt.where(PlanningRow.linked_record_id.in_(matching_ids))
+        stmt = stmt.order_by(PlanningRow.position, PlanningRow.created_at).offset(offset)
+        if limit is not None:
+            stmt = stmt.limit(limit)
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def count_for_sheet(self, sheet_id: uuid.UUID, *, organization_id: uuid.UUID | None = None) -> int:
+        """
+        Total live row count for a sheet, used for the grid's pagination footer.
+
+        ``organization_id`` (optional) mirrors ``list_page_for_sheet`` -- when
+        set, only rows whose linked Product Master belongs to that
+        organization are counted, so "Showing X-Y of N" stays accurate while
+        the Organization filter is active.
+        """
+        stmt = select(func.count(PlanningRow.id)).where(
+            PlanningRow.sheet_id == sheet_id, PlanningRow.deleted_at.is_(None)
+        )
+        if organization_id is not None:
+            matching_ids = await self._linked_record_ids_for_organization(organization_id)
+            if not matching_ids:
+                return 0
+            stmt = stmt.where(PlanningRow.linked_record_id.in_(matching_ids))
+        result = await self.session.execute(stmt)
+        return int(result.scalar_one())
 
     async def next_position(self, sheet_id: uuid.UUID) -> int:
         rows = await self.list_for_sheet(sheet_id)

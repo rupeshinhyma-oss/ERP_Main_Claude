@@ -37,15 +37,25 @@ class ProductRepository(BaseRepository[Product]):
 
     async def attach_planning_supplier_info(self, products: list[Product]) -> None:
         """
-        Attach each product's primary supplier's name/city as transient attributes.
+        Attach each product's supplier's name/city as transient attributes.
 
-        "Primary supplier" = the earliest-linked ``SupplierProductLink`` row
-        for that product (a product can be linked to several suppliers,
-        but Shipment Planning's Supplier Name / City columns need exactly
-        one supplier per item -- the exact item has the exact supplier).
+        Resolved via ``Product.supplier_id`` -- the direct FK that's
+        actually shown as "Supplier" on the Product Master form itself
+        (see ``ProductRead.supplier_company_name``, populated the exact
+        same way in ``app.masters.products.routes.list_products``) -- NOT
+        via ``SupplierProductLink``, which is a SEPARATE many-to-many
+        table for a different purpose (a product can be linked to several
+        candidate/alternate suppliers there). An earlier version of this
+        method queried SupplierProductLink instead, which silently left
+        Supplier Name/City blank on Shipment Planning for every product
+        that only had its supplier set through the normal "Supplier"
+        field on the Product Master form (i.e. nearly every product),
+        even though Product Master's own list view showed that supplier
+        correctly the whole time.
+
         Sets ``_planning_supplier_name`` / ``_planning_supplier_city`` on
-        each product in place (``None`` when the product has no linked
-        supplier yet); read back via
+        each product in place (``None`` when the product has no supplier
+        set, or that supplier has no city set); read back via
         ``app.planning.source_registry``'s product value_getter.
 
         One query total regardless of how many products are passed in,
@@ -57,25 +67,23 @@ class ProductRepository(BaseRepository[Product]):
         from sqlalchemy import select
 
         from app.masters.cities.models import City
-        from app.suppliers.models import Supplier, SupplierProductLink
+        from app.suppliers.models import Supplier
 
-        product_ids = [p.id for p in products]
-        stmt = (
-            select(SupplierProductLink.product_id, Supplier.company_name, City.name)
-            .join(Supplier, Supplier.id == SupplierProductLink.supplier_id)
-            .outerjoin(City, City.id == Supplier.city_id)
-            .where(SupplierProductLink.product_id.in_(product_ids))
-            .order_by(SupplierProductLink.product_id, SupplierProductLink.created_at)
-        )
-        result = await self.session.execute(stmt)
-        # First row per product_id (ordered by created_at above) is the primary supplier.
-        primary_by_product: dict[uuid.UUID, tuple[str, str | None]] = {}
-        for product_id, company_name, city_name in result.all():
-            if product_id not in primary_by_product:
-                primary_by_product[product_id] = (company_name, city_name)
+        supplier_ids = list({p.supplier_id for p in products if p.supplier_id})
+        name_and_city_by_supplier_id: dict[uuid.UUID, tuple[str, str | None]] = {}
+        if supplier_ids:
+            stmt = (
+                select(Supplier.id, Supplier.company_name, City.name)
+                .outerjoin(City, City.id == Supplier.city_id)
+                .where(Supplier.id.in_(supplier_ids))
+            )
+            result = await self.session.execute(stmt)
+            name_and_city_by_supplier_id = {row[0]: (row[1], row[2]) for row in result.all()}
 
         for product in products:
-            name, city = primary_by_product.get(product.id, (None, None))
+            name, city = (
+                name_and_city_by_supplier_id.get(product.supplier_id) if product.supplier_id else None
+            ) or (None, None)
             product._planning_supplier_name = name
             product._planning_supplier_city = city
 

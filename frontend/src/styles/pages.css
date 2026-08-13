@@ -1446,6 +1446,15 @@
   }
 }
 
+/* Shipment Planning: small spinner shown on a cell while its optimistic
+   edit is being saved in the background (see GridCell's saveStatus prop
+   in Planning.tsx). */
+@keyframes planning-save-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .sd-option {
   padding: 8px 11px;
   font-size: 13px;

@@ -23,11 +23,18 @@ class PlanningSheetCreate(BaseModel):
     """Payload to create a new sheet (branch tab)."""
 
     name: str = Field(..., min_length=1, max_length=150, description="e.g. 'Mum Branch'.")
+    mum_group_label: str = Field(default="Mum", min_length=1, max_length=50, description="Group label name (e.g. 'Mum', 'CN', 'MP').")
     description: str | None = Field(default=None)
 
 
 class PlanningSheetRename(BaseModel):
     name: str = Field(..., min_length=1, max_length=150)
+
+
+class PlanningSheetGroupLabelUpdate(BaseModel):
+    """Correct an existing sheet's group label in place -- see PlanningService.update_mum_group_label."""
+
+    mum_group_label: str = Field(..., min_length=1, max_length=50, description="e.g. 'Mum', 'CN', 'MP', 'Chen'.")
 
 
 class PlanningSheetRead(BaseModel):
@@ -310,11 +317,21 @@ class PlanningRowRead(BaseModel):
 
 
 class PlanningGridRead(BaseModel):
-    """Everything needed to render one sheet's grid in a single response."""
+    """
+    One page of a sheet's grid.
+
+    ``rows`` holds only ``limit`` rows starting at ``offset`` -- see
+    GET /planning/sheets/{sheet_id}/grid?offset=&limit= -- while
+    ``total_rows`` is the true, sheet-wide row count, so the frontend can
+    show "Showing 1-50 of N" and know whether another page remains.
+    """
 
     sheet: PlanningSheetRead
     columns: list[PlanningColumnRead]
     rows: list[PlanningRowRead]
+    total_rows: int
+    offset: int
+    limit: int | None
 
 
 # ---------------------------------------------------------------------------

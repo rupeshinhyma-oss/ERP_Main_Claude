@@ -51,6 +51,7 @@ from app.planning.schemas import (
     PlanningSheetDuplicate,
     PlanningSheetRead,
     PlanningSheetRename,
+    PlanningSheetGroupLabelUpdate,
     PlanningStatusTagCreate,
     PlanningStatusTagRead,
     SourceModuleInfo,
@@ -176,7 +177,11 @@ async def create_sheet(
     current_user: CurrentUser = Depends(require_permission("planning.sheet.manage")),
 ) -> dict:
     sheet = await service.create_sheet(
-        name=payload.name, description=payload.description, user_id=current_user.id, username=current_user.username
+        name=payload.name,
+        mum_group_label=payload.mum_group_label or "Mum",
+        description=payload.description,
+        user_id=current_user.id,
+        username=current_user.username,
     )
     data = PlanningSheetRead.model_validate(sheet).model_dump(mode="json")
     return build_success_response(data=data, request_id=request.state.request_id, message="Sheet created.")
@@ -245,6 +250,72 @@ async def rename_sheet(
     return build_success_response(data=data, request_id=request.state.request_id, message="Sheet renamed.")
 
 
+@router.patch("/sheets/{sheet_id}/group-label", summary="Correct an existing sheet's group label in place")
+async def update_sheet_group_label(
+    sheet_id: uuid.UUID,
+    payload: PlanningSheetGroupLabelUpdate,
+    request: Request,
+    service: PlanningService = Depends(get_planning_service),
+    current_user: CurrentUser = Depends(require_permission("planning.sheet.manage")),
+) -> dict:
+    """
+    Fix a sheet whose group label ended up wrong (e.g. left at the
+    default "Mum" instead of what the branch actually needed), without
+    creating a new sheet or touching any row/cell data -- see
+    PlanningService.update_mum_group_label for exactly what gets renamed.
+    """
+    sheet = await service.update_mum_group_label(
+        sheet_id, mum_group_label=payload.mum_group_label, user_id=current_user.id, username=current_user.username
+    )
+    data = PlanningSheetRead.model_validate(sheet).model_dump(mode="json")
+    return build_success_response(data=data, request_id=request.state.request_id, message="Group label updated.")
+
+
+@router.post("/sheets/{sheet_id}/columns/normalize-order", summary="Fix an existing sheet's column order")
+async def normalize_column_order(
+    sheet_id: uuid.UUID,
+    request: Request,
+    service: PlanningService = Depends(get_planning_service),
+    current_user: CurrentUser = Depends(require_permission("planning.column.manage")),
+) -> dict:
+    """
+    One-time repair for a sheet whose columns ended up in the wrong
+    order -- groups every Mum group's main+Remarks columns together
+    (ascending by group number), then the shared Supplier Name/City/PKG
+    QTY/Weight/CBM block once, then every group's NO. OF PKG/TOTAL
+    WEIGHT/TOTAL CBM totals together (also ascending). See
+    PlanningService.normalize_column_order for the full target order and
+    why some existing sheets need this. Never touches row/cell data --
+    only column `position` values.
+    """
+    columns = await service.normalize_column_order(sheet_id, user_id=current_user.id, username=current_user.username)
+    data = [PlanningColumnRead.model_validate(c).model_dump(mode="json") for c in columns]
+    return build_success_response(data=data, request_id=request.state.request_id, message="Column order fixed.")
+
+
+@router.post("/sheets/{sheet_id}/columns/repair-fixed-formulas", summary="Fix an existing sheet's NO. OF PKG/TOTAL WEIGHT/TOTAL CBM columns that were never wired to a formula")
+async def repair_fixed_mum_formulas(
+    sheet_id: uuid.UUID,
+    request: Request,
+    service: PlanningService = Depends(get_planning_service),
+    current_user: CurrentUser = Depends(require_permission("planning.column.manage")),
+) -> dict:
+    """
+    One-time repair for a sheet whose NO. OF PKG / TOTAL WEIGHT / TOTAL
+    CBM columns are stuck as plain MANUAL columns (no "ƒx" badge, no live
+    calculation) instead of the fixed FORMULA type -- caused by a
+    since-fixed frontend bug in "+Next <label>" that only ever matched
+    columns literally named "MUM<n>", so any sheet using a different
+    group label (CN, TN, etc.) never got these three wired up correctly
+    when the group was created. See
+    PlanningService.repair_fixed_mum_formulas. Never touches row/cell
+    data, and never touches a column that's already correctly wired.
+    """
+    columns = await service.repair_fixed_mum_formulas(sheet_id, user_id=current_user.id, username=current_user.username)
+    data = [PlanningColumnRead.model_validate(c).model_dump(mode="json") for c in columns]
+    return build_success_response(data=data, request_id=request.state.request_id, message="Formula columns repaired.")
+
+
 @router.delete("/sheets/{sheet_id}", summary="Delete a planning sheet")
 async def delete_sheet(
     sheet_id: uuid.UUID,
@@ -261,17 +332,29 @@ async def delete_sheet(
 # ---------------------------------------------------------------------------
 
 
-@router.get("/sheets/{sheet_id}/grid", summary="Get a sheet's full grid (columns, rows, cells)")
+@router.get("/sheets/{sheet_id}/grid", summary="Get one page of a sheet's grid (columns, rows, cells)")
 async def get_grid(
     sheet_id: uuid.UUID,
     request: Request,
+    offset: int = Query(0, ge=0, description="Row offset for pagination."),
+    limit: int | None = Query(
+        50, ge=1, le=500, description="Rows per page. Omit/null to fetch every row (slow on large sheets)."
+    ),
+    organization_id: uuid.UUID | None = Query(
+        None,
+        description="Optional Organization filter (from Master Data > Organization List). "
+        "Restricts the page to rows whose linked Product Master record belongs to this "
+        "organization; applied server-side so it covers the whole sheet, not just the "
+        "currently-loaded page.",
+    ),
     service: PlanningService = Depends(get_planning_service),
     _current_user: CurrentUser = Depends(require_permission("planning.read")),
 ) -> dict:
-    grid = await service.get_grid(sheet_id)
+    grid = await service.get_grid(sheet_id, offset=offset, limit=limit, organization_id=organization_id)
     columns = grid["columns"]
     rows = grid["rows"]
     sheet = grid["sheet"]
+    total_rows = grid["total_rows"]
 
     # Aggregate columns yield the same value for the whole column, so compute
     # each one exactly once here rather than once per row -- avoids an
@@ -300,6 +383,23 @@ async def get_grid(
                 for cell in row.cells
                 if cell.column_id == column.id and cell.linked_record_id is not None
             }
+            # Also bulk-fetch each row's OWN linked record (row.linked_record_id,
+            # i.e. what its ITEM cell is linked to) whenever this column's own
+            # cell has no explicit link yet AND the column pulls from the same
+            # module as ITEM -- see compute_cell_display_value's
+            # `row_linked_record_id` docstring for why this fallback exists.
+            # Guarded to the same module as ITEM: falling back to ITEM's link
+            # for a column pulling from a DIFFERENT module (e.g. "supplier"
+            # while ITEM is "product") would resolve the wrong kind of
+            # record entirely, so that case is intentionally left blank.
+            if column.source_module == sheet.item_source_module:
+                cells_by_row_for_column = {
+                    row.id: next((c for c in row.cells if c.column_id == column.id), None) for row in rows
+                }
+                for row in rows:
+                    existing_cell = cells_by_row_for_column.get(row.id)
+                    if (existing_cell is None or existing_cell.linked_record_id is None) and row.linked_record_id is not None:
+                        record_ids.add(row.linked_record_id)
             if not record_ids:
                 continue
             repository = module.repository_factory(service.cell_repository.session)
@@ -347,13 +447,26 @@ async def get_grid(
             if column.source_type == "aggregate":
                 display_value = aggregate_cache.get(column.id)
             elif column.source_type == "linked_lookup":
+                # The record id this cell will actually resolve against:
+                # its own explicit link if it has one, otherwise (when this
+                # column pulls from the same module as ITEM) the row's own
+                # ITEM link -- same fallback compute_cell_display_value
+                # applies itself; mirrored here so the prefetched-record
+                # cache lookup below is keyed by the SAME id it will use.
+                own_record_id = cell.linked_record_id if cell is not None else None
+                fallback_record_id = (
+                    row.linked_record_id
+                    if own_record_id is None and column.source_module == sheet.item_source_module
+                    else None
+                )
+                effective_record_id = own_record_id or fallback_record_id
                 # Use the sheet-wide bulk-fetched record from above (see
                 # linked_lookup_records) instead of letting
                 # compute_cell_display_value do its own per-cell
                 # get_by_id -- the whole point of batching it above.
                 prefetched = (
-                    linked_lookup_records.get((column.id, cell.linked_record_id))
-                    if cell is not None and cell.linked_record_id is not None
+                    linked_lookup_records.get((column.id, effective_record_id))
+                    if effective_record_id is not None
                     else None
                 )
                 display_value = await service.compute_cell_display_value(
@@ -363,14 +476,31 @@ async def get_grid(
                     prefetched_record=prefetched,
                     prefetched_sibling_columns=columns,
                     prefetched_row_cells=cells_by_column_id,
+                    row_linked_record_id=row.linked_record_id,
                 )
             else:
+                # FORMULA and MANUAL columns land here. FORMULA columns
+                # (including the fixed NO. OF PKG/TOTAL WEIGHT/TOTAL CBM
+                # totals) can internally need PKG QTY / UNIT WEIGHT/PKG /
+                # CBM/PKG's OWN values -- see
+                # _compute_mum_derived_value's row_linked_record_id
+                # docstring -- and those sibling LINKED_LOOKUP columns
+                # resolve via that same row-level fallback whenever their
+                # own cell was never explicitly linked. This branch used
+                # to omit row_linked_record_id entirely (unlike the
+                # linked_lookup branch just above, which always passed
+                # it), so that fallback silently never activated for
+                # anything computed THROUGH a formula -- the totals
+                # stayed blank even once the LINKED_LOOKUP columns being
+                # divided/multiplied were themselves displaying correctly
+                # as their own top-level cells.
                 display_value = await service.compute_cell_display_value(
                     column,
                     cell,
                     row_id=row.id,
                     prefetched_sibling_columns=columns,
                     prefetched_row_cells=cells_by_column_id,
+                    row_linked_record_id=row.linked_record_id,
                 )
             # Document: "the Approval column should show over the cell the
             # date ... when that Mum ... got the blue number". The Approval
@@ -439,6 +569,9 @@ async def get_grid(
         "sheet": PlanningSheetRead.model_validate(grid["sheet"]).model_dump(mode="json"),
         "columns": [PlanningColumnRead.model_validate(c).model_dump(mode="json") for c in columns],
         "rows": row_reads,
+        "total_rows": total_rows,
+        "offset": offset,
+        "limit": limit,
     }
     return build_success_response(data=data, request_id=request.state.request_id)
 
@@ -636,11 +769,14 @@ async def link_row_to_item_source_record(
     current_user: CurrentUser = Depends(require_permission("planning.cell.edit")),
 ) -> dict:
     """Pick, per row, which record (e.g. which Product) the ITEM column pulls its name from."""
-    grid = await service.get_grid(sheet_id)
+    # Only the sheet object is needed here (for its item_source_* config),
+    # not any rows -- fetch it directly instead of paying for a row page
+    # via get_grid just to reach into grid["sheet"].
+    sheet = await service.get_sheet_or_raise(sheet_id)
     row = await service.link_row_to_item_source_record(
         sheet_id, row_id, record_id=payload.record_id, user_id=current_user.id, username=current_user.username
     )
-    display_value = await service.compute_row_item_display(grid["sheet"], row)
+    display_value = await service.compute_row_item_display(sheet, row)
     data = PlanningRowRead.model_validate(_row_to_read_dict(row)).model_dump(mode="json")
     data["label"] = display_value
     return build_success_response(data=data, request_id=request.state.request_id, message="Row linked.")
@@ -666,7 +802,10 @@ async def auto_populate_rows_from_item_source(
     row per record, skipping any record already represented by an
     existing row.
     """
-    grid = await service.get_grid(sheet_id)
+    # Only the sheet object is needed here (for its item_source_* config),
+    # not any rows -- fetch it directly instead of paying for a row page
+    # via get_grid just to reach into grid["sheet"].
+    sheet = await service.get_sheet_or_raise(sheet_id)
     rows = await service.auto_populate_rows_from_item_source(
         sheet_id, limit=payload.limit, user_id=current_user.id, username=current_user.username
     )
@@ -675,7 +814,7 @@ async def auto_populate_rows_from_item_source(
     # `limit` (often 50) rows in a single call, so the old per-row
     # compute_row_item_display here was just as much a hang risk as the
     # one in get_grid was.
-    item_display_by_row = await service.compute_row_item_displays_for_all_rows(grid["sheet"], rows)
+    item_display_by_row = await service.compute_row_item_displays_for_all_rows(sheet, rows)
     data = []
     for row in rows:
         row_data = PlanningRowRead.model_validate(_row_to_read_dict(row)).model_dump(mode="json")
@@ -1005,7 +1144,24 @@ async def set_cell_value(
     # their own derived columns (Approval Date, formula totals) go stale
     # until their next manual reload -- everyone else gets it live via
     # the socket, but the actor themselves would not.
-    derived = await service.get_row_formula_display_values(sheet_id, row_id)
+    #
+    # The cell's own write above has ALREADY COMMITTED by this point, so a
+    # failure recomputing these secondary display values must not turn a
+    # successful save into a failed response -- that would make the
+    # frontend's optimistic-save retry logic think the value never
+    # reached the server (and retry) when it actually did. Degrade to "no
+    # derived values this round-trip" instead; the next full grid load (or
+    # another tab's own edit) recomputes them correctly regardless, since
+    # nothing here is ever persisted from this dict -- it's a live,
+    # recompute-on-every-read value same as everywhere else in this file.
+    try:
+        derived = await service.get_row_formula_display_values(sheet_id, row_id)
+    except Exception:  # noqa: BLE001
+        logger.exception(
+            "Failed to recompute derived cell values after a successful write; the write itself is unaffected.",
+            extra={"sheet_id": str(sheet_id), "row_id": str(row_id), "column_id": str(column_id)},
+        )
+        derived = {}
     payload_out = {"cell": data, "row_id": str(row_id), "derived_values": derived}
     await _broadcast(sheet_id, "cell_value_changed", payload_out, current_user=current_user)
     return build_success_response(

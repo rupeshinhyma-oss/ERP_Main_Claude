@@ -137,6 +137,12 @@ export interface PlanningGrid {
   sheet: PlanningSheet;
   columns: PlanningColumn[];
   rows: PlanningRow[];
+  /** Total live row count on the sheet (not just the rows in this page). Used for "Showing X-Y of N". */
+  total_rows?: number;
+  /** The offset this page was fetched with. */
+  offset?: number;
+  /** The page size this page was fetched with (null means "all rows"). */
+  limit?: number | null;
 }
 
 export interface PlanningStatusTag {

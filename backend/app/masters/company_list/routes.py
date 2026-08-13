@@ -37,7 +37,7 @@ async def list_companies_dropdown(
 ) -> dict:
     """Return all active companies for dropdown options."""
     companies = await service.list_all_dropdown()
-    data = [{"id": str(c.id), "name": c.name, "code": c.code} for c in companies]
+    data = [{"id": str(c.id), "name": c.name, "code": c.code, "branches": c.branches or []} for c in companies]
     return build_success_response(data=data, request_id=request.state.request_id)
 
 

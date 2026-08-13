@@ -741,8 +741,6 @@ export function MultiSelectField({
   };
 
   const selectedOptions = options.filter((opt) => values.includes(opt.id));
-  const visibleOptions = selectedOptions.slice(0, 3);
-  const extraCount = selectedOptions.length - 3;
 
   const filteredOptions = options.filter((opt) =>
     opt.name.toLowerCase().includes(searchTerm.trim().toLowerCase())
@@ -773,67 +771,120 @@ export function MultiSelectField({
           overflow: "hidden",
         }}
       >
-        <div style={{ display: "flex", gap: "4px", alignItems: "center", flex: 1, overflow: "hidden" }}>
+        <div style={{ display: "flex", gap: "6px", alignItems: "center", flex: 1, overflow: "hidden" }}>
           {selectedOptions.length === 0 ? (
-            <span style={{ color: "var(--color-muted)" }}>{placeholder}</span>
+            <span style={{ color: "var(--color-muted)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{placeholder}</span>
+          ) : selectedOptions.length === 1 ? (
+            <span
+              style={{
+                background: "#eff6ff",
+                color: "#1d4ed8",
+                border: "1px solid #bfdbfe",
+                borderRadius: "4px",
+                padding: "2px 8px",
+                fontSize: "12px",
+                fontWeight: 600,
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "4px",
+                whiteSpace: "nowrap",
+                maxWidth: "200px",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+              }}
+              onClick={(e) => {
+                e.stopPropagation();
+                toggleOption(selectedOptions[0].id);
+              }}
+              title={selectedOptions[0].name}
+            >
+              <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{selectedOptions[0].name}</span>
+              <span style={{ cursor: "pointer", color: "#3b82f6", fontWeight: 700 }}>×</span>
+            </span>
           ) : (
-            <>
-              {visibleOptions.map((opt) => (
-                <span
-                  key={opt.id}
-                  style={{
-                    background: "#eff6ff",
-                    color: "#1d4ed8",
-                    border: "1px solid #bfdbfe",
-                    borderRadius: "4px",
-                    padding: "2px 6px",
-                    fontSize: "12px",
-                    fontWeight: 600,
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: "4px",
-                    whiteSpace: "nowrap",
-                  }}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    toggleOption(opt.id);
-                  }}
-                >
-                  {opt.name}
-                  <span style={{ cursor: "pointer", color: "#3b82f6", fontWeight: 700 }}>×</span>
-                </span>
-              ))}
-              {extraCount > 0 && (
-                <span
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setShowEyeModal(true);
-                  }}
-                  style={{
-                    background: "#0284c7",
-                    color: "#ffffff",
-                    fontSize: "11.5px",
-                    fontWeight: 700,
-                    padding: "2px 8px",
-                    borderRadius: "12px",
-                    flexShrink: 0,
-                    cursor: "pointer",
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: "3px",
-                    boxShadow: "0 1px 2px rgba(0,0,0,0.1)",
-                  }}
-                  title="Click to view all selected items"
-                >
-                  +{extraCount} more 👁️
-                </span>
-              )}
-            </>
+            <div style={{ display: "flex", gap: "6px", alignItems: "center", flexWrap: "nowrap", overflow: "hidden" }}>
+              <span
+                style={{
+                  background: "#eff6ff",
+                  color: "#1d4ed8",
+                  border: "1px solid #bfdbfe",
+                  borderRadius: "4px",
+                  padding: "2px 8px",
+                  fontSize: "12px",
+                  fontWeight: 600,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "4px",
+                  whiteSpace: "nowrap",
+                  maxWidth: "110px",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggleOption(selectedOptions[0].id);
+                }}
+                title={selectedOptions[0].name}
+              >
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{selectedOptions[0].name}</span>
+                <span style={{ cursor: "pointer", color: "#3b82f6", fontWeight: 700 }}>×</span>
+              </span>
+
+              <span
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowEyeModal(true);
+                }}
+                style={{
+                  background: "#0284c7",
+                  color: "#ffffff",
+                  fontSize: "11.5px",
+                  fontWeight: 700,
+                  padding: "2px 8px",
+                  borderRadius: "12px",
+                  cursor: "pointer",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "4px",
+                  whiteSpace: "nowrap",
+                  boxShadow: "0 1px 2px rgba(0,0,0,0.1)",
+                  flexShrink: 0,
+                }}
+                title="Click to view all selected items"
+              >
+                👁️ +{selectedOptions.length - 1} More
+              </span>
+            </div>
           )}
         </div>
-        <span style={{ fontSize: "10px", color: "var(--color-muted)", marginLeft: "6px" }}>
-          {open ? "▲" : "▼"}
-        </span>
+
+        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          {selectedOptions.length > 0 && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowEyeModal(true);
+              }}
+              style={{
+                background: "none",
+                border: "none",
+                cursor: "pointer",
+                fontSize: "14px",
+                padding: "2px 4px",
+                borderRadius: "4px",
+                display: "flex",
+                alignItems: "center",
+              }}
+              title="View selected items in modal"
+            >
+              👁️
+            </button>
+          )}
+          <span style={{ fontSize: "10px", color: "var(--color-muted)" }}>
+            {open ? "▲" : "▼"}
+          </span>
+        </div>
       </div>
 
       {open && (
@@ -848,12 +899,36 @@ export function MultiSelectField({
             border: "1px solid #cbd5e0",
             borderRadius: "6px",
             boxShadow: "0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)",
-            maxHeight: "260px",
+            maxHeight: "280px",
             display: "flex",
             flexDirection: "column",
             overflow: "hidden",
           }}
         >
+          {/* Select All / Clear All Bar */}
+          <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 12px", background: "#f1f5f9", borderBottom: "1px solid #e2e8f0", fontSize: "12px", fontWeight: 600 }}>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onChange(options.map((o) => o.id));
+              }}
+              style={{ background: "none", border: "none", color: "#0284c7", cursor: "pointer", fontWeight: 600, padding: 0 }}
+            >
+              ☑ Select All ({options.length})
+            </button>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onChange([]);
+              }}
+              style={{ background: "none", border: "none", color: "#dc2626", cursor: "pointer", fontWeight: 600, padding: 0 }}
+            >
+              ☒ Clear All
+            </button>
+          </div>
+
           {options.length > 5 && (
             <div style={{ padding: "6px", borderBottom: "1px solid #e2e8f0", background: "#f8fafc" }}>
               <input

@@ -61,6 +61,7 @@ class Product(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
         GUID(), ForeignKey("master_companies.id", ondelete="SET NULL"), nullable=True, index=True
     )
     organization_ids: Mapped[list | None] = mapped_column(JSON, nullable=True)  # list[str] of organization UUIDs
+    branch_ids: Mapped[list | None] = mapped_column(JSON, nullable=True)  # list[str] of branch IDs/UUIDs
     supplier_id: Mapped[uuid.UUID | None] = mapped_column(
         GUID(), ForeignKey("suppliers.id", ondelete="SET NULL"), nullable=True, index=True
     )

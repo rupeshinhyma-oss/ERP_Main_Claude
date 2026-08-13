@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { SideDrawer, DetailFieldGrid } from "@/components/SideDrawer";
@@ -36,13 +36,72 @@ function isVideoUrl(url: string | null | undefined): boolean {
   return Boolean(clean.match(/\.(mp4|webm|ogg|mov|avi|mkv|m4v|3gp|flv)$/i));
 }
 
-function downloadMediaFile(url: string | null | undefined, filenamePrefix = "media") {
-  if (!url) return;
-  const fullUrl = resolveImageUrl(url);
-  const isVid = isVideoUrl(url);
-  const ext = url.split(".").pop()?.split("?")[0] || (isVid ? "mp4" : "jpg");
-  const fileName = `${filenamePrefix}_${Date.now()}.${ext}`;
+function dataURLtoBlob(dataurl: string): Blob {
+  const arr = dataurl.split(",");
+  const mimeMatch = arr[0].match(/:(.*?);/);
+  const mime = mimeMatch ? mimeMatch[1] : "image/png";
+  const bstr = atob(arr[1]);
+  let n = bstr.length;
+  const u8arr = new Uint8Array(n);
+  while (n--) {
+    u8arr[n] = bstr.charCodeAt(n);
+  }
+  return new Blob([u8arr], { type: mime });
+}
 
+function getSafeFileExtension(url: string, isVideo = false): string {
+  if (!url) return isVideo ? "mp4" : "jpg";
+  const clean = url.trim();
+  if (clean.startsWith("data:")) {
+    if (clean.includes("data:image/png")) return "png";
+    if (clean.includes("data:image/jpeg") || clean.includes("data:image/jpg")) return "jpg";
+    if (clean.includes("data:image/webp")) return "webp";
+    if (clean.includes("data:image/gif")) return "gif";
+    if (clean.includes("data:video/webm")) return "webm";
+    if (clean.includes("data:video/mp4")) return "mp4";
+    return isVideo ? "mp4" : "jpg";
+  }
+  const cleanUrl = clean.split("?")[0].split("#")[0];
+  const parts = cleanUrl.split(".");
+  if (parts.length > 1) {
+    const ext = parts.pop()?.toLowerCase() || "";
+    if (ext.length >= 2 && ext.length <= 5 && /^[a-z0-9]+$/i.test(ext)) {
+      return ext;
+    }
+  }
+  return isVideo ? "mp4" : "jpg";
+}
+
+function sanitizeFilename(name: string): string {
+  return name.replace(/[^a-zA-Z0-9_-]/g, "_").replace(/_+/g, "_").slice(0, 60);
+}
+
+function downloadMediaFile(url: string | null | undefined, filenamePrefix = "media", index = 1) {
+  if (!url) return;
+  const clean = url.trim();
+  const isVid = isVideoUrl(clean);
+  const ext = getSafeFileExtension(clean, isVid);
+  const safePrefix = sanitizeFilename(filenamePrefix);
+  const fileName = `${safePrefix}_${index}_${Date.now()}.${ext}`;
+
+  if (clean.startsWith("data:")) {
+    try {
+      const blob = dataURLtoBlob(clean);
+      const blobUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = blobUrl;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setTimeout(() => window.URL.revokeObjectURL(blobUrl), 1000);
+      return;
+    } catch (e) {
+      console.error("Failed to convert data URL to blob:", e);
+    }
+  }
+
+  const fullUrl = resolveImageUrl(clean);
   fetch(fullUrl)
     .then((res) => res.blob())
     .then((blob) => {
@@ -53,7 +112,7 @@ function downloadMediaFile(url: string | null | undefined, filenamePrefix = "med
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
-      window.URL.revokeObjectURL(blobUrl);
+      setTimeout(() => window.URL.revokeObjectURL(blobUrl), 1000);
     })
     .catch(() => {
       const link = document.createElement("a");
@@ -64,6 +123,15 @@ function downloadMediaFile(url: string | null | undefined, filenamePrefix = "med
       link.click();
       document.body.removeChild(link);
     });
+}
+
+function downloadAllMediaFiles(urls: string[], filenamePrefix = "media") {
+  if (!urls || urls.length === 0) return;
+  urls.forEach((url, i) => {
+    setTimeout(() => {
+      downloadMediaFile(url, filenamePrefix, i + 1);
+    }, i * 250);
+  });
 }
 
 function getSupplierMedia(supplier: Supplier): string[] {
@@ -119,6 +187,7 @@ export function ProductGalleryPage() {
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [selectedSupplier, setSelectedSupplier] = useState<Supplier | null>(null);
   const [selectedImageIndex, setSelectedImageIndex] = useState(0);
+  const [selectedMediaIndices, setSelectedMediaIndices] = useState<number[]>([]);
 
   const categories = useLookup<ProductCategory>("/masters/product-categories", 250);
   const subCategories = useLookup<ProductSubCategory>("/masters/product-sub-categories", 250);
@@ -153,63 +222,86 @@ export function ProductGalleryPage() {
       const suppItems = Array.isArray(suppRes.data) ? suppRes.data : (suppRes.data?.items || []);
       setSuppliers(suppItems);
     } catch (err) {
-      console.error("Failed to load gallery data:", err);
+      console.error("Failed to fetch gallery data:", err);
     } finally {
       setLoading(false);
     }
   }
 
-  const scopedSubCategories = categoryFilter
-    ? subCategories.items.filter((sc) => sc.category_id === categoryFilter)
-    : subCategories.items;
+  const allProductMediaCount = useMemo(() => {
+    return products.reduce((acc, p) => {
+      const imgList = Array.isArray(p.images) && p.images.length > 0
+        ? p.images
+        : (p.image_url ? [p.image_url] : []);
+      return acc + imgList.length;
+    }, 0);
+  }, [products]);
 
-  const filteredProducts = products.filter((p) => {
-    const imgList = Array.isArray(p.images) && p.images.length > 0
-      ? p.images
-      : (p.image_url ? [p.image_url] : []);
-    const hasPhoto = imgList.length > 0 && imgList.some((img) => img && img.trim() !== "");
-    if (!hasPhoto) return false;
+  const allSupplierMediaCount = useMemo(() => {
+    return suppliers.reduce((acc, s) => acc + getSupplierMedia(s).length, 0);
+  }, [suppliers]);
 
-    if (!search.trim()) return true;
-    const cleanSearch = search.toLowerCase().replace(/[\s-]/g, "");
-    const name = (p.product_name_tally || p.product_name || "").toLowerCase().replace(/[\s-]/g, "");
-    const code = (p.product_code || "").toLowerCase().replace(/[\s-]/g, "");
-    return name.includes(cleanSearch) || code.includes(cleanSearch);
-  });
+  const filteredProducts = useMemo(() => {
+    return products.filter((p) => {
+      const imgList = Array.isArray(p.images) && p.images.length > 0
+        ? p.images
+        : (p.image_url ? [p.image_url] : []);
+      if (imgList.length === 0) return false;
 
-  const filteredSuppliers = suppliers.filter((s) => {
-    const media = getSupplierMedia(s);
-    if (media.length === 0) return false;
+      if (search.trim()) {
+        const q = search.toLowerCase().trim();
+        const codeMatch = (p.product_code || "").toLowerCase().includes(q);
+        const nameMatch = (p.product_name_tally || p.product_name || "").toLowerCase().includes(q);
+        if (!codeMatch && !nameMatch) return false;
+      }
+      return true;
+    });
+  }, [products, search]);
 
-    if (categoryFilter && s.category_ids && !s.category_ids.includes(categoryFilter)) {
-      return false;
-    }
+  const filteredSuppliers = useMemo(() => {
+    return suppliers.filter((s) => {
+      const media = getSupplierMedia(s);
+      if (media.length === 0) return false;
 
-    if (!search.trim()) return true;
-    const cleanSearch = search.toLowerCase().replace(/[\s-]/g, "");
-    const company = (s.company_name || "").toLowerCase().replace(/[\s-]/g, "");
-    const remarks = (s.visit_remarks || s.overall_remarks || "").toLowerCase().replace(/[\s-]/g, "");
-    return company.includes(cleanSearch) || remarks.includes(cleanSearch);
-  });
+      if (search.trim()) {
+        const q = search.toLowerCase().trim();
+        const nameMatch = (s.company_name || "").toLowerCase().includes(q);
+        const remarkMatch = (s.visit_remarks || "").toLowerCase().includes(q);
+        if (!nameMatch && !remarkMatch) return false;
+      }
+      return true;
+    });
+  }, [suppliers, search]);
+
+  const scopedSubCategories = useMemo(() => {
+    if (!categoryFilter) return subCategories.items;
+    return subCategories.items.filter((sc) => sc.category_id === categoryFilter);
+  }, [subCategories.items, categoryFilter]);
 
   const p = selectedProduct;
-  const prodCat = p ? categories.items.find((c) => c.id === p.category_id) : undefined;
-  const prodSubCat = p ? subCategories.items.find((sc) => sc.id === p.sub_category_id) : undefined;
-  const prodBrand = p ? brands.items.find((b) => b.id === p.brand_id) : undefined;
-  const prodHsn = p ? hsnCodes.items.find((h) => h.id === p.hsn_id) : undefined;
-  const prodUom = p ? uoms.items.find((u) => u.id === p.uom_id) : undefined;
+  const prodBrand = p ? brands.items.find((b) => b.id === p.brand_id) : null;
+  const prodCat = p ? categories.items.find((c) => c.id === p.category_id) : null;
+  const prodSubCat = p ? subCategories.items.find((sc) => sc.id === p.sub_category_id) : null;
+  const prodHsn = p ? hsnCodes.items.find((h) => h.id === p.hsn_id) : null;
+  const prodUom = p ? uoms.items.find((u) => u.id === p.uom_id) : null;
 
   const supp = selectedSupplier;
   const suppMedia = supp ? getSupplierMedia(supp) : [];
-  const suppCountry = supp ? countries.items.find((c) => c.id === supp.country_id)?.name : "";
-  const suppCity = supp ? cities.items.find((c) => c.id === supp.city_id)?.name : "";
+  const suppCountry = supp ? countries.items.find((c) => c.id === supp.country_id)?.name : null;
+  const suppCity = supp ? cities.items.find((c) => c.id === supp.city_id)?.name : null;
+
+  const toggleMediaIndexSelection = (idx: number) => {
+    setSelectedMediaIndices((prev) =>
+      prev.includes(idx) ? prev.filter((i) => i !== idx) : [...prev, idx]
+    );
+  };
 
   return (
     <AppShell activeKey="product-gallery">
       <main className="page">
         <Breadcrumb trail={["Inventory", "Product & Supplier Gallery"]} />
 
-        <div className="page-header">
+        <div className="page-header" style={{ marginBottom: "20px" }}>
           <div>
             <h1>Product &amp; Supplier Gallery</h1>
             <div className="page-subtitle">
@@ -218,71 +310,70 @@ export function ProductGalleryPage() {
           </div>
         </div>
 
-        <div style={{ display: "flex", gap: "12px", marginBottom: "16px" }}>
+        <div style={{ display: "flex", gap: "12px", marginBottom: "20px", flexWrap: "wrap" }}>
           <button
             type="button"
+            className="btn"
             onClick={() => setGalleryTab("all")}
             style={{
-              padding: "9px 18px",
-              borderRadius: "6px",
-              border: "1px solid #cbd5e1",
               background: galleryTab === "all" ? "#0061f2" : "#ffffff",
-              color: galleryTab === "all" ? "#ffffff" : "#334155",
+              color: galleryTab === "all" ? "#ffffff" : "#475569",
+              border: galleryTab === "all" ? "none" : "1px solid #cbd5e0",
+              borderRadius: "6px",
+              padding: "8px 16px",
               fontWeight: 600,
               fontSize: "13.5px",
               cursor: "pointer",
-              boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
             }}
           >
-            🌐 All Combined Media ({filteredProducts.length + filteredSuppliers.length})
+            🌐 All Combined Media ({allProductMediaCount + allSupplierMediaCount})
           </button>
-
           <button
             type="button"
+            className="btn"
             onClick={() => setGalleryTab("products")}
             style={{
-              padding: "9px 18px",
-              borderRadius: "6px",
-              border: "1px solid #cbd5e1",
               background: galleryTab === "products" ? "#0061f2" : "#ffffff",
-              color: galleryTab === "products" ? "#ffffff" : "#334155",
+              color: galleryTab === "products" ? "#ffffff" : "#475569",
+              border: galleryTab === "products" ? "none" : "1px solid #cbd5e0",
+              borderRadius: "6px",
+              padding: "8px 16px",
               fontWeight: 600,
               fontSize: "13.5px",
               cursor: "pointer",
-              boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
             }}
           >
-            📦 Product Photos ({filteredProducts.length})
+            📦 Product Photos ({allProductMediaCount})
           </button>
-
           <button
             type="button"
+            className="btn"
             onClick={() => setGalleryTab("suppliers")}
             style={{
-              padding: "9px 18px",
-              borderRadius: "6px",
-              border: "1px solid #cbd5e1",
               background: galleryTab === "suppliers" ? "#0061f2" : "#ffffff",
-              color: galleryTab === "suppliers" ? "#ffffff" : "#334155",
+              color: galleryTab === "suppliers" ? "#ffffff" : "#475569",
+              border: galleryTab === "suppliers" ? "none" : "1px solid #cbd5e0",
+              borderRadius: "6px",
+              padding: "8px 16px",
               fontWeight: 600,
               fontSize: "13.5px",
               cursor: "pointer",
-              boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
             }}
           >
-            🏬 Supplier Visit Photos ({filteredSuppliers.length})
+            🏭 Supplier Visit Photos ({allSupplierMediaCount})
           </button>
         </div>
 
         <div
           className="card"
           style={{
-            padding: "16px 20px",
+            padding: "16px",
             marginBottom: "24px",
             display: "flex",
-            gap: "16px",
+            gap: "14px",
             flexWrap: "wrap",
             alignItems: "center",
+            background: "#ffffff",
           }}
         >
           <input
@@ -296,7 +387,7 @@ export function ProductGalleryPage() {
               border: "1px solid #cbd5e0",
               fontSize: "13.5px",
               flex: 1,
-              minWidth: "240px",
+              minWidth: "220px",
             }}
           />
 
@@ -336,7 +427,7 @@ export function ProductGalleryPage() {
             }}
           >
             <option value="">All Sub Categories</option>
-            {scopedSubCategories.map((sc) => (
+            {scopedSubCategories.map((sc: ProductSubCategory) => (
               <option key={sc.id} value={sc.id}>
                 {sc.name}
               </option>
@@ -384,7 +475,7 @@ export function ProductGalleryPage() {
             }}
           >
             {(galleryTab === "all" || galleryTab === "products") &&
-              filteredProducts.map((prod) => {
+              filteredProducts.map((prod: Product) => {
                 const imgList = Array.isArray(prod.images) && prod.images.length > 0
                   ? prod.images
                   : (prod.image_url ? [prod.image_url] : []);
@@ -400,6 +491,7 @@ export function ProductGalleryPage() {
                       setSelectedProduct(prod);
                       setSelectedSupplier(null);
                       setSelectedImageIndex(0);
+                      setSelectedMediaIndices([]);
                     }}
                     style={{
                       borderRadius: "10px",
@@ -514,18 +606,48 @@ export function ProductGalleryPage() {
                         </div>
                       </div>
 
-                      {prod.refund_vat_percent != null && (
-                        <div style={{ marginTop: "12px", fontSize: "12px", color: "#16a34a", fontWeight: 600 }}>
-                          Refund VAT: {prod.refund_vat_percent}%
-                        </div>
-                      )}
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "12px" }}>
+                        {prod.refund_vat_percent != null ? (
+                          <div style={{ fontSize: "12px", color: "#16a34a", fontWeight: 600 }}>
+                            Refund VAT: {prod.refund_vat_percent}%
+                          </div>
+                        ) : <div />}
+
+                        {imgList.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              downloadAllMediaFiles(imgList, `product_${prod.product_code || prod.product_name || "item"}`);
+                            }}
+                            style={{
+                              background: "#0061f2",
+                              color: "#ffffff",
+                              border: "none",
+                              borderRadius: "6px",
+                              padding: "4px 10px",
+                              fontSize: "12px",
+                              fontWeight: 600,
+                              cursor: "pointer",
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: "4px",
+                              boxShadow: "0 1px 2px rgba(0,0,0,0.1)",
+                              transition: "all 0.15s ease",
+                            }}
+                            title={`Download all ${imgList.length} media file(s) directly`}
+                          >
+                            📥 Download ({imgList.length})
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
                 );
               })}
 
             {(galleryTab === "all" || galleryTab === "suppliers") &&
-              filteredSuppliers.map((supp) => {
+              filteredSuppliers.map((supp: Supplier) => {
                 const sMedia = getSupplierMedia(supp);
                 const firstImg = sMedia[0];
                 const sCountry = countries.items.find((c) => c.id === supp.country_id)?.name;
@@ -540,6 +662,7 @@ export function ProductGalleryPage() {
                       setSelectedSupplier(supp);
                       setSelectedProduct(null);
                       setSelectedImageIndex(0);
+                      setSelectedMediaIndices([]);
                     }}
                     style={{
                       borderRadius: "10px",
@@ -590,7 +713,7 @@ export function ProductGalleryPage() {
                         )
                       ) : (
                         <div style={{ textAlign: "center", color: "#0284c7" }}>
-                          <div style={{ fontSize: "12px", marginTop: "4px", fontWeight: 500 }}>No Visit Media</div>
+                          <div style={{ fontSize: "12px", marginTop: "4px", fontWeight: 500 }}>No Visit Photos</div>
                         </div>
                       )}
 
@@ -599,50 +722,48 @@ export function ProductGalleryPage() {
                           position: "absolute",
                           top: "10px",
                           left: "10px",
-                          background: "#1d4ed8",
-                          color: "#ffffff",
-                          fontSize: "11px",
-                          fontWeight: 700,
-                          padding: "3px 8px",
-                          borderRadius: "4px",
-                        }}
-                      >
-                        🏬 SUPPLIER VISIT
-                      </span>
-
-                      <span
-                        style={{
-                          position: "absolute",
-                          bottom: "10px",
-                          right: "10px",
-                          background: "rgba(15, 23, 42, 0.8)",
+                          background: "#0284c7",
                           color: "#ffffff",
                           fontSize: "11px",
                           fontWeight: 600,
                           padding: "3px 8px",
                           borderRadius: "4px",
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "4px",
                         }}
                       >
-                        {firstIsVideo ? "🎬" : "📸"} {sMedia.length} Media
+                        SUPPLIER VISIT
                       </span>
+
+                      {sMedia.length > 0 && (
+                        <span
+                          style={{
+                            position: "absolute",
+                            bottom: "10px",
+                            right: "10px",
+                            background: "rgba(2, 132, 199, 0.9)",
+                            color: "#ffffff",
+                            fontSize: "11px",
+                            fontWeight: 600,
+                            padding: "3px 8px",
+                            borderRadius: "4px",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "4px",
+                          }}
+                        >
+                          {firstIsVideo ? "🎬" : "📷"} {sMedia.length} Photos
+                        </span>
+                      )}
                     </div>
 
                     <div style={{ padding: "14px", flex: 1, display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
                       <div>
                         <h4
                           style={{
-                            margin: "0 0 6px 0",
-                            fontSize: "14.5px",
-                            fontWeight: 700,
+                            margin: "0 0 4px 0",
+                            fontSize: "14px",
+                            fontWeight: 600,
                             color: "#0369a1",
                             lineHeight: "1.3",
-                            display: "-webkit-box",
-                            WebkitLineClamp: 2,
-                            WebkitBoxOrient: "vertical",
-                            overflow: "hidden",
                           }}
                         >
                           {supp.company_name}
@@ -652,24 +773,38 @@ export function ProductGalleryPage() {
                         </div>
                       </div>
 
-                      {supp.visit_remarks && (
-                        <div
-                          style={{
-                            marginTop: "10px",
-                            fontSize: "11.5px",
-                            color: "#334155",
-                            background: "#ffffff",
-                            padding: "6px 8px",
-                            borderRadius: "4px",
-                            border: "1px solid #cbd5e1",
-                            whiteSpace: "nowrap",
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                          }}
-                        >
-                          💬 {supp.visit_remarks}
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "10px" }}>
+                        <div style={{ fontSize: "11.5px", color: "#334155", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "120px" }}>
+                          {supp.visit_remarks ? `💬 ${supp.visit_remarks}` : ""}
                         </div>
-                      )}
+                        {sMedia.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              downloadAllMediaFiles(sMedia, `supplier_visit_${supp.company_name.replace(/[^a-zA-Z0-9]/g, "_")}`);
+                            }}
+                            style={{
+                              background: "#0284c7",
+                              color: "#ffffff",
+                              border: "none",
+                              borderRadius: "6px",
+                              padding: "4px 10px",
+                              fontSize: "12px",
+                              fontWeight: 600,
+                              cursor: "pointer",
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: "4px",
+                              boxShadow: "0 1px 2px rgba(0,0,0,0.1)",
+                              transition: "all 0.15s ease",
+                            }}
+                            title={`Download all ${sMedia.length} visit media file(s) directly`}
+                          >
+                            📥 Download ({sMedia.length})
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
                 );
@@ -706,6 +841,7 @@ export function ProductGalleryPage() {
               );
               setSelectedProduct((prev) => (prev ? { ...prev, ...updatedPayload } : null));
               setSelectedImageIndex(0);
+              setSelectedMediaIndices([]);
             } catch (err) {
               console.error("Failed to delete media:", err);
               alert("Failed to delete media. Please try again.");
@@ -747,32 +883,82 @@ export function ProductGalleryPage() {
                       />
                     )}
                   </div>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "10px", padding: "0 4px" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "12px", padding: "0 4px", flexWrap: "wrap", gap: "8px" }}>
                     <span style={{ fontSize: "12px", color: "#64748b", fontWeight: 500 }}>
                       Media {selectedImageIndex + 1} of {detailImgList.length} {activeIsVideo ? "(Video)" : "(Photo)"}
                     </span>
-                    <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+
+                    <div style={{ display: "flex", gap: "6px", alignItems: "center", flexWrap: "wrap" }}>
+                      {selectedMediaIndices.length > 0 ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const selectedUrls = selectedMediaIndices.map((idx) => detailImgList[idx]).filter(Boolean);
+                            downloadAllMediaFiles(selectedUrls, `product_${p.product_code || "selected"}`);
+                          }}
+                          style={{
+                            background: "#16a34a",
+                            color: "#ffffff",
+                            border: "none",
+                            borderRadius: "6px",
+                            padding: "4px 10px",
+                            fontSize: "12px",
+                            fontWeight: 600,
+                            cursor: "pointer",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "4px",
+                            boxShadow: "0 1px 3px rgba(0,0,0,0.15)",
+                          }}
+                          title="Download all checked photos"
+                        >
+                          📥 Download Selected ({selectedMediaIndices.length})
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => downloadAllMediaFiles(detailImgList, `product_${p.product_code || "all"}`)}
+                          style={{
+                            background: "#2563eb",
+                            color: "#ffffff",
+                            border: "none",
+                            borderRadius: "6px",
+                            padding: "4px 10px",
+                            fontSize: "12px",
+                            fontWeight: 600,
+                            cursor: "pointer",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "4px",
+                            boxShadow: "0 1px 2px rgba(0,0,0,0.1)",
+                          }}
+                          title="Download all photos at once"
+                        >
+                          📦 Download All ({detailImgList.length})
+                        </button>
+                      )}
+
                       <button
                         type="button"
-                        onClick={() => downloadMediaFile(activeMedia, `product_${p.product_code || "media"}`)}
+                        onClick={() => downloadMediaFile(activeMedia, `product_${p.product_code || "media"}`, selectedImageIndex + 1)}
                         style={{
                           background: "#eff6ff",
                           color: "#2563eb",
                           border: "1px solid #93c5fd",
                           borderRadius: "6px",
-                          padding: "4px 12px",
+                          padding: "4px 10px",
                           fontSize: "12px",
                           fontWeight: 600,
                           cursor: "pointer",
                           display: "inline-flex",
                           alignItems: "center",
                           gap: "4px",
-                          transition: "all 0.15s ease",
                         }}
                         title={`Download ${activeIsVideo ? "video" : "photo"}`}
                       >
-                        📥 Download {activeIsVideo ? "Video" : "Photo"}
+                        📥 Active Only
                       </button>
+
                       <button
                         type="button"
                         onClick={() => handleDeletePhoto(selectedImageIndex)}
@@ -788,61 +974,116 @@ export function ProductGalleryPage() {
                           display: "inline-flex",
                           alignItems: "center",
                           gap: "4px",
-                          transition: "all 0.15s ease",
                         }}
                         title="Delete this media from product"
                       >
-                        🗑️ Delete Media
+                        🗑️ Delete
                       </button>
                     </div>
                   </div>
+
                   {detailImgList.length > 1 && (
-                    <div style={{ display: "flex", gap: "10px", justifyContent: "center", flexWrap: "wrap", marginTop: "12px" }}>
-                      {detailImgList.map((imgUri, idx) => (
-                        isVideoUrl(imgUri) ? (
-                          <div
-                            key={idx}
-                            onClick={() => setSelectedImageIndex(idx)}
-                            style={{
-                              width: "56px",
-                              height: "56px",
-                              borderRadius: "6px",
-                              background: "#0f172a",
-                              display: "flex",
-                              flexDirection: "column",
-                              alignItems: "center",
-                              justifyContent: "center",
-                              color: "#ffffff",
-                              cursor: "pointer",
-                              fontSize: "16px",
-                              border: idx === selectedImageIndex ? "2.5px solid #2563eb" : "1px solid #cbd5e0",
-                              boxShadow: idx === selectedImageIndex ? "0 0 0 2px rgba(37,99,235,0.2)" : "0 1px 3px rgba(0,0,0,0.1)",
-                              transform: idx === selectedImageIndex ? "scale(1.08)" : "scale(1)",
-                              transition: "all 0.15s ease",
-                            }}
-                          >
-                            🎬
-                          </div>
-                        ) : (
-                          <img
-                            key={idx}
-                            src={resolveImageUrl(imgUri)}
-                            alt={`Thumbnail ${idx + 1}`}
-                            onClick={() => setSelectedImageIndex(idx)}
-                            style={{
-                              width: "56px",
-                              height: "56px",
-                              borderRadius: "6px",
-                              objectFit: "cover",
-                              cursor: "pointer",
-                              border: idx === selectedImageIndex ? "2.5px solid #2563eb" : "1px solid #cbd5e0",
-                              boxShadow: idx === selectedImageIndex ? "0 0 0 2px rgba(37,99,235,0.2)" : "0 1px 3px rgba(0,0,0,0.1)",
-                              transform: idx === selectedImageIndex ? "scale(1.08)" : "scale(1)",
-                              transition: "all 0.15s ease",
-                            }}
-                          />
-                        )
-                      ))}
+                    <div style={{ marginTop: "14px" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+                        <span style={{ fontSize: "11.5px", color: "#64748b", fontWeight: 600 }}>
+                          Thumbnails (Check boxes to select multiple for batch download):
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (selectedMediaIndices.length === detailImgList.length) {
+                              setSelectedMediaIndices([]);
+                            } else {
+                              setSelectedMediaIndices(detailImgList.map((_, i) => i));
+                            }
+                          }}
+                          style={{
+                            background: "none",
+                            border: "none",
+                            color: "#2563eb",
+                            fontSize: "11.5px",
+                            fontWeight: 600,
+                            cursor: "pointer",
+                            padding: 0,
+                          }}
+                        >
+                          {selectedMediaIndices.length === detailImgList.length ? "Deselect All" : "Select All"}
+                        </button>
+                      </div>
+
+                      <div style={{ display: "flex", gap: "10px", justifyContent: "center", flexWrap: "wrap" }}>
+                        {detailImgList.map((imgUri, idx) => {
+                          const isChecked = selectedMediaIndices.includes(idx);
+                          return (
+                            <div
+                              key={idx}
+                              style={{ position: "relative", display: "inline-block" }}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={(e) => {
+                                  e.stopPropagation();
+                                  toggleMediaIndexSelection(idx);
+                                }}
+                                style={{
+                                  position: "absolute",
+                                  top: "4px",
+                                  right: "4px",
+                                  zIndex: 10,
+                                  cursor: "pointer",
+                                  width: "16px",
+                                  height: "16px",
+                                  accentColor: "#2563eb",
+                                }}
+                                title="Select photo for batch download"
+                              />
+
+                              {isVideoUrl(imgUri) ? (
+                                <div
+                                  onClick={() => setSelectedImageIndex(idx)}
+                                  style={{
+                                    width: "56px",
+                                    height: "56px",
+                                    borderRadius: "6px",
+                                    background: "#0f172a",
+                                    display: "flex",
+                                    flexDirection: "column",
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                    color: "#ffffff",
+                                    cursor: "pointer",
+                                    fontSize: "16px",
+                                    border: idx === selectedImageIndex ? "2.5px solid #2563eb" : "1px solid #cbd5e0",
+                                    boxShadow: idx === selectedImageIndex ? "0 0 0 2px rgba(37,99,235,0.2)" : "0 1px 3px rgba(0,0,0,0.1)",
+                                    transform: idx === selectedImageIndex ? "scale(1.06)" : "scale(1)",
+                                    transition: "all 0.15s ease",
+                                  }}
+                                >
+                                  🎬
+                                </div>
+                              ) : (
+                                <img
+                                  src={resolveImageUrl(imgUri)}
+                                  alt={`Thumbnail ${idx + 1}`}
+                                  onClick={() => setSelectedImageIndex(idx)}
+                                  style={{
+                                    width: "56px",
+                                    height: "56px",
+                                    borderRadius: "6px",
+                                    objectFit: "cover",
+                                    cursor: "pointer",
+                                    border: idx === selectedImageIndex ? "2.5px solid #2563eb" : "1px solid #cbd5e0",
+                                    boxShadow: idx === selectedImageIndex ? "0 0 0 2px rgba(37,99,235,0.2)" : "0 1px 3px rgba(0,0,0,0.1)",
+                                    transform: idx === selectedImageIndex ? "scale(1.06)" : "scale(1)",
+                                    transition: "all 0.15s ease",
+                                  }}
+                                />
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
                   )}
                 </div>
@@ -914,80 +1155,186 @@ export function ProductGalleryPage() {
                       />
                     )}
                   </div>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "10px", padding: "0 4px" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "12px", padding: "0 4px", flexWrap: "wrap", gap: "8px" }}>
                     <span style={{ fontSize: "12px", color: "#0369a1", fontWeight: 600 }}>
                       Visit Media {selectedImageIndex + 1} of {suppMedia.length} {activeSuppIsVideo ? "(Video)" : "(Image)"}
                     </span>
-                    <button
-                      type="button"
-                      onClick={() => downloadMediaFile(activeSuppMedia, `supplier_visit_${supp.company_name.replace(/[^a-zA-Z0-9]/g, "_")}`)}
-                      style={{
-                        background: "#0284c7",
-                        color: "#ffffff",
-                        border: "none",
-                        borderRadius: "6px",
-                        padding: "5px 14px",
-                        fontSize: "12px",
-                        fontWeight: 600,
-                        cursor: "pointer",
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: "5px",
-                        boxShadow: "0 1px 2px rgba(0,0,0,0.1)",
-                        transition: "all 0.15s ease",
-                      }}
-                      title={`Download ${activeSuppIsVideo ? "video" : "photo"}`}
-                    >
-                      📥 Download {activeSuppIsVideo ? "Video" : "Photo"}
-                    </button>
+
+                    <div style={{ display: "flex", gap: "6px", alignItems: "center", flexWrap: "wrap" }}>
+                      {selectedMediaIndices.length > 0 ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const selectedUrls = selectedMediaIndices.map((idx) => suppMedia[idx]).filter(Boolean);
+                            downloadAllMediaFiles(selectedUrls, `supplier_visit_${supp.company_name.replace(/[^a-zA-Z0-9]/g, "_")}`);
+                          }}
+                          style={{
+                            background: "#16a34a",
+                            color: "#ffffff",
+                            border: "none",
+                            borderRadius: "6px",
+                            padding: "4px 10px",
+                            fontSize: "12px",
+                            fontWeight: 600,
+                            cursor: "pointer",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "4px",
+                            boxShadow: "0 1px 3px rgba(0,0,0,0.15)",
+                          }}
+                          title="Download all checked visit media"
+                        >
+                          📥 Download Selected ({selectedMediaIndices.length})
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => downloadAllMediaFiles(suppMedia, `supplier_visit_${supp.company_name.replace(/[^a-zA-Z0-9]/g, "_")}`)}
+                          style={{
+                            background: "#0284c7",
+                            color: "#ffffff",
+                            border: "none",
+                            borderRadius: "6px",
+                            padding: "4px 10px",
+                            fontSize: "12px",
+                            fontWeight: 600,
+                            cursor: "pointer",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "4px",
+                            boxShadow: "0 1px 2px rgba(0,0,0,0.1)",
+                          }}
+                          title="Download all visit media at once"
+                        >
+                          📦 Download All ({suppMedia.length})
+                        </button>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={() => downloadMediaFile(activeSuppMedia, `supplier_visit_${supp.company_name.replace(/[^a-zA-Z0-9]/g, "_")}`, selectedImageIndex + 1)}
+                        style={{
+                          background: "#e0f2fe",
+                          color: "#0369a1",
+                          border: "1px solid #7dd3fc",
+                          borderRadius: "6px",
+                          padding: "4px 10px",
+                          fontSize: "12px",
+                          fontWeight: 600,
+                          cursor: "pointer",
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "4px",
+                        }}
+                        title={`Download ${activeSuppIsVideo ? "video" : "photo"}`}
+                      >
+                        📥 Active Only
+                      </button>
+                    </div>
                   </div>
+
                   {suppMedia.length > 1 && (
-                    <div style={{ display: "flex", gap: "10px", justifyContent: "center", flexWrap: "wrap", marginTop: "12px" }}>
-                      {suppMedia.map((imgUri, idx) => (
-                        isVideoUrl(imgUri) ? (
-                          <div
-                            key={idx}
-                            onClick={() => setSelectedImageIndex(idx)}
-                            style={{
-                              width: "56px",
-                              height: "56px",
-                              borderRadius: "6px",
-                              background: "#0369a1",
-                              display: "flex",
-                              flexDirection: "column",
-                              alignItems: "center",
-                              justifyContent: "center",
-                              color: "#ffffff",
-                              cursor: "pointer",
-                              fontSize: "16px",
-                              border: idx === selectedImageIndex ? "2.5px solid #0284c7" : "1px solid #bae6fd",
-                              boxShadow: idx === selectedImageIndex ? "0 0 0 2px rgba(2,132,199,0.2)" : "0 1px 3px rgba(0,0,0,0.1)",
-                              transform: idx === selectedImageIndex ? "scale(1.08)" : "scale(1)",
-                              transition: "all 0.15s ease",
-                            }}
-                          >
-                            🎬
-                          </div>
-                        ) : (
-                          <img
-                            key={idx}
-                            src={resolveImageUrl(imgUri)}
-                            alt={`Thumbnail ${idx + 1}`}
-                            onClick={() => setSelectedImageIndex(idx)}
-                            style={{
-                              width: "56px",
-                              height: "56px",
-                              borderRadius: "6px",
-                              objectFit: "cover",
-                              cursor: "pointer",
-                              border: idx === selectedImageIndex ? "2.5px solid #0284c7" : "1px solid #bae6fd",
-                              boxShadow: idx === selectedImageIndex ? "0 0 0 2px rgba(2,132,199,0.2)" : "0 1px 3px rgba(0,0,0,0.1)",
-                              transform: idx === selectedImageIndex ? "scale(1.08)" : "scale(1)",
-                              transition: "all 0.15s ease",
-                            }}
-                          />
-                        )
-                      ))}
+                    <div style={{ marginTop: "14px" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+                        <span style={{ fontSize: "11.5px", color: "#0369a1", fontWeight: 600 }}>
+                          Thumbnails (Check boxes to select multiple for batch download):
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (selectedMediaIndices.length === suppMedia.length) {
+                              setSelectedMediaIndices([]);
+                            } else {
+                              setSelectedMediaIndices(suppMedia.map((_, i) => i));
+                            }
+                          }}
+                          style={{
+                            background: "none",
+                            border: "none",
+                            color: "#0284c7",
+                            fontSize: "11.5px",
+                            fontWeight: 600,
+                            cursor: "pointer",
+                            padding: 0,
+                          }}
+                        >
+                          {selectedMediaIndices.length === suppMedia.length ? "Deselect All" : "Select All"}
+                        </button>
+                      </div>
+
+                      <div style={{ display: "flex", gap: "10px", justifyContent: "center", flexWrap: "wrap" }}>
+                        {suppMedia.map((imgUri, idx) => {
+                          const isChecked = selectedMediaIndices.includes(idx);
+                          return (
+                            <div
+                              key={idx}
+                              style={{ position: "relative", display: "inline-block" }}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={(e) => {
+                                  e.stopPropagation();
+                                  toggleMediaIndexSelection(idx);
+                                }}
+                                style={{
+                                  position: "absolute",
+                                  top: "4px",
+                                  right: "4px",
+                                  zIndex: 10,
+                                  cursor: "pointer",
+                                  width: "16px",
+                                  height: "16px",
+                                  accentColor: "#0284c7",
+                                }}
+                                title="Select photo for batch download"
+                              />
+
+                              {isVideoUrl(imgUri) ? (
+                                <div
+                                  onClick={() => setSelectedImageIndex(idx)}
+                                  style={{
+                                    width: "56px",
+                                    height: "56px",
+                                    borderRadius: "6px",
+                                    background: "#0369a1",
+                                    display: "flex",
+                                    flexDirection: "column",
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                    color: "#ffffff",
+                                    cursor: "pointer",
+                                    fontSize: "16px",
+                                    border: idx === selectedImageIndex ? "2.5px solid #0284c7" : "1px solid #bae6fd",
+                                    boxShadow: idx === selectedImageIndex ? "0 0 0 2px rgba(2,132,199,0.2)" : "0 1px 3px rgba(0,0,0,0.1)",
+                                    transform: idx === selectedImageIndex ? "scale(1.06)" : "scale(1)",
+                                    transition: "all 0.15s ease",
+                                  }}
+                                >
+                                  🎬
+                                </div>
+                              ) : (
+                                <img
+                                  src={resolveImageUrl(imgUri)}
+                                  alt={`Thumbnail ${idx + 1}`}
+                                  onClick={() => setSelectedImageIndex(idx)}
+                                  style={{
+                                    width: "56px",
+                                    height: "56px",
+                                    borderRadius: "6px",
+                                    objectFit: "cover",
+                                    cursor: "pointer",
+                                    border: idx === selectedImageIndex ? "2.5px solid #0284c7" : "1px solid #bae6fd",
+                                    boxShadow: idx === selectedImageIndex ? "0 0 0 2px rgba(2,132,199,0.2)" : "0 1px 3px rgba(0,0,0,0.1)",
+                                    transform: idx === selectedImageIndex ? "scale(1.06)" : "scale(1)",
+                                    transition: "all 0.15s ease",
+                                  }}
+                                />
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
                   )}
                 </div>

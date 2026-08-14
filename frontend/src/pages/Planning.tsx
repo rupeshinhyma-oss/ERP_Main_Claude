@@ -27,6 +27,7 @@ import { apiDelete, apiGet, apiPatch, apiPost, apiPut, API_BASE, ApiError, toQue
 import { Auth } from "@/lib/auth";
 import { useAuth } from "@/lib/hooks";
 import { useLookup } from "@/lib/lookups";
+import { useLiveList } from "@/lib/live/useLiveList";
 import type { Role } from "@/types";
 import type {
   MumColumnStatusHistoryEntry,
@@ -1268,6 +1269,34 @@ export function PlanningPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams, setSearchParams]);
 
+  /**
+   * Live sync for the SHEET LIST only (Phase 5, consolidated onto the
+   * shared `useLiveList` pattern in Phase 6 -- see
+   * `frontend/src/lib/live/useLiveList.ts`) -- e.g. another tab
+   * creating/renaming/deleting a branch tab shows up here without a
+   * manual refresh. `useLiveList` is the SAME hook `Buyers.tsx` uses;
+   * this is one of the two reference integrations it was extracted from.
+   *
+   * Deliberately SEPARATE from the existing per-sheet grid-internals
+   * socket below (`applyLiveEvent`, `/planning/sheets/{sheet_id}/live`)
+   * -- that one is untouched this phase and keeps handling cell/column/
+   * row-level events at its own, much finer granularity that
+   * `useLiveList` (a flat-list pattern) was never meant to cover. This
+   * hook only ever touches the flat `sheets` array (tab list), never
+   * `grid`.
+   */
+  useLiveList<PlanningSheet>({
+    moduleName: "planning",
+    setRecords: setSheets,
+    // No buildFromEvent: a `planning.created` event's `changes` only
+    // carries {name}, not a full PlanningSheet (item_source_type,
+    // mum_group_label, etc. -- see the event's own small-payload
+    // docstring) -- inserting an incomplete sheet object would risk this
+    // tab crashing on a field it assumes exists. A brand-new sheet
+    // created by another tab appears here on this tab's next natural
+    // `loadSheets()` call (e.g. navigating to Shipment Planning) instead.
+  });
+
   /** Rows per page for the grid -- matches Product Master's own default page size. */
   const GRID_PAGE_SIZE = 50;
 
@@ -2261,33 +2290,27 @@ export function PlanningPage() {
   const [loadingMoreProducts, setLoadingMoreProducts] = useState(false);
 
   /**
-   * "Load more products" -- the ONLY way left to pull additional Product
-   * Master rows into the sheet now that the manual per-row 🔗 link icon
-   * and the ITEM header's Configure (⚙) modal have both been removed
-   * (ITEM is permanently Product Master -> Product Name; see
-   * PlanningService.create_sheet). Mirrors Product Master's own default
-   * page size of 50 (see MasterPage's pageSize=50): each click asks for
-   * 50 more than currently exist ON THE SHEET (grid.total_rows -- the
-   * true sheet-wide count, NOT rows.length, which is only the current
-   * page's row count now that /grid is paginated), and the backend's
-   * own de-dupe (by linked_record_id) means re-fetching from the top and
-   * skipping already-linked products is safe and never creates duplicate
-   * rows.
+   * "Load more products" -- pulls the next page of Product Master
+   * records into the sheet as new linked rows.
    *
-   * After the backend creates the new rows, this does NOT reload the
-   * whole grid from scratch (that was the "Loading grid..." hang once a
-   * sheet had many rows) -- it just fetches and appends the newly-added
-   * page(s), the same additive path `loadMoreRows` uses for the "show
-   * more of what's already there" case.
+   * `grid.total_rows` is now the TRUE Product Master total (optionally
+   * narrowed by the active Organization filter), not just how many rows
+   * happen to be linked already -- see PlanningService.get_grid's
+   * auto-population-on-read. That means `loadMoreRows()` (a plain
+   * `/grid?offset=...` call) is now sufficient on its own: the backend
+   * transparently creates whatever linked rows are still missing to
+   * cover the requested page before returning it, the same
+   * `auto_populate_rows_from_item_source` path this button used to call
+   * directly. Kept as a distinctly-labeled button (matching Product
+   * Master's own "Load More" language) since "pull the next batch from
+   * Product Master" reads more clearly here than a generic "Load more"
+   * would, but it no longer needs its own separate API call.
    */
   async function handleLoadMoreProducts() {
     if (!activeSheetId) return;
     setLoadingMoreProducts(true);
     setError(null);
     try {
-      const currentTotal = grid?.total_rows ?? rows.length;
-      const nextLimit = currentTotal + GRID_PAGE_SIZE;
-      await apiPost(`/planning/sheets/${activeSheetId}/item-source/auto-populate`, { limit: nextLimit });
       await loadMoreRows();
     } catch (err) {
       setError(err);
@@ -2847,7 +2870,7 @@ export function PlanningPage() {
                   type="button"
                   className="btn btn-secondary"
                   onClick={handleLoadMoreProducts}
-                  disabled={loadingMoreProducts || !activeSheetId}
+                  disabled={loadingMoreProducts || !activeSheetId || !grid || rows.length >= (grid.total_rows ?? 0)}
                   title="Pull the next 50 products from Product Master as new rows (already-loaded products are skipped)"
                 >
                   {loadingMoreProducts ? "Loading…" : "Load More Products"}

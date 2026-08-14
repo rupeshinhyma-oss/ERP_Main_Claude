@@ -16,6 +16,72 @@ export interface LookupResult<T> {
   loaded: boolean;
 }
 
+/**
+ * Debounced, server-side search-as-you-type lookup for tables too large to
+ * ever prefetch in full (e.g. Products, once it's grown past a few
+ * thousand rows). Unlike `useLookup`, this does NOT fetch anything until
+ * the caller has an actual search term -- an empty/short term returns an
+ * empty list rather than the whole table, so it never pulls 1000+ rows
+ * into browser memory just to populate a dropdown or check for a
+ * duplicate code.
+ *
+ * Use this instead of `useLookup` for any lookup where the underlying
+ * table is expected to reach large row counts. Small, bounded master
+ * tables (categories, brands, UOM, etc.) should keep using `useLookup` --
+ * prefetching a few hundred rows once is simpler and cheaper than
+ * debounced search for those.
+ */
+export function useSearchableLookup<T>(
+  apiBase: string,
+  term: string,
+  options?: { pageSize?: number; minChars?: number; debounceMs?: number }
+): LookupResult<T> {
+  const pageSize = options?.pageSize ?? 20;
+  const minChars = options?.minChars ?? 2;
+  const debounceMs = options?.debounceMs ?? 300;
+
+  const [items, setItems] = useState<T[]>([]);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    const trimmed = term.trim();
+    if (trimmed.length < minChars) {
+      setItems([]);
+      setLoaded(true);
+      return;
+    }
+
+    let cancelled = false;
+    setLoaded(false);
+    const timer = window.setTimeout(async () => {
+      try {
+        const { data } = await apiGet<T[]>(
+          apiBase +
+          toQueryString({
+            page: 1,
+            page_size: pageSize,
+            sort_order: "asc",
+            status: "active",
+            search: trimmed,
+          })
+        );
+        if (!cancelled) setItems(data || []);
+      } catch {
+        /* filters and dropdowns degrade gracefully without lookups */
+      } finally {
+        if (!cancelled) setLoaded(true);
+      }
+    }, debounceMs);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [apiBase, term, pageSize, minChars, debounceMs]);
+
+  return useMemo(() => ({ items, loaded }), [items, loaded]);
+}
+
 export function useLookup<T>(apiBase: string, pageSize = 250): LookupResult<T> {
   const [items, setItems] = useState<T[]>([]);
   const [loaded, setLoaded] = useState(false);
@@ -26,7 +92,7 @@ export function useLookup<T>(apiBase: string, pageSize = 250): LookupResult<T> {
       try {
         const { data } = await apiGet<T[]>(
           apiBase +
-            toQueryString({ page: 1, page_size: pageSize, sort_order: "asc", status: "active" })
+          toQueryString({ page: 1, page_size: pageSize, sort_order: "asc", status: "active" })
         );
         if (!cancelled) setItems(data || []);
       } catch {

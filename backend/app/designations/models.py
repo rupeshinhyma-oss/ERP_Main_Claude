@@ -12,11 +12,21 @@ from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.constants import RecordStatus
-from app.database.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
+from app.database.base import Base, SoftDeleteMixin, TimestampMixin, UUIDPrimaryKeyMixin, VersionMixin
 
 
-class Designation(Base, UUIDPrimaryKeyMixin, TimestampMixin):
-    """A single job title/level record."""
+class Designation(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin, SoftDeleteMixin):
+    """
+    A single job title/level record.
+
+    Soft-delete (``SoftDeleteMixin``): deleting a designation must never
+    hard-delete it, since employees may reference it historically and the
+    company-wide policy is a recoverable delete for every module (see
+    ``BaseRepository.delete`` and the Trash module). Previously this model
+    had no soft-delete support, so ``DesignationService.delete`` was a
+    real, unrecoverable hard delete -- the one genuine gap found when
+    auditing every module's delete path against that policy.
+    """
 
     __tablename__ = "designations"
 

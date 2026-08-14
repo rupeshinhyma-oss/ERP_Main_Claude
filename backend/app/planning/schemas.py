@@ -28,6 +28,7 @@ class PlanningSheetCreate(BaseModel):
 
 
 class PlanningSheetRename(BaseModel):
+    version: int | None = None
     name: str = Field(..., min_length=1, max_length=150)
 
 
@@ -41,6 +42,7 @@ class PlanningSheetRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
+    version: int = 1
     name: str
     description: str | None = None
     position: int
@@ -130,6 +132,13 @@ class PlanningItemAutoPopulate(BaseModel):
         default=25,
         ge=1,
         description="How many records to pull from the source module (e.g. 25/50/100). Omit or pass null to load ALL records.",
+    )
+    organization_id: uuid.UUID | None = Field(
+        default=None,
+        description="Optional Organization filter (Master Data > Organization List). When set, only "
+        "records belonging to this organization are eligible to become new rows -- keeps 'Load More "
+        "Products' consistent with whatever Organization filter is active in the grid. Only meaningful "
+        "when the ITEM source module is 'product'; ignored otherwise.",
     )
 
 

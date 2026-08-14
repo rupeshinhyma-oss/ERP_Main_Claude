@@ -28,7 +28,7 @@ from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, String, Text, Unique
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.database.base import GUID, Base, SoftDeleteMixin, TimestampMixin, UUIDPrimaryKeyMixin
+from app.database.base import GUID, Base, SoftDeleteMixin, TimestampMixin, UUIDPrimaryKeyMixin, VersionMixin
 
 
 def _utcnow() -> datetime:
@@ -72,8 +72,21 @@ class BuyerPotential(str, Enum):
     NO = "no"
 
 
-class Buyer(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
-    """A single buyer (client) profile record."""
+class Buyer(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin, SoftDeleteMixin):
+    """
+    A single buyer (client) profile record.
+
+    ``VersionMixin`` (Optimistic Concurrency Control) was added here in
+    the Phase 3 performance/correctness audit: the `buyers.version`
+    column has existed at the DATABASE level since migration
+    v6w7x8y9z0a1 ("add_version_column_for_occ"), and the frontend
+    (`Buyers.tsx`) already sends `version` on every PATCH -- but this
+    model never declared the column, so `BaseRepository.update()`'s OCC
+    check (`getattr(instance, "version", None)`) always saw `None` and
+    silently never fired. Two users could overwrite each other's changes
+    with no conflict raised. No new migration is needed for this fix --
+    only the model was missing the column, not the database.
+    """
 
     __tablename__ = "buyers"
 

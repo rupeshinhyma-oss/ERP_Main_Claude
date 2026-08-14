@@ -36,6 +36,7 @@ import {
   toQueryString,
 } from "@/lib/api";
 import { useAuth, useSrNoJump } from "@/lib/hooks";
+import { useLiveList } from "@/lib/live/useLiveList";
 import type { ImportHeader, ImportSummary, MasterRecord, PaginationMeta } from "@/types";
 
 /** Form state is a flat id -> string map, mirroring the original inputs. */
@@ -113,6 +114,18 @@ export interface MasterPageProps<T extends MasterRecord> {
    * without MasterPage needing to know anything about that custom UI.
    */
   onReady?: (handle: MasterPageHandle) => void;
+  /**
+   * Phase 9: module channel name (e.g. "brands", "categories", "hsn") to
+   * subscribe to for real-time create/update/delete events from other
+   * users. Deliberately opt-in per page rather than derived automatically
+   * from `permissionPrefix` -- several pages' `permissionPrefix` values
+   * (e.g. BuyerTypes/SupplierTypes/CompanyList using "buyer"/"supplier"/
+   * "company") do NOT correspond 1:1 with their own live channel, so an
+   * automatic derivation would silently mis-subscribe them to an
+   * unrelated module's events. Omit this prop for master pages that
+   * don't yet have a registered backend channel/publisher.
+   */
+  liveModule?: string;
 }
 
 export interface MasterPageHandle {
@@ -149,6 +162,7 @@ export function MasterPage<T extends MasterRecord>({
   detailTitle,
   detailSubtitle,
   onReady,
+  liveModule,
 }: MasterPageProps<T>) {
   const { hasPermission } = useAuth();
 
@@ -326,6 +340,41 @@ export function MasterPage<T extends MasterRecord>({
 
 
   const reload = useCallback(() => setReloadCounter((n) => n + 1), []);
+
+  /**
+   * Live sync (Phase 9): every master page built on MasterPage gets
+   * real-time create/update/delete sync for free by passing `liveModule`
+   * -- no per-page wiring needed, unlike Buyers/Suppliers/Inquiries which
+   * each hand-roll their own `useLiveList` call because they DON'T share
+   * a common list component. Conservative like those hand-rolled
+   * integrations: skips patching while any search/status filter is
+   * active or the view isn't on page 1, since replicating this page's
+   * own `extraFilters` matching logic here (different per page: category
+   * scoping, country/state scoping, etc.) isn't something this shared
+   * component can safely generalize. `total_records` is kept in sync on
+   * create/delete the same way Buyers/Suppliers already do.
+   */
+  const hasActiveMasterFilterOrSearch = Boolean(effectiveSearch) || Boolean(statusFilter) || Boolean(extraFiltersKey);
+  useLiveList<T>({
+    moduleName: liveModule ?? null,
+    setRecords: setRows,
+    shouldSkip: () => hasActiveMasterFilterOrSearch || currentPage !== 1,
+    onApplied: (result) => {
+      if (result.action === "created" || result.action === "deleted") {
+        setPagination((prev) =>
+          prev
+            ? {
+              ...prev,
+              total_records:
+                result.action === "created"
+                  ? (prev.total_records || 0) + 1
+                  : Math.max(0, (prev.total_records || 1) - 1),
+            }
+            : prev
+        );
+      }
+    },
+  });
 
   /* --- Table load --- */
   useEffect(() => {
@@ -1212,10 +1261,10 @@ export function MasterPage<T extends MasterRecord>({
           onEdit={
             canUpdate
               ? () => {
-                  const item = drawerItem;
-                  setDrawerItem(null);
-                  if (item) handleEdit(item.id);
-                }
+                const item = drawerItem;
+                setDrawerItem(null);
+                if (item) handleEdit(item.id);
+              }
               : undefined
           }
         >

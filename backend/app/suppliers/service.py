@@ -162,26 +162,40 @@ class SupplierService:
             raise BadRequestException("The specified city does not belong to the specified state.")
 
     async def _validate_categories(self, category_ids: list[uuid.UUID]) -> None:
-        """Ensure every given product category exists."""
-        for category_id in category_ids:
-            if await self.category_repository.get_by_id(category_id) is None:
-                raise BadRequestException(f"Product category {category_id} does not exist.")
+        """
+        Ensure every given product category exists, in ONE query.
+
+        Phase 3 N+1 fix: this used to call ``get_by_id`` in a loop, one
+        round trip per category ID, on every single create/update. See
+        ``app.buyers.service.BuyerService._validate_categories`` for the
+        identical fix applied there.
+        """
+        if not category_ids:
+            return
+        found = await self.category_repository.get_by_ids(category_ids)
+        missing = [str(cid) for cid in category_ids if cid not in found]
+        if missing:
+            raise BadRequestException(f"Product category {missing[0]} does not exist.")
 
     async def _validate_sub_categories(self, sub_category_ids: list[uuid.UUID]) -> None:
-        """Ensure every given product sub-category exists."""
-        for sub_category_id in sub_category_ids:
-            if await self.sub_category_repository.get_by_id(sub_category_id) is None:
-                raise BadRequestException(f"Product sub-category {sub_category_id} does not exist.")
+        """Ensure every given product sub-category exists, in ONE query -- see ``_validate_categories``."""
+        if not sub_category_ids:
+            return
+        found = await self.sub_category_repository.get_by_ids(sub_category_ids)
+        missing = [str(sid) for sid in sub_category_ids if sid not in found]
+        if missing:
+            raise BadRequestException(f"Product sub-category {missing[0]} does not exist.")
 
     async def _validate_products(self, product_ids: list[uuid.UUID]) -> None:
-        """Ensure every given product exists (Products is the central item master; see its module docstring)."""
+        """Ensure every given product exists (Products is the central item master; see its module docstring), in ONE query."""
         if not product_ids:
             return
         if self.product_repository is None:
             raise BadRequestException("Product linking is not available in this context.")
-        for product_id in product_ids:
-            if await self.product_repository.get_by_id(product_id) is None:
-                raise BadRequestException(f"Product {product_id} does not exist.")
+        found = await self.product_repository.get_by_ids(product_ids)
+        missing = [str(pid) for pid in product_ids if pid not in found]
+        if missing:
+            raise BadRequestException(f"Product {missing[0]} does not exist.")
 
     def _validate_visit_remarks(self, visited: bool, visit_remarks: str | None) -> None:
         """

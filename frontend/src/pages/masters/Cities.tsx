@@ -26,6 +26,7 @@ export function CitiesPage() {
       activeKey="masters-cities"
       apiBase="/masters/cities"
       permissionPrefix="city"
+      liveModule="cities"
       entityName="city"
       heading="City Master"
       subtitle="Administrative cities, prefectures, and districts."

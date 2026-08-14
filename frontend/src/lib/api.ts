@@ -36,19 +36,46 @@ export const API_ORIGIN: string = import.meta.env.VITE_API_ORIGIN ?? "";
 export const API_BASE = `${API_ORIGIN}/api/v1`;
 
 /**
+ * Status used internally for a genuine network failure (fetch itself threw,
+ * e.g. the connection dropped, DNS failed, CORS blocked, offline). There is
+ * no real HTTP status in that case, but treating it as a distinct numeric
+ * "status" lets the same retry/isRetryable logic below handle network
+ * failures and transient HTTP statuses (502/503/...) uniformly.
+ */
+export const NETWORK_ERROR_STATUS = 0;
+
+/**
  * A structured error carrying the parsed API error envelope, so callers can
  * show `err.message` directly to the user.
  */
 export class ApiError extends Error {
   status: number;
   errors: ApiFieldError[];
+  /** Parsed `Retry-After` header (ms), if the server sent one (typically on 429). */
+  retryAfterMs?: number;
 
-  constructor(message: string, status: number, errors?: ApiFieldError[]) {
+  constructor(
+    message: string,
+    status: number,
+    errors?: ApiFieldError[],
+    retryAfterHeader?: string | null
+  ) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.errors = errors || [];
+    if (retryAfterHeader) {
+      const seconds = Number(retryAfterHeader);
+      if (!Number.isNaN(seconds) && seconds >= 0) {
+        this.retryAfterMs = Math.min(seconds * 1000, MAX_RETRY_DELAY_MS);
+      }
+    }
   }
+}
+
+/** True if this is a genuine network failure (see NETWORK_ERROR_STATUS) rather than an HTTP response. */
+export function isNetworkError(err: unknown): boolean {
+  return err instanceof ApiError && err.status === NETWORK_ERROR_STATUS;
 }
 
 /**
@@ -60,9 +87,9 @@ export class ApiError extends Error {
 export function isAbortError(err: unknown): boolean {
   return Boolean(
     err &&
-      typeof err === "object" &&
-      "name" in err &&
-      (err as { name?: string }).name === "AbortError"
+    typeof err === "object" &&
+    "name" in err &&
+    (err as { name?: string }).name === "AbortError"
   );
 }
 
@@ -94,6 +121,63 @@ function isLoginFlowPath(path: string): boolean {
   return path.startsWith("/auth/login") || path.startsWith("/auth/refresh");
 }
 
+// --- Retry policy -----------------------------------------------------------
+// Phase 7: bounded, jittered exponential backoff for TRANSIENT failures only.
+// "Transient" means: a genuine network failure, or one of the HTTP statuses
+// below that represent a temporary condition rather than a permanent
+// rejection of the request. Everything else (400/401/403/404/409/422/...)
+// is never retried automatically -- retrying those would either never
+// succeed (a validation error doesn't fix itself) or, worse, risk
+// double-applying a mutation the server already rejected for a reason that
+// retrying won't change.
+const MAX_RETRY_ATTEMPTS = 3; // in addition to the initial attempt
+const BASE_RETRY_DELAY_MS = 300;
+const MAX_RETRY_DELAY_MS = 4000;
+const RETRYABLE_STATUSES = new Set([408, 429, 500, 502, 503, 504]);
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Bounded exponential backoff with jitter, mirroring the pattern already used by LiveClient's WebSocket reconnect logic. */
+function computeRetryDelay(attempt: number): number {
+  const raw = BASE_RETRY_DELAY_MS * 2 ** attempt;
+  const jitter = raw * 0.2 * Math.random();
+  return Math.min(MAX_RETRY_DELAY_MS, Math.round(raw + jitter));
+}
+
+/** GET/HEAD are always safe to retry (they don't change server state). Everything else must opt in explicitly. */
+function isInherentlySafeMethod(method: string): boolean {
+  return method === "GET" || method === "HEAD";
+}
+
+/** Human-readable fallback message per status, used only when the backend didn't already supply one (see item 12 of the Phase 7 brief). */
+function defaultMessageForStatus(status: number): string {
+  switch (status) {
+    case NETWORK_ERROR_STATUS:
+      return "Network connection lost. Please try again.";
+    case 403:
+      return "You do not have permission to perform this action.";
+    case 404:
+      return "The requested resource was not found.";
+    case 408:
+      return "The request timed out. Please try again.";
+    case 409:
+      return "Someone else updated this record. Reload the latest version before saving.";
+    case 422:
+      return "Please correct the highlighted fields and try again.";
+    case 429:
+      return "Too many requests. Please wait a moment and try again.";
+    case 500:
+    case 502:
+    case 503:
+    case 504:
+      return "Something went wrong while saving. Please try again.";
+    default:
+      return "The request failed.";
+  }
+}
+
 async function rawFetch(path: string, options: RequestInit): Promise<RawResponse> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -103,7 +187,18 @@ async function rawFetch(path: string, options: RequestInit): Promise<RawResponse
   if (token) {
     headers["Authorization"] = `Bearer ${token}`;
   }
-  const response = await fetch(`${API_BASE}${path}`, { ...options, headers });
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}${path}`, { ...options, headers });
+  } catch (err) {
+    // A thrown fetch means the request never reached the server (offline,
+    // DNS failure, connection reset, CORS, ...) -- NOT a successful
+    // operation, and must never be swallowed as one (Phase 7 item 4). An
+    // intentional cancellation (AbortController) is passed through as-is
+    // so callers' existing `isAbortError` handling keeps working unchanged.
+    if (isAbortError(err)) throw err;
+    throw new ApiError(defaultMessageForStatus(NETWORK_ERROR_STATUS), NETWORK_ERROR_STATUS, []);
+  }
   let body: ApiEnvelope<unknown> | null = null;
   try {
     body = (await response.json()) as ApiEnvelope<unknown>;
@@ -157,19 +252,23 @@ async function tryRefresh(): Promise<boolean> {
 }
 
 /**
- * Perform an authenticated API call against the standard response envelope.
- * Returns `data` (plus `meta`) on success; throws `ApiError` on failure.
- * Retries exactly once after a silent token refresh on a 401 -- and that
- * refresh is deduplicated across concurrent callers (see tryRefresh above),
- * which is the fix for "getting logged out randomly" under parallel requests.
- *
- * Pass { signal } in options to make this request cancellable via
- * AbortController -- see apiGet/apiPost/etc below.
+ * Options controlling Phase 7 retry behaviour. Only relevant for
+ * non-GET/HEAD methods -- GET/HEAD are always safe to retry automatically.
  */
-export async function apiCall<T>(
-  path: string,
-  options: RequestInit = {}
-): Promise<ApiResult<T>> {
+export interface RetryConfig {
+  /**
+   * Set true ONLY if this specific call is safe to repeat verbatim without
+   * risk of double-applying the mutation -- e.g. a PUT that fully replaces
+   * a resource by a caller-supplied id, or a DELETE by id (deleting twice
+   * is a no-op). Per the Phase 7 brief: CREATE (POST) should essentially
+   * never set this unless the backend guarantees idempotency (e.g. via an
+   * idempotency key); UPDATE/DELETE only when known safe.
+   */
+  idempotent?: boolean;
+}
+
+/** One (non-retrying) attempt: the original 401-refresh + envelope logic, unchanged in behaviour. */
+async function performRequestOnce<T>(path: string, options: RequestInit): Promise<ApiResult<T>> {
   let { response, body } = await rawFetch(path, options);
 
   if (response.status === 401 && Auth.getRefreshToken()) {
@@ -183,7 +282,7 @@ export async function apiCall<T>(
     if (!isLoginFlowPath(path)) {
       handleSessionExpired();
     }
-    const message = body?.message || "Session expired. Please log in again.";
+    const message = body?.message || defaultMessageForStatus(401);
     throw new ApiError(message, 401, body?.errors || []);
   }
 
@@ -191,12 +290,13 @@ export async function apiCall<T>(
     throw new ApiError(
       `Request failed with status ${response.status}.`,
       response.status,
-      []
+      [],
+      response.headers.get("Retry-After")
     );
   }
 
   if (!response.ok || body.success === false) {
-    let message = body.message || "The request failed.";
+    let message = body.message || defaultMessageForStatus(response.status);
     if (body.errors && body.errors.length > 0) {
       const details = body.errors
         .map((e) => (e.field ? `${e.field}: ${e.message}` : e.message))
@@ -206,11 +306,65 @@ export async function apiCall<T>(
         message = `${message} (${details})`;
       }
     }
-    throw new ApiError(message, response.status, body.errors || []);
+    throw new ApiError(message, response.status, body.errors || [], response.headers.get("Retry-After"));
   }
 
-
   return { data: body.data as T, meta: body.meta };
+}
+
+/**
+ * Perform an authenticated API call against the standard response envelope.
+ * Returns `data` (plus `meta`) on success; throws `ApiError` on failure.
+ *
+ * Two layers of resilience:
+ * 1. Auth: a 401 triggers exactly one silent, single-flight token refresh
+ *    (see tryRefresh above) before failing -- unchanged from before.
+ * 2. Transient-failure retry (Phase 7): network failures and 408/429/
+ *    500/502/503/504 responses are retried with bounded exponential
+ *    backoff (+ jitter), but ONLY for GET/HEAD or for calls explicitly
+ *    marked `{ idempotent: true }` in `retryConfig`. Every other failure
+ *    (400/401-after-refresh-failed/403/404/409/422/...) is never retried
+ *    -- see RETRYABLE_STATUSES and isRetryableFailure below.
+ *
+ * Pass { signal } in options to make this request cancellable via
+ * AbortController -- see apiGet/apiPost/etc below. A cancelled request
+ * (AbortError) is never retried and is rethrown as-is.
+ */
+export async function apiCall<T>(
+  path: string,
+  options: RequestInit = {},
+  retryConfig: RetryConfig = {}
+): Promise<ApiResult<T>> {
+  const method = (options.method || "GET").toUpperCase();
+  const canRetry = isInherentlySafeMethod(method) || retryConfig.idempotent === true;
+  const maxAttempts = canRetry ? MAX_RETRY_ATTEMPTS + 1 : 1;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      return await performRequestOnce<T>(path, options);
+    } catch (err) {
+      if (isAbortError(err)) throw err;
+
+      const isLastAttempt = attempt === maxAttempts - 1;
+      const status = err instanceof ApiError ? err.status : null;
+      const isRetryableFailure =
+        status !== null && (status === NETWORK_ERROR_STATUS || RETRYABLE_STATUSES.has(status));
+
+      if (isLastAttempt || !isRetryableFailure) {
+        throw err;
+      }
+
+      const delay =
+        err instanceof ApiError && err.retryAfterMs !== undefined
+          ? err.retryAfterMs
+          : computeRetryDelay(attempt);
+      await sleep(delay);
+    }
+  }
+
+  // Unreachable (the loop above always either returns or throws), but kept
+  // so this function's control flow satisfies TypeScript's return analysis.
+  throw new ApiError(defaultMessageForStatus(NETWORK_ERROR_STATUS), NETWORK_ERROR_STATUS, []);
 }
 
 export function apiGet<T>(path: string, options: RequestInit = {}): Promise<ApiResult<T>> {
@@ -220,57 +374,129 @@ export function apiGet<T>(path: string, options: RequestInit = {}): Promise<ApiR
 export function apiPost<T>(
   path: string,
   payload?: unknown,
-  options: RequestInit = {}
+  options: RequestInit = {},
+  retryConfig: RetryConfig = {}
 ): Promise<ApiResult<T>> {
-  return apiCall<T>(path, {
-    method: "POST",
-    body: JSON.stringify(payload || {}),
-    ...options,
-  });
+  return apiCall<T>(
+    path,
+    {
+      method: "POST",
+      body: JSON.stringify(payload || {}),
+      ...options,
+    },
+    retryConfig
+  );
 }
 
-export async function apiPostMultipart<T>(path: string, formData: FormData): Promise<ApiResult<T>> {
-  const token = Auth.getAccessToken();
-  const res = await fetch(`${API_BASE}${path}`, {
-    method: "POST",
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-    body: formData,
-  });
-  if (!res.ok) {
-    throw new ApiError(`Upload failed: ${res.statusText}`, res.status);
+/**
+ * Upload via multipart/form-data. Brought into the shared reliability/auth
+ * behaviour (Phase 7 item 13): single-flight 401 refresh-and-retry, the
+ * standard error envelope (so `errorMessage()` works the same as every
+ * other call), and AbortController support for cancellation.
+ *
+ * Never retried automatically -- a file upload is a POST with real,
+ * potentially large side effects (and re-sending the body twice on a flaky
+ * connection is exactly the kind of accidental duplication Phase 7 says to
+ * avoid) -- callers get a clear thrown ApiError and can offer their own
+ * "retry" affordance if they choose to.
+ */
+export async function apiPostMultipart<T>(
+  path: string,
+  formData: FormData,
+  options: { signal?: AbortSignal } = {}
+): Promise<ApiResult<T>> {
+  const doUpload = async (): Promise<RawResponse> => {
+    const token = Auth.getAccessToken();
+    const headers: Record<string, string> = {};
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+    let response: Response;
+    try {
+      response = await fetch(`${API_BASE}${path}`, {
+        method: "POST",
+        headers,
+        body: formData,
+        signal: options.signal,
+      });
+    } catch (err) {
+      if (isAbortError(err)) throw err;
+      throw new ApiError(defaultMessageForStatus(NETWORK_ERROR_STATUS), NETWORK_ERROR_STATUS, []);
+    }
+    let body: ApiEnvelope<unknown> | null = null;
+    try {
+      body = (await response.json()) as ApiEnvelope<unknown>;
+    } catch {
+      body = null;
+    }
+    return { response, body };
+  };
+
+  let { response, body } = await doUpload();
+
+  if (response.status === 401 && Auth.getRefreshToken()) {
+    const refreshed = await tryRefresh();
+    if (refreshed) {
+      ({ response, body } = await doUpload());
+    }
   }
-  return res.json();
+
+  if (response.status === 401) {
+    if (!isLoginFlowPath(path)) {
+      handleSessionExpired();
+    }
+    throw new ApiError(body?.message || defaultMessageForStatus(401), 401, body?.errors || []);
+  }
+
+  if (!body) {
+    throw new ApiError(`Upload failed with status ${response.status}.`, response.status, []);
+  }
+
+  if (!response.ok || body.success === false) {
+    throw new ApiError(body.message || defaultMessageForStatus(response.status), response.status, body.errors || []);
+  }
+
+  return { data: body.data as T, meta: body.meta };
 }
 
 export function apiPatch<T>(
   path: string,
   payload?: unknown,
-  options: RequestInit = {}
+  options: RequestInit = {},
+  retryConfig: RetryConfig = {}
 ): Promise<ApiResult<T>> {
-  return apiCall<T>(path, {
-    method: "PATCH",
-    body: JSON.stringify(payload || {}),
-    ...options,
-  });
+  return apiCall<T>(
+    path,
+    {
+      method: "PATCH",
+      body: JSON.stringify(payload || {}),
+      ...options,
+    },
+    retryConfig
+  );
 }
 
 export function apiPut<T>(
   path: string,
   payload?: unknown,
-  options: RequestInit = {}
+  options: RequestInit = {},
+  retryConfig: RetryConfig = {}
 ): Promise<ApiResult<T>> {
-  return apiCall<T>(path, {
-    method: "PUT",
-    body: JSON.stringify(payload || {}),
-    ...options,
-  });
+  return apiCall<T>(
+    path,
+    {
+      method: "PUT",
+      body: JSON.stringify(payload || {}),
+      ...options,
+    },
+    retryConfig
+  );
 }
 
 export function apiDelete<T>(
   path: string,
-  options: RequestInit = {}
+  options: RequestInit = {},
+  retryConfig: RetryConfig = {}
 ): Promise<ApiResult<T>> {
-  return apiCall<T>(path, { method: "DELETE", ...options });
+  return apiCall<T>(path, { method: "DELETE", ...options }, retryConfig);
 }
 
 /** Build a `?key=value&...` query string, skipping empty/undefined values. */
@@ -294,21 +520,84 @@ export function errorMessage(err: unknown): string {
 }
 
 /**
- * Download an export file. Mirrors the original inline fetch: the browser's
- * download machinery can't attach an Authorization header to a plain link, so
- * the blob is fetched with the bearer token and handed to a temporary anchor.
+ * Download an export file. The browser's download machinery can't attach an
+ * Authorization header to a plain link, so the blob is fetched with the
+ * bearer token and handed to a temporary anchor.
+ *
+ * Brought into the shared reliability behaviour (Phase 7 item 13, same
+ * treatment as `apiPostMultipart`): single-flight 401 refresh-and-retry,
+ * bounded exponential-backoff retry for transient failures (GET is
+ * inherently safe/idempotent), and a real ApiError with a readable message
+ * on failure instead of a bare `Error("Export failed.")` -- so callers can
+ * use the same `errorMessage()` / toast handling as every other request.
  */
 export async function downloadExport(
   apiBase: string,
   format: "csv" | "xlsx",
-  fileBaseName: string
+  fileBaseName: string,
+  options: { signal?: AbortSignal } = {}
 ): Promise<void> {
-  const token = Auth.getAccessToken();
-  const res = await fetch(`${API_BASE}${apiBase}/export?format=${format}`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  if (!res.ok) throw new Error("Export failed.");
-  const blob = await res.blob();
+  const path = `${apiBase}/export?format=${format}`;
+
+  const doDownload = async (): Promise<Response> => {
+    const token = Auth.getAccessToken();
+    const headers: Record<string, string> = {};
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+    try {
+      return await fetch(`${API_BASE}${path}`, { headers, signal: options.signal });
+    } catch (err) {
+      if (isAbortError(err)) throw err;
+      throw new ApiError(defaultMessageForStatus(NETWORK_ERROR_STATUS), NETWORK_ERROR_STATUS, []);
+    }
+  };
+
+  const maxAttempts = MAX_RETRY_ATTEMPTS + 1; // GET is inherently safe to retry
+  let response: Response | null = null;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      response = await doDownload();
+
+      if (response.status === 401 && Auth.getRefreshToken()) {
+        const refreshed = await tryRefresh();
+        if (refreshed) response = await doDownload();
+      }
+
+      if (response.status === 401) {
+        handleSessionExpired();
+        throw new ApiError(defaultMessageForStatus(401), 401, []);
+      }
+
+      if (!response.ok) {
+        throw new ApiError(defaultMessageForStatus(response.status), response.status, []);
+      }
+
+      break; // success
+    } catch (err) {
+      if (isAbortError(err)) throw err;
+
+      const isLastAttempt = attempt === maxAttempts - 1;
+      const status = err instanceof ApiError ? err.status : null;
+      const isRetryableFailure =
+        status !== null && (status === NETWORK_ERROR_STATUS || RETRYABLE_STATUSES.has(status));
+
+      if (isLastAttempt || !isRetryableFailure) throw err;
+
+      const delay =
+        err instanceof ApiError && err.retryAfterMs !== undefined
+          ? err.retryAfterMs
+          : computeRetryDelay(attempt);
+      await sleep(delay);
+    }
+  }
+
+  if (!response) {
+    // Unreachable (the loop above always either breaks with a response or
+    // throws), kept so TypeScript's control-flow analysis is satisfied.
+    throw new ApiError(defaultMessageForStatus(NETWORK_ERROR_STATUS), NETWORK_ERROR_STATUS, []);
+  }
+
+  const blob = await response.blob();
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;

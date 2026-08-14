@@ -1,4 +1,11 @@
-"""Product Category Routes. Standard CRUD + activate/deactivate + import/export, with audit logging."""
+"""
+Product Category Routes. Standard CRUD + activate/deactivate + import/export, with audit logging.
+
+Phase 9: added live event publishing on every mutation so the Categories
+list page receives real-time updates from other users without a manual
+refresh. Uses ``module:categories`` (entity="category"), registered in
+``app.events.channels.MODULE_CHANNEL_PERMISSIONS`` -> ``category.read``.
+"""
 
 from __future__ import annotations
 
@@ -6,6 +13,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, File, Request, UploadFile, status
 from fastapi.responses import Response
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.constants import AuditAction
 from app.audit.dependencies import get_audit_service
@@ -14,6 +22,9 @@ from app.auth.service import CurrentUser
 from app.common.list_query import ListQueryParams, get_list_query_params
 from app.common.pagination import PageMeta
 from app.core.responses import build_success_response
+from app.database.session import get_db_session
+from app.events.dependencies import get_event_dispatcher
+from app.events.dispatcher import EventDispatcher
 from app.masters.product_categories.dependencies import get_product_category_service
 from app.masters.product_categories.schemas import (
     ImportSummaryRead,
@@ -25,6 +36,28 @@ from app.masters.product_categories.service import ProductCategoryService
 from app.rbac.dependencies import require_permission
 
 router = APIRouter(prefix="/masters/product-categories", tags=["Masters - Product Categories"])
+
+
+async def _publish_category_event(
+    *,
+    db: AsyncSession,
+    dispatcher: EventDispatcher,
+    event_type: str,
+    category_id: uuid.UUID | str,
+    user_id: uuid.UUID,
+    changes: dict,
+) -> None:
+    """Commit ``db``, then publish a ``category.*`` live event on ``module:categories``."""
+    await dispatcher.publish_lifecycle_event(
+        db,
+        module="categories",
+        entity="category",
+        entity_id=category_id,
+        event_type=event_type,
+        version=None,
+        user_id=user_id,
+        changes=changes,
+    )
 
 
 async def _record_action(
@@ -64,6 +97,8 @@ async def create_category(
     service: ProductCategoryService = Depends(get_product_category_service),
     current_user: CurrentUser = Depends(require_permission("category.create")),
     audit_service: AuditService = Depends(get_audit_service),
+    db: AsyncSession = Depends(get_db_session),
+    dispatcher: EventDispatcher = Depends(get_event_dispatcher),
 ) -> dict:
     """Create a new product category."""
     category = await service.create(**payload.model_dump())
@@ -76,6 +111,14 @@ async def create_category(
         entity_id=category.id,
         description=f"Created product category {category.name!r} ({category.code}).",
         new_values=payload.model_dump(mode="json"),
+    )
+    await _publish_category_event(
+        db=db,
+        dispatcher=dispatcher,
+        event_type="category.created",
+        category_id=category.id,
+        user_id=current_user.id,
+        changes=payload.model_dump(mode="json"),
     )
     return build_success_response(data=data, request_id=request.state.request_id, message="Resource created successfully.")
 
@@ -165,6 +208,8 @@ async def update_category(
     service: ProductCategoryService = Depends(get_product_category_service),
     current_user: CurrentUser = Depends(require_permission("category.update")),
     audit_service: AuditService = Depends(get_audit_service),
+    db: AsyncSession = Depends(get_db_session),
+    dispatcher: EventDispatcher = Depends(get_event_dispatcher),
 ) -> dict:
     """Update an existing product category."""
     category = await service.update(category_id, **payload.model_dump())
@@ -178,6 +223,14 @@ async def update_category(
         description=f"Updated product category {category.name!r}.",
         new_values=payload.model_dump(exclude_none=True, mode="json"),
     )
+    await _publish_category_event(
+        db=db,
+        dispatcher=dispatcher,
+        event_type="category.updated",
+        category_id=category.id,
+        user_id=current_user.id,
+        changes=payload.model_dump(exclude_none=True, mode="json"),
+    )
     return build_success_response(data=data, request_id=request.state.request_id)
 
 
@@ -188,6 +241,8 @@ async def activate_category(
     service: ProductCategoryService = Depends(get_product_category_service),
     current_user: CurrentUser = Depends(require_permission("category.update")),
     audit_service: AuditService = Depends(get_audit_service),
+    db: AsyncSession = Depends(get_db_session),
+    dispatcher: EventDispatcher = Depends(get_event_dispatcher),
 ) -> dict:
     """Set a product category's status to active."""
     category = await service.activate(category_id)
@@ -200,6 +255,14 @@ async def activate_category(
         entity_id=category.id,
         description=f"Activated product category {category.name!r}.",
     )
+    await _publish_category_event(
+        db=db,
+        dispatcher=dispatcher,
+        event_type="category.updated",
+        category_id=category.id,
+        user_id=current_user.id,
+        changes={"is_active": True},
+    )
     return build_success_response(data=data, request_id=request.state.request_id)
 
 
@@ -210,6 +273,8 @@ async def deactivate_category(
     service: ProductCategoryService = Depends(get_product_category_service),
     current_user: CurrentUser = Depends(require_permission("category.update")),
     audit_service: AuditService = Depends(get_audit_service),
+    db: AsyncSession = Depends(get_db_session),
+    dispatcher: EventDispatcher = Depends(get_event_dispatcher),
 ) -> dict:
     """Set a product category's status to inactive."""
     category = await service.deactivate(category_id)
@@ -222,6 +287,14 @@ async def deactivate_category(
         entity_id=category.id,
         description=f"Deactivated product category {category.name!r}.",
     )
+    await _publish_category_event(
+        db=db,
+        dispatcher=dispatcher,
+        event_type="category.updated",
+        category_id=category.id,
+        user_id=current_user.id,
+        changes={"is_active": False},
+    )
     return build_success_response(data=data, request_id=request.state.request_id)
 
 
@@ -232,6 +305,8 @@ async def delete_category(
     service: ProductCategoryService = Depends(get_product_category_service),
     current_user: CurrentUser = Depends(require_permission("category.delete")),
     audit_service: AuditService = Depends(get_audit_service),
+    db: AsyncSession = Depends(get_db_session),
+    dispatcher: EventDispatcher = Depends(get_event_dispatcher),
 ) -> dict:
     """Soft-delete a product category."""
     await service.delete(category_id)
@@ -242,5 +317,13 @@ async def delete_category(
         actor=current_user,
         entity_id=category_id,
         description="Deleted product category.",
+    )
+    await _publish_category_event(
+        db=db,
+        dispatcher=dispatcher,
+        event_type="category.deleted",
+        category_id=category_id,
+        user_id=current_user.id,
+        changes={},
     )
     return build_success_response(data={"deleted": True}, request_id=request.state.request_id)

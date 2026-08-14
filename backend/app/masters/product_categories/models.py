@@ -12,10 +12,10 @@ from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.constants import RecordStatus
-from app.database.base import Base, SoftDeleteMixin, TimestampMixin, UUIDPrimaryKeyMixin
+from app.database.base import Base, SoftDeleteMixin, TimestampMixin, UUIDPrimaryKeyMixin, VersionMixin
 
 
-class ProductCategory(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
+class ProductCategory(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin, SoftDeleteMixin):
     """A single product category reference record."""
 
     __tablename__ = "product_categories"

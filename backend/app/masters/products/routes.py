@@ -1,4 +1,11 @@
-"""Product Routes. Standard CRUD + activate/deactivate + import/export, with audit logging."""
+"""Product Routes. Standard CRUD + activate/deactivate + import/export, with audit logging.
+
+Phase 9: added live event publishing on every mutation so ProductMaster and
+ProductGallery pages receive real-time updates. Uses the shared ``module:inventory``
+channel (entity="product") that ``app.events.channels`` already maps to
+``product.read`` -- matching the existing frontend ENTITY_TO_MODULE_CHANNEL
+entry for ``"product" -> moduleChannel("inventory")``.
+"""
 
 from __future__ import annotations
 
@@ -6,6 +13,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, File, Request, UploadFile, status
 from fastapi.responses import Response
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.constants import AuditAction
 from app.audit.dependencies import get_audit_service
@@ -14,12 +22,45 @@ from app.auth.service import CurrentUser
 from app.common.list_query import ListQueryParams, get_list_query_params
 from app.common.pagination import PageMeta
 from app.core.responses import build_success_response
+from app.database.session import get_db_session
+from app.events.dependencies import get_event_dispatcher
+from app.events.dispatcher import EventDispatcher
 from app.masters.products.dependencies import get_product_service
 from app.masters.products.schemas import ImportSummaryRead, ProductCreate, ProductRead, ProductUpdate
 from app.masters.products.service import ProductService
 from app.rbac.dependencies import require_permission
 
 router = APIRouter(prefix="/masters/products", tags=["Masters - Products"])
+
+
+async def _publish_product_event(
+    *,
+    db: AsyncSession,
+    dispatcher: EventDispatcher,
+    event_type: str,
+    product_id: uuid.UUID | str,
+    user_id: uuid.UUID,
+    changes: dict,
+) -> None:
+    """
+    Commit ``db``, then publish a ``product.*`` live event on ``module:inventory``.
+
+    Phase 9: Products use entity="product" which the frontend
+    ENTITY_TO_MODULE_CHANNEL table already maps to moduleChannel("inventory"),
+    matching the MODULE_CHANNEL_PERMISSIONS entry ``module:inventory -> product.read``.
+    No version field on Product yet -- passed as None (liveEntityStore handles
+    missing versions by skipping the staleness check, still applying the event).
+    """
+    await dispatcher.publish_lifecycle_event(
+        db,
+        module="inventory",
+        entity="product",
+        entity_id=product_id,
+        event_type=event_type,
+        version=None,
+        user_id=user_id,
+        changes=changes,
+    )
 
 
 async def _record_action(
@@ -59,6 +100,8 @@ async def create_product(
     service: ProductService = Depends(get_product_service),
     current_user: CurrentUser = Depends(require_permission("product.create")),
     audit_service: AuditService = Depends(get_audit_service),
+    db: AsyncSession = Depends(get_db_session),
+    dispatcher: EventDispatcher = Depends(get_event_dispatcher),
 ) -> dict:
     """Create a new product."""
     product = await service.create(**payload.model_dump())
@@ -71,6 +114,14 @@ async def create_product(
         entity_id=product.id,
         description=f"Created product {product.product_name!r} ({product.product_code}).",
         new_values=payload.model_dump(mode="json"),
+    )
+    await _publish_product_event(
+        db=db,
+        dispatcher=dispatcher,
+        event_type="product.created",
+        product_id=product.id,
+        user_id=current_user.id,
+        changes=payload.model_dump(mode="json"),
     )
     return build_success_response(data=data, request_id=request.state.request_id, message="Resource created successfully.")
 
@@ -103,7 +154,6 @@ async def list_products(
         data.append(p_dict)
 
     return build_success_response(data=data, request_id=request.state.request_id, meta=meta)
-
 
 
 @router.get("/export", summary="Export products to CSV/Excel")
@@ -161,43 +211,59 @@ async def upload_product_image(
     file: UploadFile = File(...),
     _current_user: CurrentUser = Depends(require_permission("product.create")),
 ) -> dict:
+    """
+    Upload a product image to Supabase Storage, falling back to local disk.
+
+    Phase 3 performance/async-correctness fix: this used to call
+    ``urllib.request.urlopen`` (a fully synchronous, blocking network
+    call) and a blocking ``open(...).write(...)`` directly inside this
+    ``async def`` route -- both block FastAPI's single event-loop thread
+    for their entire duration, freezing EVERY other concurrent request
+    this worker is serving, not just this one. The Supabase upload now
+    uses ``httpx.AsyncClient`` (already a project dependency -- see
+    requirements.txt) instead of ``urllib``, and the local-disk fallback
+    write is offloaded to a worker thread via ``asyncio.to_thread`` so it
+    can't block the event loop either. Behavior (Supabase first, local
+    disk fallback, same response shape) is otherwise unchanged.
+    """
     from pathlib import Path
-    import urllib.request
     import os
+    import httpx
 
     content = await file.read()
     filename = f"{uuid.uuid4().hex}_{file.filename}"
     supabase_project_id = os.getenv("SUPABASE_PROJECT_ID", "mpvzjzunkiqchhhvxrza")
     supabase_key = os.getenv("SUPABASE_SERVICE_KEY") or os.getenv("SUPABASE_ANON_KEY", "")
 
-    # Try direct upload to Supabase Storage Bucket 'product-images'
     if supabase_key:
         try:
             supabase_upload_url = f"https://{supabase_project_id}.supabase.co/storage/v1/object/product-images/{filename}"
-            req = urllib.request.Request(
-                supabase_upload_url,
-                data=content,
-                headers={
-                    "Authorization": f"Bearer {supabase_key}",
-                    "Content-Type": file.content_type or "image/jpeg",
-                    "x-upsert": "true",
-                },
-                method="POST"
-            )
-            with urllib.request.urlopen(req) as resp:
-                if resp.status in (200, 201):
-                    public_url = f"https://{supabase_project_id}.supabase.co/storage/v1/object/public/product-images/{filename}"
-                    return {"success": True, "data": {"url": public_url}}
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.post(
+                    supabase_upload_url,
+                    content=content,
+                    headers={
+                        "Authorization": f"Bearer {supabase_key}",
+                        "Content-Type": file.content_type or "image/jpeg",
+                        "x-upsert": "true",
+                    },
+                )
+            if resp.status_code in (200, 201):
+                public_url = f"https://{supabase_project_id}.supabase.co/storage/v1/object/public/product-images/{filename}"
+                return {"success": True, "data": {"url": public_url}}
         except Exception:
             pass
 
-    # Save to local server storage folder as fallback
-    uploads_dir = Path("uploads/products")
-    uploads_dir.mkdir(parents=True, exist_ok=True)
-    file_path = uploads_dir / filename
-    with open(file_path, "wb") as f:
-        f.write(content)
-    image_url = f"/uploads/products/{filename}"
+    def _write_to_local_disk() -> str:
+        uploads_dir = Path("uploads/products")
+        uploads_dir.mkdir(parents=True, exist_ok=True)
+        file_path = uploads_dir / filename
+        with open(file_path, "wb") as f:
+            f.write(content)
+        return f"/uploads/products/{filename}"
+
+    import asyncio
+    image_url = await asyncio.to_thread(_write_to_local_disk)
     return {"success": True, "data": {"url": image_url}}
 
 
@@ -222,6 +288,8 @@ async def update_product(
     service: ProductService = Depends(get_product_service),
     current_user: CurrentUser = Depends(require_permission("product.update")),
     audit_service: AuditService = Depends(get_audit_service),
+    db: AsyncSession = Depends(get_db_session),
+    dispatcher: EventDispatcher = Depends(get_event_dispatcher),
 ) -> dict:
     """Update an existing product."""
     product = await service.update(product_id, **payload.model_dump())
@@ -235,6 +303,14 @@ async def update_product(
         description=f"Updated product {product.product_name!r}.",
         new_values=payload.model_dump(exclude_none=True, mode="json"),
     )
+    await _publish_product_event(
+        db=db,
+        dispatcher=dispatcher,
+        event_type="product.updated",
+        product_id=product.id,
+        user_id=current_user.id,
+        changes=payload.model_dump(exclude_none=True, mode="json"),
+    )
     return build_success_response(data=data, request_id=request.state.request_id)
 
 
@@ -245,6 +321,8 @@ async def activate_product(
     service: ProductService = Depends(get_product_service),
     current_user: CurrentUser = Depends(require_permission("product.update")),
     audit_service: AuditService = Depends(get_audit_service),
+    db: AsyncSession = Depends(get_db_session),
+    dispatcher: EventDispatcher = Depends(get_event_dispatcher),
 ) -> dict:
     """Set a product's status to active."""
     product = await service.activate(product_id)
@@ -257,6 +335,14 @@ async def activate_product(
         entity_id=product.id,
         description=f"Activated product {product.product_name!r}.",
     )
+    await _publish_product_event(
+        db=db,
+        dispatcher=dispatcher,
+        event_type="product.updated",
+        product_id=product.id,
+        user_id=current_user.id,
+        changes={"is_active": True},
+    )
     return build_success_response(data=data, request_id=request.state.request_id)
 
 
@@ -267,6 +353,8 @@ async def deactivate_product(
     service: ProductService = Depends(get_product_service),
     current_user: CurrentUser = Depends(require_permission("product.update")),
     audit_service: AuditService = Depends(get_audit_service),
+    db: AsyncSession = Depends(get_db_session),
+    dispatcher: EventDispatcher = Depends(get_event_dispatcher),
 ) -> dict:
     """Set a product's status to inactive."""
     product = await service.deactivate(product_id)
@@ -279,6 +367,14 @@ async def deactivate_product(
         entity_id=product.id,
         description=f"Deactivated product {product.product_name!r}.",
     )
+    await _publish_product_event(
+        db=db,
+        dispatcher=dispatcher,
+        event_type="product.updated",
+        product_id=product.id,
+        user_id=current_user.id,
+        changes={"is_active": False},
+    )
     return build_success_response(data=data, request_id=request.state.request_id)
 
 
@@ -289,6 +385,8 @@ async def delete_product(
     service: ProductService = Depends(get_product_service),
     current_user: CurrentUser = Depends(require_permission("product.delete")),
     audit_service: AuditService = Depends(get_audit_service),
+    db: AsyncSession = Depends(get_db_session),
+    dispatcher: EventDispatcher = Depends(get_event_dispatcher),
 ) -> dict:
     """Soft-delete a product."""
     await service.delete(product_id)
@@ -299,5 +397,13 @@ async def delete_product(
         actor=current_user,
         entity_id=product_id,
         description="Deleted product.",
+    )
+    await _publish_product_event(
+        db=db,
+        dispatcher=dispatcher,
+        event_type="product.deleted",
+        product_id=product_id,
+        user_id=current_user.id,
+        changes={},
     )
     return build_success_response(data={"deleted": True}, request_id=request.state.request_id)

@@ -66,6 +66,19 @@ def main() -> None:
         "--no-reload", action="store_true", help="Disable uvicorn's auto-reload (default: reload is ON)."
     )
     parser.add_argument(
+        "--workers",
+        type=int,
+        default=1,
+        help=(
+            "Number of Uvicorn worker processes (default: 1, dev mode). "
+            "Use e.g. --workers 4 --no-reload for production so CPU-bound "
+            "work (Argon2 logins, Excel import/export) on one request "
+            "can't block every other user's request. Ignored (forced to 1) "
+            "if --reload is active, since Uvicorn does not support reload "
+            "with multiple workers -- pass --no-reload alongside --workers."
+        ),
+    )
+    parser.add_argument(
         "--skip-migrate", action="store_true", help="Skip the 'alembic upgrade head' step."
     )
     parser.add_argument(
@@ -94,6 +107,16 @@ def main() -> None:
     ]
     if not args.no_reload:
         uvicorn_command.append("--reload")
+        if args.workers > 1:
+            print(
+                "\n[server.py] WARNING: --reload is on, so --workers is being "
+                "ignored (forced to 1). Uvicorn does not support hot-reload "
+                "with multiple worker processes. Pass --no-reload --workers "
+                f"{args.workers} together to actually run {args.workers} workers "
+                "(e.g. for a production-like load test).\n"
+            )
+    elif args.workers > 1:
+        uvicorn_command.extend(["--workers", str(args.workers)])
 
     print(f"\n{'=' * 70}\n>>> Starting API server: http://{args.host}:{args.port}\n{'=' * 70}\n")
     result = subprocess.run(uvicorn_command, cwd=BACKEND_DIR)

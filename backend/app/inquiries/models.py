@@ -42,7 +42,7 @@ from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.constants import RecordStatus
-from app.database.base import GUID, Base, SoftDeleteMixin, TimestampMixin, UUIDPrimaryKeyMixin
+from app.database.base import GUID, Base, SoftDeleteMixin, TimestampMixin, UUIDPrimaryKeyMixin, VersionMixin
 
 
 def _utcnow() -> datetime:
@@ -109,7 +109,7 @@ class ConsignmentCode(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin
         return f"<ConsignmentCode code={self.code!r}>"
 
 
-class Inquiry(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
+class Inquiry(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin, SoftDeleteMixin):
     """
     One consignment (Layer 1 of the document's two-layer list).
 

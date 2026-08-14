@@ -29,6 +29,7 @@ export function SubCategoriesPage() {
       activeKey="masters-subcategories"
       apiBase="/masters/product-sub-categories"
       permissionPrefix="subcategory"
+      liveModule="subcategories"
       entityName="sub-category"
       heading="Product Sub-Categories"
       subtitle="Belongs to a category; names are unique within their category."

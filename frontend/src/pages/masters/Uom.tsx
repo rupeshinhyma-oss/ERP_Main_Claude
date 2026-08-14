@@ -13,6 +13,7 @@ export function UomPage() {
       activeKey="masters-uom"
       apiBase="/masters/uom"
       permissionPrefix="uom"
+      liveModule="uom"
       entityName="unit of measurement"
       heading="Units of Measurement"
       subtitle="KG, GM, PCS, BOX, LTR, MTR, SET, PAIR and any others your products need."

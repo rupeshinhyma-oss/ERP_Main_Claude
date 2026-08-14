@@ -13,6 +13,7 @@ export function BrandsPage() {
       activeKey="masters-brands"
       apiBase="/masters/brands"
       permissionPrefix="brand"
+      liveModule="brands"
       entityName="brand"
       heading="Brands"
       subtitle="Product brand names, referenced by the Product master."

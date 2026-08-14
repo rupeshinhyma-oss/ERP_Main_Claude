@@ -168,3 +168,55 @@ export function useSrNoJump(): {
 export function isSrNoQuery(value: string): boolean {
   return /^\d+$/.test(value.trim());
 }
+
+/**
+ * Phase 7 (item 5, "Mutation Reliability"): prevents accidental double-submit
+ * on pages that fire mutations directly (apiPost/apiPatch/apiPut/apiDelete)
+ * from plain event handlers rather than through `MasterPage`, which already
+ * has its own local `submitting` guard.
+ *
+ * Keyed rather than a single boolean so a list page can disable just the ONE
+ * row/button a user clicked (e.g. `Delete` on row 3) without freezing every
+ * other row's actions while that request is in flight -- a single shared
+ * `submitting` flag would make unrelated rows look broken during someone
+ * else's slow request.
+ *
+ * Usage:
+ *
+ *     const { isPending, guard } = usePendingGuard();
+ *     <button disabled={isPending(buyer.id)} onClick={() => guard(buyer.id, () => handleDelete(buyer))}>
+ *       {isPending(buyer.id) ? "Deleting…" : "Delete"}
+ *     </button>
+ *
+ * `guard` is a silent no-op (never double-invokes `fn`) if the same key is
+ * already pending; the key is always cleared in a `finally`, so a failed
+ * request (which the caller is expected to surface via its own try/catch
+ * and error state) never leaves a button permanently disabled.
+ */
+export function usePendingGuard<K extends string = string>(): {
+  isPending: (key: K) => boolean;
+  guard: (key: K, fn: () => Promise<unknown>) => Promise<void>;
+} {
+  const [pendingKeys, setPendingKeys] = useState<Set<K>>(() => new Set());
+  // Mirrors `pendingKeys` synchronously so `guard` can check "already
+  // pending?" without waiting on a state update (React state updates are
+  // async/batched, so reading `pendingKeys` itself inside a fast second
+  // click could still see the pre-update value).
+  const pendingRef = useRef<Set<K>>(new Set());
+
+  const isPending = useCallback((key: K) => pendingKeys.has(key), [pendingKeys]);
+
+  const guard = useCallback(async (key: K, fn: () => Promise<unknown>) => {
+    if (pendingRef.current.has(key)) return; // already in flight -- ignore the extra click
+    pendingRef.current.add(key);
+    setPendingKeys(new Set(pendingRef.current));
+    try {
+      await fn();
+    } finally {
+      pendingRef.current.delete(key);
+      setPendingKeys(new Set(pendingRef.current));
+    }
+  }, []);
+
+  return { isPending, guard };
+}

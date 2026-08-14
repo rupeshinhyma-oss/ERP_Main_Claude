@@ -46,7 +46,7 @@ from sqlalchemy import DateTime, ForeignKey, Index, Integer, JSON, String, Text,
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.database.base import GUID, Base, SoftDeleteMixin, TimestampMixin, UUIDPrimaryKeyMixin
+from app.database.base import GUID, Base, SoftDeleteMixin, TimestampMixin, UUIDPrimaryKeyMixin, VersionMixin
 
 
 def _utcnow() -> datetime:
@@ -148,7 +148,7 @@ class PlanningChangeAction(str, Enum):
     ROW_DESCRIPTION_CHANGED = "ROW_DESCRIPTION_CHANGED"
 
 
-class PlanningSheet(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Base):
+class PlanningSheet(UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin, SoftDeleteMixin, Base):
     """One branch tab of the planning grid (e.g. "Mum Branch")."""
 
     __tablename__ = "planning_sheets"

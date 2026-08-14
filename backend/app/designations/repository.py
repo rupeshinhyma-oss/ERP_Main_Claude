@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.base_repository import BaseRepository
@@ -23,21 +22,30 @@ class DesignationRepository(BaseRepository[Designation]):
         super().__init__(session, Designation)
 
     async def get_by_code(self, code: str) -> Designation | None:
-        """Fetch a designation by its unique code."""
-        stmt = select(Designation).where(Designation.code == code)
+        """Fetch a designation by its unique code (excludes soft-deleted rows)."""
+        stmt = self._base_select().where(Designation.code == code)
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
     async def code_exists(self, code: str, *, exclude_id: uuid.UUID | None = None) -> bool:
-        """Return True if another designation already uses this code."""
-        stmt = select(Designation.id).where(Designation.code == code)
+        """
+        Return True if another (non-deleted) designation already uses this code.
+
+        Uses ``_base_select()`` rather than a bare ``select(Designation.id)``
+        so a soft-deleted designation's old code doesn't block reuse of
+        that code by a new record -- now that ``Designation`` has
+        ``SoftDeleteMixin``, a plain ``select()`` here would otherwise
+        incorrectly report the code as taken forever, even after the
+        record holding it was deleted.
+        """
+        stmt = self._base_select().with_only_columns(Designation.id).where(Designation.code == code)
         if exclude_id is not None:
             stmt = stmt.where(Designation.id != exclude_id)
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none() is not None
 
     async def list_all(self) -> list[Designation]:
-        """Return every designation, ordered by title (used for cached dropdown data)."""
-        stmt = select(Designation).order_by(Designation.title)
+        """Return every non-deleted designation, ordered by title (used for cached dropdown data)."""
+        stmt = self._base_select().order_by(Designation.title)
         result = await self.session.execute(stmt)
         return list(result.scalars().all())

@@ -14,10 +14,10 @@ from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.constants import RecordStatus
-from app.database.base import GUID, Base, SoftDeleteMixin, TimestampMixin, UUIDPrimaryKeyMixin
+from app.database.base import GUID, Base, SoftDeleteMixin, TimestampMixin, UUIDPrimaryKeyMixin, VersionMixin
 
 
-class City(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
+class City(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin, SoftDeleteMixin):
     """A single city record, belonging to a state (and transitively a country)."""
 
     __tablename__ = "cities"

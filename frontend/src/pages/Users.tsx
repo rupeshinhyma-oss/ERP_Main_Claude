@@ -15,7 +15,7 @@ import { Banner, Can, Modal, TableMessageRow, dash } from "@/components/ui";
 import { Pagination } from "@/components/Pagination";
 import { SelectField, TextField } from "@/components/fields";
 import { apiDelete, apiGet, apiPatch, apiPost, apiPut, toQueryString } from "@/lib/api";
-import { useAuth, useDebouncedValue } from "@/lib/hooks";
+import { useAuth, useDebouncedValue, usePendingGuard } from "@/lib/hooks";
 import { useToast } from "@/lib/toast";
 import { friendlyPermissionLabel, groupPermissionsByModule, MODULE_NAMES } from "@/lib/permissionLabels";
 import type {
@@ -129,6 +129,15 @@ export function UsersPage() {
   // matching the source's chrome-only checkbox column.
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
+  // Phase 7: double-submit guards. Row-scoped actions (force-logout, reset
+  // password, admin-role toggle) share one keyed guard so acting on one row
+  // never disables another; the three single-instance modal forms
+  // (create/edit/assign-role) get their own simple booleans.
+  const { isPending: isRowActionPending, guard: guardRowAction } = usePendingGuard<string>();
+  const [createSubmitting, setCreateSubmitting] = useState(false);
+  const [editSubmitting, setEditSubmitting] = useState(false);
+  const [assignRoleSubmitting, setAssignRoleSubmitting] = useState(false);
+
   const reload = useCallback(() => setReloadCounter((n) => n + 1), []);
 
   /* --- Lookups --- */
@@ -212,14 +221,16 @@ export function UsersPage() {
 
   async function handleForceLogout(userId: string, username: string) {
     if (!confirm(`Force logout user '${username}' from all devices?`)) return;
-    try {
-      const { data } = await apiPost<{ revoked_sessions?: number }>(
-        `/users/${userId}/force-logout`
-      );
-      alert(`Successfully revoked ${data.revoked_sessions || 0} active session(s).`);
-    } catch (err) {
-      setError(err);
-    }
+    await guardRowAction(`force-logout:${userId}`, async () => {
+      try {
+        const { data } = await apiPost<{ revoked_sessions?: number }>(
+          `/users/${userId}/force-logout`
+        );
+        alert(`Successfully revoked ${data.revoked_sessions || 0} active session(s).`);
+      } catch (err) {
+        setError(err);
+      }
+    });
   }
 
   async function handleResetPassword(userId: string, username: string) {
@@ -227,14 +238,16 @@ export function UsersPage() {
       !confirm(`Reset password for user '${username}'? This will generate a new temporary password.`)
     )
       return;
-    try {
-      const { data } = await apiPost<{ temporary_password: string }>(
-        `/users/${userId}/reset-password`
-      );
-      setTempPassword(data.temporary_password);
-    } catch (err) {
-      setError(err);
-    }
+    await guardRowAction(`reset-password:${userId}`, async () => {
+      try {
+        const { data } = await apiPost<{ temporary_password: string }>(
+          `/users/${userId}/reset-password`
+        );
+        setTempPassword(data.temporary_password);
+      } catch (err) {
+        setError(err);
+      }
+    });
   }
 
   async function openViewUser(userId: string) {
@@ -273,7 +286,9 @@ export function UsersPage() {
 
   async function handleCreateSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (createSubmitting) return; // Phase 7: ignore a second click while the first save is still in flight
     setError(null);
+    setCreateSubmitting(true);
     try {
       const { data } = await apiPost<User>("/users", {
         first_name: createForm.first_name.trim(),
@@ -299,11 +314,15 @@ export function UsersPage() {
       }
     } catch (err) {
       setError(err);
+    } finally {
+      setCreateSubmitting(false);
     }
   }
 
   async function handleEditSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (editSubmitting) return; // Phase 7: ignore a second click while the first save is still in flight
+    setEditSubmitting(true);
     try {
       const existingUser = rows.find((u) => u.id === editForm.id);
       const { data: updatedUser } = await apiPatch<User>(`/users/${editForm.id}`, {
@@ -324,27 +343,31 @@ export function UsersPage() {
           prev.map((u) =>
             u.id === editForm.id
               ? {
-                  ...u,
-                  first_name: editForm.first_name.trim() || null,
-                  last_name: editForm.last_name.trim() || null,
-                  email: editForm.email.trim(),
-                  employee_code: editForm.employee_code.trim() || null,
-                  phone: editForm.phone.trim() || u.phone,
-                  department_id: editForm.department_id || null,
-                  designation_id: editForm.designation_id || null,
-                }
+                ...u,
+                first_name: editForm.first_name.trim() || null,
+                last_name: editForm.last_name.trim() || null,
+                email: editForm.email.trim(),
+                employee_code: editForm.employee_code.trim() || null,
+                phone: editForm.phone.trim() || u.phone,
+                department_id: editForm.department_id || null,
+                designation_id: editForm.designation_id || null,
+              }
               : u
           )
         );
       }
     } catch (err) {
       setError(err);
+    } finally {
+      setEditSubmitting(false);
     }
   }
 
   async function handleAssignRole(e: React.FormEvent) {
     e.preventDefault();
+    if (assignRoleSubmitting) return; // Phase 7: ignore a second click while the first save is still in flight
     if (!roleModalUserId) return;
+    setAssignRoleSubmitting(true);
     try {
       await apiPost(`/users/${roleModalUserId}/roles`, { role_id: assignRoleId });
       setRoleModalUserId(null);
@@ -352,40 +375,46 @@ export function UsersPage() {
       reload();
     } catch (err) {
       setError(err);
+    } finally {
+      setAssignRoleSubmitting(false);
     }
   }
 
   /** Quick-toggle: grant/revoke the "admin" system role without opening the full Assign Role modal. */
   async function setAdminRole(userId: string, username: string) {
     if (!confirm(`Grant Administrator privileges to '${username}'?`)) return;
-    try {
-      const { data: allRoles } = await apiGet<Role[]>("/rbac/roles");
-      const adminRole = allRoles.find((r) => r.name === "admin");
-      if (!adminRole) {
-        setError(new Error("Admin role not found in system."));
-        return;
+    await guardRowAction(`admin-role:${userId}`, async () => {
+      try {
+        const { data: allRoles } = await apiGet<Role[]>("/rbac/roles");
+        const adminRole = allRoles.find((r) => r.name === "admin");
+        if (!adminRole) {
+          setError(new Error("Admin role not found in system."));
+          return;
+        }
+        await apiPost(`/users/${userId}/roles`, { role_id: adminRole.id });
+        reload();
+      } catch (err) {
+        setError(err);
       }
-      await apiPost(`/users/${userId}/roles`, { role_id: adminRole.id });
-      reload();
-    } catch (err) {
-      setError(err);
-    }
+    });
   }
 
   async function removeAdminRole(userId: string, username: string) {
     if (!confirm(`Revoke Administrator privileges from '${username}'?`)) return;
-    try {
-      const { data: allRoles } = await apiGet<Role[]>("/rbac/roles");
-      const adminRole = allRoles.find((r) => r.name === "admin");
-      if (!adminRole) {
-        setError(new Error("Admin role not found in system."));
-        return;
+    await guardRowAction(`admin-role:${userId}`, async () => {
+      try {
+        const { data: allRoles } = await apiGet<Role[]>("/rbac/roles");
+        const adminRole = allRoles.find((r) => r.name === "admin");
+        if (!adminRole) {
+          setError(new Error("Admin role not found in system."));
+          return;
+        }
+        await apiDelete(`/users/${userId}/roles/${adminRole.id}`);
+        reload();
+      } catch (err) {
+        setError(err);
       }
-      await apiDelete(`/users/${userId}/roles/${adminRole.id}`);
-      reload();
-    } catch (err) {
-      setError(err);
-    }
+    });
   }
 
   /** Open the checkbox-grid permission-overrides modal for one user. */
@@ -561,22 +590,24 @@ export function UsersPage() {
                       });
                     }
                     if (canModifyTarget && canManage) {
+                      const resettingPassword = isRowActionPending(`reset-password:${u.id}`);
                       actions.push({
                         key: "reset-password",
-                        label: "🔑 Reset Password",
+                        label: resettingPassword ? "🔑 Resetting..." : "🔑 Reset Password",
                         onClick: () => handleResetPassword(u.id, u.username),
                       });
+                      const changingAdminRole = isRowActionPending(`admin-role:${u.id}`);
                       if (hasAdminRole) {
                         actions.push({
                           key: "remove-admin",
-                          label: "🛡️ Remove Admin",
+                          label: changingAdminRole ? "🛡️ Removing..." : "🛡️ Remove Admin",
                           danger: true,
                           onClick: () => removeAdminRole(u.id, u.username),
                         });
                       } else {
                         actions.push({
                           key: "set-admin",
-                          label: "⚡ Set Admin",
+                          label: changingAdminRole ? "⚡ Setting..." : "⚡ Set Admin",
                           onClick: () => setAdminRole(u.id, u.username),
                         });
                       }
@@ -634,7 +665,9 @@ export function UsersPage() {
                       }
                       actions.push({
                         key: "force-logout",
-                        label: "🚪 Force Logout All",
+                        label: isRowActionPending(`force-logout:${u.id}`)
+                          ? "🚪 Logging out..."
+                          : "🚪 Force Logout All",
                         danger: true,
                         onClick: () => handleForceLogout(u.id, u.username),
                       });
@@ -798,8 +831,8 @@ export function UsersPage() {
             </SelectField>
           </div>
           <div className="form-actions">
-            <button type="submit" className="btn btn-primary">
-              Create User Account
+            <button type="submit" className="btn btn-primary" disabled={createSubmitting}>
+              {createSubmitting ? "Creating…" : "Create User Account"}
             </button>
             <button type="button" className="btn" onClick={() => setCreateOpen(false)}>
               Cancel
@@ -838,8 +871,8 @@ export function UsersPage() {
             </SelectField>
           </div>
           <div className="form-actions">
-            <button type="submit" className="btn btn-primary">
-              Save Changes
+            <button type="submit" className="btn btn-primary" disabled={editSubmitting}>
+              {editSubmitting ? "Saving…" : "Save Changes"}
             </button>
             <button type="button" className="btn" onClick={() => setEditOpen(false)}>
               Cancel
@@ -910,10 +943,10 @@ export function UsersPage() {
                 <div style={{ marginTop: "4px" }}>
                   {viewUser.roles && viewUser.roles.length
                     ? viewUser.roles.map((r) => (
-                        <span className="badge badge-neutral" key={r}>
-                          {r}
-                        </span>
-                      ))
+                      <span className="badge badge-neutral" key={r}>
+                        {r}
+                      </span>
+                    ))
                     : "None"}
                 </div>
               </div>
@@ -974,8 +1007,8 @@ export function UsersPage() {
             </select>
           </div>
           <div className="form-actions">
-            <button type="submit" className="btn btn-primary">
-              Assign Role
+            <button type="submit" className="btn btn-primary" disabled={assignRoleSubmitting}>
+              {assignRoleSubmitting ? "Assigning…" : "Assign Role"}
             </button>
             <button type="button" className="btn" onClick={() => setRoleModalUserId(null)}>
               Cancel
@@ -1069,11 +1102,11 @@ export function UsersPage() {
                     !q
                       ? true
                       : groups[modKey].some(
-                          (p) =>
-                            p.code.toLowerCase().includes(q) ||
-                            (p.description || "").toLowerCase().includes(q) ||
-                            modKey.toLowerCase().includes(q)
-                        )
+                        (p) =>
+                          p.code.toLowerCase().includes(q) ||
+                          (p.description || "").toLowerCase().includes(q) ||
+                          modKey.toLowerCase().includes(q)
+                      )
                   );
 
                 if (modKeys.length === 0) {
@@ -1087,11 +1120,11 @@ export function UsersPage() {
                 return modKeys.map((modKey) => {
                   const items = q
                     ? groups[modKey].filter(
-                        (p) =>
-                          p.code.toLowerCase().includes(q) ||
-                          (p.description || "").toLowerCase().includes(q) ||
-                          modKey.toLowerCase().includes(q)
-                      )
+                      (p) =>
+                        p.code.toLowerCase().includes(q) ||
+                        (p.description || "").toLowerCase().includes(q) ||
+                        modKey.toLowerCase().includes(q)
+                    )
                     : groups[modKey];
                   const allCheckedInMod = items.every((p) => overridesChecked.has(p.code));
 

@@ -486,7 +486,20 @@ class PlanningService:
         )
         return await self.get_sheet_or_raise(new_sheet.id)
 
-    async def rename_sheet(self, sheet_id: uuid.UUID, *, name: str, user_id: uuid.UUID, username: str) -> PlanningSheet:
+    async def rename_sheet(
+        self, sheet_id: uuid.UUID, *, name: str, user_id: uuid.UUID, username: str, version: int | None = None
+    ) -> PlanningSheet:
+        """
+        Rename a sheet's display name, enforcing Optimistic Concurrency
+        Control if ``version`` is given.
+
+        ``version`` added in the Phase 5 audit -- mirrors the identical
+        fix applied to ``BuyerService.update`` in Phase 4:
+        ``BaseRepository.update()`` already auto-detects a ``version``
+        kwarg and treats it as ``expected_version`` (see its own
+        docstring), so no repository change was needed here either, only
+        threading the field through from the schema.
+        """
         sheet = await self.get_sheet_or_raise(sheet_id)
         name = name.strip()
         if not name:
@@ -495,7 +508,10 @@ class PlanningService:
         if existing and existing.id != sheet_id:
             raise ConflictException(f"A sheet named {name!r} already exists.")
         old_name = sheet.name
-        sheet = await self.sheet_repository.update(sheet, name=name)
+        update_kwargs: dict[str, Any] = {"name": name}
+        if version is not None:
+            update_kwargs["version"] = version
+        sheet = await self.sheet_repository.update(sheet, **update_kwargs)
         await self._record_change(
             action=PlanningChangeAction.SHEET_RENAMED,
             sheet_id=sheet.id,
@@ -856,10 +872,9 @@ class PlanningService:
         sheet). The default (50) is what the grid endpoint uses, matching
         Product Master's own default page size -- a sheet with hundreds
         of rows no longer pays for computing every row's cells on every
-        single load; "Load More Products"/scrolling just asks for the
-        next page instead of the whole grid growing every time. Columns
-        are never paginated (a sheet rarely has more than a few dozen),
-        only rows.
+        single load; scrolling/"Load more" just asks for the next page
+        instead of the whole grid growing every time. Columns are never
+        paginated (a sheet rarely has more than a few dozen), only rows.
 
         ``organization_id`` (optional) is the Organization filter shown
         next to the sheet tabs in the UI -- restricts the page (and the
@@ -869,13 +884,63 @@ class PlanningService:
         Master's ``organization_ids`` on every call, the same "never a
         stale copy" rule every other Shipment Planning lookup column
         follows (see ``PlanningRowRepository._linked_record_ids_for_organization``).
+
+        --- Auto-population on read (fixes "Showing 1-50 of 50" getting
+        permanently stuck on a sheet whose ITEM is LINKED_LOOKUP onto a
+        source module that actually has MORE than 50 records) ---
+
+        For a LINKED_LOOKUP-onto-a-module ITEM column, ``total_rows`` is
+        no longer "how many PlanningRow records happen to exist yet" --
+        it's the TRUE count of matching source records (e.g. every live
+        Product Master row, or every one belonging to ``organization_id``
+        when that filter is set). A brand-new sheet (which starts with
+        only its first 50 rows materialized -- see ``create_sheet``) or
+        one an admin previously capped via "Load More Products" now
+        reports the real total from the very first load, not just
+        whatever happened to be linked already.
+
+        To back that number with real rows once the person actually
+        scrolls/pages that far, this transparently creates whatever
+        linked rows are still missing to satisfy ``offset + limit``
+        (capped at the true total) BEFORE reading the page -- the exact
+        same row-creation path "Load More Products" already used
+        (``auto_populate_rows_from_item_source``), just triggered
+        automatically instead of requiring a separate explicit click.
+        Skips this entirely for MANUAL/other ITEM configs, where there is
+        no source module to pull more rows from and the row count really
+        is just however many rows exist.
         """
         sheet = await self.get_sheet_or_raise(sheet_id)
+
+        source_total: int | None = None
+        if sheet.item_source_type == PlanningColumnSourceType.LINKED_LOOKUP and sheet.item_source_module == "product":
+            all_matching_ids = await self.row_repository._all_product_ids_for_organization(organization_id)
+            source_total = len(all_matching_ids)
+
+            if limit is not None and source_total > 0:
+                needed = min(offset + limit, source_total)
+                currently_linked = await self.row_repository.count_for_sheet(sheet_id, organization_id=organization_id)
+                if currently_linked < needed:
+                    # Pull enough of THIS organization's records to cover
+                    # the requested page -- e.g. asking for offset=50,
+                    # limit=50 with 31 currently linked needs 69 more created.
+                    await self.auto_populate_rows_from_item_source(
+                        sheet_id,
+                        limit=needed,
+                        user_id=sheet.created_by,  # system-driven creation; attributed to the sheet's owner, mirrors seed-time auto-populate
+                        username="system",
+                        organization_id=organization_id,
+                    )
+
         columns = await self.column_repository.list_for_sheet(sheet_id)
         rows = await self.row_repository.list_page_for_sheet(
             sheet_id, offset=offset, limit=limit, organization_id=organization_id
         )
-        total_rows = await self.row_repository.count_for_sheet(sheet_id, organization_id=organization_id)
+        total_rows = (
+            source_total
+            if source_total is not None
+            else await self.row_repository.count_for_sheet(sheet_id, organization_id=organization_id)
+        )
         return {"sheet": sheet, "columns": columns, "rows": rows, "total_rows": total_rows}
 
     # --- Columns (admin-defined, unlimited, insertable at any position) ----------
@@ -1534,6 +1599,7 @@ class PlanningService:
         limit: int | None,
         user_id: uuid.UUID,
         username: str,
+        organization_id: uuid.UUID | None = None,
     ) -> list[PlanningRow]:
         """
         Bulk-create rows straight from the sheet's configured item source
@@ -1546,6 +1612,18 @@ class PlanningService:
         previous auto-populate call), so repeating this with a bigger page
         size to pull more records in doesn't create duplicate rows for
         records already on the sheet.
+
+        ``organization_id`` (optional) restricts which records are
+        eligible to become new rows to those belonging to that
+        organization -- only meaningful when the source module is
+        ``"product"`` (the only module with an Organization concept right
+        now; see ``app.masters.products.models.Product.organization_ids``).
+        Ignored for any other source module. This is what lets the
+        Organization filter (see ``PlanningService.get_grid``'s
+        auto-population-on-read) create exactly the rows it needs when a
+        filtered page runs past how many matching rows already exist,
+        instead of only ever pulling from the front of the WHOLE
+        (unfiltered) source list.
         """
         sheet = await self.get_sheet_or_raise(sheet_id)
         if sheet.item_source_type != PlanningColumnSourceType.LINKED_LOOKUP:
@@ -1554,8 +1632,19 @@ class PlanningService:
         if module is None:
             raise ConflictException("The ITEM column references an unregistered source module.")
 
-        repository = module.repository_factory(self.row_repository.session)
-        records = await repository.list(offset=0, limit=limit)
+        if organization_id is not None and module.key == "product":
+            record_ids = await self.row_repository._all_product_ids_for_organization(organization_id)
+            record_ids = record_ids if limit is None else record_ids[:limit]
+            repository = module.repository_factory(self.row_repository.session)
+            records_by_id = await repository.get_by_ids(record_ids)
+            # get_by_ids returns a dict (arbitrary key order in some drivers) --
+            # re-sort back into record_ids' deterministic order, so
+            # position/next_position assignment below stays stable.
+            records = [records_by_id[rid] for rid in record_ids if rid in records_by_id]
+        else:
+            repository = module.repository_factory(self.row_repository.session)
+            order_by = getattr(repository.model, "created_at", None)
+            records = await repository.list(offset=0, limit=limit, order_by=order_by)
 
         existing_rows = await self.row_repository.list_for_sheet(sheet_id)
         already_linked_ids = {r.linked_record_id for r in existing_rows if r.linked_record_id is not None}

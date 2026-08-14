@@ -1,4 +1,12 @@
-"""Product Sub-Category Routes. Standard CRUD + activate/deactivate + import/export, with audit logging."""
+"""
+Product Sub-Category Routes. Standard CRUD + activate/deactivate + import/export, with audit logging.
+
+Phase 9: added live event publishing on every mutation so the Sub
+Categories list page receives real-time updates from other users without
+a manual refresh. Uses ``module:subcategories`` (entity="subcategory"),
+registered in ``app.events.channels.MODULE_CHANNEL_PERMISSIONS`` ->
+``subcategory.read``.
+"""
 
 from __future__ import annotations
 
@@ -6,6 +14,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, File, Request, UploadFile, status
 from fastapi.responses import Response
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.constants import AuditAction
 from app.audit.dependencies import get_audit_service
@@ -14,6 +23,9 @@ from app.auth.service import CurrentUser
 from app.common.list_query import ListQueryParams, get_list_query_params
 from app.common.pagination import PageMeta
 from app.core.responses import build_success_response
+from app.database.session import get_db_session
+from app.events.dependencies import get_event_dispatcher
+from app.events.dispatcher import EventDispatcher
 from app.masters.product_sub_categories.dependencies import get_product_sub_category_service
 from app.masters.product_sub_categories.schemas import (
     ImportSummaryRead,
@@ -27,6 +39,28 @@ from app.rbac.dependencies import require_permission
 router = APIRouter(prefix="/masters/product-sub-categories", tags=["Masters - Product Sub-Categories"])
 
 
+async def _publish_sub_category_event(
+    *,
+    db: AsyncSession,
+    dispatcher: EventDispatcher,
+    event_type: str,
+    sub_category_id: uuid.UUID | str,
+    user_id: uuid.UUID,
+    changes: dict,
+) -> None:
+    """Commit ``db``, then publish a ``subcategory.*`` live event on ``module:subcategories``."""
+    await dispatcher.publish_lifecycle_event(
+        db,
+        module="subcategories",
+        entity="subcategory",
+        entity_id=sub_category_id,
+        event_type=event_type,
+        version=None,
+        user_id=user_id,
+        changes=changes,
+    )
+
+
 async def _record_action(
     *,
     audit_service: AuditService,
@@ -37,7 +71,7 @@ async def _record_action(
     description: str,
     new_values: dict | None = None,
 ) -> None:
-    """Shared helper: record a sub-category action and mark the request as logged."""
+    """Shared helper: record a product sub-category action and mark the request as logged."""
     await audit_service.record(
         action=action,
         module="masters.product_sub_categories",
@@ -64,6 +98,8 @@ async def create_sub_category(
     service: ProductSubCategoryService = Depends(get_product_sub_category_service),
     current_user: CurrentUser = Depends(require_permission("subcategory.create")),
     audit_service: AuditService = Depends(get_audit_service),
+    db: AsyncSession = Depends(get_db_session),
+    dispatcher: EventDispatcher = Depends(get_event_dispatcher),
 ) -> dict:
     """Create a new product sub-category."""
     sub_category = await service.create(**payload.model_dump())
@@ -74,8 +110,16 @@ async def create_sub_category(
         action=AuditAction.CREATE,
         actor=current_user,
         entity_id=sub_category.id,
-        description=f"Created product sub-category {sub_category.name!r} ({sub_category.code}).",
+        description=f"Created product sub-category {sub_category.name!r}.",
         new_values=payload.model_dump(mode="json"),
+    )
+    await _publish_sub_category_event(
+        db=db,
+        dispatcher=dispatcher,
+        event_type="subcategory.created",
+        sub_category_id=sub_category.id,
+        user_id=current_user.id,
+        changes=payload.model_dump(mode="json"),
     )
     return build_success_response(data=data, request_id=request.state.request_id, message="Resource created successfully.")
 
@@ -90,7 +134,7 @@ async def list_sub_categories(
     """List product sub-categories, with search/sort/filter/pagination."""
     sub_categories, total = await service.list_paginated(query)
     meta = PageMeta.build(page=query.page.page, page_size=query.page.page_size, total_records=total).as_meta_dict()
-    data = [ProductSubCategoryRead.model_validate(s).model_dump(mode="json") for s in sub_categories]
+    data = [ProductSubCategoryRead.model_validate(c).model_dump(mode="json") for c in sub_categories]
     return build_success_response(data=data, request_id=request.state.request_id, meta=meta)
 
 
@@ -165,6 +209,8 @@ async def update_sub_category(
     service: ProductSubCategoryService = Depends(get_product_sub_category_service),
     current_user: CurrentUser = Depends(require_permission("subcategory.update")),
     audit_service: AuditService = Depends(get_audit_service),
+    db: AsyncSession = Depends(get_db_session),
+    dispatcher: EventDispatcher = Depends(get_event_dispatcher),
 ) -> dict:
     """Update an existing product sub-category."""
     sub_category = await service.update(sub_category_id, **payload.model_dump())
@@ -178,6 +224,14 @@ async def update_sub_category(
         description=f"Updated product sub-category {sub_category.name!r}.",
         new_values=payload.model_dump(exclude_none=True, mode="json"),
     )
+    await _publish_sub_category_event(
+        db=db,
+        dispatcher=dispatcher,
+        event_type="subcategory.updated",
+        sub_category_id=sub_category.id,
+        user_id=current_user.id,
+        changes=payload.model_dump(exclude_none=True, mode="json"),
+    )
     return build_success_response(data=data, request_id=request.state.request_id)
 
 
@@ -188,6 +242,8 @@ async def activate_sub_category(
     service: ProductSubCategoryService = Depends(get_product_sub_category_service),
     current_user: CurrentUser = Depends(require_permission("subcategory.update")),
     audit_service: AuditService = Depends(get_audit_service),
+    db: AsyncSession = Depends(get_db_session),
+    dispatcher: EventDispatcher = Depends(get_event_dispatcher),
 ) -> dict:
     """Set a product sub-category's status to active."""
     sub_category = await service.activate(sub_category_id)
@@ -200,6 +256,14 @@ async def activate_sub_category(
         entity_id=sub_category.id,
         description=f"Activated product sub-category {sub_category.name!r}.",
     )
+    await _publish_sub_category_event(
+        db=db,
+        dispatcher=dispatcher,
+        event_type="subcategory.updated",
+        sub_category_id=sub_category.id,
+        user_id=current_user.id,
+        changes={"is_active": True},
+    )
     return build_success_response(data=data, request_id=request.state.request_id)
 
 
@@ -210,6 +274,8 @@ async def deactivate_sub_category(
     service: ProductSubCategoryService = Depends(get_product_sub_category_service),
     current_user: CurrentUser = Depends(require_permission("subcategory.update")),
     audit_service: AuditService = Depends(get_audit_service),
+    db: AsyncSession = Depends(get_db_session),
+    dispatcher: EventDispatcher = Depends(get_event_dispatcher),
 ) -> dict:
     """Set a product sub-category's status to inactive."""
     sub_category = await service.deactivate(sub_category_id)
@@ -222,6 +288,14 @@ async def deactivate_sub_category(
         entity_id=sub_category.id,
         description=f"Deactivated product sub-category {sub_category.name!r}.",
     )
+    await _publish_sub_category_event(
+        db=db,
+        dispatcher=dispatcher,
+        event_type="subcategory.updated",
+        sub_category_id=sub_category.id,
+        user_id=current_user.id,
+        changes={"is_active": False},
+    )
     return build_success_response(data=data, request_id=request.state.request_id)
 
 
@@ -232,6 +306,8 @@ async def delete_sub_category(
     service: ProductSubCategoryService = Depends(get_product_sub_category_service),
     current_user: CurrentUser = Depends(require_permission("subcategory.delete")),
     audit_service: AuditService = Depends(get_audit_service),
+    db: AsyncSession = Depends(get_db_session),
+    dispatcher: EventDispatcher = Depends(get_event_dispatcher),
 ) -> dict:
     """Soft-delete a product sub-category."""
     await service.delete(sub_category_id)
@@ -242,5 +318,13 @@ async def delete_sub_category(
         actor=current_user,
         entity_id=sub_category_id,
         description="Deleted product sub-category.",
+    )
+    await _publish_sub_category_event(
+        db=db,
+        dispatcher=dispatcher,
+        event_type="subcategory.deleted",
+        sub_category_id=sub_category_id,
+        user_id=current_user.id,
+        changes={},
     )
     return build_success_response(data={"deleted": True}, request_id=request.state.request_id)

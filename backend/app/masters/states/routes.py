@@ -1,4 +1,10 @@
-"""State Routes. Standard CRUD + activate/deactivate + import/export, with audit logging."""
+"""
+State Routes. Standard CRUD + activate/deactivate + import/export, with audit logging.
+
+Phase 9: added live event publishing on every mutation so the State list
+page receives real-time updates from other users without a full-page reload.
+Uses the shared global WebSocket infrastructure via ``module:states``.
+"""
 
 from __future__ import annotations
 
@@ -6,6 +12,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, File, Request, UploadFile, status
 from fastapi.responses import Response
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.constants import AuditAction
 from app.audit.dependencies import get_audit_service
@@ -14,12 +21,37 @@ from app.auth.service import CurrentUser
 from app.common.list_query import ListQueryParams, get_list_query_params
 from app.common.pagination import PageMeta
 from app.core.responses import build_success_response
+from app.database.session import get_db_session
+from app.events.dependencies import get_event_dispatcher
+from app.events.dispatcher import EventDispatcher
 from app.masters.states.dependencies import get_state_service
-from app.masters.states.schemas import ImportSummaryRead, StateCreate, StateRead, StateUpdate
+from app.masters.states.schemas import StateRead, StateCreate, StateUpdate, ImportSummaryRead
 from app.masters.states.service import StateService
 from app.rbac.dependencies import require_permission
 
 router = APIRouter(prefix="/masters/states", tags=["Masters - States"])
+
+
+async def _publish_state_event(
+    *,
+    db: AsyncSession,
+    dispatcher: EventDispatcher,
+    event_type: str,
+    state_id: uuid.UUID | str,
+    user_id: uuid.UUID,
+    changes: dict,
+) -> None:
+    """Commit ``db``, then publish a ``state.*`` live event on ``module:states``."""
+    await dispatcher.publish_lifecycle_event(
+        db,
+        module="states",
+        entity="state",
+        entity_id=state_id,
+        event_type=event_type,
+        version=None,
+        user_id=user_id,
+        changes=changes,
+    )
 
 
 async def _record_action(
@@ -59,6 +91,8 @@ async def create_state(
     service: StateService = Depends(get_state_service),
     current_user: CurrentUser = Depends(require_permission("state.create")),
     audit_service: AuditService = Depends(get_audit_service),
+    db: AsyncSession = Depends(get_db_session),
+    dispatcher: EventDispatcher = Depends(get_event_dispatcher),
 ) -> dict:
     """Create a new state."""
     state = await service.create(**payload.model_dump())
@@ -69,8 +103,13 @@ async def create_state(
         action=AuditAction.CREATE,
         actor=current_user,
         entity_id=state.id,
-        description=f"Created state {state.name!r}.",
+        description=f"Created state {state.name!r} ({state.code}).",
         new_values=payload.model_dump(mode="json"),
+    )
+    await _publish_state_event(
+        db=db, dispatcher=dispatcher, event_type="state.created",
+        state_id=state.id, user_id=current_user.id,
+        changes=payload.model_dump(mode="json"),
     )
     return build_success_response(data=data, request_id=request.state.request_id, message="Resource created successfully.")
 
@@ -85,7 +124,7 @@ async def list_states(
     """List states, with search/sort/filter/pagination."""
     states, total = await service.list_paginated(query)
     meta = PageMeta.build(page=query.page.page, page_size=query.page.page_size, total_records=total).as_meta_dict()
-    data = [StateRead.model_validate(s).model_dump(mode="json") for s in states]
+    data = [StateRead.model_validate(b).model_dump(mode="json") for b in states]
     return build_success_response(data=data, request_id=request.state.request_id, meta=meta)
 
 
@@ -103,11 +142,8 @@ async def export_states(
         file_format = "csv"
     content = await service.export_file(file_format)
     await _record_action(
-        audit_service=audit_service,
-        request=request,
-        action=AuditAction.EXPORT,
-        actor=current_user,
-        entity_id="bulk",
+        audit_service=audit_service, request=request, action=AuditAction.EXPORT,
+        actor=current_user, entity_id="bulk",
         description=f"Exported states as {file_format}.",
     )
     media_type = "text/csv" if file_format == "csv" else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -127,11 +163,8 @@ async def import_states(
     raw_bytes = await file.read()
     summary = await service.import_file(file.filename or "import.csv", raw_bytes)
     await _record_action(
-        audit_service=audit_service,
-        request=request,
-        action=AuditAction.IMPORT,
-        actor=current_user,
-        entity_id="bulk",
+        audit_service=audit_service, request=request, action=AuditAction.IMPORT,
+        actor=current_user, entity_id="bulk",
         description=f"Imported states: {summary.created} created, {summary.failed} failed.",
         new_values=summary.as_dict(),
     )
@@ -160,18 +193,22 @@ async def update_state(
     service: StateService = Depends(get_state_service),
     current_user: CurrentUser = Depends(require_permission("state.update")),
     audit_service: AuditService = Depends(get_audit_service),
+    db: AsyncSession = Depends(get_db_session),
+    dispatcher: EventDispatcher = Depends(get_event_dispatcher),
 ) -> dict:
     """Update an existing state."""
     state = await service.update(state_id, **payload.model_dump())
     data = StateRead.model_validate(state).model_dump(mode="json")
     await _record_action(
-        audit_service=audit_service,
-        request=request,
-        action=AuditAction.UPDATE,
-        actor=current_user,
-        entity_id=state.id,
+        audit_service=audit_service, request=request, action=AuditAction.UPDATE,
+        actor=current_user, entity_id=state.id,
         description=f"Updated state {state.name!r}.",
         new_values=payload.model_dump(exclude_none=True, mode="json"),
+    )
+    await _publish_state_event(
+        db=db, dispatcher=dispatcher, event_type="state.updated",
+        state_id=state.id, user_id=current_user.id,
+        changes=payload.model_dump(exclude_none=True, mode="json"),
     )
     return build_success_response(data=data, request_id=request.state.request_id)
 
@@ -183,17 +220,21 @@ async def activate_state(
     service: StateService = Depends(get_state_service),
     current_user: CurrentUser = Depends(require_permission("state.update")),
     audit_service: AuditService = Depends(get_audit_service),
+    db: AsyncSession = Depends(get_db_session),
+    dispatcher: EventDispatcher = Depends(get_event_dispatcher),
 ) -> dict:
     """Set a state's status to active."""
     state = await service.activate(state_id)
     data = StateRead.model_validate(state).model_dump(mode="json")
     await _record_action(
-        audit_service=audit_service,
-        request=request,
-        action=AuditAction.UPDATE,
-        actor=current_user,
-        entity_id=state.id,
+        audit_service=audit_service, request=request, action=AuditAction.UPDATE,
+        actor=current_user, entity_id=state.id,
         description=f"Activated state {state.name!r}.",
+    )
+    await _publish_state_event(
+        db=db, dispatcher=dispatcher, event_type="state.updated",
+        state_id=state.id, user_id=current_user.id,
+        changes={"is_active": True},
     )
     return build_success_response(data=data, request_id=request.state.request_id)
 
@@ -205,17 +246,21 @@ async def deactivate_state(
     service: StateService = Depends(get_state_service),
     current_user: CurrentUser = Depends(require_permission("state.update")),
     audit_service: AuditService = Depends(get_audit_service),
+    db: AsyncSession = Depends(get_db_session),
+    dispatcher: EventDispatcher = Depends(get_event_dispatcher),
 ) -> dict:
     """Set a state's status to inactive."""
     state = await service.deactivate(state_id)
     data = StateRead.model_validate(state).model_dump(mode="json")
     await _record_action(
-        audit_service=audit_service,
-        request=request,
-        action=AuditAction.UPDATE,
-        actor=current_user,
-        entity_id=state.id,
+        audit_service=audit_service, request=request, action=AuditAction.UPDATE,
+        actor=current_user, entity_id=state.id,
         description=f"Deactivated state {state.name!r}.",
+    )
+    await _publish_state_event(
+        db=db, dispatcher=dispatcher, event_type="state.updated",
+        state_id=state.id, user_id=current_user.id,
+        changes={"is_active": False},
     )
     return build_success_response(data=data, request_id=request.state.request_id)
 
@@ -227,15 +272,19 @@ async def delete_state(
     service: StateService = Depends(get_state_service),
     current_user: CurrentUser = Depends(require_permission("state.delete")),
     audit_service: AuditService = Depends(get_audit_service),
+    db: AsyncSession = Depends(get_db_session),
+    dispatcher: EventDispatcher = Depends(get_event_dispatcher),
 ) -> dict:
     """Soft-delete a state."""
     await service.delete(state_id)
     await _record_action(
-        audit_service=audit_service,
-        request=request,
-        action=AuditAction.DELETE,
-        actor=current_user,
-        entity_id=state_id,
+        audit_service=audit_service, request=request, action=AuditAction.DELETE,
+        actor=current_user, entity_id=state_id,
         description="Deleted state.",
+    )
+    await _publish_state_event(
+        db=db, dispatcher=dispatcher, event_type="state.deleted",
+        state_id=state_id, user_id=current_user.id,
+        changes={},
     )
     return build_success_response(data={"deleted": True}, request_id=request.state.request_id)

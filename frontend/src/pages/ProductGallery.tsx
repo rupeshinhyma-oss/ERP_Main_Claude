@@ -3,6 +3,7 @@ import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { SideDrawer, DetailFieldGrid } from "@/components/SideDrawer";
 import { apiGet, apiPatch } from "@/lib/api";
+import { usePendingGuard } from "@/lib/hooks";
 import { useLookup } from "@/lib/lookups";
 import type {
   Product,
@@ -188,6 +189,9 @@ export function ProductGalleryPage() {
   const [selectedSupplier, setSelectedSupplier] = useState<Supplier | null>(null);
   const [selectedImageIndex, setSelectedImageIndex] = useState(0);
   const [selectedMediaIndices, setSelectedMediaIndices] = useState<number[]>([]);
+  // Phase 7: keyed by "productId:photoIndex" so deleting one photo never
+  // disables the delete control for another photo/product.
+  const { isPending: isPhotoDeletePending, guard: guardPhotoDelete } = usePendingGuard<string>();
 
   const categories = useLookup<ProductCategory>("/masters/product-categories", 250);
   const subCategories = useLookup<ProductSubCategory>("/masters/product-sub-categories", 250);
@@ -828,24 +832,26 @@ export function ProductGalleryPage() {
             if (!p) return;
             if (!window.confirm("Are you sure you want to delete this media from the product?")) return;
 
-            const updatedImages = detailImgList.filter((_, idx) => idx !== indexToDelete);
-            const updatedPayload = {
-              images: updatedImages,
-              image_url: updatedImages[0] || null,
-            };
+            await guardPhotoDelete(`${p.id}:${indexToDelete}`, async () => {
+              const updatedImages = detailImgList.filter((_, idx) => idx !== indexToDelete);
+              const updatedPayload = {
+                images: updatedImages,
+                image_url: updatedImages[0] || null,
+              };
 
-            try {
-              await apiPatch<Product>(`/masters/products/${p.id}`, updatedPayload);
-              setProducts((prev) =>
-                prev.map((prod) => (prod.id === p.id ? { ...prod, ...updatedPayload } : prod))
-              );
-              setSelectedProduct((prev) => (prev ? { ...prev, ...updatedPayload } : null));
-              setSelectedImageIndex(0);
-              setSelectedMediaIndices([]);
-            } catch (err) {
-              console.error("Failed to delete media:", err);
-              alert("Failed to delete media. Please try again.");
-            }
+              try {
+                await apiPatch<Product>(`/masters/products/${p.id}`, updatedPayload);
+                setProducts((prev) =>
+                  prev.map((prod) => (prod.id === p.id ? { ...prod, ...updatedPayload } : prod))
+                );
+                setSelectedProduct((prev) => (prev ? { ...prev, ...updatedPayload } : null));
+                setSelectedImageIndex(0);
+                setSelectedMediaIndices([]);
+              } catch (err) {
+                console.error("Failed to delete media:", err);
+                alert("Failed to delete media. Please try again.");
+              }
+            });
           };
 
           const activeMedia = detailImgList[selectedImageIndex] || detailImgList[0];
@@ -962,6 +968,7 @@ export function ProductGalleryPage() {
                       <button
                         type="button"
                         onClick={() => handleDeletePhoto(selectedImageIndex)}
+                        disabled={isPhotoDeletePending(`${p.id}:${selectedImageIndex}`)}
                         style={{
                           background: "#fee2e2",
                           color: "#dc2626",
@@ -970,14 +977,15 @@ export function ProductGalleryPage() {
                           padding: "4px 10px",
                           fontSize: "12px",
                           fontWeight: 600,
-                          cursor: "pointer",
+                          cursor: isPhotoDeletePending(`${p.id}:${selectedImageIndex}`) ? "default" : "pointer",
+                          opacity: isPhotoDeletePending(`${p.id}:${selectedImageIndex}`) ? 0.6 : 1,
                           display: "inline-flex",
                           alignItems: "center",
                           gap: "4px",
                         }}
                         title="Delete this media from product"
                       >
-                        🗑️ Delete
+                        {isPhotoDeletePending(`${p.id}:${selectedImageIndex}`) ? "Deleting…" : "🗑️ Delete"}
                       </button>
                     </div>
                   </div>

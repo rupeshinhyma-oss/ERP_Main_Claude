@@ -107,8 +107,15 @@ class Settings(BaseSettings):
         description="Async SQLAlchemy connection string, e.g. "
         "postgresql+asyncpg://user:pass@host:5432/dbname",
     )
-    DATABASE_POOL_SIZE: int = 10
-    DATABASE_MAX_OVERFLOW: int = 20
+    # Sized for ~100+ concurrent active users behind a small number of
+    # Uvicorn/Gunicorn worker processes. Each worker gets its OWN pool of
+    # this size (SQLAlchemy pools are per-process), so with e.g. 4 workers
+    # the effective ceiling is roughly 4 * (POOL_SIZE + MAX_OVERFLOW) = 400
+    # connections -- keep this in mind alongside PostgreSQL's own
+    # `max_connections` (and put PgBouncer in front in production so the
+    # database itself isn't holding hundreds of idle connections).
+    DATABASE_POOL_SIZE: int = 50
+    DATABASE_MAX_OVERFLOW: int = 50
     DATABASE_POOL_TIMEOUT_SECONDS: int = 30
     DATABASE_POOL_RECYCLE_SECONDS: int = 1800
     DATABASE_ECHO: bool = False
@@ -133,7 +140,14 @@ class Settings(BaseSettings):
     # -------------------------------------------------------------------
     # Future extension points (Redis / Celery-ready, disabled for Phase 1)
     # -------------------------------------------------------------------
+    # Set CACHE_BACKEND=redis once running with more than one worker
+    # process/instance -- "in_memory" is per-process, so with multiple
+    # workers each one has its own disconnected cache, which silently
+    # breaks any cache-based invalidation/consistency the app relies on.
+    # No call-site code changes needed to flip this; see cache backend
+    # wiring in app/core/cache.py (or equivalent).
     CACHE_BACKEND: str = "in_memory"  # switch to "redis" later, no code change needed at call sites
+    REDIS_URL: str = "redis://localhost:6379/0"
     QUEUE_BACKEND: str = "in_process"  # switch to "celery" / "rabbitmq" later
 
     # -------------------------------------------------------------------
@@ -142,6 +156,26 @@ class Settings(BaseSettings):
     CACHE_MAX_SIZE: int = 10_000
     CACHE_DEFAULT_TTL_SECONDS: int | None = None
     CACHE_CLEANUP_INTERVAL_SECONDS: float = 60.0
+
+    # -------------------------------------------------------------------
+    # Soft-Delete Retention / Trash Auto-Purge
+    # -------------------------------------------------------------------
+    # Every user-facing delete across the system is a SOFT delete (sets
+    # ``deleted_at``; see app.database.base.SoftDeleteMixin and
+    # app.common.base_repository.BaseRepository.delete). A soft-deleted
+    # record sits in Trash and can be restored at any time up until it is
+    # permanently purged. RETENTION_DAYS controls how long that window is;
+    # 365 * 4 = 1460 days ("keep for 4 years") is the default per company
+    # policy. Restoring a record at any point resets nothing -- it simply
+    # becomes a normal live record again with no ``deleted_at``/purge date,
+    # exactly as if it had never been deleted, and stays until a user
+    # deletes it again (soft-deleting it a second time starts a fresh
+    # 4-year countdown from that new deletion).
+    TRASH_RETENTION_DAYS: int = 1460  # 365 * 4
+    # How often the background purge worker checks for records past their
+    # retention window. Daily is frequent enough for a years-long
+    # retention policy and cheap enough to not matter performance-wise.
+    TRASH_PURGE_CHECK_INTERVAL_SECONDS: float = 86400.0  # 24 hours
 
     # -------------------------------------------------------------------
     # Authentication / JWT (Phase 2)

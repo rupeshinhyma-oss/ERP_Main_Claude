@@ -22,7 +22,7 @@ import { Banner, Can, Modal, StatusBadge, TableMessageRow, dash } from "@/compon
 import { Pagination } from "@/components/Pagination";
 import { SelectField, TextAreaField, TextField } from "@/components/fields";
 import { apiDelete, apiGet, apiPatch, apiPost, toQueryString } from "@/lib/api";
-import { useAuth, useSrNoJump, isSrNoQuery } from "@/lib/hooks";
+import { useAuth, usePendingGuard, useSrNoJump, isSrNoQuery } from "@/lib/hooks";
 import type {
   Department,
   Designation,
@@ -131,6 +131,16 @@ export function TeamsPage() {
   const [tab, setTab] = useState<TabId>("employees");
   const [error, setError] = useState<unknown>(null);
 
+  // Phase 7: double-submit guards. Row-level deletes (department/designation)
+  // share one keyed guard so clicking Delete on one row never disables an
+  // unrelated row; each form below gets its own simple boolean since there's
+  // only ever one instance of each open at a time.
+  const { isPending: isRowActionPending, guard: guardRowAction } = usePendingGuard<string>();
+  const [deptSubmitting, setDeptSubmitting] = useState(false);
+  const [desigSubmitting, setDesigSubmitting] = useState(false);
+  const [memberSubmitting, setMemberSubmitting] = useState(false);
+  const [resetSubmitting, setResetSubmitting] = useState(false);
+
   /* Shared lookups */
   const [departments, setDepartments] = useState<Department[]>([]);
   const [designations, setDesignations] = useState<Designation[]>([]);
@@ -215,14 +225,14 @@ export function TeamsPage() {
       try {
         const { data, meta } = await apiGet<ItemsPage<User>>(
           "/users" +
-            toQueryString({
-              page: empPage,
-              page_size: empPageSize,
-              query: empQuery,
-              department_id: empDeptFilter,
-              designation_id: empDesigFilter,
-              status: empStatusFilter,
-            })
+          toQueryString({
+            page: empPage,
+            page_size: empPageSize,
+            query: empQuery,
+            department_id: empDeptFilter,
+            designation_id: empDesigFilter,
+            status: empStatusFilter,
+          })
         );
         if (cancelled) return;
         setEmpRows(data?.items || []);
@@ -287,13 +297,13 @@ export function TeamsPage() {
       try {
         const { data, meta } = await apiGet<Department[]>(
           "/departments" +
-            toQueryString({
-              page: deptPage,
-              page_size: deptPageSize,
-              sort_order: "asc",
-              search: deptSearch,
-              status: deptStatusFilter,
-            })
+          toQueryString({
+            page: deptPage,
+            page_size: deptPageSize,
+            sort_order: "asc",
+            search: deptSearch,
+            status: deptStatusFilter,
+          })
         );
         if (cancelled) return;
         setDeptRows(data || []);
@@ -318,14 +328,14 @@ export function TeamsPage() {
     setDeptForm(
       d
         ? {
-            id: d.id,
-            code: d.code,
-            name: d.name,
-            description: d.description || "",
-            parent_department_id: d.parent_department_id || "",
-            manager_id: d.manager_id || "",
-            status: d.status,
-          }
+          id: d.id,
+          code: d.code,
+          name: d.name,
+          description: d.description || "",
+          parent_department_id: d.parent_department_id || "",
+          manager_id: d.manager_id || "",
+          status: d.status,
+        }
         : EMPTY_DEPT
     );
     setDeptFormOpen(true);
@@ -336,6 +346,7 @@ export function TeamsPage() {
 
   async function handleDeptSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (deptSubmitting) return; // Phase 7: ignore a second click while the first save is still in flight
     setError(null);
     const payload = {
       code: deptForm.code.trim(),
@@ -345,6 +356,7 @@ export function TeamsPage() {
       manager_id: deptForm.manager_id || null,
       status: deptForm.status,
     };
+    setDeptSubmitting(true);
     try {
       if (deptForm.id) await apiPatch(`/departments/${deptForm.id}`, payload);
       else await apiPost("/departments", payload);
@@ -353,6 +365,8 @@ export function TeamsPage() {
       setDeptReload((n) => n + 1);
     } catch (err) {
       setError(err);
+    } finally {
+      setDeptSubmitting(false);
     }
   }
 
@@ -367,12 +381,14 @@ export function TeamsPage() {
 
   async function handleDeptDelete(id: string) {
     if (!confirm("Delete this department? This cannot be undone.")) return;
-    try {
-      await apiDelete(`/departments/${id}`);
-      setDeptReload((n) => n + 1);
-    } catch (err) {
-      setError(err);
-    }
+    await guardRowAction(`delete-dept:${id}`, async () => {
+      try {
+        await apiDelete(`/departments/${id}`);
+        setDeptReload((n) => n + 1);
+      } catch (err) {
+        setError(err);
+      }
+    });
   }
 
   /* ================= Designations tab ================= */
@@ -419,13 +435,13 @@ export function TeamsPage() {
       try {
         const { data, meta } = await apiGet<Designation[]>(
           "/designations" +
-            toQueryString({
-              page: desigPage,
-              page_size: desigPageSize,
-              sort_order: "asc",
-              search: desigSearch,
-              status: desigStatusFilter,
-            })
+          toQueryString({
+            page: desigPage,
+            page_size: desigPageSize,
+            sort_order: "asc",
+            search: desigSearch,
+            status: desigStatusFilter,
+          })
         );
         if (cancelled) return;
         setDesigRows(data || []);
@@ -450,13 +466,13 @@ export function TeamsPage() {
     setDesigForm(
       d
         ? {
-            id: d.id,
-            code: d.code,
-            title: d.title,
-            level: d.level !== null && d.level !== undefined ? String(d.level) : "",
-            description: d.description || "",
-            status: d.status,
-          }
+          id: d.id,
+          code: d.code,
+          title: d.title,
+          level: d.level !== null && d.level !== undefined ? String(d.level) : "",
+          description: d.description || "",
+          status: d.status,
+        }
         : EMPTY_DESIG
     );
     setDesigFormOpen(true);
@@ -467,6 +483,7 @@ export function TeamsPage() {
 
   async function handleDesigSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (desigSubmitting) return; // Phase 7: ignore a second click while the first save is still in flight
     setError(null);
     const payload = {
       code: desigForm.code.trim(),
@@ -475,6 +492,7 @@ export function TeamsPage() {
       level: desigForm.level === "" ? null : Number(desigForm.level),
       status: desigForm.status,
     };
+    setDesigSubmitting(true);
     try {
       if (desigForm.id) await apiPatch(`/designations/${desigForm.id}`, payload);
       else await apiPost("/designations", payload);
@@ -483,6 +501,8 @@ export function TeamsPage() {
       setDesigReload((n) => n + 1);
     } catch (err) {
       setError(err);
+    } finally {
+      setDesigSubmitting(false);
     }
   }
 
@@ -497,12 +517,14 @@ export function TeamsPage() {
 
   async function handleDesigDelete(id: string) {
     if (!confirm("Delete this designation? This cannot be undone.")) return;
-    try {
-      await apiDelete(`/designations/${id}`);
-      setDesigReload((n) => n + 1);
-    } catch (err) {
-      setError(err);
-    }
+    await guardRowAction(`delete-desig:${id}`, async () => {
+      try {
+        await apiDelete(`/designations/${id}`);
+        setDesigReload((n) => n + 1);
+      } catch (err) {
+        setError(err);
+      }
+    });
   }
 
   /* ================= Add Member modal ================= */
@@ -522,8 +544,10 @@ export function TeamsPage() {
 
   async function handleMemberSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (memberSubmitting) return; // Phase 7: ignore a second click while the first save is still in flight
     setMemberError(null);
     const password = memberForm.password;
+    setMemberSubmitting(true);
     try {
       const { data } = await apiPost<TeamMember>("/members", {
         full_name: memberForm.full_name.trim(),
@@ -538,6 +562,8 @@ export function TeamsPage() {
       setCreatedMember({ ...data, password });
     } catch (err) {
       setMemberError(err);
+    } finally {
+      setMemberSubmitting(false);
     }
   }
 
@@ -548,8 +574,10 @@ export function TeamsPage() {
 
   async function handleResetSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (resetSubmitting) return; // Phase 7: ignore a second click while the first save is still in flight
     setResetError(null);
     if (!resetUserId) return;
+    setResetSubmitting(true);
     try {
       await apiPatch(`/members/${resetUserId}/password`, { password: resetPassword });
       setResetUserId(null);
@@ -557,6 +585,8 @@ export function TeamsPage() {
       setEmpReload((n) => n + 1);
     } catch (err) {
       setResetError(err);
+    } finally {
+      setResetSubmitting(false);
     }
   }
 
@@ -829,8 +859,8 @@ export function TeamsPage() {
                 </div>
                 <TextAreaField id="dept_description" label="Description" value={deptForm.description} onChange={(v) => setDeptForm((f) => ({ ...f, description: v }))} />
                 <div className="form-actions">
-                  <button type="submit" className="btn btn-primary">
-                    Save
+                  <button type="submit" className="btn btn-primary" disabled={deptSubmitting}>
+                    {deptSubmitting ? "Saving…" : "Save"}
                   </button>
                   <button type="button" className="btn" onClick={() => setDeptFormOpen(false)}>
                     Cancel
@@ -924,9 +954,10 @@ export function TeamsPage() {
                           <Can permission="department.delete">
                             <button
                               className="btn btn-small btn-danger"
+                              disabled={isRowActionPending(`delete-dept:${d.id}`)}
                               onClick={() => handleDeptDelete(d.id)}
                             >
-                              Delete
+                              {isRowActionPending(`delete-dept:${d.id}`) ? "Deleting…" : "Delete"}
                             </button>
                           </Can>
                         </td>
@@ -979,8 +1010,8 @@ export function TeamsPage() {
                 </div>
                 <TextAreaField id="desig_description" label="Description" value={desigForm.description} onChange={(v) => setDesigForm((f) => ({ ...f, description: v }))} />
                 <div className="form-actions">
-                  <button type="submit" className="btn btn-primary">
-                    Save
+                  <button type="submit" className="btn btn-primary" disabled={desigSubmitting}>
+                    {desigSubmitting ? "Saving…" : "Save"}
                   </button>
                   <button type="button" className="btn" onClick={() => setDesigFormOpen(false)}>
                     Cancel
@@ -1072,9 +1103,10 @@ export function TeamsPage() {
                           <Can permission="designation.delete">
                             <button
                               className="btn btn-small btn-danger"
+                              disabled={isRowActionPending(`delete-desig:${d.id}`)}
                               onClick={() => handleDesigDelete(d.id)}
                             >
-                              Delete
+                              {isRowActionPending(`delete-desig:${d.id}`) ? "Deleting…" : "Delete"}
                             </button>
                           </Can>
                         </td>
@@ -1186,8 +1218,8 @@ export function TeamsPage() {
                 ))}
               </SelectField>
               <div className="form-actions">
-                <button type="submit" className="btn btn-primary">
-                  Save
+                <button type="submit" className="btn btn-primary" disabled={memberSubmitting}>
+                  {memberSubmitting ? "Saving…" : "Save"}
                 </button>
                 <button type="button" className="btn" onClick={() => setMemberOpen(false)}>
                   Cancel
@@ -1276,8 +1308,8 @@ export function TeamsPage() {
             hint={PASSWORD_HINT}
           />
           <div className="form-actions">
-            <button type="submit" className="btn btn-primary">
-              Reset Password
+            <button type="submit" className="btn btn-primary" disabled={resetSubmitting}>
+              {resetSubmitting ? "Resetting…" : "Reset Password"}
             </button>
             <button type="button" className="btn" onClick={() => setResetUserId(null)}>
               Cancel

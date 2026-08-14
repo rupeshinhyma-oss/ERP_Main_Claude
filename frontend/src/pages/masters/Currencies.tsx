@@ -13,6 +13,7 @@ export function CurrenciesPage() {
       activeKey="masters-currencies"
       apiBase="/masters/currencies"
       permissionPrefix="currency"
+      liveModule="currencies"
       entityName="currency"
       heading="Currencies"
       subtitle="Reference currencies for pricing, invoicing, and finance."

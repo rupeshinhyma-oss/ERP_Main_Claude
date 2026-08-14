@@ -160,6 +160,7 @@ export function ProductsPage() {
       activeKey="masters-products"
       apiBase="/masters/products"
       permissionPrefix="product"
+      liveModule="inventory"
       entityName="product"
       heading="Products Master"
       subtitle="Manage items, packaging weights, CBM, refund VAT, and license warnings."
@@ -394,8 +395,8 @@ export function ProductsPage() {
           organization_ids_json: JSON.stringify(
             item
               ? (item.organization_ids && item.organization_ids.length > 0
-                  ? item.organization_ids
-                  : (item.organization_id ? [item.organization_id] : []))
+                ? item.organization_ids
+                : (item.organization_id ? [item.organization_id] : []))
               : []
           ),
           supplier_id: str(item?.supplier_id),

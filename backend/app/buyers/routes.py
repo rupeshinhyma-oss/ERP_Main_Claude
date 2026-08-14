@@ -11,6 +11,7 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, Depends, Request, status
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.constants import AuditAction
 from app.audit.dependencies import get_audit_service
@@ -32,9 +33,54 @@ from app.buyers.service import BuyerService
 from app.common.list_query import ListQueryParams, get_list_query_params
 from app.common.pagination import PageMeta
 from app.core.responses import build_success_response
+from app.database.session import get_db_session
+from app.events.dependencies import get_event_dispatcher
+from app.events.dispatcher import EventDispatcher
 from app.rbac.dependencies import require_permission
 
 router = APIRouter(prefix="/buyers", tags=["Buyers"])
+
+
+async def _publish_buyer_event(
+    *,
+    db: AsyncSession,
+    dispatcher: EventDispatcher,
+    event_type: str,
+    buyer_id: uuid.UUID | str,
+    version: int | None,
+    user_id: uuid.UUID,
+    changes: dict,
+) -> None:
+    """
+    Commit ``db``, then publish a ``buyer.*`` live event on ``module:buyers``.
+
+    Phase 6: thin wrapper around the shared
+    :meth:`EventDispatcher.publish_lifecycle_event` -- see that method's
+    own docstring for the full reasoning (commit-before-publish
+    ordering, why a second later commit from ``get_db_session`` is
+    safe, etc.), which used to live here as Buyers-specific prose before
+    the identical pattern was also needed for Planning (Phase 5) and
+    consolidated (Phase 6). Kept as a thin Buyers-named wrapper (rather
+    than having every route call ``dispatcher.publish_lifecycle_event``
+    directly with a long argument list) purely so each of the 7 call
+    sites below stays a short, readable one-liner -- not because there's
+    any Buyers-specific LOGIC left in this function at all.
+
+    Publishes to ``module:buyers`` only (not a per-record ``buyer:{id}``
+    channel) -- no Buyer detail page/side-panel subscribes to one today,
+    so there is nothing yet to address individually; see
+    ``app.events.channels.entity_channel`` if that changes later.
+    """
+    await dispatcher.publish_lifecycle_event(
+        db,
+        module="buyers",
+        entity="buyer",
+        entity_id=buyer_id,
+        event_type=event_type,
+        version=version,
+        user_id=user_id,
+        changes=changes,
+    )
 
 
 async def _record_action(
@@ -75,8 +121,20 @@ async def _to_buyer_read(service: BuyerService, buyer) -> dict:
     # during validation, before we get a chance to override it with the
     # flattened string list -- raising a validation error, since a
     # BuyerEmail object isn't a str. Mirrors app.suppliers.routes._to_supplier_read.
+    #
+    # category_ids/sub_category_ids are read directly off the ORM
+    # relationship (buyer.category_links/sub_category_links) rather than
+    # via service.get_category_ids()/get_sub_category_ids() -- those
+    # relationships are declared `lazy="selectin"` on the Buyer model
+    # (see app/buyers/models.py), so they are ALREADY loaded in memory by
+    # the time a Buyer instance reaches this function. Calling the
+    # service methods here would re-query the exact same
+    # buyer_category_links/buyer_sub_category_links rows the ORM already
+    # fetched, for no benefit -- see the Phase 3 audit notes in
+    # PHASE3_PERFORMANCE.md ("N+1 in list/detail serialization").
     payload = {
         "id": buyer.id,
+        "version": buyer.version,
         "company_name": buyer.company_name,
         "buyer_type": buyer.buyer_type,
         "country_id": buyer.country_id,
@@ -100,18 +158,28 @@ async def _to_buyer_read(service: BuyerService, buyer) -> dict:
         "created_at": buyer.created_at,
         "updated_at": buyer.updated_at,
         "emails": [e.email for e in buyer.emails],
-        "category_ids": await service.get_category_ids(buyer.id),
-        "sub_category_ids": await service.get_sub_category_ids(buyer.id),
+        "category_ids": [link.category_id for link in buyer.category_links],
+        "sub_category_ids": [link.sub_category_id for link in buyer.sub_category_links],
         "contacts": [BuyerContactRead.model_validate(c) for c in buyer.contacts],
     }
     return BuyerRead.model_validate(payload).model_dump(mode="json")
 
 
-async def _to_list_item(service: BuyerService, buyer) -> dict:
-    """Build a BuyerListItemRead dict for the list view (document: "Fields in List")."""
+def _to_list_item(buyer) -> dict:
+    """
+    Build a BuyerListItemRead dict for the list view (document: "Fields in List").
+
+    No longer takes/uses a ``service`` argument, and no longer ``async``
+    -- see ``_to_buyer_read``'s docstring above for why reading
+    ``buyer.category_links``/``buyer.sub_category_links`` directly (both
+    already loaded via the model's ``lazy="selectin"`` relationships) is
+    both correct and strictly faster than the two extra per-row queries
+    this used to issue. Call sites updated accordingly (no more
+    ``await``, and one less argument).
+    """
     data = BuyerListItemRead.model_validate(buyer).model_dump(mode="json")
-    data["category_ids"] = [str(cid) for cid in await service.get_category_ids(buyer.id)]
-    data["sub_category_ids"] = [str(cid) for cid in await service.get_sub_category_ids(buyer.id)]
+    data["category_ids"] = [str(link.category_id) for link in buyer.category_links]
+    data["sub_category_ids"] = [str(link.sub_category_id) for link in buyer.sub_category_links]
     return data
 
 
@@ -127,6 +195,8 @@ async def create_buyer(
     service: BuyerService = Depends(get_buyer_service),
     current_user: CurrentUser = Depends(require_permission("buyer.create")),
     audit_service: AuditService = Depends(get_audit_service),
+    db: AsyncSession = Depends(get_db_session),
+    dispatcher: EventDispatcher = Depends(get_event_dispatcher),
 ) -> dict:
     """Create a new buyer (client) profile."""
     buyer = await service.create(**payload.model_dump())
@@ -139,6 +209,15 @@ async def create_buyer(
         entity_id=buyer.id,
         description=f"Created buyer {buyer.company_name!r}.",
         new_values=payload.model_dump(mode="json"),
+    )
+    await _publish_buyer_event(
+        db=db,
+        dispatcher=dispatcher,
+        event_type="buyer.created",
+        buyer_id=buyer.id,
+        version=buyer.version,
+        user_id=current_user.id,
+        changes=payload.model_dump(mode="json"),
     )
     return build_success_response(data=data, request_id=request.state.request_id, message="Resource created successfully.")
 
@@ -164,7 +243,7 @@ async def list_buyers(
     """
     buyers, total = await service.list_paginated(query, category_id=category_id, sub_category_id=sub_category_id)
     meta = PageMeta.build(page=query.page.page, page_size=query.page.page_size, total_records=total).as_meta_dict()
-    data = [await _to_list_item(service, b) for b in buyers]
+    data = [_to_list_item(b) for b in buyers]
     return build_success_response(data=data, request_id=request.state.request_id, meta=meta)
 
 
@@ -189,10 +268,13 @@ async def update_buyer(
     service: BuyerService = Depends(get_buyer_service),
     current_user: CurrentUser = Depends(require_permission("buyer.update")),
     audit_service: AuditService = Depends(get_audit_service),
+    db: AsyncSession = Depends(get_db_session),
+    dispatcher: EventDispatcher = Depends(get_event_dispatcher),
 ) -> dict:
     """Update an existing buyer profile."""
     buyer = await service.update(buyer_id, **payload.model_dump())
     data = await _to_buyer_read(service, buyer)
+    changes = payload.model_dump(exclude_none=True, exclude={"version"}, mode="json")
     await _record_action(
         audit_service=audit_service,
         request=request,
@@ -201,6 +283,15 @@ async def update_buyer(
         entity_id=buyer.id,
         description=f"Updated buyer {buyer.company_name!r}.",
         new_values=payload.model_dump(exclude_none=True, mode="json"),
+    )
+    await _publish_buyer_event(
+        db=db,
+        dispatcher=dispatcher,
+        event_type="buyer.updated",
+        buyer_id=buyer.id,
+        version=buyer.version,
+        user_id=current_user.id,
+        changes=changes,
     )
     return build_success_response(data=data, request_id=request.state.request_id)
 
@@ -213,6 +304,8 @@ async def update_buyer_grade(
     service: BuyerService = Depends(get_buyer_service),
     current_user: CurrentUser = Depends(require_permission("buyer.update")),
     audit_service: AuditService = Depends(get_audit_service),
+    db: AsyncSession = Depends(get_db_session),
+    dispatcher: EventDispatcher = Depends(get_event_dispatcher),
 ) -> dict:
     """Document: "Client Grade (editable dropdown in list)"."""
     buyer = await service.update_grade(buyer_id, payload.buyer_grade)
@@ -226,6 +319,15 @@ async def update_buyer_grade(
         description=f"Updated grade for buyer {buyer.company_name!r}.",
         new_values=payload.model_dump(mode="json"),
     )
+    await _publish_buyer_event(
+        db=db,
+        dispatcher=dispatcher,
+        event_type="buyer.updated",
+        buyer_id=buyer.id,
+        version=buyer.version,
+        user_id=current_user.id,
+        changes={"buyer_grade": payload.model_dump(mode="json").get("buyer_grade")},
+    )
     return build_success_response(data=data, request_id=request.state.request_id)
 
 
@@ -237,6 +339,8 @@ async def update_buyer_potential(
     service: BuyerService = Depends(get_buyer_service),
     current_user: CurrentUser = Depends(require_permission("buyer.update")),
     audit_service: AuditService = Depends(get_audit_service),
+    db: AsyncSession = Depends(get_db_session),
+    dispatcher: EventDispatcher = Depends(get_event_dispatcher),
 ) -> dict:
     """Document: "Potential (editable dropdown in list)"."""
     buyer = await service.update_potential(buyer_id, payload.potential)
@@ -250,6 +354,15 @@ async def update_buyer_potential(
         description=f"Updated potential for buyer {buyer.company_name!r}.",
         new_values=payload.model_dump(mode="json"),
     )
+    await _publish_buyer_event(
+        db=db,
+        dispatcher=dispatcher,
+        event_type="buyer.updated",
+        buyer_id=buyer.id,
+        version=buyer.version,
+        user_id=current_user.id,
+        changes={"potential": payload.model_dump(mode="json").get("potential")},
+    )
     return build_success_response(data=data, request_id=request.state.request_id)
 
 
@@ -260,6 +373,8 @@ async def activate_buyer(
     service: BuyerService = Depends(get_buyer_service),
     current_user: CurrentUser = Depends(require_permission("buyer.update")),
     audit_service: AuditService = Depends(get_audit_service),
+    db: AsyncSession = Depends(get_db_session),
+    dispatcher: EventDispatcher = Depends(get_event_dispatcher),
 ) -> dict:
     """Set a buyer's status to active."""
     buyer = await service.activate(buyer_id)
@@ -272,6 +387,15 @@ async def activate_buyer(
         entity_id=buyer.id,
         description=f"Activated buyer {buyer.company_name!r}.",
     )
+    await _publish_buyer_event(
+        db=db,
+        dispatcher=dispatcher,
+        event_type="buyer.updated",
+        buyer_id=buyer.id,
+        version=buyer.version,
+        user_id=current_user.id,
+        changes={"is_active": True},
+    )
     return build_success_response(data=data, request_id=request.state.request_id)
 
 
@@ -282,6 +406,8 @@ async def deactivate_buyer(
     service: BuyerService = Depends(get_buyer_service),
     current_user: CurrentUser = Depends(require_permission("buyer.update")),
     audit_service: AuditService = Depends(get_audit_service),
+    db: AsyncSession = Depends(get_db_session),
+    dispatcher: EventDispatcher = Depends(get_event_dispatcher),
 ) -> dict:
     """
     Set a buyer's status to inactive.
@@ -300,6 +426,15 @@ async def deactivate_buyer(
         entity_id=buyer.id,
         description=f"Deactivated buyer {buyer.company_name!r}.",
     )
+    await _publish_buyer_event(
+        db=db,
+        dispatcher=dispatcher,
+        event_type="buyer.updated",
+        buyer_id=buyer.id,
+        version=buyer.version,
+        user_id=current_user.id,
+        changes={"is_active": False},
+    )
     return build_success_response(data=data, request_id=request.state.request_id)
 
 
@@ -310,6 +445,8 @@ async def delete_buyer(
     service: BuyerService = Depends(get_buyer_service),
     current_user: CurrentUser = Depends(require_permission("buyer.delete")),
     audit_service: AuditService = Depends(get_audit_service),
+    db: AsyncSession = Depends(get_db_session),
+    dispatcher: EventDispatcher = Depends(get_event_dispatcher),
 ) -> dict:
     """
     Soft-delete a buyer.
@@ -326,6 +463,15 @@ async def delete_buyer(
         actor=current_user,
         entity_id=buyer_id,
         description="Deleted buyer.",
+    )
+    await _publish_buyer_event(
+        db=db,
+        dispatcher=dispatcher,
+        event_type="buyer.deleted",
+        buyer_id=buyer_id,
+        version=None,
+        user_id=current_user.id,
+        changes={},
     )
     return build_success_response(data={"deleted": True}, request_id=request.state.request_id)
 

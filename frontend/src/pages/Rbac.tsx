@@ -14,7 +14,7 @@ import { Breadcrumb } from "@/components/Breadcrumb";
 import { Banner, Can, Modal } from "@/components/ui";
 import { SelectField, TextField } from "@/components/fields";
 import { apiDelete, apiGet, apiPatch, apiPost, apiPut } from "@/lib/api";
-import { useAuth } from "@/lib/hooks";
+import { useAuth, usePendingGuard } from "@/lib/hooks";
 import { useToast } from "@/lib/toast";
 import { sourceBadgeClass } from "./EffectivePermissions";
 import type {
@@ -58,6 +58,12 @@ export function RbacPage() {
   const [cloneOpen, setCloneOpen] = useState(false);
   const [cloneSourceId, setCloneSourceId] = useState("");
   const [cloneTargetId, setCloneTargetId] = useState("");
+  // Phase 7: double-submit guards. Role delete is per-row (keyed) so
+  // deleting one role never disables another; the role-save and clone
+  // modals are single-instance, so a plain boolean is enough for each.
+  const { isPending: isRowActionPending, guard: guardRowAction } = usePendingGuard<string>();
+  const [roleSubmitting, setRoleSubmitting] = useState(false);
+  const [cloneSubmitting, setCloneSubmitting] = useState(false);
 
   /* Users tab */
   const [selectedUserId, setSelectedUserId] = useState("");
@@ -241,11 +247,13 @@ export function RbacPage() {
 
   async function handleRoleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (roleSubmitting) return; // Phase 7: ignore a second click while the first save is still in flight
     setError(null);
     const name = roleName.trim();
     const description = roleDescription.trim() || null;
     const desiredCodes = checkedCodes;
 
+    setRoleSubmitting(true);
     try {
       let roleId = editingRole?.id || "";
       if (roleId) {
@@ -273,21 +281,27 @@ export function RbacPage() {
       setRoleModalOpen(false);
     } catch (err) {
       setError(err);
+    } finally {
+      setRoleSubmitting(false);
     }
   }
 
   async function handleDeleteRole(roleId: string) {
     if (!confirm("Delete this system role?")) return;
-    try {
-      await apiDelete(`/rbac/roles/${roleId}`);
-      await loadRoles();
-    } catch (err) {
-      setError(err);
-    }
+    await guardRowAction(`delete-role:${roleId}`, async () => {
+      try {
+        await apiDelete(`/rbac/roles/${roleId}`);
+        await loadRoles();
+      } catch (err) {
+        setError(err);
+      }
+    });
   }
 
   async function handleClone(e: React.FormEvent) {
     e.preventDefault();
+    if (cloneSubmitting) return; // Phase 7: ignore a second click while the first save is still in flight
+    setCloneSubmitting(true);
     try {
       const res = await apiPost<{ cloned_count: number }>("/rbac/clone-permissions", {
         source_type: "role",
@@ -300,6 +314,8 @@ export function RbacPage() {
       void loadRoles();
     } catch (err) {
       setError(err);
+    } finally {
+      setCloneSubmitting(false);
     }
   }
 
@@ -521,13 +537,13 @@ export function RbacPage() {
                       const canDeleteThisRole = canManage && !isSystem && isSuperAdmin;
                       const formattedCreated = (role as unknown as Record<string, unknown>).created_at
                         ? new Date(String((role as unknown as Record<string, unknown>).created_at)).toLocaleString("en-GB", {
-                            day: "2-digit",
-                            month: "2-digit",
-                            year: "numeric",
-                            hour: "2-digit",
-                            minute: "2-digit",
-                            hour12: true,
-                          })
+                          day: "2-digit",
+                          month: "2-digit",
+                          year: "numeric",
+                          hour: "2-digit",
+                          minute: "2-digit",
+                          hour12: true,
+                        })
                         : "07-08-2026 11:29 AM";
 
                       return (
@@ -565,11 +581,12 @@ export function RbacPage() {
                               {canDeleteThisRole && (
                                 <button
                                   className="btn btn-small btn-danger"
-                                  style={{ padding: "4px 8px", fontSize: "12px" }}
+                                  style={{ padding: "4px 8px", fontSize: "12px", opacity: isRowActionPending(`delete-role:${role.id}`) ? 0.6 : 1 }}
                                   onClick={() => handleDeleteRole(role.id)}
+                                  disabled={isRowActionPending(`delete-role:${role.id}`)}
                                   title="Delete Role"
                                 >
-                                  🗑️
+                                  {isRowActionPending(`delete-role:${role.id}`) ? "…" : "🗑️"}
                                 </button>
                               )}
                               {!canEditThisRole && !canDeleteThisRole && (
@@ -592,393 +609,393 @@ export function RbacPage() {
             </div>
           </div>
 
-        {/* Tab 2: Individual User Permissions */}
-        <div className={`tab-content ${activeTab === "tab-users" ? "active" : ""}`}>
-          <div className="toolbar-row">
-            <div className="search-filter-box" style={{ maxWidth: "600px" }}>
-              <select
-                style={{ flex: 1 }}
-                value={selectedUserId}
-                onChange={(e) => setSelectedUserId(e.target.value)}
+          {/* Tab 2: Individual User Permissions */}
+          <div className={`tab-content ${activeTab === "tab-users" ? "active" : ""}`}>
+            <div className="toolbar-row">
+              <div className="search-filter-box" style={{ maxWidth: "600px" }}>
+                <select
+                  style={{ flex: 1 }}
+                  value={selectedUserId}
+                  onChange={(e) => setSelectedUserId(e.target.value)}
+                >
+                  <option value="">Select User to inspect &amp; override permissions...</option>
+                  {userOptions}
+                </select>
+              </div>
+            </div>
+            <div>
+              {userTabStatus === "idle" && (
+                <p className="muted">
+                  Select a user above to view effective permissions and manage direct overrides.
+                </p>
+              )}
+              {userTabStatus === "loading" && (
+                <p className="muted">Calculating effective permissions...</p>
+              )}
+              {userTabStatus === "ready" && userBreakdown && (
+                <>
+                  <div className="item-card" style={{ borderLeft: "4px solid #3182ce" }}>
+                    <div className="item-card-header">
+                      <h3>Individual Permission Overrides</h3>
+                      {canManage && !userBreakdown.is_super_admin && (
+                        <button
+                          type="button"
+                          className="btn btn-small btn-primary"
+                          disabled={savingUserOverrides}
+                          onClick={() => void handleSaveUserOverrides()}
+                        >
+                          {savingUserOverrides ? "Saving..." : "Save Changes"}
+                        </button>
+                      )}
+                    </div>
+                    <div className="muted" style={{ fontSize: "13px", marginBottom: 0 }}>
+                      {userBreakdown.is_super_admin
+                        ? "This user is a Super Administrator and always has every permission — individual overrides do not apply."
+                        : "Tick or untick permissions below to grant or revoke direct access for this user. Checked-but-greyed items are inherited from the user's assigned roles. Click Save Changes to apply immediately."}
+                    </div>
+                  </div>
+
+                  {!userBreakdown.is_super_admin && (
+                    <div className="item-card">
+                      {Object.keys(permissionGroups)
+                        .sort()
+                        .map((modKey) => {
+                          const items = permissionGroups[modKey];
+                          const roleGranted = new Set(userBreakdown.role_permissions || []);
+                          const allCheckedInMod = items.every((p) => checkedUserCodes.has(p.code));
+                          return (
+                            <div className="permission-group" key={modKey}>
+                              <div className="permission-group-header">
+                                <div className="permission-group-title">
+                                  {MODULE_NAMES[modKey] || modKey.toUpperCase()}
+                                </div>
+                                {canManage && (
+                                  <button
+                                    type="button"
+                                    className="toggle-btn"
+                                    onClick={() => {
+                                      setCheckedUserCodes((prev) => {
+                                        const next = new Set(prev);
+                                        items.forEach((p) => {
+                                          if (allCheckedInMod) next.delete(p.code);
+                                          else next.add(p.code);
+                                        });
+                                        return next;
+                                      });
+                                    }}
+                                  >
+                                    {allCheckedInMod ? "Deselect Group" : "Select Group"}
+                                  </button>
+                                )}
+                              </div>
+                              <div className="permission-checks">
+                                {items.map((p) => {
+                                  const checked = checkedUserCodes.has(p.code);
+                                  const isRoleGranted = roleGranted.has(p.code);
+                                  return (
+                                    <label key={p.code}>
+                                      <input
+                                        type="checkbox"
+                                        checked={checked}
+                                        disabled={!canManage}
+                                        onChange={() => {
+                                          setCheckedUserCodes((prev) => {
+                                            const next = new Set(prev);
+                                            if (next.has(p.code)) next.delete(p.code);
+                                            else next.add(p.code);
+                                            return next;
+                                          });
+                                        }}
+                                      />
+                                      <span>
+                                        {friendlyPermissionLabel(p.code)}
+                                        {checked && !isRoleGranted && (
+                                          <span
+                                            className="chip chip-grant"
+                                            style={{ marginLeft: "6px", fontSize: "10px", padding: "1px 6px" }}
+                                          >
+                                            DIRECT GRANT
+                                          </span>
+                                        )}
+                                        {!checked && isRoleGranted && (
+                                          <span
+                                            className="chip chip-deny"
+                                            style={{ marginLeft: "6px", fontSize: "10px", padding: "1px 6px" }}
+                                          >
+                                            DIRECT DENY
+                                          </span>
+                                        )}
+                                        {checked && isRoleGranted && (
+                                          <span
+                                            className="chip"
+                                            style={{
+                                              marginLeft: "6px",
+                                              fontSize: "10px",
+                                              padding: "1px 6px",
+                                              background: "#e2e8f0",
+                                              color: "#334155",
+                                            }}
+                                          >
+                                            FROM ROLE
+                                          </span>
+                                        )}
+                                      </span>
+                                    </label>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          );
+                        })}
+                    </div>
+                  )}
+
+                  <div className="item-card" style={{ marginTop: "16px" }}>
+                    <h3>
+                      Calculated Effective Permissions (
+                      {userBreakdown.effective_permissions?.length || 0})
+                    </h3>
+                    <div className="muted" style={{ marginBottom: "12px", fontSize: "13px" }}>
+                      Final effective permission set applied immediately on new requests:
+                    </div>
+                    <div>
+                      {(userBreakdown.effective_permissions || []).map((c) => (
+                        <span
+                          className="chip"
+                          style={{ background: "#f1f5f9", border: "1px solid #cbd5e0" }}
+                          key={c}
+                        >
+                          {c}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="item-card" style={{ marginTop: "16px" }}>
+                    <h4>From Assigned Roles ({userBreakdown.role_permissions?.length || 0})</h4>
+                    <div>
+                      {(userBreakdown.role_permissions || []).map((c) => (
+                        <span className="chip" key={c}>
+                          {c}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* Tab 3: Effective Permissions Inspector */}
+          <div className={`tab-content ${activeTab === "tab-effective" ? "active" : ""}`}>
+            <div
+              className="info-card"
+              style={{ borderLeft: "4px solid var(--color-primary, #3182ce)" }}
+            >
+              <label
+                style={{
+                  display: "block",
+                  fontSize: "13px",
+                  fontWeight: 600,
+                  marginBottom: "6px",
+                  color: "#334155",
+                }}
               >
-                <option value="">Select User to inspect &amp; override permissions...</option>
+                Select User to Inspect Effective Access &amp; Permission Sources:
+              </label>
+              <select
+                style={{
+                  width: "100%",
+                  maxWidth: "540px",
+                  padding: "10px",
+                  border: "1px solid #cbd5e0",
+                  borderRadius: "6px",
+                  fontSize: "14px",
+                }}
+                value={effectiveUserId}
+                onChange={(e) => setEffectiveUserId(e.target.value)}
+              >
+                <option value="">Select User...</option>
                 {userOptions}
               </select>
             </div>
-          </div>
-          <div>
-            {userTabStatus === "idle" && (
-              <p className="muted">
-                Select a user above to view effective permissions and manage direct overrides.
-              </p>
-            )}
-            {userTabStatus === "loading" && (
-              <p className="muted">Calculating effective permissions...</p>
-            )}
-            {userTabStatus === "ready" && userBreakdown && (
-              <>
-                <div className="item-card" style={{ borderLeft: "4px solid #3182ce" }}>
-                  <div className="item-card-header">
-                    <h3>Individual Permission Overrides</h3>
-                    {canManage && !userBreakdown.is_super_admin && (
-                      <button
-                        type="button"
-                        className="btn btn-small btn-primary"
-                        disabled={savingUserOverrides}
-                        onClick={() => void handleSaveUserOverrides()}
-                      >
-                        {savingUserOverrides ? "Saving..." : "Save Changes"}
-                      </button>
-                    )}
-                  </div>
-                  <div className="muted" style={{ fontSize: "13px", marginBottom: 0 }}>
-                    {userBreakdown.is_super_admin
-                      ? "This user is a Super Administrator and always has every permission — individual overrides do not apply."
-                      : "Tick or untick permissions below to grant or revoke direct access for this user. Checked-but-greyed items are inherited from the user's assigned roles. Click Save Changes to apply immediately."}
-                  </div>
-                </div>
 
-                {!userBreakdown.is_super_admin && (
-                  <div className="item-card">
-                    {Object.keys(permissionGroups)
-                      .sort()
-                      .map((modKey) => {
-                        const items = permissionGroups[modKey];
-                        const roleGranted = new Set(userBreakdown.role_permissions || []);
-                        const allCheckedInMod = items.every((p) => checkedUserCodes.has(p.code));
-                        return (
-                          <div className="permission-group" key={modKey}>
-                            <div className="permission-group-header">
-                              <div className="permission-group-title">
-                                {MODULE_NAMES[modKey] || modKey.toUpperCase()}
-                              </div>
-                              {canManage && (
-                                <button
-                                  type="button"
-                                  className="toggle-btn"
-                                  onClick={() => {
-                                    setCheckedUserCodes((prev) => {
-                                      const next = new Set(prev);
-                                      items.forEach((p) => {
-                                        if (allCheckedInMod) next.delete(p.code);
-                                        else next.add(p.code);
-                                      });
-                                      return next;
-                                    });
-                                  }}
-                                >
-                                  {allCheckedInMod ? "Deselect Group" : "Select Group"}
-                                </button>
-                              )}
-                            </div>
-                            <div className="permission-checks">
-                              {items.map((p) => {
-                                const checked = checkedUserCodes.has(p.code);
-                                const isRoleGranted = roleGranted.has(p.code);
-                                return (
-                                  <label key={p.code}>
-                                    <input
-                                      type="checkbox"
-                                      checked={checked}
-                                      disabled={!canManage}
-                                      onChange={() => {
-                                        setCheckedUserCodes((prev) => {
-                                          const next = new Set(prev);
-                                          if (next.has(p.code)) next.delete(p.code);
-                                          else next.add(p.code);
-                                          return next;
-                                        });
-                                      }}
-                                    />
-                                    <span>
-                                      {friendlyPermissionLabel(p.code)}
-                                      {checked && !isRoleGranted && (
-                                        <span
-                                          className="chip chip-grant"
-                                          style={{ marginLeft: "6px", fontSize: "10px", padding: "1px 6px" }}
-                                        >
-                                          DIRECT GRANT
-                                        </span>
-                                      )}
-                                      {!checked && isRoleGranted && (
-                                        <span
-                                          className="chip chip-deny"
-                                          style={{ marginLeft: "6px", fontSize: "10px", padding: "1px 6px" }}
-                                        >
-                                          DIRECT DENY
-                                        </span>
-                                      )}
-                                      {checked && isRoleGranted && (
-                                        <span
-                                          className="chip"
-                                          style={{
-                                            marginLeft: "6px",
-                                            fontSize: "10px",
-                                            padding: "1px 6px",
-                                            background: "#e2e8f0",
-                                            color: "#334155",
-                                          }}
-                                        >
-                                          FROM ROLE
-                                        </span>
-                                      )}
-                                    </span>
-                                  </label>
-                                );
-                              })}
-                            </div>
-                          </div>
-                        );
-                      })}
-                  </div>
-                )}
-
-                <div className="item-card" style={{ marginTop: "16px" }}>
-                  <h3>
-                    Calculated Effective Permissions (
-                    {userBreakdown.effective_permissions?.length || 0})
-                  </h3>
-                  <div className="muted" style={{ marginBottom: "12px", fontSize: "13px" }}>
-                    Final effective permission set applied immediately on new requests:
-                  </div>
-                  <div>
-                    {(userBreakdown.effective_permissions || []).map((c) => (
-                      <span
-                        className="chip"
-                        style={{ background: "#f1f5f9", border: "1px solid #cbd5e0" }}
-                        key={c}
-                      >
-                        {c}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-                <div className="item-card" style={{ marginTop: "16px" }}>
-                  <h4>From Assigned Roles ({userBreakdown.role_permissions?.length || 0})</h4>
-                  <div>
-                    {(userBreakdown.role_permissions || []).map((c) => (
-                      <span className="chip" key={c}>
-                        {c}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-
-        {/* Tab 3: Effective Permissions Inspector */}
-        <div className={`tab-content ${activeTab === "tab-effective" ? "active" : ""}`}>
-          <div
-            className="info-card"
-            style={{ borderLeft: "4px solid var(--color-primary, #3182ce)" }}
-          >
-            <label
-              style={{
-                display: "block",
-                fontSize: "13px",
-                fontWeight: 600,
-                marginBottom: "6px",
-                color: "#334155",
-              }}
-            >
-              Select User to Inspect Effective Access &amp; Permission Sources:
-            </label>
-            <select
-              style={{
-                width: "100%",
-                maxWidth: "540px",
-                padding: "10px",
-                border: "1px solid #cbd5e0",
-                borderRadius: "6px",
-                fontSize: "14px",
-              }}
-              value={effectiveUserId}
-              onChange={(e) => setEffectiveUserId(e.target.value)}
-            >
-              <option value="">Select User...</option>
-              {userOptions}
-            </select>
-          </div>
-
-          <div>
-            {effectiveStatus === "idle" && (
-              <p className="muted">Select a user above to view their effective access report.</p>
-            )}
-            {effectiveStatus === "loading" && (
-              <p className="muted">Calculating effective permissions and tracing sources...</p>
-            )}
-            {effectiveStatus === "ready" && !effectiveBreakdown?.user_info && (
-              <p className="muted">No access data available for selected user.</p>
-            )}
-            {effectiveStatus === "ready" && effectiveBreakdown?.user_info && (
-              <>
-                <div className="info-card">
-                  <div
-                    style={{
-                      fontSize: "15px",
-                      fontWeight: 700,
-                      color: "#1e293b",
-                      marginBottom: "8px",
-                    }}
-                  >
-                    User Information
-                  </div>
-                  <div className="info-grid">
-                    <div>
-                      <div className="info-label">Employee Name</div>
-                      <div className="info-value">
-                        {effectiveBreakdown.user_info.employee_name}
+            <div>
+              {effectiveStatus === "idle" && (
+                <p className="muted">Select a user above to view their effective access report.</p>
+              )}
+              {effectiveStatus === "loading" && (
+                <p className="muted">Calculating effective permissions and tracing sources...</p>
+              )}
+              {effectiveStatus === "ready" && !effectiveBreakdown?.user_info && (
+                <p className="muted">No access data available for selected user.</p>
+              )}
+              {effectiveStatus === "ready" && effectiveBreakdown?.user_info && (
+                <>
+                  <div className="info-card">
+                    <div
+                      style={{
+                        fontSize: "15px",
+                        fontWeight: 700,
+                        color: "#1e293b",
+                        marginBottom: "8px",
+                      }}
+                    >
+                      User Information
+                    </div>
+                    <div className="info-grid">
+                      <div>
+                        <div className="info-label">Employee Name</div>
+                        <div className="info-value">
+                          {effectiveBreakdown.user_info.employee_name}
+                        </div>
                       </div>
-                    </div>
-                    <div>
-                      <div className="info-label">Username</div>
-                      <div className="info-value">{effectiveBreakdown.user_info.username}</div>
-                    </div>
-                    <div>
-                      <div className="info-label">Department</div>
-                      <div className="info-value">{effectiveBreakdown.user_info.department}</div>
-                    </div>
-                    <div>
-                      <div className="info-label">Designation</div>
-                      <div className="info-value">{effectiveBreakdown.user_info.designation}</div>
-                    </div>
-                    <div>
-                      <div className="info-label">Assigned Roles</div>
-                      <div className="info-value">
-                        {(effectiveBreakdown.user_info.system_roles || []).join(", ") || "User"}
+                      <div>
+                        <div className="info-label">Username</div>
+                        <div className="info-value">{effectiveBreakdown.user_info.username}</div>
                       </div>
-                    </div>
-                    <div>
-                      <div className="info-label">Account Status</div>
-                      <div className="info-value">
-                        <span
-                          className={`badge ${effectiveBreakdown.user_info.status === "ACTIVE"
+                      <div>
+                        <div className="info-label">Department</div>
+                        <div className="info-value">{effectiveBreakdown.user_info.department}</div>
+                      </div>
+                      <div>
+                        <div className="info-label">Designation</div>
+                        <div className="info-value">{effectiveBreakdown.user_info.designation}</div>
+                      </div>
+                      <div>
+                        <div className="info-label">Assigned Roles</div>
+                        <div className="info-value">
+                          {(effectiveBreakdown.user_info.system_roles || []).join(", ") || "User"}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="info-label">Account Status</div>
+                        <div className="info-value">
+                          <span
+                            className={`badge ${effectiveBreakdown.user_info.status === "ACTIVE"
                               ? "badge-success"
                               : "badge-warning"
-                            }`}
-                        >
-                          {effectiveBreakdown.user_info.status}
-                        </span>
+                              }`}
+                          >
+                            {effectiveBreakdown.user_info.status}
+                          </span>
+                        </div>
                       </div>
                     </div>
                   </div>
-                </div>
 
-                <div className="info-card">
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      marginBottom: "12px",
-                    }}
-                  >
-                    <div style={{ fontSize: "15px", fontWeight: 700, color: "#1e293b" }}>
-                      Permission Sources ({effectiveSources.length})
-                    </div>
-                  </div>
-
-                  <div className="filter-bar">
-                    <input
-                      type="text"
-                      placeholder="Search permissions or modules..."
-                      style={{ flex: 1, maxWidth: "320px" }}
-                      value={tableSearch}
-                      onChange={(e) => setTableSearch(e.target.value)}
-                    />
-                    <select
-                      style={{ maxWidth: "200px" }}
-                      value={sourceFilter}
-                      onChange={(e) => setSourceFilter(e.target.value)}
+                  <div className="info-card">
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        marginBottom: "12px",
+                      }}
                     >
-                      <option value="">All Permission Sources</option>
-                      <option value="System Role">System Role</option>
-                      <option value="Individual User">Individual User</option>
-                      <option value="Super Administrator">Super Administrator</option>
-                    </select>
-                  </div>
+                      <div style={{ fontSize: "15px", fontWeight: 700, color: "#1e293b" }}>
+                        Permission Sources ({effectiveSources.length})
+                      </div>
+                    </div>
 
-                  <table className="data-table">
-                    <thead>
-                      <tr>
-                        <th>Permission Code</th>
-                        <th>Module</th>
-                        <th>Calculated Source</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredEffectiveSources.length === 0 ? (
+                    <div className="filter-bar">
+                      <input
+                        type="text"
+                        placeholder="Search permissions or modules..."
+                        style={{ flex: 1, maxWidth: "320px" }}
+                        value={tableSearch}
+                        onChange={(e) => setTableSearch(e.target.value)}
+                      />
+                      <select
+                        style={{ maxWidth: "200px" }}
+                        value={sourceFilter}
+                        onChange={(e) => setSourceFilter(e.target.value)}
+                      >
+                        <option value="">All Permission Sources</option>
+                        <option value="System Role">System Role</option>
+                        <option value="Individual User">Individual User</option>
+                        <option value="Super Administrator">Super Administrator</option>
+                      </select>
+                    </div>
+
+                    <table className="data-table">
+                      <thead>
                         <tr>
-                          <td colSpan={3} className="muted" style={{ textAlign: "center" }}>
-                            No permissions granted.
-                          </td>
+                          <th>Permission Code</th>
+                          <th>Module</th>
+                          <th>Calculated Source</th>
                         </tr>
-                      ) : (
-                        filteredEffectiveSources.map((item) => (
-                          <tr key={item.code}>
-                            <td>
-                              <strong style={{ fontFamily: "monospace", color: "#0f172a" }}>
-                                {item.code}
-                              </strong>
-                            </td>
-                            <td>
-                              <span
-                                className="badge badge-neutral"
-                                style={{ textTransform: "capitalize" }}
-                              >
-                                {item.module}
-                              </span>
-                            </td>
-                            <td>
-                              <span className={`source-badge ${sourceBadgeClass(item.source)}`}>
-                                {item.source}
-                              </span>
+                      </thead>
+                      <tbody>
+                        {filteredEffectiveSources.length === 0 ? (
+                          <tr>
+                            <td colSpan={3} className="muted" style={{ textAlign: "center" }}>
+                              No permissions granted.
                             </td>
                           </tr>
-                        ))
-                      )}
-                    </tbody>
-                  </table>
-                </div>
+                        ) : (
+                          filteredEffectiveSources.map((item) => (
+                            <tr key={item.code}>
+                              <td>
+                                <strong style={{ fontFamily: "monospace", color: "#0f172a" }}>
+                                  {item.code}
+                                </strong>
+                              </td>
+                              <td>
+                                <span
+                                  className="badge badge-neutral"
+                                  style={{ textTransform: "capitalize" }}
+                                >
+                                  {item.module}
+                                </span>
+                              </td>
+                              <td>
+                                <span className={`source-badge ${sourceBadgeClass(item.source)}`}>
+                                  {item.source}
+                                </span>
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
 
-                <div className="info-card">
-                  <div
-                    style={{
-                      fontSize: "15px",
-                      fontWeight: 700,
-                      color: "#1e293b",
-                      marginBottom: "12px",
-                    }}
-                  >
-                    Final Calculated Effective Permissions
+                  <div className="info-card">
+                    <div
+                      style={{
+                        fontSize: "15px",
+                        fontWeight: 700,
+                        color: "#1e293b",
+                        marginBottom: "12px",
+                      }}
+                    >
+                      Final Calculated Effective Permissions
+                    </div>
+                    <div>
+                      {(effectiveBreakdown.effective_permissions || []).map((c) => (
+                        <span
+                          className="chip"
+                          key={c}
+                          style={{
+                            background: "#f1f5f9",
+                            border: "1px solid #cbd5e0",
+                            padding: "4px 10px",
+                            fontSize: "12px",
+                            margin: "3px",
+                            display: "inline-block",
+                          }}
+                        >
+                          {c}
+                        </span>
+                      ))}
+                    </div>
                   </div>
-                  <div>
-                    {(effectiveBreakdown.effective_permissions || []).map((c) => (
-                      <span
-                        className="chip"
-                        key={c}
-                        style={{
-                          background: "#f1f5f9",
-                          border: "1px solid #cbd5e0",
-                          padding: "4px 10px",
-                          fontSize: "12px",
-                          margin: "3px",
-                          display: "inline-block",
-                        }}
-                      >
-                        {c}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              </>
-            )}
+                </>
+              )}
+            </div>
           </div>
         </div>
-      </div>
-    </main>
+      </main>
 
       {/* Create / Edit Role Permissions */}
       <Modal
@@ -1082,8 +1099,8 @@ export function RbacPage() {
           </div>
 
           <div className="form-actions">
-            <button type="submit" className="btn btn-primary">
-              Save Role
+            <button type="submit" className="btn btn-primary" disabled={roleSubmitting}>
+              {roleSubmitting ? "Saving…" : "Save Role"}
             </button>
             <button type="button" className="btn" onClick={() => setRoleModalOpen(false)}>
               Cancel
@@ -1131,8 +1148,8 @@ export function RbacPage() {
             </SelectField>
           </div>
           <div className="form-actions">
-            <button type="submit" className="btn btn-primary">
-              Clone Permissions
+            <button type="submit" className="btn btn-primary" disabled={cloneSubmitting}>
+              {cloneSubmitting ? "Cloning…" : "Clone Permissions"}
             </button>
             <button type="button" className="btn" onClick={() => setCloneOpen(false)}>
               Cancel

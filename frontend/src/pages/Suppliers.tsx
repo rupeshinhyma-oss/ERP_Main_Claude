@@ -38,7 +38,9 @@ import {
   toQueryString,
 } from "@/lib/api";
 import { createNameResolver } from "@/lib/nameResolver";
-import { useAuth, useSrNoJump, isSrNoQuery } from "@/lib/hooks";
+import { useAuth, useSrNoJump, isSrNoQuery, usePendingGuard } from "@/lib/hooks";
+import { useLiveConnectionStatus } from "@/lib/live/useLive";
+import { useLiveList } from "@/lib/live/useLiveList";
 import type {
   ImportHeader,
   ImportSummary,
@@ -200,6 +202,9 @@ export function SuppliersPage() {
   const [importSummary, setImportSummary] = useState<ImportSummary | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  // Phase 7: keyed so deleting one row/contact, or the bulk delete, never
+  // disables an unrelated row's controls.
+  const { isPending: isRowActionPending, guard: guardRowAction } = usePendingGuard<string>();
   const [alertPopup, setAlertPopup] = useState<{ title: string; message: string } | null>(null);
   const [drawerSupplier, setDrawerSupplier] = useState<Supplier | null>(null);
   const [pinnedCols, setPinnedCols] = useState<Record<number, "left" | "right">>(() => {
@@ -306,12 +311,12 @@ export function SuppliersPage() {
     const dir = pinnedCols[colIdx];
     const headerTopStyle: React.CSSProperties = isHeader
       ? {
-          position: "sticky",
-          top: 0,
-          zIndex: dir ? 30 : 15,
-          backgroundColor: "#f8fafc",
-          boxShadow: "0 2px 4px rgba(0, 0, 0, 0.06)",
-        }
+        position: "sticky",
+        top: 0,
+        zIndex: dir ? 30 : 15,
+        backgroundColor: "#f8fafc",
+        boxShadow: "0 2px 4px rgba(0, 0, 0, 0.06)",
+      }
       : {};
 
     if (!dir) return headerTopStyle;
@@ -421,13 +426,13 @@ export function SuppliersPage() {
     try {
       const { data } = await apiGet<{ id: string; name: string }[]>(
         "/masters/countries" +
-          toQueryString({
-            search: "China",
-            page: 1,
-            page_size: 20,
-            sort_order: "asc",
-            status: "active",
-          })
+        toQueryString({
+          search: "China",
+          page: 1,
+          page_size: 20,
+          sort_order: "asc",
+          status: "active",
+        })
       );
       const china = (data || []).find((c) => c.name.toLowerCase().includes("china"));
       if (china) return china.id;
@@ -530,14 +535,14 @@ export function SuppliersPage() {
         const extra = extraParams ? extraParams() : {};
         const { data } = await apiGet<{ id: string; name: string }[]>(
           apiBase +
-            toQueryString({
-              search: term,
-              page: 1,
-              page_size: 20,
-              sort_order: "asc",
-              status: "active",
-              ...extra,
-            }),
+          toQueryString({
+            search: term,
+            page: 1,
+            page_size: 20,
+            sort_order: "asc",
+            status: "active",
+            ...extra,
+          }),
           { signal }
         );
         return data.map((d) => ({ value: d.id, label: d.name }));
@@ -574,13 +579,13 @@ export function SuppliersPage() {
     async (term: string, signal: AbortSignal): Promise<DropdownOption[]> => {
       const { data } = await apiGet<Product[]>(
         "/masters/products" +
-          toQueryString({
-            search: term,
-            page: 1,
-            page_size: 20,
-            sort_order: "asc",
-            status: "active",
-          }),
+        toQueryString({
+          search: term,
+          page: 1,
+          page_size: 20,
+          sort_order: "asc",
+          status: "active",
+        }),
         { signal }
       );
       return data.map((d) => ({
@@ -703,6 +708,72 @@ export function SuppliersPage() {
   }, [loading, rows]);
 
   const reload = () => setReloadCounter((n) => n + 1);
+
+  /**
+   * Live sync (Phase 9): Suppliers list receives real-time updates from
+   * other users without a manual refresh, using the same useLiveList
+   * pattern as Buyers.tsx. Skips live-patching when any filter/search is
+   * active or when not on page 1 -- the same conservative correctness
+   * decision Buyers already makes (server-side filter logic would need to
+   * be duplicated here to decide whether a live-patched record still
+   * belongs in the current filtered view, so we don't attempt it;
+   * unfiltered page 1 is the safe case).
+   */
+  const hasActiveSupplierFilterOrSearch =
+    Boolean(effectiveSearch) ||
+    Boolean(categoryFilter) ||
+    Boolean(subCategoryFilter) ||
+    Boolean(productFilter) ||
+    Boolean(countryFilter) ||
+    Boolean(stateFilter) ||
+    Boolean(cityFilter) ||
+    Boolean(supplierTypeFilter) ||
+    Boolean(gradeFilter) ||
+    Boolean(statusFilter) ||
+    Boolean(potentialFilter) ||
+    Boolean(visitedFilter);
+
+  useLiveList<Supplier>({
+    moduleName: "suppliers",
+    setRecords: setRows,
+    shouldSkip: () => hasActiveSupplierFilterOrSearch || currentPage !== 1,
+    onApplied: (result) => {
+      if (result.action === "created" || result.action === "deleted") {
+        setPagination((prev) =>
+          prev
+            ? {
+              ...prev,
+              total_records:
+                result.action === "created"
+                  ? (prev.total_records || 0) + 1
+                  : Math.max(0, (prev.total_records || 1) - 1),
+            }
+            : prev
+        );
+      }
+    },
+  });
+
+  /**
+   * Reconnect sync (Phase 9): if the WebSocket dropped while we were
+   * viewing this page, re-run the REST fetch once when it comes back to
+   * pick up any changes missed during the disconnect window. Mirrors the
+   * identical pattern in Buyers.tsx.
+   */
+  const liveConnectionStatus = useLiveConnectionStatus();
+  const hasConnectedBeforeRef = useRef(false);
+  const wasDisconnectedRef = useRef(false);
+  useEffect(() => {
+    if (liveConnectionStatus === "connected") {
+      if (hasConnectedBeforeRef.current && wasDisconnectedRef.current) {
+        reload();
+      }
+      hasConnectedBeforeRef.current = true;
+      wasDisconnectedRef.current = false;
+    } else if (hasConnectedBeforeRef.current) {
+      wasDisconnectedRef.current = true;
+    }
+  }, [liveConnectionStatus]);
 
   function renderTruncatedText(text: string | null | undefined, maxLen = 22, modalTitle = "Details") {
     if (!text) return <span className="muted">—</span>;
@@ -1116,16 +1187,16 @@ export function SuppliersPage() {
     setContactForm(
       contact
         ? {
-            id: contact.id,
-            salutation: contact.salutation || "",
-            person_name: contact.person_name,
-            designation: contact.designation || "",
-            handling_territory: contact.handling_territory || "",
-            calling_number: contact.calling_number || "",
-            whatsapp_number: contact.whatsapp_number || "",
-            wechat_number: contact.wechat_number || "",
-            email: contact.email || "",
-          }
+          id: contact.id,
+          salutation: contact.salutation || "",
+          person_name: contact.person_name,
+          designation: contact.designation || "",
+          handling_territory: contact.handling_territory || "",
+          calling_number: contact.calling_number || "",
+          whatsapp_number: contact.whatsapp_number || "",
+          wechat_number: contact.wechat_number || "",
+          email: contact.email || "",
+        }
         : EMPTY_CONTACT_FORM
     );
     setContactCountryId(contact?.country_id || defaultChinaId || null);
@@ -1175,12 +1246,14 @@ export function SuppliersPage() {
 
   async function handleContactDelete(contactId: string) {
     if (!confirm("Delete this contact?")) return;
-    try {
-      await apiDelete(`/suppliers/${currentSupplierId}/contacts/${contactId}`);
-      await refreshContacts();
-    } catch (err) {
-      setError(err);
-    }
+    await guardRowAction(`delete-contact:${contactId}`, async () => {
+      try {
+        await apiDelete(`/suppliers/${currentSupplierId}/contacts/${contactId}`);
+        await refreshContacts();
+      } catch (err) {
+        setError(err);
+      }
+    });
   }
 
   async function handleRowEdit(id: string) {
@@ -1194,25 +1267,29 @@ export function SuppliersPage() {
 
   async function handleRowDelete(id: string) {
     if (!confirm("Delete this supplier?")) return;
-    try {
-      await apiDelete(`/suppliers/${id}`);
-      setRows((prev) => prev.filter((r) => r.id !== id));
-      setPagination((prev) => (prev ? { ...prev, total_records: Math.max(0, (prev.total_records || 1) - 1) } : prev));
-    } catch (err) {
-      setError(err);
-    }
+    await guardRowAction(`delete:${id}`, async () => {
+      try {
+        await apiDelete(`/suppliers/${id}`);
+        setRows((prev) => prev.filter((r) => r.id !== id));
+        setPagination((prev) => (prev ? { ...prev, total_records: Math.max(0, (prev.total_records || 1) - 1) } : prev));
+      } catch (err) {
+        setError(err);
+      }
+    });
   }
 
   async function handleBulkDelete() {
     if (!selectedIds.length) return;
     if (!confirm(`Delete ${selectedIds.length} selected supplier(s)? This cannot be undone.`)) return;
-    try {
-      await Promise.all(selectedIds.map((id) => apiDelete(`/suppliers/${id}`)));
-      setRows((prev) => prev.filter((r) => !selectedIds.includes(r.id)));
-      setSelectedIds([]);
-    } catch (err) {
-      setError(err);
-    }
+    await guardRowAction("bulk-delete", async () => {
+      try {
+        await Promise.all(selectedIds.map((id) => apiDelete(`/suppliers/${id}`)));
+        setRows((prev) => prev.filter((r) => !selectedIds.includes(r.id)));
+        setSelectedIds([]);
+      } catch (err) {
+        setError(err);
+      }
+    });
   }
 
   async function handleInlineUpdate(path: string, payload: unknown) {
@@ -2323,6 +2400,7 @@ export function SuppliersPage() {
                                   <button
                                     type="button"
                                     onClick={() => handleContactDelete(c.id)}
+                                    disabled={isRowActionPending(`delete-contact:${c.id}`)}
                                     style={{
                                       background: "#ef4444",
                                       color: "#ffffff",
@@ -2331,13 +2409,14 @@ export function SuppliersPage() {
                                       padding: "5px 12px",
                                       fontSize: "12px",
                                       fontWeight: 600,
-                                      cursor: "pointer",
+                                      cursor: isRowActionPending(`delete-contact:${c.id}`) ? "default" : "pointer",
+                                      opacity: isRowActionPending(`delete-contact:${c.id}`) ? 0.6 : 1,
                                       display: "inline-flex",
                                       alignItems: "center",
                                       gap: "4px",
                                     }}
                                   >
-                                    🗑️ Delete
+                                    {isRowActionPending(`delete-contact:${c.id}`) ? "Deleting…" : "🗑️ Delete"}
                                   </button>
                                 )}
                               </div>
@@ -2945,13 +3024,15 @@ export function SuppliersPage() {
                                       <button
                                         type="button"
                                         className="btn"
+                                        disabled={isRowActionPending(`delete:${s.id}`)}
                                         style={{
                                           background: "#ef4444",
                                           color: "#ffffff",
                                           padding: "6px 9px",
                                           borderRadius: "4px",
                                           border: "none",
-                                          cursor: "pointer",
+                                          cursor: isRowActionPending(`delete:${s.id}`) ? "default" : "pointer",
+                                          opacity: isRowActionPending(`delete:${s.id}`) ? 0.6 : 1,
                                           display: "inline-flex",
                                           alignItems: "center",
                                           justifyContent: "center",
@@ -3012,10 +3093,10 @@ export function SuppliersPage() {
           onEdit={
             canUpdate
               ? () => {
-                  const id = drawerSupplier.id;
-                  setDrawerSupplier(null);
-                  void handleRowEdit(id);
-                }
+                const id = drawerSupplier.id;
+                setDrawerSupplier(null);
+                void handleRowEdit(id);
+              }
               : undefined
           }
           editLabel="✏️ Edit Supplier"

@@ -14,10 +14,10 @@ from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.constants import RecordStatus
-from app.database.base import Base, SoftDeleteMixin, TimestampMixin, UUIDPrimaryKeyMixin
+from app.database.base import Base, SoftDeleteMixin, TimestampMixin, UUIDPrimaryKeyMixin, VersionMixin
 
 
-class Country(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
+class Country(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin, SoftDeleteMixin):
     """A single country reference record."""
 
     __tablename__ = "countries"

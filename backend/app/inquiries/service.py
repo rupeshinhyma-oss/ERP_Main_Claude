@@ -129,20 +129,12 @@ class InquiryService:
 
         Document: "1st layer summary is company wise (for example, F&B,
         One Stop, Inhyma etc)".
+
+        Phase 8: computed via one grouped SQL query
+        (``InquiryRepository.get_company_summaries``) instead of a
+        per-buyer query loop -- see that method's docstring.
         """
-        buyer_ids = await self.inquiry_repository.list_distinct_buyer_ids()
-        summaries = []
-        for buyer_id in buyer_ids:
-            consignments = await self.inquiry_repository.list_for_buyer(buyer_id)
-            summaries.append(
-                {
-                    "buyer_id": buyer_id,
-                    "consignment_count": len(consignments),
-                    "total_cbm": sum(c.total_cbm for c in consignments),
-                    "total_weight": sum(c.total_weight for c in consignments),
-                }
-            )
-        return summaries
+        return await self.inquiry_repository.get_company_summaries()
 
     async def list_consignments_for_buyer(self, buyer_id: uuid.UUID) -> list[Inquiry]:
         """Layer 1 inside one company: every consignment code for that buyer (document: "FB1, FB2...")."""

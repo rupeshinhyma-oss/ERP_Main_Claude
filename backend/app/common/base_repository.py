@@ -199,18 +199,54 @@ class BaseRepository(Generic[ModelT]):
         base_stmt = self._apply_search(base_stmt, query.search.normalized)
         base_stmt = self._apply_dynamic_filters(base_stmt, query.filters)
 
-        count_stmt = select(func.count()).select_from(base_stmt.subquery())
-        total = int((await self.session.execute(count_stmt)).scalar_one())
-
+        # Get the current page AND the total matching count in ONE round
+        # trip using a window function (COUNT(*) OVER ()), instead of two
+        # separate queries (a full COUNT(*) scan, then the page SELECT).
+        # This matters most once search/filter predicates can't use a
+        # tight index (see _apply_search's trigram-index note below) --
+        # previously every paginated request paid for a full scan-and-count
+        # of the ENTIRE matching set before it could even start fetching
+        # one page's worth of rows, which is the single biggest per-request
+        # cost at 1M+ rows. The window function still has to touch every
+        # matching row internally, but it does so once, in the same query
+        # plan as the actual page fetch, rather than twice.
         list_stmt = self._apply_sort(base_stmt, query.sort)
         list_stmt = list_stmt.offset(query.page.offset).limit(query.page.limit)
+        list_stmt = list_stmt.add_columns(func.count().over().label("__total_count"))
+
         result = await self.session.execute(list_stmt)
-        items = list(result.scalars().all())
+        rows = result.all()
+
+        if not rows:
+            # No rows on this page doesn't necessarily mean zero total
+            # matches (e.g. requesting a page past the end) -- fall back to
+            # a real count so pagination metadata (total_pages/has_next)
+            # stays correct in that edge case. This is the only remaining
+            # code path that can still issue a separate COUNT(*), and only
+            # ever fires for an empty page.
+            count_stmt = select(func.count()).select_from(base_stmt.subquery())
+            total = int((await self.session.execute(count_stmt)).scalar_one())
+            return [], total
+
+        total = int(rows[0][-1])
+        items = [row[0] for row in rows]
 
         return items, total
 
     def _apply_search(self, stmt: Select, term: str | None) -> Select:
-        """Apply an ``OR``-ed, case-insensitive ``ILIKE`` search across ``searchable_fields``."""
+        """
+        Apply an ``OR``-ed, case-insensitive substring search across ``searchable_fields``.
+
+        Still expressed as ``ILIKE '%term%'`` -- the SQL/ORM shape is
+        unchanged on purpose, so no repository or route code needs to
+        change -- but this now relies on a PostgreSQL ``pg_trgm`` GIN
+        index existing on each searchable column (see the
+        ``add_trgm_search_indexes`` Alembic migration) to make it fast at
+        1M+ rows. A plain B-tree index CANNOT accelerate a leading-wildcard
+        ``ILIKE '%term%'``; a GIN trigram index CAN, and Postgres will pick
+        it automatically once it exists -- this method's query text does
+        not need to know or care that the index is there.
+        """
         if not term or not self.searchable_fields:
             return stmt
         pattern = f"%{term}%"
@@ -299,10 +335,25 @@ class BaseRepository(Generic[ModelT]):
         """
         Delete a row.
 
-        Performs a soft delete (sets ``deleted_at``) for models that support
-        it, and a hard delete otherwise. This is decided per-model via
-        ``isinstance`` rather than by the caller, so callers cannot
-        accidentally bypass an intended soft-delete policy.
+        Performs a soft delete (sets ``deleted_at``) for every model that
+        supports it, and a hard delete only for the small set of models
+        that intentionally have no soft-delete support (see
+        ``SoftDeleteMixin``'s docstring and ``app.trash`` for the full
+        list of soft-deletable models). This is decided per-model via
+        ``isinstance`` rather than by the caller, so no caller -- admin or
+        otherwise -- can accidentally (or deliberately) bypass the
+        company-wide "every delete is recoverable" policy: whatever
+        per-form condition a service already checked before calling this
+        (e.g. "not referenced by another record", "not a system role")
+        is unaffected by this method: those checks decide WHETHER a
+        delete is allowed at all; this method only decides HOW it's
+        carried out once a service has already allowed it.
+
+        A soft-deleted row is picked up by ``app.trash`` for
+        listing/restore, and permanently purged automatically after
+        ``settings.TRASH_RETENTION_DAYS`` (see
+        ``app.trash.purge_worker.TrashPurgeWorker``) if nobody restores
+        it first.
         """
         if isinstance(instance, SoftDeleteMixin):
             from datetime import datetime, timezone
@@ -312,3 +363,28 @@ class BaseRepository(Generic[ModelT]):
         else:
             await self.session.delete(instance)
             await self.session.flush()
+
+    async def restore(self, instance: ModelT) -> ModelT:
+        """
+        Restore a soft-deleted row back to a normal, live record.
+
+        Clears ``deleted_at`` (so it reappears in every normal
+        ``_base_select()``-based query and stops counting toward its
+        4-year auto-purge window), with no other side effects -- a
+        restored record keeps its original id, all its column values,
+        and any relationship rows that were left untouched by the soft
+        delete (see the note on ``Role.permission_links`` cascade in
+        ``app.rbac.models`` for why that matters there specifically).
+
+        Raises ``TypeError`` for a model that doesn't support soft-delete
+        at all, since "restore" is meaningless for something that can
+        only ever be hard-deleted.
+        """
+        if not isinstance(instance, SoftDeleteMixin):
+            raise TypeError(
+                f"{type(instance).__name__} does not support soft-delete/restore "
+                "(no SoftDeleteMixin)."
+            )
+        instance.deleted_at = None
+        await self.session.flush()
+        return instance

@@ -397,6 +397,105 @@ class TestCacheManager:
         assert await manager.get_record("user", "u2") is None
 
 
+class TestCacheManagerFailureFallback:
+    """
+    Phase 3 resilience tests: a backend failure must degrade to
+    "cache miss"/no-op, never propagate and break the caller.
+
+    Uses a small backend double whose methods raise on demand, rather
+    than InMemoryCacheBackend (which has no way to simulate a failure --
+    a plain dict essentially never raises), to prove CacheManager's own
+    try/except wrapping actually works, independent of which concrete
+    backend is plugged in.
+    """
+
+    class _FlakyCacheBackend(CacheBackend):
+        """A backend whose every method raises, simulating e.g. a dropped Redis connection."""
+
+        async def get(self, key: str):
+            raise ConnectionError("simulated cache backend outage")
+
+        async def set(self, key: str, value, *, ttl_seconds=None) -> None:
+            raise ConnectionError("simulated cache backend outage")
+
+        async def delete(self, key: str) -> None:
+            raise ConnectionError("simulated cache backend outage")
+
+        async def exists(self, key: str) -> bool:
+            raise ConnectionError("simulated cache backend outage")
+
+        async def clear(self) -> None:
+            raise ConnectionError("simulated cache backend outage")
+
+        async def delete_namespace(self, namespace: str) -> int:
+            raise ConnectionError("simulated cache backend outage")
+
+    async def test_get_failure_returns_none_instead_of_raising(self):
+        """A failing backend.get() must surface as a miss (None), not an exception."""
+        manager = CacheManager(self._FlakyCacheBackend())
+        result = await manager.get("some-key")
+        assert result is None
+
+    async def test_set_failure_is_swallowed(self):
+        """A failing backend.set() must not raise -- the value simply isn't cached."""
+        manager = CacheManager(self._FlakyCacheBackend())
+        await manager.set("some-key", "some-value")  # must not raise
+
+    async def test_delete_failure_is_swallowed(self):
+        """A failing backend.delete() must not raise."""
+        manager = CacheManager(self._FlakyCacheBackend())
+        await manager.delete("some-key")  # must not raise
+
+    async def test_exists_failure_returns_false(self):
+        """A failing backend.exists() must surface as False, not an exception."""
+        manager = CacheManager(self._FlakyCacheBackend())
+        assert await manager.exists("some-key") is False
+
+    async def test_delete_namespace_failure_returns_zero(self):
+        """A failing backend.delete_namespace() must surface as 0, not an exception."""
+        manager = CacheManager(self._FlakyCacheBackend())
+        assert await manager.delete_namespace("some-namespace") == 0
+
+    async def test_get_or_set_falls_through_to_loader_when_backend_is_down(self):
+        """
+        With the cache backend entirely down, get_or_set() must still
+        return a correct value by falling through to the loader --
+        i.e. the ERP keeps working (degraded to "always a cache miss"),
+        exactly as if there were simply no cache at all.
+        """
+        manager = CacheManager(self._FlakyCacheBackend())
+        calls = {"count": 0}
+
+        async def loader():
+            calls["count"] += 1
+            return "value-from-database"
+
+        result = await manager.get_or_set("k1", loader, ttl_seconds=60)
+
+        assert result == "value-from-database"
+        assert calls["count"] == 1
+
+    async def test_named_helpers_degrade_gracefully_when_backend_is_down(self):
+        """
+        Every named helper (permissions, dropdown, departments, etc.)
+        routes through the same hardened get/set/delete -- spot-check a
+        few to confirm none of them bypass the fallback and raise.
+        """
+        manager = CacheManager(self._FlakyCacheBackend())
+
+        assert await manager.get_user_permissions("u1") is None
+        await manager.set_user_permissions("u1", {"a"})  # must not raise
+        # Always returns 1 when a user_id is given (by design -- see
+        # invalidate_user_permissions's own implementation), regardless
+        # of whether the underlying delete succeeded; the point here is
+        # just that calling it with a down backend must not raise.
+        assert await manager.invalidate_user_permissions("u1") == 1
+
+        assert await manager.get_dropdown("countries") is None
+        await manager.set_dropdown("countries", ["US"])  # must not raise
+        assert await manager.get_dashboard_count("metric") is None
+
+
 # ---------------------------------------------------------------------------
 # BackgroundCleanupWorker
 # ---------------------------------------------------------------------------

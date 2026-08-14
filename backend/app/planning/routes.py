@@ -18,6 +18,8 @@ from app.auth.service import AuthService, CurrentUser
 from app.core.exceptions import UnauthorizedException
 from app.core.logging import get_logger
 from app.core.responses import build_success_response
+from app.events.dependencies import get_event_dispatcher
+from app.events.dispatcher import EventDispatcher
 from app.planning import source_registry
 from app.planning.dependencies import get_planning_service
 from app.planning.ws_manager import connection_manager
@@ -114,19 +116,33 @@ async def sheet_live_updates(
         connection_manager.disconnect(sheet_id, websocket)
 
 
-async def _broadcast(sheet_id: uuid.UUID, event_type: str, payload: dict, *, current_user: CurrentUser) -> None:
+async def _broadcast(
+    sheet_id: uuid.UUID, event_type: str, payload: dict, *, current_user: CurrentUser, service: PlanningService
+) -> None:
     """
-    Fan out a change to every other tab watching this sheet.
+    Commit the write, THEN fan out a change to every other tab watching this sheet.
 
-    Called after each write route's DB transaction has already committed
-    (``get_db_session`` commits when the route returns normally, but this
-    call happens inside the route body before the return -- the write
-    itself was already flushed to the DB by the service call above it, so
-    another tab reloading in response to this event will see consistent
-    data). Never raises: a broadcast failure must not turn a successful
-    write into a failed HTTP response for the user who made it.
+    Phase 5 fix: this previously ran BEFORE ``get_db_session``'s own
+    commit (which only happens once the route handler returns), despite
+    this function's own docstring incorrectly treating "flushed" as
+    equivalent to "committed" -- flush makes a write visible to the
+    SAME transaction/session, not to any OTHER connection reading the
+    database, which is exactly what another tab's live-triggered grid
+    reload does. A tab that reacted to this broadcast fast enough could
+    have read stale (pre-write) data. Explicitly committing here first
+    -- via the same ``AsyncSession`` the route's own ``service`` already
+    wraps (``service.sheet_repository.session``), so no route signature
+    needs to change -- closes that window. A second, later commit from
+    ``get_db_session``'s own generator (once the route returns) is then
+    a safe no-op with nothing left pending; verified directly against
+    SQLAlchemy's ``AsyncSession`` when fixing the identical issue for
+    Buyers in Phase 4 (see ``app.buyers.routes._publish_buyer_event``).
+
+    Never raises: a broadcast failure must not turn a successful write
+    into a failed HTTP response for the user who made it.
     """
     try:
+        await service.sheet_repository.session.commit()
         await connection_manager.broadcast(
             sheet_id,
             {"type": event_type, "payload": payload, "changed_by": str(current_user.id)},
@@ -134,6 +150,55 @@ async def _broadcast(sheet_id: uuid.UUID, event_type: str, payload: dict, *, cur
         )
     except Exception:  # noqa: BLE001
         logger.exception("Failed to broadcast planning live-update event.", extra={"sheet_id": str(sheet_id), "event_type": event_type})
+
+
+async def _publish_planning_sheet_event(
+    *,
+    service: PlanningService,
+    dispatcher: EventDispatcher,
+    event_type: str,
+    sheet_id: uuid.UUID | str,
+    version: int | None,
+    user_id: uuid.UUID,
+    changes: dict,
+) -> None:
+    """
+    Commit, then publish a ``planning.*`` SHEET-LIFECYCLE event on
+    ``module:planning``.
+
+    Phase 6: thin wrapper around the shared
+    :meth:`EventDispatcher.publish_lifecycle_event` -- see that method's
+    own docstring for the full reasoning. This function used to build
+    the ``Event``/commit the session itself; that logic was identical to
+    Buyers' own ``_publish_buyer_event`` except for which session
+    accessor each had available, so it's now consolidated there and this
+    is just a short, Planning-named call site.
+
+    Deliberately separate from :func:`_broadcast` above, which is for
+    the EXISTING per-sheet grid-internals socket (cell/column/row
+    changes -- a fundamentally different granularity that the generic
+    entity-event model was never designed for; see PHASE5_PLANNING_LIVE.md
+    for the full reasoning). This is only for whole-sheet lifecycle
+    events (create/rename/delete a sheet/branch tab), which map onto the
+    generic "one record changed" model exactly like a Buyer does -- so a
+    sheet LIST view (if one is ever built) could subscribe to
+    ``module:planning`` the same way ``Buyers.tsx`` subscribes to
+    ``module:buyers``, without needing a live connection to any specific
+    sheet's grid socket at all.
+
+    Uses ``service.sheet_repository.session`` for the same reason
+    ``_broadcast`` does -- no route signature needs a ``db`` parameter.
+    """
+    await dispatcher.publish_lifecycle_event(
+        service.sheet_repository.session,
+        module="planning",
+        entity="planning",
+        entity_id=sheet_id,
+        event_type=event_type,
+        version=version,
+        user_id=user_id,
+        changes=changes,
+    )
 
 
 def _row_to_read_dict(row) -> dict:
@@ -175,6 +240,7 @@ async def create_sheet(
     request: Request,
     service: PlanningService = Depends(get_planning_service),
     current_user: CurrentUser = Depends(require_permission("planning.sheet.manage")),
+    dispatcher: EventDispatcher = Depends(get_event_dispatcher),
 ) -> dict:
     sheet = await service.create_sheet(
         name=payload.name,
@@ -184,6 +250,15 @@ async def create_sheet(
         username=current_user.username,
     )
     data = PlanningSheetRead.model_validate(sheet).model_dump(mode="json")
+    await _publish_planning_sheet_event(
+        service=service,
+        dispatcher=dispatcher,
+        event_type="planning.created",
+        sheet_id=sheet.id,
+        version=sheet.version,
+        user_id=current_user.id,
+        changes={"name": sheet.name},
+    )
     return build_success_response(data=data, request_id=request.state.request_id, message="Sheet created.")
 
 
@@ -244,9 +319,21 @@ async def rename_sheet(
     request: Request,
     service: PlanningService = Depends(get_planning_service),
     current_user: CurrentUser = Depends(require_permission("planning.sheet.manage")),
+    dispatcher: EventDispatcher = Depends(get_event_dispatcher),
 ) -> dict:
-    sheet = await service.rename_sheet(sheet_id, name=payload.name, user_id=current_user.id, username=current_user.username)
+    sheet = await service.rename_sheet(
+        sheet_id, name=payload.name, version=payload.version, user_id=current_user.id, username=current_user.username
+    )
     data = PlanningSheetRead.model_validate(sheet).model_dump(mode="json")
+    await _publish_planning_sheet_event(
+        service=service,
+        dispatcher=dispatcher,
+        event_type="planning.updated",
+        sheet_id=sheet.id,
+        version=sheet.version,
+        user_id=current_user.id,
+        changes={"name": sheet.name},
+    )
     return build_success_response(data=data, request_id=request.state.request_id, message="Sheet renamed.")
 
 
@@ -322,8 +409,18 @@ async def delete_sheet(
     request: Request,
     service: PlanningService = Depends(get_planning_service),
     current_user: CurrentUser = Depends(require_permission("planning.sheet.manage")),
+    dispatcher: EventDispatcher = Depends(get_event_dispatcher),
 ) -> dict:
     await service.delete_sheet(sheet_id, user_id=current_user.id, username=current_user.username)
+    await _publish_planning_sheet_event(
+        service=service,
+        dispatcher=dispatcher,
+        event_type="planning.deleted",
+        sheet_id=sheet_id,
+        version=None,
+        user_id=current_user.id,
+        changes={},
+    )
     return build_success_response(data=None, request_id=request.state.request_id, message="Sheet deleted.")
 
 
@@ -604,7 +701,7 @@ async def add_column(
         username=current_user.username,
     )
     data = PlanningColumnRead.model_validate(column).model_dump(mode="json")
-    await _broadcast(sheet_id, "column_added", data, current_user=current_user)
+    await _broadcast(sheet_id, "column_added", data, current_user=current_user, service=service)
     return build_success_response(data=data, request_id=request.state.request_id, message="Column added.")
 
 
@@ -621,7 +718,7 @@ async def rename_column(
         sheet_id, column_id, name=payload.name, user_id=current_user.id, username=current_user.username
     )
     data = PlanningColumnRead.model_validate(column).model_dump(mode="json")
-    await _broadcast(sheet_id, "column_renamed", data, current_user=current_user)
+    await _broadcast(sheet_id, "column_renamed", data, current_user=current_user, service=service)
     return build_success_response(data=data, request_id=request.state.request_id, message="Column renamed.")
 
 
@@ -638,7 +735,7 @@ async def move_column(
         sheet_id, column_id, new_position=payload.position, user_id=current_user.id, username=current_user.username
     )
     data = PlanningColumnRead.model_validate(column).model_dump(mode="json")
-    await _broadcast(sheet_id, "column_moved", data, current_user=current_user)
+    await _broadcast(sheet_id, "column_moved", data, current_user=current_user, service=service)
     return build_success_response(data=data, request_id=request.state.request_id, message="Column moved.")
 
 
@@ -651,7 +748,7 @@ async def delete_column(
     current_user: CurrentUser = Depends(require_permission("planning.column.manage")),
 ) -> dict:
     await service.delete_column(sheet_id, column_id, user_id=current_user.id, username=current_user.username)
-    await _broadcast(sheet_id, "column_deleted", {"column_id": str(column_id)}, current_user=current_user)
+    await _broadcast(sheet_id, "column_deleted", {"column_id": str(column_id)}, current_user=current_user, service=service)
     return build_success_response(data=None, request_id=request.state.request_id, message="Column deleted.")
 
 
@@ -721,7 +818,7 @@ async def configure_column_source(
         username=current_user.username,
     )
     data = PlanningColumnRead.model_validate(column).model_dump(mode="json")
-    await _broadcast(sheet_id, "column_source_configured", data, current_user=current_user)
+    await _broadcast(sheet_id, "column_source_configured", data, current_user=current_user, service=service)
     return build_success_response(data=data, request_id=request.state.request_id, message="Column source configured.")
 
 
@@ -807,7 +904,11 @@ async def auto_populate_rows_from_item_source(
     # via get_grid just to reach into grid["sheet"].
     sheet = await service.get_sheet_or_raise(sheet_id)
     rows = await service.auto_populate_rows_from_item_source(
-        sheet_id, limit=payload.limit, user_id=current_user.id, username=current_user.username
+        sheet_id,
+        limit=payload.limit,
+        user_id=current_user.id,
+        username=current_user.username,
+        organization_id=payload.organization_id,
     )
     # Batched the same way as get_grid -- one query for every linked
     # record just created, not one per row. This route creates up to
@@ -925,7 +1026,7 @@ async def set_column_role_lock(
         sheet_id, column_id, role_ids=payload.role_ids, user_id=current_user.id, username=current_user.username
     )
     data = PlanningColumnRead.model_validate(column).model_dump(mode="json")
-    await _broadcast(sheet_id, "column_role_lock_changed", data, current_user=current_user)
+    await _broadcast(sheet_id, "column_role_lock_changed", data, current_user=current_user, service=service)
     return build_success_response(data=data, request_id=request.state.request_id, message="Column role lock updated.")
 
 
@@ -951,7 +1052,7 @@ async def set_column_status_color_enabled(
         sheet_id, column_id, enabled=payload.enable_status_color, user_id=current_user.id, username=current_user.username
     )
     data = PlanningColumnRead.model_validate(column).model_dump(mode="json")
-    await _broadcast(sheet_id, "column_status_color_toggled", data, current_user=current_user)
+    await _broadcast(sheet_id, "column_status_color_toggled", data, current_user=current_user, service=service)
     return build_success_response(data=data, request_id=request.state.request_id, message="Column status-color setting updated.")
 
 
@@ -980,7 +1081,7 @@ async def set_column_description(
         sheet_id, column_id, description=payload.description, user_id=current_user.id, username=current_user.username
     )
     data = PlanningColumnRead.model_validate(column).model_dump(mode="json")
-    await _broadcast(sheet_id, "column_description_changed", data, current_user=current_user)
+    await _broadcast(sheet_id, "column_description_changed", data, current_user=current_user, service=service)
     return build_success_response(data=data, request_id=request.state.request_id, message="Column description updated.")
 
 
@@ -999,7 +1100,7 @@ async def set_item_column_description(
         sheet_id, description=payload.description, user_id=current_user.id, username=current_user.username
     )
     data = PlanningSheetRead.model_validate(sheet).model_dump(mode="json")
-    await _broadcast(sheet_id, "item_description_changed", data, current_user=current_user)
+    await _broadcast(sheet_id, "item_description_changed", data, current_user=current_user, service=service)
     return build_success_response(data=data, request_id=request.state.request_id, message="ITEM column description updated.")
 
 
@@ -1019,7 +1120,7 @@ async def rename_row(
 ) -> dict:
     row = await service.rename_row(sheet_id, row_id, label=payload.label, user_id=current_user.id, username=current_user.username)
     data = PlanningRowRead.model_validate(_row_to_read_dict(row)).model_dump(mode="json")
-    await _broadcast(sheet_id, "row_renamed", data, current_user=current_user)
+    await _broadcast(sheet_id, "row_renamed", data, current_user=current_user, service=service)
     return build_success_response(data=data, request_id=request.state.request_id, message="Row renamed.")
 
 
@@ -1042,7 +1143,7 @@ async def set_row_description(
         sheet_id, row_id, description=payload.description, user_id=current_user.id, username=current_user.username
     )
     data = PlanningRowRead.model_validate(_row_to_read_dict(row)).model_dump(mode="json")
-    await _broadcast(sheet_id, "row_description_changed", data, current_user=current_user)
+    await _broadcast(sheet_id, "row_description_changed", data, current_user=current_user, service=service)
     return build_success_response(data=data, request_id=request.state.request_id, message="Row description updated.")
 
 
@@ -1059,7 +1160,7 @@ async def move_row(
         sheet_id, row_id, new_position=payload.position, user_id=current_user.id, username=current_user.username
     )
     data = PlanningRowRead.model_validate(_row_to_read_dict(row)).model_dump(mode="json")
-    await _broadcast(sheet_id, "row_moved", data, current_user=current_user)
+    await _broadcast(sheet_id, "row_moved", data, current_user=current_user, service=service)
     return build_success_response(data=data, request_id=request.state.request_id, message="Row moved.")
 
 
@@ -1072,7 +1173,7 @@ async def delete_row(
     current_user: CurrentUser = Depends(require_permission("planning.row.manage")),
 ) -> dict:
     await service.delete_row(sheet_id, row_id, user_id=current_user.id, username=current_user.username)
-    await _broadcast(sheet_id, "row_deleted", {"row_id": str(row_id)}, current_user=current_user)
+    await _broadcast(sheet_id, "row_deleted", {"row_id": str(row_id)}, current_user=current_user, service=service)
     return build_success_response(data=None, request_id=request.state.request_id, message="Row deleted.")
 
 
@@ -1163,7 +1264,7 @@ async def set_cell_value(
         )
         derived = {}
     payload_out = {"cell": data, "row_id": str(row_id), "derived_values": derived}
-    await _broadcast(sheet_id, "cell_value_changed", payload_out, current_user=current_user)
+    await _broadcast(sheet_id, "cell_value_changed", payload_out, current_user=current_user, service=service)
     return build_success_response(
         data={"cell": data, "derived_values": derived}, request_id=request.state.request_id, message="Cell updated."
     )
@@ -1194,7 +1295,7 @@ async def set_cell_status(
         username=current_user.username,
     )
     data = PlanningCellRead.model_validate(cell).model_dump(mode="json")
-    await _broadcast(sheet_id, "cell_status_changed", {"cell": data, "row_id": str(row_id)}, current_user=current_user)
+    await _broadcast(sheet_id, "cell_status_changed", {"cell": data, "row_id": str(row_id)}, current_user=current_user, service=service)
     return build_success_response(data=data, request_id=request.state.request_id, message="Cell status updated.")
 
 
@@ -1220,7 +1321,7 @@ async def set_cell_description(
         sheet_id, row_id, column_id, description=payload.description, user_id=current_user.id, username=current_user.username
     )
     data = PlanningCellRead.model_validate(cell).model_dump(mode="json")
-    await _broadcast(sheet_id, "cell_description_changed", {"cell": data, "row_id": str(row_id)}, current_user=current_user)
+    await _broadcast(sheet_id, "cell_description_changed", {"cell": data, "row_id": str(row_id)}, current_user=current_user, service=service)
     return build_success_response(data=data, request_id=request.state.request_id, message="Cell description updated.")
 
 

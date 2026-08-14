@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
+from sqlalchemy.exc import OperationalError, TimeoutError as SATimeoutError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import JSONResponse
 
@@ -86,6 +87,44 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     )
 
 
+async def database_unavailable_handler(request: Request, exc: Exception) -> JSONResponse:
+    """
+    Handle database-connectivity failures specifically (Phase 7 item 7):
+    ``OperationalError`` (connection refused/reset, auth failure to the DB
+    itself) and SQLAlchemy's own pool-checkout ``TimeoutError`` (pool
+    exhausted -- every connection is in use and none freed up within
+    ``DATABASE_POOL_TIMEOUT_SECONDS``).
+
+    These are distinguished from an arbitrary unhandled exception because
+    they're a genuinely different, transient condition -- "the database is
+    unreachable right now" -- and are mapped to 503 rather than a bare 500
+    so that: (a) the frontend's retry logic treats them as retryable
+    (RETRYABLE_STATUSES includes 503, see frontend/src/lib/api.ts), and
+    (b) operators scanning logs/metrics can tell "DB is down" apart from
+    "a bug threw an unexpected exception". The message shown to the client
+    stays generic -- no DSN, host, or driver error text -- per the
+    "never expose stack traces or internal database errors" rule.
+
+    NOTE: any transaction on the failed session was already rolled back by
+    ``app.database.session.get_db_session``'s own exception handling before
+    this ever runs, so there is no risk of this handler seeing (or masking)
+    a dirty/uncommitted transaction.
+    """
+    request_id = _get_request_id(request)
+    logger.error(
+        "Database unavailable while handling request.",
+        extra={"path": request.url.path, "request_id": request_id, "error_type": type(exc).__name__},
+    )
+    return JSONResponse(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        content=build_error_response(
+            code="SERVICE_UNAVAILABLE",
+            message="The service is temporarily unavailable. Please try again in a moment.",
+            request_id=request_id,
+        ),
+    )
+
+
 async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     """
     Catch-all handler for exceptions with no more specific handler.
@@ -112,4 +151,6 @@ def register_exception_handlers(app: FastAPI) -> None:
     app.add_exception_handler(AppException, app_exception_handler)
     app.add_exception_handler(StarletteHTTPException, http_exception_handler)
     app.add_exception_handler(RequestValidationError, validation_exception_handler)
+    app.add_exception_handler(OperationalError, database_unavailable_handler)
+    app.add_exception_handler(SATimeoutError, database_unavailable_handler)
     app.add_exception_handler(Exception, unhandled_exception_handler)

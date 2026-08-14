@@ -18,7 +18,8 @@ import { Banner, Can, TableMessageRow } from "@/components/ui";
 import { SearchableDropdown, type DropdownOption } from "@/components/SearchableDropdown";
 import { SelectField, TextAreaField, TextField } from "@/components/fields";
 import { apiDelete, apiGet, apiPatch, apiPost, toQueryString } from "@/lib/api";
-import { useAuth } from "@/lib/hooks";
+import { useLiveModule } from "@/lib/live/useLive";
+import { useAuth, usePendingGuard } from "@/lib/hooks";
 import type { Buyer } from "@/types/buyers";
 import type { CompanySummary, ConsignmentCode, Inquiry, InquiryItem, InquiryListItem } from "@/types/inquiries";
 
@@ -109,8 +110,8 @@ export function InquiriesPage() {
             view.layer === "companies"
               ? ["Inquiries & Consignments"]
               : view.layer === "consignments"
-              ? ["Inquiries & Consignments", buyerNames[view.buyerId] || "…"]
-              : ["Inquiries & Consignments", buyerNames[view.buyerId] || "…", "Consignment"]
+                ? ["Inquiries & Consignments", buyerNames[view.buyerId] || "…"]
+                : ["Inquiries & Consignments", buyerNames[view.buyerId] || "…", "Consignment"]
           }
         />
         <Banner error={error} />
@@ -263,6 +264,8 @@ function ConsignmentsView({
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [addOpen, setAddOpen] = useState(false);
+  // Phase 7: keyed so deleting one row never disables another row's button.
+  const { isPending: isRowActionPending, guard: guardRowAction } = usePendingGuard<string>();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -290,12 +293,14 @@ function ConsignmentsView({
 
   async function handleDelete(inquiryId: string) {
     if (!window.confirm("Delete this consignment and all its items?")) return;
-    try {
-      await apiDelete(`/inquiries/${inquiryId}`);
-      void load();
-    } catch (err) {
-      onError(err);
-    }
+    await guardRowAction(`delete:${inquiryId}`, async () => {
+      try {
+        await apiDelete(`/inquiries/${inquiryId}`);
+        void load();
+      } catch (err) {
+        onError(err);
+      }
+    });
   }
 
   return (
@@ -356,7 +361,14 @@ function ConsignmentsView({
                     <div style={{ display: "flex", gap: 6 }}>
                       <button type="button" onClick={() => onOpenConsignment(r.id)} className="btn-link">View</button>
                       <Can permission="inquiry.delete">
-                        <button type="button" onClick={() => handleDelete(r.id)} className="btn-link btn-link-danger">Delete</button>
+                        <button
+                          type="button"
+                          onClick={() => handleDelete(r.id)}
+                          disabled={isRowActionPending(`delete:${r.id}`)}
+                          className="btn-link btn-link-danger"
+                        >
+                          {isRowActionPending(`delete:${r.id}`) ? "Deleting…" : "Delete"}
+                        </button>
                       </Can>
                     </div>
                   </td>
@@ -418,6 +430,9 @@ function ItemsView({
   const [addOpen, setAddOpen] = useState(false);
   const [shiftTarget, setShiftTarget] = useState<InquiryItem | null>(null);
   const [remarksTarget, setRemarksTarget] = useState<InquiryItem | null>(null);
+  // Phase 7: keyed per item+action so approving/reverting/deleting one row,
+  // or the bulk tally-post, never disables an unrelated row's controls.
+  const { isPending: isRowActionPending, guard: guardRowAction } = usePendingGuard<string>();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -438,6 +453,24 @@ function ItemsView({
     void load();
   }, [load]);
 
+  /**
+   * Live sync (Phase 9): backend inquiry events (`app.inquiries.routes.
+   * _publish_inquiry_event`) are published at the ITEM level -- entity_id
+   * is the InquiryItem's own id, not the parent consignment's -- and
+   * carry only a small partial `changes` payload (see the dispatcher's
+   * own docstring), not a full item record. Rather than duplicate this
+   * page's own quantity/status/shift/approve business rules to hand-patch
+   * `inquiry.items` from that partial payload (which `useLiveList` is
+   * built for on FLAT lists, not this nested `Inquiry.items` shape), this
+   * performs a targeted re-fetch of just this one consignment whenever
+   * any inquiry event arrives while it's open. Cheap (one GET, not the
+   * whole Layer-1 list) and always correct, since `load()` is the exact
+   * same fetch this view already uses for its initial render.
+   */
+  useLiveModule("inquiries", () => {
+    void load();
+  });
+
   // Document: "All pending entries to show on top by default" -- the backend already
   // orders pending-first; keep that order here rather than re-sorting client-side.
   const items = inquiry?.items ?? [];
@@ -453,52 +486,62 @@ function ItemsView({
 
   async function handleBulkTallyPost() {
     if (selectedIds.size === 0) return;
-    try {
-      await apiPost("/inquiries/items/bulk-tally-post", { item_ids: Array.from(selectedIds) });
-      setSelectedIds(new Set());
-      void load();
-    } catch (err) {
-      onError(err);
-    }
+    await guardRowAction("bulk-tally-post", async () => {
+      try {
+        await apiPost("/inquiries/items/bulk-tally-post", { item_ids: Array.from(selectedIds) });
+        setSelectedIds(new Set());
+        void load();
+      } catch (err) {
+        onError(err);
+      }
+    });
   }
 
   async function handleApprove(item: InquiryItem) {
-    try {
-      await apiPost(`/inquiries/${inquiryId}/items/${item.id}/approve`, {});
-      void load();
-    } catch (err) {
-      onError(err);
-    }
+    await guardRowAction(`approve:${item.id}`, async () => {
+      try {
+        await apiPost(`/inquiries/${inquiryId}/items/${item.id}/approve`, {});
+        void load();
+      } catch (err) {
+        onError(err);
+      }
+    });
   }
 
   async function handleRevert(item: InquiryItem) {
-    try {
-      await apiPost(`/inquiries/${inquiryId}/items/${item.id}/revert`, {});
-      void load();
-    } catch (err) {
-      onError(err);
-    }
+    await guardRowAction(`revert:${item.id}`, async () => {
+      try {
+        await apiPost(`/inquiries/${inquiryId}/items/${item.id}/revert`, {});
+        void load();
+      } catch (err) {
+        onError(err);
+      }
+    });
   }
 
   async function handleDeleteItem(item: InquiryItem) {
     if (!window.confirm("Delete this inquiry item?")) return;
-    try {
-      await apiDelete(`/inquiries/${inquiryId}/items/${item.id}`);
-      void load();
-    } catch (err) {
-      onError(err);
-    }
+    await guardRowAction(`delete:${item.id}`, async () => {
+      try {
+        await apiDelete(`/inquiries/${inquiryId}/items/${item.id}`);
+        void load();
+      } catch (err) {
+        onError(err);
+      }
+    });
   }
 
   async function handleQuantityChange(item: InquiryItem, quantity: string) {
     const value = Number(quantity);
     if (!value || value <= 0) return;
-    try {
-      await apiPatch(`/inquiries/${inquiryId}/items/${item.id}`, { quantity: value });
-      void load();
-    } catch (err) {
-      onError(err);
-    }
+    await guardRowAction(`qty:${item.id}`, async () => {
+      try {
+        await apiPatch(`/inquiries/${inquiryId}/items/${item.id}`, { quantity: value });
+        void load();
+      } catch (err) {
+        onError(err);
+      }
+    });
   }
 
   return (
@@ -520,8 +563,15 @@ function ItemsView({
         </div>
         <div style={{ display: "flex", gap: 8 }}>
           <Can permission="inquiry.update">
-            <button type="button" className="btn btn-secondary" onClick={handleBulkTallyPost} disabled={selectedIds.size === 0}>
-              Mark {selectedIds.size > 0 ? `${selectedIds.size} ` : ""}Tally Posted
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={handleBulkTallyPost}
+              disabled={selectedIds.size === 0 || isRowActionPending("bulk-tally-post")}
+            >
+              {isRowActionPending("bulk-tally-post")
+                ? "Posting…"
+                : `Mark ${selectedIds.size > 0 ? `${selectedIds.size} ` : ""}Tally Posted`}
             </button>
           </Can>
           <Can permission="inquiry.create">
@@ -581,6 +631,7 @@ function ItemsView({
                         step="any"
                         defaultValue={item.quantity}
                         onBlur={(e) => handleQuantityChange(item, e.target.value)}
+                        disabled={isRowActionPending(`qty:${item.id}`)}
                         style={{ width: 80, padding: 4, border: "1px solid #E2E8F0", borderRadius: 4 }}
                       />
                     </Can>
@@ -601,16 +652,37 @@ function ItemsView({
                   <td style={tdStyle}>
                     <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                       {canApprove && item.status === "proposed" && (
-                        <button type="button" onClick={() => handleApprove(item)} className="btn-link">Approve</button>
+                        <button
+                          type="button"
+                          onClick={() => handleApprove(item)}
+                          disabled={isRowActionPending(`approve:${item.id}`)}
+                          className="btn-link"
+                        >
+                          {isRowActionPending(`approve:${item.id}`) ? "Approving…" : "Approve"}
+                        </button>
                       )}
                       {canApprove && item.status === "approved" && (
-                        <button type="button" onClick={() => handleRevert(item)} className="btn-link">Revert</button>
+                        <button
+                          type="button"
+                          onClick={() => handleRevert(item)}
+                          disabled={isRowActionPending(`revert:${item.id}`)}
+                          className="btn-link"
+                        >
+                          {isRowActionPending(`revert:${item.id}`) ? "Reverting…" : "Revert"}
+                        </button>
                       )}
                       <Can permission="inquiry.update">
                         <button type="button" onClick={() => setShiftTarget(item)} className="btn-link">Shift</button>
                       </Can>
                       {canDelete && (
-                        <button type="button" onClick={() => handleDeleteItem(item)} className="btn-link btn-link-danger">Delete</button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteItem(item)}
+                          disabled={isRowActionPending(`delete:${item.id}`)}
+                          className="btn-link btn-link-danger"
+                        >
+                          {isRowActionPending(`delete:${item.id}`) ? "Deleting…" : "Delete"}
+                        </button>
                       )}
                     </div>
                   </td>
@@ -673,6 +745,7 @@ function AddItemModal({
 }) {
   const [form, setForm] = useState({ ...EMPTY_ITEM_FORM, buyer_id: defaultBuyerId, consignment_code_id: defaultConsignmentCodeId || "" });
   const [status, setStatus] = useState<"proposed" | "approved">("proposed");
+  const [submitting, setSubmitting] = useState(false);
 
   const codeFetcher = useCallback(
     async (term: string, signal: AbortSignal): Promise<DropdownOption[]> => {
@@ -708,7 +781,9 @@ function AddItemModal({
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (submitting) return; // Phase 7: ignore a second click while the first save is still in flight
     if (!form.consignment_code_id || !form.product_id || !form.quantity) return;
+    setSubmitting(true);
     try {
       await apiPost("/inquiries/items", {
         buyer_id: form.buyer_id,
@@ -722,6 +797,8 @@ function AddItemModal({
       onSaved();
     } catch (err) {
       onError(err);
+    } finally {
+      setSubmitting(false);
     }
   }
 
@@ -782,7 +859,14 @@ function AddItemModal({
 
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 20 }}>
           <button type="button" className="btn btn-secondary" onClick={onClose}>Cancel</button>
-          <button type="submit" className="btn btn-primary">Add Item</button>
+          <button
+            type="submit"
+            className="btn btn-primary"
+            disabled={submitting}
+            style={submitting ? { cursor: "default", opacity: 0.7 } : undefined}
+          >
+            {submitting ? "Adding…" : "Add Item"}
+          </button>
         </div>
       </form>
     </ModalShell>
@@ -803,6 +887,7 @@ function ShiftItemModal({
   onError: (err: unknown) => void;
 }) {
   const [targetCodeId, setTargetCodeId] = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
   const codeFetcher = useCallback(
     async (term: string, signal: AbortSignal): Promise<DropdownOption[]> => {
@@ -819,12 +904,16 @@ function ShiftItemModal({
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (submitting) return; // Phase 7: ignore a second click while the first save is still in flight
     if (!targetCodeId) return;
+    setSubmitting(true);
     try {
       await apiPost(`/inquiries/${item.inquiry_id}/items/${item.id}/shift`, { to_consignment_code_id: targetCodeId });
       onShifted();
     } catch (err) {
       onError(err);
+    } finally {
+      setSubmitting(false);
     }
   }
 
@@ -835,7 +924,14 @@ function ShiftItemModal({
         <SearchableDropdown value={targetCodeId} onChange={(v) => setTargetCodeId(v || "")} placeholder="e.g. FB2" fetchOptions={codeFetcher} fetchLabelForValue={codeLabel} />
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 20 }}>
           <button type="button" className="btn btn-secondary" onClick={onClose}>Cancel</button>
-          <button type="submit" className="btn btn-primary">Shift Item</button>
+          <button
+            type="submit"
+            className="btn btn-primary"
+            disabled={submitting}
+            style={submitting ? { cursor: "default", opacity: 0.7 } : undefined}
+          >
+            {submitting ? "Shifting…" : "Shift Item"}
+          </button>
         </div>
       </form>
     </ModalShell>
@@ -856,14 +952,19 @@ function ProcurementRemarksModal({
   onError: (err: unknown) => void;
 }) {
   const [remarks, setRemarks] = useState(item.procurement_remarks || "");
+  const [submitting, setSubmitting] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (submitting) return; // Phase 7: ignore a second click while the first save is still in flight
+    setSubmitting(true);
     try {
       await apiPatch(`/inquiries/${inquiryId}/items/${item.id}/procurement-remarks`, { remarks: remarks || null });
       onSaved();
     } catch (err) {
       onError(err);
+    } finally {
+      setSubmitting(false);
     }
   }
 
@@ -873,7 +974,14 @@ function ProcurementRemarksModal({
         <TextAreaField id="remarks" label="Remarks (by Yinglima China Procurement Team)" rows={4} value={remarks} onChange={setRemarks} />
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
           <button type="button" className="btn btn-secondary" onClick={onClose}>Cancel</button>
-          <button type="submit" className="btn btn-primary">Save</button>
+          <button
+            type="submit"
+            className="btn btn-primary"
+            disabled={submitting}
+            style={submitting ? { cursor: "default", opacity: 0.7 } : undefined}
+          >
+            {submitting ? "Saving…" : "Save"}
+          </button>
         </div>
       </form>
     </ModalShell>

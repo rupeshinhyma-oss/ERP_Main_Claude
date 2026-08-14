@@ -65,11 +65,39 @@ class InquiryRepository(BaseRepository[Inquiry]):
         result = await self.session.execute(stmt)
         return list(result.scalars().unique().all())
 
-    async def list_distinct_buyer_ids(self) -> list[uuid.UUID]:
-        """Return every buyer_id that has at least one consignment -- the Layer-1 "company wise" grouping."""
-        stmt = select(Inquiry.buyer_id).distinct()
+    async def get_company_summaries(self) -> list[dict]:
+        """
+        Return one aggregate row per buyer (Layer-1 "company wise" summary), in a
+        single grouped query.
+
+        Phase 8 fix: this used to be ``list_distinct_buyer_ids()`` (1 query)
+        followed by a ``list_for_buyer()`` call PER buyer to sum totals in
+        Python -- a classic N+1 that ran on every Inquiries page load and
+        scaled linearly with the number of buyers that have consignments.
+        Replaced with one ``GROUP BY buyer_id`` query that computes the
+        count/sum server-side, matching item 3's "100 records must NOT
+        accidentally generate 100+ database queries" rule.
+        """
+        stmt = (
+            self._base_select()
+            .with_only_columns(
+                Inquiry.buyer_id,
+                func.count(Inquiry.id).label("consignment_count"),
+                func.coalesce(func.sum(Inquiry.total_cbm), 0).label("total_cbm"),
+                func.coalesce(func.sum(Inquiry.total_weight), 0).label("total_weight"),
+            )
+            .group_by(Inquiry.buyer_id)
+        )
         result = await self.session.execute(stmt)
-        return list(result.scalars().all())
+        return [
+            {
+                "buyer_id": row.buyer_id,
+                "consignment_count": row.consignment_count,
+                "total_cbm": row.total_cbm,
+                "total_weight": row.total_weight,
+            }
+            for row in result.all()
+        ]
 
 
 class InquiryItemRepository(BaseRepository[InquiryItem]):

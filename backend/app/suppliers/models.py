@@ -32,7 +32,7 @@ from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, String, Text, Unique
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.database.base import GUID, Base, SoftDeleteMixin, TimestampMixin, UUIDPrimaryKeyMixin
+from app.database.base import GUID, Base, SoftDeleteMixin, TimestampMixin, UUIDPrimaryKeyMixin, VersionMixin
 
 
 def _utcnow() -> datetime:
@@ -80,9 +80,17 @@ class SupplierPotential(str, Enum):
     NO = "no"
 
 
-class Supplier(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
+class Supplier(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin, SoftDeleteMixin):
     """
     A single supplier profile record.
+
+    ``VersionMixin`` (Optimistic Concurrency Control) was added here in
+    the Phase 3 performance/correctness audit: the `suppliers.version`
+    column has existed at the DATABASE level since migration
+    v6w7x8y9z0a1 ("add_version_column_for_occ"), but this model never
+    declared the column, so `BaseRepository.update()`'s OCC check always
+    saw `None` and silently never fired. No new migration is needed --
+    only the model was missing the column, not the database.
 
     Combines the document's "First data form" and "Second Form (main data
     profile form)" into one table -- the two forms are presented to the

@@ -19,6 +19,7 @@ export function StatesPage() {
       activeKey="masters-states"
       apiBase="/masters/states"
       permissionPrefix="state"
+      liveModule="states"
       entityName="state"
       heading="Provinces (First Level Divisions)"
       subtitle="First-level administrative divisions of China: 23 Provinces, 5 Autonomous Regions, 4 Direct-administered Municipalities (Beijing, Shanghai, Tianjin, Chongqing), and 2 SARs."

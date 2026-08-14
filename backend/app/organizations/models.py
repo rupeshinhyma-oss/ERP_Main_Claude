@@ -17,7 +17,7 @@ from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.constants import RecordStatus
-from app.database.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
+from app.database.base import Base, TimestampMixin, UUIDPrimaryKeyMixin, VersionMixin
 
 
 class OrganizationStatus(str, Enum):
@@ -27,7 +27,7 @@ class OrganizationStatus(str, Enum):
     INACTIVE = "INACTIVE"
 
 
-class Organization(Base, UUIDPrimaryKeyMixin, TimestampMixin):
+class Organization(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin):
     """The single company profile record. Exactly one row should ever exist."""
 
     __tablename__ = "organizations"

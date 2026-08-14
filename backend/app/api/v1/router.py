@@ -18,6 +18,7 @@ from app.buyers.routes import router as buyers_router
 from app.cache.routes import router as cache_router
 from app.departments.routes import router as departments_router
 from app.designations.routes import router as designations_router
+from app.events.routes import router as events_router
 from app.inquiries.routes import router as inquiries_router
 from app.masters.brands.routes import router as brands_router
 from app.masters.cities.routes import router as cities_router
@@ -82,3 +83,9 @@ api_router.include_router(inquiries_router)
 
 # Shipment Planning: dynamic branch-sheet grid (Mum Branch, MP Branch, ...).
 api_router.include_router(planning_router)
+
+# Phase 1 (Live Events): generic real-time WebSocket infrastructure --
+# see app/events/ and doc/EVENTS_ARCHITECTURE.md. Not module-specific;
+# any future module's routes/services publish through this without
+# needing their own router entry here.
+api_router.include_router(events_router)

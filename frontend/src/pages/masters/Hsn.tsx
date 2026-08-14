@@ -19,6 +19,7 @@ export function HsnPage() {
       activeKey="masters-hsn"
       apiBase="/masters/hsn"
       permissionPrefix="hsn"
+      liveModule="hsn"
       entityName="HSN code"
       heading="HSN Codes"
       subtitle="Harmonized System Nomenclature codes for GST classification."

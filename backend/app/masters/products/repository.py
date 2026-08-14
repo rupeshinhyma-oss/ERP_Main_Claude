@@ -88,7 +88,19 @@ class ProductRepository(BaseRepository[Product]):
             product._planning_supplier_city = city
 
     def _apply_search(self, stmt, term: str | None):
-        """Apply a flexible, space-normalized case-insensitive search across searchable_fields."""
+        """
+        Apply a flexible, space-normalized case-insensitive search across searchable_fields.
+
+        Two conditions per field on purpose: the plain ``ILIKE`` (matches
+        the base class's behavior, accelerated by a plain trigram GIN
+        index per field) plus a space/hyphen-normalized ``LIKE`` against
+        ``lower(replace(replace(col, ' ', ''), '-', ''))`` (accelerated by
+        a separate trigram GIN index built on that SAME expression -- see
+        the ``add_trgm_search_indexes`` migration's expression indexes for
+        ``products``). Postgres can only use a trigram index that matches
+        the exact expression queried, so the normalized search needed its
+        own expression index, not just the five plain-column ones.
+        """
         if not term:
             return stmt
 

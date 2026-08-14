@@ -42,6 +42,8 @@ import { CategoriesPage } from "@/pages/masters/Categories";
 import { SubCategoriesPage } from "@/pages/masters/SubCategories";
 import { ProductsPage } from "@/pages/masters/Products";
 import { NetworkStatusNotifier } from "@/components/NetworkStatusNotifier";
+import { LiveConnectionIndicator } from "@/components/LiveConnectionIndicator";
+import { LiveConnectionLifecycle } from "@/lib/live/liveConnectionLifecycle";
 import { ProductGalleryPage } from "@/pages/ProductGallery";
 import { TrashPage } from "@/pages/Trash";
 
@@ -58,45 +60,47 @@ export function App() {
   return (
     <>
       <NetworkStatusNotifier />
+      <LiveConnectionLifecycle />
+      <LiveConnectionIndicator />
       <Routes>
-      <Route path="/login" element={<LoginPage />} />
-      <Route path="/" element={<Navigate to="/dashboard" replace />} />
-      <Route path="/dashboard" element={<DashboardPage />} />
-      <Route path="/403" element={<ForbiddenPage />} />
-      <Route path="/organization" element={<OrganizationPage />} />
-      <Route path="/audit" element={<AuditPage />} />
-      <Route path="/trash" element={<TrashPage />} />
-      <Route path="/profile" element={<ProfilePage />} />
-      <Route path="/users" element={<UsersPage />} />
-      <Route path="/rbac" element={<RbacPage />} />
-      <Route path="/effective-permissions" element={<EffectivePermissionsPage />} />
-      <Route path="/teams" element={<TeamsPage />} />
-      <Route path="/suppliers" element={<SuppliersPage />} />
-      <Route path="/buyers" element={<BuyersPage />} />
-      <Route path="/inquiries" element={<InquiriesPage />} />
-      <Route path="/planning" element={<PlanningPage />} />
+        <Route path="/login" element={<LoginPage />} />
+        <Route path="/" element={<Navigate to="/dashboard" replace />} />
+        <Route path="/dashboard" element={<DashboardPage />} />
+        <Route path="/403" element={<ForbiddenPage />} />
+        <Route path="/organization" element={<OrganizationPage />} />
+        <Route path="/audit" element={<AuditPage />} />
+        <Route path="/trash" element={<TrashPage />} />
+        <Route path="/profile" element={<ProfilePage />} />
+        <Route path="/users" element={<UsersPage />} />
+        <Route path="/rbac" element={<RbacPage />} />
+        <Route path="/effective-permissions" element={<EffectivePermissionsPage />} />
+        <Route path="/teams" element={<TeamsPage />} />
+        <Route path="/suppliers" element={<SuppliersPage />} />
+        <Route path="/buyers" element={<BuyersPage />} />
+        <Route path="/inquiries" element={<InquiriesPage />} />
+        <Route path="/planning" element={<PlanningPage />} />
 
-      <Route path="/masters/company-list" element={<CompanyListPage />} />
-      <Route path="/masters/countries" element={<CountriesPage />} />
-      <Route path="/masters/states" element={<StatesPage />} />
-      <Route path="/masters/cities" element={<CitiesPage />} />
-      <Route path="/masters/currencies" element={<CurrenciesPage />} />
-      <Route path="/masters/uom" element={<UomPage />} />
-      <Route path="/masters/hsn" element={<HsnPage />} />
-      <Route path="/masters/brands" element={<BrandsPage />} />
-      <Route path="/masters/supplier-types" element={<SupplierTypesPage />} />
-      <Route path="/masters/buyer-types" element={<BuyerTypesPage />} />
-      <Route path="/masters/categories" element={<CategoriesPage />} />
-      <Route path="/masters/subcategories" element={<SubCategoriesPage />} />
-      <Route path="/masters/products" element={<ProductsPage />} />
-      <Route path="/product-gallery" element={<ProductGalleryPage />} />
+        <Route path="/masters/company-list" element={<CompanyListPage />} />
+        <Route path="/masters/countries" element={<CountriesPage />} />
+        <Route path="/masters/states" element={<StatesPage />} />
+        <Route path="/masters/cities" element={<CitiesPage />} />
+        <Route path="/masters/currencies" element={<CurrenciesPage />} />
+        <Route path="/masters/uom" element={<UomPage />} />
+        <Route path="/masters/hsn" element={<HsnPage />} />
+        <Route path="/masters/brands" element={<BrandsPage />} />
+        <Route path="/masters/supplier-types" element={<SupplierTypesPage />} />
+        <Route path="/masters/buyer-types" element={<BuyerTypesPage />} />
+        <Route path="/masters/categories" element={<CategoriesPage />} />
+        <Route path="/masters/subcategories" element={<SubCategoriesPage />} />
+        <Route path="/masters/products" element={<ProductsPage />} />
+        <Route path="/product-gallery" element={<ProductGalleryPage />} />
 
-      {Object.entries(LEGACY_REDIRECTS).map(([from, to]) => (
-        <Route key={from} path={from} element={<Navigate to={to} replace />} />
-      ))}
+        {Object.entries(LEGACY_REDIRECTS).map(([from, to]) => (
+          <Route key={from} path={from} element={<Navigate to={to} replace />} />
+        ))}
 
-      <Route path="*" element={<Navigate to="/dashboard" replace />} />
-    </Routes>
+        <Route path="*" element={<Navigate to="/dashboard" replace />} />
+      </Routes>
     </>
   );
 }

@@ -4,6 +4,11 @@ Supplier Routes.
 Standard CRUD + contacts sub-resource + list-view inline grade/potential
 updates + activate/deactivate + import/export, with audit logging on every
 mutation, following the same pattern as the Phase 7 Master Data routes.
+
+Phase 9: wired live event publishing on every mutation (create, update,
+grade, potential, activate, deactivate, delete) so Suppliers.tsx can
+receive real-time updates via the shared WebSocket infrastructure. Mirrors
+the identical pattern already established by app.buyers.routes.
 """
 
 from __future__ import annotations
@@ -12,6 +17,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, File, Request, UploadFile, status
 from fastapi.responses import Response
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.constants import AuditAction
 from app.audit.dependencies import get_audit_service
@@ -20,6 +26,9 @@ from app.auth.service import CurrentUser
 from app.common.list_query import ListQueryParams, get_list_query_params
 from app.common.pagination import PageMeta
 from app.core.responses import build_success_response
+from app.database.session import get_db_session
+from app.events.dependencies import get_event_dispatcher
+from app.events.dispatcher import EventDispatcher
 from app.rbac.dependencies import require_permission
 from app.suppliers.dependencies import get_supplier_service
 from app.suppliers.schemas import (
@@ -37,6 +46,41 @@ from app.suppliers.schemas import (
 from app.suppliers.service import SupplierService
 
 router = APIRouter(prefix="/suppliers", tags=["Suppliers"])
+
+
+async def _publish_supplier_event(
+    *,
+    db: AsyncSession,
+    dispatcher: EventDispatcher,
+    event_type: str,
+    supplier_id: uuid.UUID | str,
+    version: int | None,
+    user_id: uuid.UUID,
+    changes: dict,
+) -> None:
+    """
+    Commit ``db``, then publish a ``supplier.*`` live event on
+    ``module:suppliers``.
+
+    Phase 9: mirrors ``app.buyers.routes._publish_buyer_event`` exactly
+    (Suppliers is one of the two large, frequently-edited list modules
+    Phase 9 targets, and its channel/permission was already registered in
+    ``app.events.channels.MODULE_CHANNEL_PERMISSIONS`` -- ``supplier.read``
+    -- since Phase 1, but nothing ever actually published to it until
+    now). Publishes to ``module:suppliers`` only, same reasoning as
+    Buyers: no Supplier detail page/side-panel subscribes to a per-record
+    channel today, so broadcasting to the module channel is sufficient.
+    """
+    await dispatcher.publish_lifecycle_event(
+        db,
+        module="suppliers",
+        entity="supplier",
+        entity_id=supplier_id,
+        event_type=event_type,
+        version=version,
+        user_id=user_id,
+        changes=changes,
+    )
 
 
 async def _record_action(
@@ -71,12 +115,6 @@ async def _record_action(
 
 async def _to_supplier_read(service: SupplierService, supplier) -> dict:
     """Build a SupplierRead dict, filling in derived/joined fields the ORM object doesn't carry directly."""
-    # Built from a plain dict rather than SupplierRead.model_validate(supplier)
-    # directly: the ORM relationship Supplier.emails (list[SupplierEmail])
-    # would otherwise auto-populate the schema's `emails: list[str]` field
-    # during validation, before we get a chance to override it with the
-    # flattened string list -- raising a validation error, since a
-    # SupplierEmail object isn't a str.
     payload = {
         "id": supplier.id,
         "company_name": supplier.company_name,
@@ -109,20 +147,27 @@ async def _to_supplier_read(service: SupplierService, supplier) -> dict:
         "created_at": supplier.created_at,
         "updated_at": supplier.updated_at,
         "emails": [e.email for e in supplier.emails],
-        "category_ids": await service.get_category_ids(supplier.id),
-        "sub_category_ids": await service.get_sub_category_ids(supplier.id),
-        "product_ids": await service.get_product_ids(supplier.id),
+        "category_ids": [link.category_id for link in supplier.category_links],
+        "sub_category_ids": [link.sub_category_id for link in supplier.sub_category_links],
+        "product_ids": [link.product_id for link in supplier.product_links],
         "contacts": [SupplierContactRead.model_validate(c) for c in supplier.contacts],
     }
     return SupplierRead.model_validate(payload).model_dump(mode="json")
 
 
-async def _to_list_item(service: SupplierService, supplier) -> dict:
-    """Build a SupplierListItemRead dict for the list view (document: "Fields in List")."""
+def _to_list_item(supplier) -> dict:
+    """
+    Build a SupplierListItemRead dict for the list view (document: "Fields in List").
+
+    No longer takes/uses a ``service`` argument, and no longer ``async``
+    -- reading ``supplier.category_links``/``sub_category_links``/``product_links``
+    directly (all already loaded via the model's `lazy="selectin"` relationships)
+    is both correct and strictly faster than the extra per-row queries.
+    """
     data = SupplierListItemRead.model_validate(supplier).model_dump(mode="json")
-    data["category_ids"] = [str(cid) for cid in await service.get_category_ids(supplier.id)]
-    data["sub_category_ids"] = [str(cid) for cid in await service.get_sub_category_ids(supplier.id)]
-    data["product_ids"] = [str(pid) for pid in await service.get_product_ids(supplier.id)]
+    data["category_ids"] = [str(link.category_id) for link in supplier.category_links]
+    data["sub_category_ids"] = [str(link.sub_category_id) for link in supplier.sub_category_links]
+    data["product_ids"] = [str(link.product_id) for link in supplier.product_links]
     return data
 
 
@@ -138,6 +183,8 @@ async def create_supplier(
     service: SupplierService = Depends(get_supplier_service),
     current_user: CurrentUser = Depends(require_permission("supplier.create")),
     audit_service: AuditService = Depends(get_audit_service),
+    db: AsyncSession = Depends(get_db_session),
+    dispatcher: EventDispatcher = Depends(get_event_dispatcher),
 ) -> dict:
     """Create a new supplier profile (First Data Form + Second Form)."""
     supplier = await service.create(**payload.model_dump())
@@ -150,6 +197,15 @@ async def create_supplier(
         entity_id=supplier.id,
         description=f"Created supplier {supplier.company_name!r}.",
         new_values=payload.model_dump(mode="json"),
+    )
+    await _publish_supplier_event(
+        db=db,
+        dispatcher=dispatcher,
+        event_type="supplier.created",
+        supplier_id=supplier.id,
+        version=getattr(supplier, "version", None),
+        user_id=current_user.id,
+        changes=payload.model_dump(mode="json"),
     )
     return build_success_response(data=data, request_id=request.state.request_id, message="Resource created successfully.")
 
@@ -179,7 +235,7 @@ async def list_suppliers(
         query, category_id=category_id, sub_category_id=sub_category_id, product_id=product_id
     )
     meta = PageMeta.build(page=query.page.page, page_size=query.page.page_size, total_records=total).as_meta_dict()
-    data = [await _to_list_item(service, s) for s in suppliers]
+    data = [_to_list_item(s) for s in suppliers]
     return build_success_response(data=data, request_id=request.state.request_id, meta=meta)
 
 
@@ -305,10 +361,13 @@ async def update_supplier(
     service: SupplierService = Depends(get_supplier_service),
     current_user: CurrentUser = Depends(require_permission("supplier.update")),
     audit_service: AuditService = Depends(get_audit_service),
+    db: AsyncSession = Depends(get_db_session),
+    dispatcher: EventDispatcher = Depends(get_event_dispatcher),
 ) -> dict:
     """Update an existing supplier profile."""
     supplier = await service.update(supplier_id, **payload.model_dump())
     data = await _to_supplier_read(service, supplier)
+    changes = payload.model_dump(exclude_none=True, exclude={"version"}, mode="json")
     await _record_action(
         audit_service=audit_service,
         request=request,
@@ -317,6 +376,15 @@ async def update_supplier(
         entity_id=supplier.id,
         description=f"Updated supplier {supplier.company_name!r}.",
         new_values=payload.model_dump(exclude_none=True, mode="json"),
+    )
+    await _publish_supplier_event(
+        db=db,
+        dispatcher=dispatcher,
+        event_type="supplier.updated",
+        supplier_id=supplier.id,
+        version=getattr(supplier, "version", None),
+        user_id=current_user.id,
+        changes=changes,
     )
     return build_success_response(data=data, request_id=request.state.request_id)
 
@@ -329,6 +397,8 @@ async def update_supplier_grade(
     service: SupplierService = Depends(get_supplier_service),
     current_user: CurrentUser = Depends(require_permission("supplier.update")),
     audit_service: AuditService = Depends(get_audit_service),
+    db: AsyncSession = Depends(get_db_session),
+    dispatcher: EventDispatcher = Depends(get_event_dispatcher),
 ) -> dict:
     """Document: "Supplier's Grade (editable dropdown in list)"."""
     supplier = await service.update_grade(supplier_id, payload.supplier_grade)
@@ -342,6 +412,15 @@ async def update_supplier_grade(
         description=f"Updated grade for supplier {supplier.company_name!r}.",
         new_values=payload.model_dump(mode="json"),
     )
+    await _publish_supplier_event(
+        db=db,
+        dispatcher=dispatcher,
+        event_type="supplier.updated",
+        supplier_id=supplier.id,
+        version=getattr(supplier, "version", None),
+        user_id=current_user.id,
+        changes={"supplier_grade": payload.model_dump(mode="json").get("supplier_grade")},
+    )
     return build_success_response(data=data, request_id=request.state.request_id)
 
 
@@ -353,6 +432,8 @@ async def update_supplier_potential(
     service: SupplierService = Depends(get_supplier_service),
     current_user: CurrentUser = Depends(require_permission("supplier.update")),
     audit_service: AuditService = Depends(get_audit_service),
+    db: AsyncSession = Depends(get_db_session),
+    dispatcher: EventDispatcher = Depends(get_event_dispatcher),
 ) -> dict:
     """Document: "Potential (editable dropdown in list)"."""
     supplier = await service.update_potential(supplier_id, payload.potential)
@@ -366,6 +447,15 @@ async def update_supplier_potential(
         description=f"Updated potential for supplier {supplier.company_name!r}.",
         new_values=payload.model_dump(mode="json"),
     )
+    await _publish_supplier_event(
+        db=db,
+        dispatcher=dispatcher,
+        event_type="supplier.updated",
+        supplier_id=supplier.id,
+        version=getattr(supplier, "version", None),
+        user_id=current_user.id,
+        changes={"potential": payload.model_dump(mode="json").get("potential")},
+    )
     return build_success_response(data=data, request_id=request.state.request_id)
 
 
@@ -376,6 +466,8 @@ async def activate_supplier(
     service: SupplierService = Depends(get_supplier_service),
     current_user: CurrentUser = Depends(require_permission("supplier.update")),
     audit_service: AuditService = Depends(get_audit_service),
+    db: AsyncSession = Depends(get_db_session),
+    dispatcher: EventDispatcher = Depends(get_event_dispatcher),
 ) -> dict:
     """Set a supplier's status to active."""
     supplier = await service.activate(supplier_id)
@@ -388,6 +480,15 @@ async def activate_supplier(
         entity_id=supplier.id,
         description=f"Activated supplier {supplier.company_name!r}.",
     )
+    await _publish_supplier_event(
+        db=db,
+        dispatcher=dispatcher,
+        event_type="supplier.updated",
+        supplier_id=supplier.id,
+        version=getattr(supplier, "version", None),
+        user_id=current_user.id,
+        changes={"is_active": True},
+    )
     return build_success_response(data=data, request_id=request.state.request_id)
 
 
@@ -398,6 +499,8 @@ async def deactivate_supplier(
     service: SupplierService = Depends(get_supplier_service),
     current_user: CurrentUser = Depends(require_permission("supplier.update")),
     audit_service: AuditService = Depends(get_audit_service),
+    db: AsyncSession = Depends(get_db_session),
+    dispatcher: EventDispatcher = Depends(get_event_dispatcher),
 ) -> dict:
     """
     Set a supplier's status to inactive.
@@ -416,6 +519,15 @@ async def deactivate_supplier(
         entity_id=supplier.id,
         description=f"Deactivated supplier {supplier.company_name!r}.",
     )
+    await _publish_supplier_event(
+        db=db,
+        dispatcher=dispatcher,
+        event_type="supplier.updated",
+        supplier_id=supplier.id,
+        version=getattr(supplier, "version", None),
+        user_id=current_user.id,
+        changes={"is_active": False},
+    )
     return build_success_response(data=data, request_id=request.state.request_id)
 
 
@@ -426,6 +538,8 @@ async def delete_supplier(
     service: SupplierService = Depends(get_supplier_service),
     current_user: CurrentUser = Depends(require_permission("supplier.delete")),
     audit_service: AuditService = Depends(get_audit_service),
+    db: AsyncSession = Depends(get_db_session),
+    dispatcher: EventDispatcher = Depends(get_event_dispatcher),
 ) -> dict:
     """
     Soft-delete a supplier.
@@ -442,6 +556,15 @@ async def delete_supplier(
         actor=current_user,
         entity_id=supplier_id,
         description="Deleted supplier.",
+    )
+    await _publish_supplier_event(
+        db=db,
+        dispatcher=dispatcher,
+        event_type="supplier.deleted",
+        supplier_id=supplier_id,
+        version=None,
+        user_id=current_user.id,
+        changes={},
     )
     return build_success_response(data={"deleted": True}, request_id=request.state.request_id)
 

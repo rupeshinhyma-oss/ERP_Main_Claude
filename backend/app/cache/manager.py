@@ -38,8 +38,11 @@ from collections.abc import Awaitable, Callable
 from typing import Any, TypeVar
 
 from app.cache.base import CacheBackend
+from app.core.logging import get_logger
 
 T = TypeVar("T")
+
+logger = get_logger(__name__)
 
 # ----------------------------------------------------------------------
 # Default TTLs per use case, in seconds. Centralized here so tuning cache
@@ -94,24 +97,92 @@ class CacheManager:
     # ------------------------------------------------------------------
 
     async def get(self, key: str) -> Any | None:
-        """Return the cached value for ``key``, or None if absent/expired."""
-        return await self._backend.get(key)
+        """
+        Return the cached value for ``key``, or ``None`` on a genuine
+        miss OR if the backend itself failed.
+
+        Phase 3 performance/resilience fix: previously a bare passthrough
+        to ``self._backend.get(key)`` -- fine for the in-memory backend
+        (a plain dict, which essentially never raises), but this
+        interface is explicitly designed to be swapped for a real
+        networked backend later (Redis, etc. -- see this class's own
+        docstring), and a network cache CAN legitimately time out or
+        drop a connection. Without this try/except, that failure would
+        propagate straight out of a read-through cache lookup and 500 an
+        otherwise-healthy request purely because the ACCELERATION layer
+        had a blip -- exactly the "cache becomes a single point of
+        failure" failure mode Phase 3 explicitly calls out to avoid.
+        Treating a backend error the same as a cache miss means every
+        caller (including ``get_or_set`` below) transparently falls back
+        to whatever it would already do on a miss -- load from the
+        database -- with no special-case handling needed at any call site.
+        """
+        try:
+            return await self._backend.get(key)
+        except Exception:  # noqa: BLE001 - a cache failure must degrade to "miss", never propagate
+            logger.warning("Cache backend .get() failed; treating as a cache miss.", extra={"key": key})
+            return None
 
     async def set(self, key: str, value: Any, *, ttl_seconds: int | None = None) -> None:
-        """Store ``value`` under ``key`` with an optional TTL."""
-        await self._backend.set(key, value, ttl_seconds=ttl_seconds)
+        """
+        Store ``value`` under ``key`` with an optional TTL.
+
+        Failures are logged and swallowed for the same reason as
+        :meth:`get`: a cache WRITE failing must not break the request
+        that computed the value being cached -- the value is still
+        returned to that request's caller either way (see
+        :meth:`get_or_set`); it just won't be cached for next time.
+        """
+        try:
+            await self._backend.set(key, value, ttl_seconds=ttl_seconds)
+        except Exception:  # noqa: BLE001
+            logger.warning("Cache backend .set() failed; value was not cached.", extra={"key": key})
 
     async def delete(self, key: str) -> None:
-        """Remove a single key from the cache."""
-        await self._backend.delete(key)
+        """
+        Remove a single key from the cache.
+
+        Failures are logged and swallowed -- an invalidation that fails
+        to reach the cache backend should not block/fail the write
+        operation that triggered it (the write to the database already
+        succeeded by the time invalidation runs); worst case the cache
+        serves a stale entry until its TTL naturally expires.
+        """
+        try:
+            await self._backend.delete(key)
+        except Exception:  # noqa: BLE001
+            logger.warning("Cache backend .delete() failed.", extra={"key": key})
 
     async def exists(self, key: str) -> bool:
-        """Return True if ``key`` is present and not expired."""
-        return await self._backend.exists(key)
+        """Return True if ``key`` is present and not expired. Returns False (not an exception) if the backend fails."""
+        try:
+            return await self._backend.exists(key)
+        except Exception:  # noqa: BLE001
+            logger.warning("Cache backend .exists() failed; treating as absent.", extra={"key": key})
+            return False
 
     async def clear(self) -> None:
         """Remove every entry from the cache. Primarily for tests/admin use."""
         await self._backend.clear()
+
+    async def delete_namespace(self, namespace: str) -> int:
+        """
+        Delete every key under ``namespace`` (see ``CacheBackend.delete_namespace``).
+
+        Backs every ``invalidate_*`` helper below. Failures are logged
+        and swallowed for the same reason as :meth:`delete`: a failed
+        invalidation should not block the write operation that triggered
+        it. Returns 0 (rather than raising) on failure, matching
+        ``CacheBackend.delete_namespace``'s own "0 if nothing to do"
+        contract, so a caller checking the returned count can't
+        distinguish "genuinely nothing to invalidate" from "the backend
+        errored" -- both are safe/inert outcomes for a caller here.
+        """
+        try:
+            return await self._backend.delete_namespace(namespace)
+        except Exception:  # noqa: BLE001
+            logger.warning("Cache backend .delete_namespace() failed.", extra={"namespace": namespace})
+            return 0
 
     async def get_or_set(
         self,
@@ -134,12 +205,19 @@ class CacheManager:
         The ``loader`` is only invoked on a cache miss, so an expensive
         database query only runs when the cache genuinely has nothing to
         offer.
+
+        Routes through :meth:`get`/:meth:`set` (not ``self._backend``
+        directly) specifically so a backend failure here gets the same
+        fail-safe "treat as a miss, fall through to the database"
+        behavior documented on those methods -- a network cache outage
+        should make every ``get_or_set`` call temporarily behave like the
+        cache is simply always empty, never make it raise.
         """
-        cached = await self._backend.get(key)
+        cached = await self.get(key)
         if cached is not None:
             return cached
         value = await loader()
-        await self._backend.set(key, value, ttl_seconds=ttl_seconds)
+        await self.set(key, value, ttl_seconds=ttl_seconds)
         return value
 
     # ------------------------------------------------------------------
@@ -148,11 +226,11 @@ class CacheManager:
 
     async def get_user_permissions(self, user_id: uuid.UUID | str) -> set[str] | None:
         """Return the cached permission-code set for a user, or None on a miss."""
-        return await self._backend.get(CacheBackend.build_key(NS_USER_PERMISSIONS, str(user_id)))
+        return await self.get(CacheBackend.build_key(NS_USER_PERMISSIONS, str(user_id)))
 
     async def set_user_permissions(self, user_id: uuid.UUID | str, permissions: set[str]) -> None:
         """Cache a user's resolved permission-code set."""
-        await self._backend.set(
+        await self.set(
             CacheBackend.build_key(NS_USER_PERMISSIONS, str(user_id)),
             permissions,
             ttl_seconds=TTL_USER_PERMISSIONS,
@@ -167,9 +245,9 @@ class CacheManager:
         grant/revoke on a role, etc.).
         """
         if user_id is not None:
-            await self._backend.delete(CacheBackend.build_key(NS_USER_PERMISSIONS, str(user_id)))
+            await self.delete(CacheBackend.build_key(NS_USER_PERMISSIONS, str(user_id)))
             return 1
-        return await self._backend.delete_namespace(NS_USER_PERMISSIONS)
+        return await self.delete_namespace(NS_USER_PERMISSIONS)
 
     # ------------------------------------------------------------------
     # Named helpers: User Roles
@@ -177,20 +255,20 @@ class CacheManager:
 
     async def get_user_roles(self, user_id: uuid.UUID | str) -> list[str] | None:
         """Return the cached role-name list for a user, or None on a miss."""
-        return await self._backend.get(CacheBackend.build_key(NS_USER_ROLES, str(user_id)))
+        return await self.get(CacheBackend.build_key(NS_USER_ROLES, str(user_id)))
 
     async def set_user_roles(self, user_id: uuid.UUID | str, roles: list[str]) -> None:
         """Cache a user's assigned role names."""
-        await self._backend.set(
+        await self.set(
             CacheBackend.build_key(NS_USER_ROLES, str(user_id)), roles, ttl_seconds=TTL_USER_ROLES
         )
 
     async def invalidate_user_roles(self, user_id: uuid.UUID | str | None = None) -> int:
         """Invalidate one user's cached roles, or every user's if ``user_id`` is omitted."""
         if user_id is not None:
-            await self._backend.delete(CacheBackend.build_key(NS_USER_ROLES, str(user_id)))
+            await self.delete(CacheBackend.build_key(NS_USER_ROLES, str(user_id)))
             return 1
-        return await self._backend.delete_namespace(NS_USER_ROLES)
+        return await self.delete_namespace(NS_USER_ROLES)
 
     # ------------------------------------------------------------------
     # Named helpers: Application Settings
@@ -198,17 +276,17 @@ class CacheManager:
 
     async def get_setting(self, setting_key: str) -> Any | None:
         """Return a cached application-setting value, or None on a miss."""
-        return await self._backend.get(CacheBackend.build_key(NS_APP_SETTINGS, setting_key))
+        return await self.get(CacheBackend.build_key(NS_APP_SETTINGS, setting_key))
 
     async def set_setting(self, setting_key: str, value: Any) -> None:
         """Cache an application-setting value."""
-        await self._backend.set(
+        await self.set(
             CacheBackend.build_key(NS_APP_SETTINGS, setting_key), value, ttl_seconds=TTL_APP_SETTINGS
         )
 
     async def invalidate_settings(self) -> int:
         """Invalidate every cached application setting (e.g. after an admin updates one)."""
-        return await self._backend.delete_namespace(NS_APP_SETTINGS)
+        return await self.delete_namespace(NS_APP_SETTINGS)
 
     # ------------------------------------------------------------------
     # Named helpers: Departments / Designations / Dropdown data
@@ -216,48 +294,48 @@ class CacheManager:
 
     async def get_departments(self) -> list[Any] | None:
         """Return the cached department list, or None on a miss."""
-        return await self._backend.get(CacheBackend.build_key(NS_DEPARTMENTS, "all"))
+        return await self.get(CacheBackend.build_key(NS_DEPARTMENTS, "all"))
 
     async def set_departments(self, departments: list[Any]) -> None:
         """Cache the full department list."""
-        await self._backend.set(
+        await self.set(
             CacheBackend.build_key(NS_DEPARTMENTS, "all"), departments, ttl_seconds=TTL_DEPARTMENTS
         )
 
     async def invalidate_departments(self) -> int:
         """Invalidate the cached department list (call after any department create/update/delete)."""
-        return await self._backend.delete_namespace(NS_DEPARTMENTS)
+        return await self.delete_namespace(NS_DEPARTMENTS)
 
     async def get_designations(self) -> list[Any] | None:
         """Return the cached designation list, or None on a miss."""
-        return await self._backend.get(CacheBackend.build_key(NS_DESIGNATIONS, "all"))
+        return await self.get(CacheBackend.build_key(NS_DESIGNATIONS, "all"))
 
     async def set_designations(self, designations: list[Any]) -> None:
         """Cache the full designation list."""
-        await self._backend.set(
+        await self.set(
             CacheBackend.build_key(NS_DESIGNATIONS, "all"), designations, ttl_seconds=TTL_DESIGNATIONS
         )
 
     async def invalidate_designations(self) -> int:
         """Invalidate the cached designation list."""
-        return await self._backend.delete_namespace(NS_DESIGNATIONS)
+        return await self.delete_namespace(NS_DESIGNATIONS)
 
     async def get_dropdown(self, dropdown_name: str) -> list[Any] | None:
         """Return cached dropdown/lookup options by name (e.g. 'countries', 'currencies')."""
-        return await self._backend.get(CacheBackend.build_key(NS_DROPDOWN, dropdown_name))
+        return await self.get(CacheBackend.build_key(NS_DROPDOWN, dropdown_name))
 
     async def set_dropdown(self, dropdown_name: str, options: list[Any]) -> None:
         """Cache a dropdown/lookup option list under a given name."""
-        await self._backend.set(
+        await self.set(
             CacheBackend.build_key(NS_DROPDOWN, dropdown_name), options, ttl_seconds=TTL_DROPDOWN_DATA
         )
 
     async def invalidate_dropdown(self, dropdown_name: str | None = None) -> int:
         """Invalidate one named dropdown list, or every cached dropdown if omitted."""
         if dropdown_name is not None:
-            await self._backend.delete(CacheBackend.build_key(NS_DROPDOWN, dropdown_name))
+            await self.delete(CacheBackend.build_key(NS_DROPDOWN, dropdown_name))
             return 1
-        return await self._backend.delete_namespace(NS_DROPDOWN)
+        return await self.delete_namespace(NS_DROPDOWN)
 
     # ------------------------------------------------------------------
     # Named helpers: Dashboard counts
@@ -265,17 +343,17 @@ class CacheManager:
 
     async def get_dashboard_count(self, metric_name: str) -> int | None:
         """Return a cached dashboard count metric (e.g. 'active_users'), or None on a miss."""
-        return await self._backend.get(CacheBackend.build_key(NS_DASHBOARD, metric_name))
+        return await self.get(CacheBackend.build_key(NS_DASHBOARD, metric_name))
 
     async def set_dashboard_count(self, metric_name: str, count: int) -> None:
         """Cache a dashboard count metric with a short TTL, since counts should stay near-live."""
-        await self._backend.set(
+        await self.set(
             CacheBackend.build_key(NS_DASHBOARD, metric_name), count, ttl_seconds=TTL_DASHBOARD_COUNTS
         )
 
     async def invalidate_dashboard_counts(self) -> int:
         """Invalidate all cached dashboard counts."""
-        return await self._backend.delete_namespace(NS_DASHBOARD)
+        return await self.delete_namespace(NS_DASHBOARD)
 
     # ------------------------------------------------------------------
     # Named helpers: Generic frequently-accessed records
@@ -288,17 +366,17 @@ class CacheManager:
         A generic escape hatch for "frequently accessed records" that
         don't warrant their own named helper above.
         """
-        return await self._backend.get(CacheBackend.build_key(NS_RECORD, entity, str(record_id)))
+        return await self.get(CacheBackend.build_key(NS_RECORD, entity, str(record_id)))
 
     async def set_record(self, entity: str, record_id: uuid.UUID | str, value: Any) -> None:
         """Cache a record by entity type + id."""
-        await self._backend.set(
+        await self.set(
             CacheBackend.build_key(NS_RECORD, entity, str(record_id)), value, ttl_seconds=TTL_RECORD
         )
 
     async def invalidate_record(self, entity: str, record_id: uuid.UUID | str | None = None) -> int:
         """Invalidate one cached record, or every cached record of a given entity type."""
         if record_id is not None:
-            await self._backend.delete(CacheBackend.build_key(NS_RECORD, entity, str(record_id)))
+            await self.delete(CacheBackend.build_key(NS_RECORD, entity, str(record_id)))
             return 1
-        return await self._backend.delete_namespace(CacheBackend.build_key(NS_RECORD, entity))
+        return await self.delete_namespace(CacheBackend.build_key(NS_RECORD, entity))

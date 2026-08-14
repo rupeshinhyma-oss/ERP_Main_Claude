@@ -29,6 +29,9 @@ import { SideDrawer, DetailFieldGrid } from "@/components/SideDrawer";
 import { ImpExpDropdown, BulkActionsDropdown, ImportSummaryPanel } from "@/components/ImportWizard";
 import { apiDelete, apiGet, apiPatch, apiPost, downloadExport, toQueryString } from "@/lib/api";
 import { useLookup } from "@/lib/lookups";
+import { usePendingGuard } from "@/lib/hooks";
+import { useLiveConnectionStatus } from "@/lib/live/useLive";
+import { useLiveList } from "@/lib/live/useLiveList";
 import type { Country, ImportHeader, ImportSummary, ProductCategory, ProductSubCategory } from "@/types";
 import type { Buyer, BuyerContact } from "@/types/buyers";
 
@@ -201,6 +204,15 @@ export function BuyersPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const [reloadCounter, setReloadCounter] = useState(0);
+
+  /* Phase 7: double-submit guards. `formSubmitting`/`contactSubmitting` cover
+     the two single-instance modal forms (like every other page's `submitting`
+     flag); `rowAction` is keyed so per-row/per-bulk actions (Delete, Bulk
+     Activate, ...) only disable the ONE button that was clicked rather than
+     freezing the whole list while any one request is in flight. */
+  const [formSubmitting, setFormSubmitting] = useState(false);
+  const [contactSubmitting, setContactSubmitting] = useState(false);
+  const { isPending: isRowActionPending, guard: guardRowAction } = usePendingGuard<string>();
 
   /* Import / Export State */
   const [importSummary, setImportSummary] = useState<ImportSummary | null>(null);
@@ -425,6 +437,88 @@ export function BuyersPage() {
     setDateToFilter("");
     setCurrentPage(1);
   };
+
+  /**
+   * Live sync (Phase 2, consolidated onto the shared `useLiveList`
+   * pattern in Phase 6 -- see `frontend/src/lib/live/useLiveList.ts`).
+   * Buyers is one of the two reference integrations (Buyers + Planning)
+   * this shared hook was extracted FROM, so this block is now the same
+   * few lines any future module's page would write, not a bespoke
+   * hand-rolled subscription.
+   *
+   * Everything above (fetch effect, filters, pagination, create/update/
+   * delete handlers) is completely untouched -- this only ADDS a
+   * subscription on top.
+   */
+  const hasActiveFilterOrSearch =
+    Boolean(effectiveSearch) ||
+    Boolean(buyerTypeFilter) ||
+    Boolean(statusFilter) ||
+    Boolean(potentialFilter) ||
+    Boolean(gradeFilter) ||
+    Boolean(countryFilter) ||
+    Boolean(categoryFilter) ||
+    Boolean(subCategoryFilter) ||
+    Boolean(dateFromFilter) ||
+    Boolean(dateToFilter);
+
+  useLiveList<Buyer>({
+    moduleName: "buyers",
+    setRecords: setRows,
+    // Every filter above is applied SERVER-SIDE (see the fetch effect's
+    // `params`), so replicating that same filter logic here just to
+    // decide "does this live-patched record still belong in view" would
+    // duplicate it and risk drifting out of sync with the server's own
+    // rules over time. Deliberately conservative instead: while ANY
+    // filter/search is active, or the view isn't showing page 1, live
+    // patching is skipped entirely and the list simply stays exactly as
+    // the last REST fetch left it (i.e. behaves exactly as it did before
+    // this Phase 2 integration existed) -- correctness over
+    // completeness. Unfiltered page 1 is the one case where "does this
+    // record belong in view" has an unambiguous, filter-free answer.
+    shouldSkip: () => hasActiveFilterOrSearch || currentPage !== 1,
+    // No buildFromEvent: `changes` is deliberately a small partial
+    // payload (see Event's own docstring), not a full Buyer record, so a
+    // live `buyer.created` for a row not already loaded is safely
+    // ignored rather than inserting an incomplete row -- the person will
+    // see it on their next natural page load/refresh.
+    onApplied: (result) => {
+      if (result.action === "created" || result.action === "deleted") {
+        setTotalRecords((prevTotal) => (result.action === "created" ? prevTotal + 1 : Math.max(0, prevTotal - 1)));
+      }
+    },
+  });
+
+  /**
+   * Reconnect synchronization (Phase 2 brief section 17): this ERP's
+   * backend has no missed-event/replay mechanism (Phase 1 was
+   * infrastructure-only -- see PHASE1_EVENTS.md's "What's intentionally
+   * NOT in Phase 1"), so the safe fallback is exactly what the brief
+   * calls for: re-run the normal REST fetch once the connection comes
+   * back, rather than assuming the 3 changes that happened while
+   * offline are already known. Only refreshes THIS page's own active
+   * dataset (via the existing `reload()`/`reloadCounter` the fetch
+   * effect above already depends on) -- not a blanket app-wide reload.
+   */
+  const liveConnectionStatus = useLiveConnectionStatus();
+  const hasConnectedBeforeRef = useRef(false);
+  const wasDisconnectedRef = useRef(false);
+  useEffect(() => {
+    if (liveConnectionStatus === "connected") {
+      // Only treat this as a RECOVERY (and therefore worth an extra
+      // fetch) if we had previously been connected at least once and
+      // then dropped -- not on the very first connect after this page
+      // mounts, which would otherwise double-fetch redundantly right
+      // alongside the page's own initial REST load.
+      if (hasConnectedBeforeRef.current && wasDisconnectedRef.current) {
+        reload();
+      }
+      hasConnectedBeforeRef.current = true;
+      wasDisconnectedRef.current = false;
+    } else if (hasConnectedBeforeRef.current) {
+      wasDisconnectedRef.current = true;
+    }
+  }, [liveConnectionStatus]);
 
   /* Default Country Uganda Lookup */
   const defaultUgandaId = useMemo(() => {
@@ -673,6 +767,7 @@ export function BuyersPage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (formSubmitting) return; // Phase 7: ignore a second click while the first save is still in flight
     setError(null);
 
     // 1. Required field validation
@@ -726,6 +821,7 @@ export function BuyersPage() {
       sub_category_ids: subCategoryIds,
     };
 
+    setFormSubmitting(true);
     try {
       if (modalMode === "create") {
         const { data: newBuyer } = await apiPost<Buyer>("/buyers", payload);
@@ -747,6 +843,8 @@ export function BuyersPage() {
     } catch (err) {
       setError(err);
       window.scrollTo({ top: 0, behavior: "smooth" });
+    } finally {
+      setFormSubmitting(false);
     }
   }
 
@@ -757,19 +855,21 @@ export function BuyersPage() {
     if (isExisting || isPotentialYes) {
       alert(
         `Cannot DELETE buyer "${buyer.company_name}"!\n\n` +
-          `Document Rule: Buyers with Current Status 'Existing' or Potential 'Yes' cannot be deleted. You can make it 'Inactive' instead.`
+        `Document Rule: Buyers with Current Status 'Existing' or Potential 'Yes' cannot be deleted. You can make it 'Inactive' instead.`
       );
       return;
     }
 
     if (!window.confirm(`Delete buyer "${buyer.company_name}"? This action cannot be undone.`)) return;
-    try {
-      await apiDelete(`/buyers/${buyer.id}`);
-      setRows((prev) => prev.filter((b) => b.id !== buyer.id));
-      setTotalRecords((prev) => Math.max(0, prev - 1));
-    } catch (err) {
-      setError(err);
-    }
+    await guardRowAction(`delete:${buyer.id}`, async () => {
+      try {
+        await apiDelete(`/buyers/${buyer.id}`);
+        setRows((prev) => prev.filter((b) => b.id !== buyer.id));
+        setTotalRecords((prev) => Math.max(0, prev - 1));
+      } catch (err) {
+        setError(err);
+      }
+    });
   }
 
   /* Contact Person Handlers */
@@ -799,6 +899,7 @@ export function BuyersPage() {
   async function handleSaveContact(e: React.FormEvent) {
     e.preventDefault();
     if (!editingId) return;
+    if (contactSubmitting) return; // Phase 7: ignore a second click while the first save is still in flight
     if (!contactForm.person_name.trim()) {
       alert("Contact Full Name is required.");
       return;
@@ -807,6 +908,7 @@ export function BuyersPage() {
       ...contactForm,
       country_id: contactForm.country_id || form.country_id,
     };
+    setContactSubmitting(true);
     try {
       if (editingContactId) {
         const { data: updatedContact } = await apiPatch<BuyerContact>(`/buyers/${editingId}/contacts/${editingContactId}`, payload);
@@ -820,41 +922,49 @@ export function BuyersPage() {
       setContactFormOpen(false);
     } catch (err) {
       setError(err);
+    } finally {
+      setContactSubmitting(false);
     }
   }
 
   async function handleDeleteContact(contactId: string) {
     if (!editingId) return;
     if (!window.confirm("Remove this contact person?")) return;
-    try {
-      await apiDelete(`/buyers/${editingId}/contacts/${contactId}`);
-      setContacts((prev) => prev.filter((c) => c.id !== contactId));
-    } catch (err) {
-      setError(err);
-    }
+    await guardRowAction(`delete-contact:${contactId}`, async () => {
+      try {
+        await apiDelete(`/buyers/${editingId}/contacts/${contactId}`);
+        setContacts((prev) => prev.filter((c) => c.id !== contactId));
+      } catch (err) {
+        setError(err);
+      }
+    });
   }
 
   /* Bulk Actions Handlers */
   async function handleBulkActivate() {
     if (!selectedIds.length) return;
-    try {
-      await Promise.all(selectedIds.map((id) => apiPost(`/buyers/${id}/activate`)));
-      setRows((prev) => prev.map((r) => (selectedIds.includes(r.id) ? { ...r, is_active: true } : r)));
-      setSelectedIds([]);
-    } catch (err) {
-      setError(err);
-    }
+    await guardRowAction("bulk-activate", async () => {
+      try {
+        await Promise.all(selectedIds.map((id) => apiPost(`/buyers/${id}/activate`)));
+        setRows((prev) => prev.map((r) => (selectedIds.includes(r.id) ? { ...r, is_active: true } : r)));
+        setSelectedIds([]);
+      } catch (err) {
+        setError(err);
+      }
+    });
   }
 
   async function handleBulkDeactivate() {
     if (!selectedIds.length) return;
-    try {
-      await Promise.all(selectedIds.map((id) => apiPost(`/buyers/${id}/deactivate`)));
-      setRows((prev) => prev.map((r) => (selectedIds.includes(r.id) ? { ...r, is_active: false } : r)));
-      setSelectedIds([]);
-    } catch (err) {
-      setError(err);
-    }
+    await guardRowAction("bulk-deactivate", async () => {
+      try {
+        await Promise.all(selectedIds.map((id) => apiPost(`/buyers/${id}/deactivate`)));
+        setRows((prev) => prev.map((r) => (selectedIds.includes(r.id) ? { ...r, is_active: false } : r)));
+        setSelectedIds([]);
+      } catch (err) {
+        setError(err);
+      }
+    });
   }
 
   async function handleBulkDelete() {
@@ -866,20 +976,22 @@ export function BuyersPage() {
     if (restricted.length > 0) {
       alert(
         `Cannot delete ${restricted.length} selected buyer(s)!\n\n` +
-          `Document Rule: Buyers with Current Status 'Existing' or Potential 'Yes' cannot be deleted. You can deactivate them instead.`
+        `Document Rule: Buyers with Current Status 'Existing' or Potential 'Yes' cannot be deleted. You can deactivate them instead.`
       );
       return;
     }
 
     if (!window.confirm(`Delete ${selectedIds.length} selected buyer(s)? This action cannot be undone.`)) return;
-    try {
-      await Promise.all(selectedIds.map((id) => apiDelete(`/buyers/${id}`)));
-      setRows((prev) => prev.filter((r) => !selectedIds.includes(r.id)));
-      setTotalRecords((prev) => Math.max(0, prev - selectedIds.length));
-      setSelectedIds([]);
-    } catch (err) {
-      setError(err);
-    }
+    await guardRowAction("bulk-delete", async () => {
+      try {
+        await Promise.all(selectedIds.map((id) => apiDelete(`/buyers/${id}`)));
+        setRows((prev) => prev.filter((r) => !selectedIds.includes(r.id)));
+        setTotalRecords((prev) => Math.max(0, prev - selectedIds.length));
+        setSelectedIds([]);
+      } catch (err) {
+        setError(err);
+      }
+    });
   }
 
   async function handleExport(format: "csv" | "xlsx") {
@@ -896,12 +1008,12 @@ export function BuyersPage() {
       const dir = pinnedCols[colIdx];
       const headerTopStyle: React.CSSProperties = isHeader
         ? {
-            position: "sticky",
-            top: 0,
-            zIndex: dir ? 30 : 15,
-            backgroundColor: "#f8fafc",
-            boxShadow: "0 2px 4px rgba(0, 0, 0, 0.06)",
-          }
+          position: "sticky",
+          top: 0,
+          zIndex: dir ? 30 : 15,
+          backgroundColor: "#f8fafc",
+          boxShadow: "0 2px 4px rgba(0, 0, 0, 0.06)",
+        }
         : {};
 
       if (!dir) return headerTopStyle;
@@ -1101,7 +1213,7 @@ export function BuyersPage() {
                 <div>
                   <div style={sectionTitleStyle}>Identity &amp; Business Profile</div>
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "16px" }}>
-                    
+
                     {/* Company Name with Live Typeahead Suggestions */}
                     <div style={{ position: "relative" }}>
                       <TextField
@@ -1438,9 +1550,10 @@ export function BuyersPage() {
                   </button>
                   <button
                     type="submit"
-                    style={{ padding: "9px 24px", borderRadius: "6px", background: "#2563eb", color: "#ffffff", border: "none", fontWeight: 600, fontSize: "13.5px", cursor: "pointer" }}
+                    disabled={formSubmitting}
+                    style={{ padding: "9px 24px", borderRadius: "6px", background: "#2563eb", color: "#ffffff", border: "none", fontWeight: 600, fontSize: "13.5px", cursor: formSubmitting ? "default" : "pointer", opacity: formSubmitting ? 0.7 : 1 }}
                   >
-                    {modalMode === "create" ? "Save Buyer Profile" : "Update Buyer Profile"}
+                    {formSubmitting ? "Saving…" : modalMode === "create" ? "Save Buyer Profile" : "Update Buyer Profile"}
                   </button>
                 </div>
               </form>
@@ -1545,10 +1658,11 @@ export function BuyersPage() {
                                 {!c.is_primary && (
                                   <button
                                     type="button"
+                                    disabled={isRowActionPending(`delete-contact:${c.id}`)}
                                     onClick={() => handleDeleteContact(c.id)}
-                                    style={{ padding: "4px 10px", fontSize: "12px", borderRadius: "4px", border: "1px solid #fee2e2", background: "#fff1f2", color: "#e11d48", cursor: "pointer", fontWeight: 600 }}
+                                    style={{ padding: "4px 10px", fontSize: "12px", borderRadius: "4px", border: "1px solid #fee2e2", background: "#fff1f2", color: "#e11d48", cursor: isRowActionPending(`delete-contact:${c.id}`) ? "default" : "pointer", fontWeight: 600, opacity: isRowActionPending(`delete-contact:${c.id}`) ? 0.6 : 1 }}
                                   >
-                                    Delete
+                                    {isRowActionPending(`delete-contact:${c.id}`) ? "Removing…" : "Delete"}
                                   </button>
                                 )}
                               </div>
@@ -1642,9 +1756,10 @@ export function BuyersPage() {
                           </button>
                           <button
                             type="submit"
-                            style={{ padding: "8px 20px", borderRadius: "6px", background: "#2563eb", color: "#ffffff", border: "none", fontWeight: 600, fontSize: "13px", cursor: "pointer" }}
+                            disabled={contactSubmitting}
+                            style={{ padding: "8px 20px", borderRadius: "6px", background: "#2563eb", color: "#ffffff", border: "none", fontWeight: 600, fontSize: "13px", cursor: contactSubmitting ? "default" : "pointer", opacity: contactSubmitting ? 0.7 : 1 }}
                           >
-                            {editingContactId ? "Update Contact" : "Save Contact"}
+                            {contactSubmitting ? "Saving…" : editingContactId ? "Update Contact" : "Save Contact"}
                           </button>
                         </div>
                       </form>
@@ -2128,7 +2243,7 @@ export function BuyersPage() {
                             type="button"
                             onClick={() => handleDelete(r)}
                             title={cannotDelete ? "Cannot delete buyer with Existing status or Yes potential (document rule)" : "Delete buyer"}
-                            disabled={cannotDelete}
+                            disabled={cannotDelete || isRowActionPending(`delete:${r.id}`)}
                             style={{
                               background: cannotDelete ? "#cbd5e1" : "#ef4444",
                               color: "#ffffff",

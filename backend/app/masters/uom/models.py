@@ -13,10 +13,10 @@ from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.constants import RecordStatus
-from app.database.base import Base, SoftDeleteMixin, TimestampMixin, UUIDPrimaryKeyMixin
+from app.database.base import Base, SoftDeleteMixin, TimestampMixin, UUIDPrimaryKeyMixin, VersionMixin
 
 
-class UnitOfMeasurement(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
+class UnitOfMeasurement(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin, SoftDeleteMixin):
     """A single unit-of-measurement reference record."""
 
     __tablename__ = "units_of_measurement"

@@ -31,6 +31,7 @@ export type PlanningChangeAction =
 
 export interface PlanningSheet {
   id: string;
+  version?: number;
   name: string;
   description?: string | null;
   position: number;

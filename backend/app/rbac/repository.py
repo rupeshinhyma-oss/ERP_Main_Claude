@@ -55,15 +55,15 @@ class RoleRepository(BaseRepository[Role]):
         super().__init__(session, Role)
 
     async def get_by_name(self, name: str) -> Role | None:
-        """Fetch a role by its unique name."""
-        stmt = select(Role).where(Role.name == name)
+        """Fetch a role by its unique name (excludes soft-deleted roles)."""
+        stmt = self._base_select().where(Role.name == name)
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
     async def get_with_permissions(self, role_id: uuid.UUID) -> Role | None:
-        """Fetch a role with its permission links eagerly loaded, to avoid N+1 lazy-loads."""
+        """Fetch a (non-deleted) role with its permission links eagerly loaded, to avoid N+1 lazy-loads."""
         stmt = (
-            select(Role)
+            self._base_select()
             .where(Role.id == role_id)
             .options(selectinload(Role.permission_links).selectinload(RolePermission.permission))
         )
@@ -71,8 +71,8 @@ class RoleRepository(BaseRepository[Role]):
         return result.scalar_one_or_none()
 
     async def list_all(self) -> list[Role]:
-        """Return every role, ordered by name."""
-        stmt = select(Role).order_by(Role.name)
+        """Return every non-deleted role, ordered by name."""
+        stmt = self._base_select().order_by(Role.name)
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
@@ -87,10 +87,19 @@ class RoleRepository(BaseRepository[Role]):
         If the user has the super_admin role, returns all system permissions.
         """
         # 1. Check if user has super_admin role
+        #
+        # ``Role.deleted_at.is_(None)`` is required here (and on stmt_roles
+        # just below) now that ``Role`` supports soft-delete: without it, a
+        # role that has been "deleted" through the admin API still sits in
+        # the ``roles`` table with ``deleted_at`` set, and this query would
+        # keep granting super_admin (or that role's other permissions) to
+        # anyone still assigned to it -- i.e. deleting a role would have no
+        # actual security effect until it was purged from Trash, which
+        # could be up to ``settings.TRASH_RETENTION_DAYS`` (4 years) later.
         stmt_super_admin = (
             select(Role.name)
             .join(UserRole, UserRole.role_id == Role.id)
-            .where(UserRole.user_id == user_id, Role.name == "super_admin")
+            .where(UserRole.user_id == user_id, Role.name == "super_admin", Role.deleted_at.is_(None))
         )
         if (await self.session.execute(stmt_super_admin)).scalar_one_or_none() is not None:
             all_perms_stmt = select(Permission.code)
@@ -102,7 +111,8 @@ class RoleRepository(BaseRepository[Role]):
             select(Permission.code)
             .join(RolePermission, RolePermission.permission_id == Permission.id)
             .join(UserRole, UserRole.role_id == RolePermission.role_id)
-            .where(UserRole.user_id == user_id)
+            .join(Role, Role.id == RolePermission.role_id)
+            .where(UserRole.user_id == user_id, Role.deleted_at.is_(None))
             .distinct()
         )
         role_perms = set((await self.session.execute(stmt_roles)).scalars().all())
@@ -134,11 +144,14 @@ class RoleRepository(BaseRepository[Role]):
         if not user:
             return {}
 
-        # Fetch System / Custom Roles
+        # Fetch System / Custom Roles (excludes soft-deleted roles -- see
+        # the note in get_permission_codes_for_user above for why this
+        # matters, not just for display but for what "is_super_admin"
+        # correctly means below).
         stmt_user_roles = (
             select(Role.name)
             .join(UserRole, UserRole.role_id == Role.id)
-            .where(UserRole.user_id == user_id)
+            .where(UserRole.user_id == user_id, Role.deleted_at.is_(None))
         )
         system_roles = list((await self.session.execute(stmt_user_roles)).scalars().all())
         is_super_admin = "super_admin" in system_roles

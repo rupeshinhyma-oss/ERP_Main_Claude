@@ -1,4 +1,10 @@
-"""Brand Routes. Standard CRUD + activate/deactivate + import/export, with audit logging."""
+"""
+Brand Routes. Standard CRUD + activate/deactivate + import/export, with audit logging.
+
+Phase 9: added live event publishing on every mutation so the Brand list
+page receives real-time updates from other users without a full-page reload.
+Uses the shared global WebSocket infrastructure via ``module:brands``.
+"""
 
 from __future__ import annotations
 
@@ -6,6 +12,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, File, Request, UploadFile, status
 from fastapi.responses import Response
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.constants import AuditAction
 from app.audit.dependencies import get_audit_service
@@ -14,12 +21,37 @@ from app.auth.service import CurrentUser
 from app.common.list_query import ListQueryParams, get_list_query_params
 from app.common.pagination import PageMeta
 from app.core.responses import build_success_response
+from app.database.session import get_db_session
+from app.events.dependencies import get_event_dispatcher
+from app.events.dispatcher import EventDispatcher
 from app.masters.brands.dependencies import get_brand_service
-from app.masters.brands.schemas import BrandCreate, BrandRead, BrandUpdate, ImportSummaryRead
+from app.masters.brands.schemas import BrandRead, BrandCreate, BrandUpdate, ImportSummaryRead
 from app.masters.brands.service import BrandService
 from app.rbac.dependencies import require_permission
 
 router = APIRouter(prefix="/masters/brands", tags=["Masters - Brands"])
+
+
+async def _publish_brand_event(
+    *,
+    db: AsyncSession,
+    dispatcher: EventDispatcher,
+    event_type: str,
+    brand_id: uuid.UUID | str,
+    user_id: uuid.UUID,
+    changes: dict,
+) -> None:
+    """Commit ``db``, then publish a ``brand.*`` live event on ``module:brands``."""
+    await dispatcher.publish_lifecycle_event(
+        db,
+        module="brands",
+        entity="brand",
+        entity_id=brand_id,
+        event_type=event_type,
+        version=None,
+        user_id=user_id,
+        changes=changes,
+    )
 
 
 async def _record_action(
@@ -59,6 +91,8 @@ async def create_brand(
     service: BrandService = Depends(get_brand_service),
     current_user: CurrentUser = Depends(require_permission("brand.create")),
     audit_service: AuditService = Depends(get_audit_service),
+    db: AsyncSession = Depends(get_db_session),
+    dispatcher: EventDispatcher = Depends(get_event_dispatcher),
 ) -> dict:
     """Create a new brand."""
     brand = await service.create(**payload.model_dump())
@@ -71,6 +105,11 @@ async def create_brand(
         entity_id=brand.id,
         description=f"Created brand {brand.name!r} ({brand.code}).",
         new_values=payload.model_dump(mode="json"),
+    )
+    await _publish_brand_event(
+        db=db, dispatcher=dispatcher, event_type="brand.created",
+        brand_id=brand.id, user_id=current_user.id,
+        changes=payload.model_dump(mode="json"),
     )
     return build_success_response(data=data, request_id=request.state.request_id, message="Resource created successfully.")
 
@@ -103,11 +142,8 @@ async def export_brands(
         file_format = "csv"
     content = await service.export_file(file_format)
     await _record_action(
-        audit_service=audit_service,
-        request=request,
-        action=AuditAction.EXPORT,
-        actor=current_user,
-        entity_id="bulk",
+        audit_service=audit_service, request=request, action=AuditAction.EXPORT,
+        actor=current_user, entity_id="bulk",
         description=f"Exported brands as {file_format}.",
     )
     media_type = "text/csv" if file_format == "csv" else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -127,11 +163,8 @@ async def import_brands(
     raw_bytes = await file.read()
     summary = await service.import_file(file.filename or "import.csv", raw_bytes)
     await _record_action(
-        audit_service=audit_service,
-        request=request,
-        action=AuditAction.IMPORT,
-        actor=current_user,
-        entity_id="bulk",
+        audit_service=audit_service, request=request, action=AuditAction.IMPORT,
+        actor=current_user, entity_id="bulk",
         description=f"Imported brands: {summary.created} created, {summary.failed} failed.",
         new_values=summary.as_dict(),
     )
@@ -160,18 +193,22 @@ async def update_brand(
     service: BrandService = Depends(get_brand_service),
     current_user: CurrentUser = Depends(require_permission("brand.update")),
     audit_service: AuditService = Depends(get_audit_service),
+    db: AsyncSession = Depends(get_db_session),
+    dispatcher: EventDispatcher = Depends(get_event_dispatcher),
 ) -> dict:
     """Update an existing brand."""
     brand = await service.update(brand_id, **payload.model_dump())
     data = BrandRead.model_validate(brand).model_dump(mode="json")
     await _record_action(
-        audit_service=audit_service,
-        request=request,
-        action=AuditAction.UPDATE,
-        actor=current_user,
-        entity_id=brand.id,
+        audit_service=audit_service, request=request, action=AuditAction.UPDATE,
+        actor=current_user, entity_id=brand.id,
         description=f"Updated brand {brand.name!r}.",
         new_values=payload.model_dump(exclude_none=True, mode="json"),
+    )
+    await _publish_brand_event(
+        db=db, dispatcher=dispatcher, event_type="brand.updated",
+        brand_id=brand.id, user_id=current_user.id,
+        changes=payload.model_dump(exclude_none=True, mode="json"),
     )
     return build_success_response(data=data, request_id=request.state.request_id)
 
@@ -183,17 +220,21 @@ async def activate_brand(
     service: BrandService = Depends(get_brand_service),
     current_user: CurrentUser = Depends(require_permission("brand.update")),
     audit_service: AuditService = Depends(get_audit_service),
+    db: AsyncSession = Depends(get_db_session),
+    dispatcher: EventDispatcher = Depends(get_event_dispatcher),
 ) -> dict:
     """Set a brand's status to active."""
     brand = await service.activate(brand_id)
     data = BrandRead.model_validate(brand).model_dump(mode="json")
     await _record_action(
-        audit_service=audit_service,
-        request=request,
-        action=AuditAction.UPDATE,
-        actor=current_user,
-        entity_id=brand.id,
+        audit_service=audit_service, request=request, action=AuditAction.UPDATE,
+        actor=current_user, entity_id=brand.id,
         description=f"Activated brand {brand.name!r}.",
+    )
+    await _publish_brand_event(
+        db=db, dispatcher=dispatcher, event_type="brand.updated",
+        brand_id=brand.id, user_id=current_user.id,
+        changes={"is_active": True},
     )
     return build_success_response(data=data, request_id=request.state.request_id)
 
@@ -205,17 +246,21 @@ async def deactivate_brand(
     service: BrandService = Depends(get_brand_service),
     current_user: CurrentUser = Depends(require_permission("brand.update")),
     audit_service: AuditService = Depends(get_audit_service),
+    db: AsyncSession = Depends(get_db_session),
+    dispatcher: EventDispatcher = Depends(get_event_dispatcher),
 ) -> dict:
     """Set a brand's status to inactive."""
     brand = await service.deactivate(brand_id)
     data = BrandRead.model_validate(brand).model_dump(mode="json")
     await _record_action(
-        audit_service=audit_service,
-        request=request,
-        action=AuditAction.UPDATE,
-        actor=current_user,
-        entity_id=brand.id,
+        audit_service=audit_service, request=request, action=AuditAction.UPDATE,
+        actor=current_user, entity_id=brand.id,
         description=f"Deactivated brand {brand.name!r}.",
+    )
+    await _publish_brand_event(
+        db=db, dispatcher=dispatcher, event_type="brand.updated",
+        brand_id=brand.id, user_id=current_user.id,
+        changes={"is_active": False},
     )
     return build_success_response(data=data, request_id=request.state.request_id)
 
@@ -227,15 +272,19 @@ async def delete_brand(
     service: BrandService = Depends(get_brand_service),
     current_user: CurrentUser = Depends(require_permission("brand.delete")),
     audit_service: AuditService = Depends(get_audit_service),
+    db: AsyncSession = Depends(get_db_session),
+    dispatcher: EventDispatcher = Depends(get_event_dispatcher),
 ) -> dict:
     """Soft-delete a brand."""
     await service.delete(brand_id)
     await _record_action(
-        audit_service=audit_service,
-        request=request,
-        action=AuditAction.DELETE,
-        actor=current_user,
-        entity_id=brand_id,
+        audit_service=audit_service, request=request, action=AuditAction.DELETE,
+        actor=current_user, entity_id=brand_id,
         description="Deleted brand.",
+    )
+    await _publish_brand_event(
+        db=db, dispatcher=dispatcher, event_type="brand.deleted",
+        brand_id=brand_id, user_id=current_user.id,
+        changes={},
     )
     return build_success_response(data={"deleted": True}, request_id=request.state.request_id)

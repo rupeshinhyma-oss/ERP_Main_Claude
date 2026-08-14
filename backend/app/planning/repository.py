@@ -99,16 +99,40 @@ class PlanningRowRepository(BaseRepository[PlanningRow]):
         since "no products belong to this org" should filter every row out,
         not disable the filter.
         """
+        ids = await self._all_product_ids_for_organization(organization_id)
+        return set(ids)
+
+    async def _all_product_ids_for_organization(self, organization_id: uuid.UUID | None) -> list[uuid.UUID]:
+        """
+        Return every live Product Master ID, in stable ``created_at`` order,
+        optionally restricted to those whose ``organization_ids`` contains
+        ``organization_id``.
+
+        This is the SAME ordering ``ProductRepository.list()`` /
+        ``BaseRepository._base_select()`` falls back to, so results here
+        line up 1:1 with what ``PlanningService.auto_populate_rows_from_item_source``
+        pulls when it calls ``repository.list(offset=0, limit=...)`` --
+        important because both the "how many rows COULD this sheet have"
+        count and the "create the next N rows" action need to agree on
+        which record is #1, #2, #51, etc., or a page boundary could skip
+        or duplicate a record.
+        """
         from app.masters.products.models import Product
 
-        stmt = select(Product.id, Product.organization_ids).where(Product.deleted_at.is_(None))
+        stmt = (
+            select(Product.id, Product.organization_ids)
+            .where(Product.deleted_at.is_(None))
+            .order_by(Product.created_at, Product.id)
+        )
         result = await self.session.execute(stmt)
+        if organization_id is None:
+            return [row[0] for row in result.all()]
         org_str = str(organization_id)
-        matching_ids: set[uuid.UUID] = set()
-        for product_id, organization_ids in result.all():
-            if organization_ids and org_str in [str(x) for x in organization_ids]:
-                matching_ids.add(product_id)
-        return matching_ids
+        return [
+            product_id
+            for product_id, organization_ids in result.all()
+            if organization_ids and org_str in [str(x) for x in organization_ids]
+        ]
 
     async def list_page_for_sheet(
         self,

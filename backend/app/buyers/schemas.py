@@ -143,6 +143,7 @@ class BuyerCreate(BaseModel):
 class BuyerUpdate(BaseModel):
     """Payload to update an existing buyer profile. All fields optional (partial update)."""
 
+    version: int | None = None
     company_name: str | None = Field(default=None, min_length=1, max_length=255)
     category_ids: list[uuid.UUID] | None = None
     sub_category_ids: list[uuid.UUID] | None = None
@@ -212,6 +213,7 @@ class BuyerRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
+    version: int = 1
     company_name: str
     buyer_type: str | None
     country_id: uuid.UUID
@@ -250,6 +252,7 @@ class BuyerListItemRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
+    version: int = 1
     company_name: str
     buyer_type: str | None
     country_id: uuid.UUID

@@ -9,6 +9,13 @@ Implements the document's two-layer structure directly in the URL shape:
 
 Plus the admin-managed Consignment Codes master, and the bulk
 Tally-Entry-Posted action.
+
+Phase 9: added live event publishing on every mutation so the Inquiries
+page receives real-time updates via ``module:inquiries``. The entity name
+``"inquiry"`` already exists in the frontend ENTITY_TO_MODULE_CHANNEL
+table (mapped to ``moduleChannel("inquiries")``), so no frontend routing
+change is needed. Events are published at the item level (the unit that
+actually changes), not the consignment level.
 """
 
 from __future__ import annotations
@@ -16,12 +23,16 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, Depends, Request, status
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.constants import AuditAction
 from app.audit.dependencies import get_audit_service
 from app.audit.service import AuditService
 from app.auth.service import CurrentUser
 from app.core.responses import build_success_response
+from app.database.session import get_db_session
+from app.events.dependencies import get_event_dispatcher
+from app.events.dispatcher import EventDispatcher
 from app.inquiries.dependencies import get_inquiry_service
 from app.inquiries.schemas import (
     BulkTallyPostRequest,
@@ -40,6 +51,38 @@ from app.inquiries.service import InquiryService
 from app.rbac.dependencies import require_permission
 
 router = APIRouter(prefix="/inquiries", tags=["Inquiries"])
+
+
+async def _publish_inquiry_event(
+    *,
+    db: AsyncSession,
+    dispatcher: EventDispatcher,
+    event_type: str,
+    entity_id: uuid.UUID | str,
+    user_id: uuid.UUID,
+    changes: dict,
+) -> None:
+    """
+    Commit ``db``, then publish an ``inquiry.*`` live event on
+    ``module:inquiries``.
+
+    Phase 9: the frontend ENTITY_TO_MODULE_CHANNEL table already maps
+    ``entity="inquiry"`` to ``moduleChannel("inquiries")``, and
+    ``MODULE_CHANNEL_PERMISSIONS`` already maps that channel to
+    ``inquiry.read`` -- both were registered in Phase 1, but nothing
+    published to them until now. Events use the item id as ``entity_id``
+    (the record that actually changed) rather than the consignment id.
+    """
+    await dispatcher.publish_lifecycle_event(
+        db,
+        module="inquiries",
+        entity="inquiry",
+        entity_id=entity_id,
+        event_type=event_type,
+        version=None,
+        user_id=user_id,
+        changes=changes,
+    )
 
 
 async def _record_action(
@@ -109,14 +152,6 @@ async def list_consignment_codes(
 ) -> dict:
     """
     List consignment codes, optionally scoped to one buyer (for the create-inquiry dropdown).
-
-    Document: "respective company users should see only relevant options
-    to choose, but admin can see all" -- per the confirmed scope for this
-    pass, every user with inquiry.read currently sees every code
-    regardless of company; enforcing the per-user company restriction is
-    flagged as follow-up work (see the ``ConsignmentCode`` model
-    docstring), not silently implemented here without the underlying
-    "which company does this user belong to" concept existing yet.
     """
     codes = await service.list_consignment_codes(buyer_id=buyer_id)
     data = [ConsignmentCodeRead.model_validate(c).model_dump(mode="json") for c in codes]
@@ -181,6 +216,8 @@ async def delete_consignment(
     service: InquiryService = Depends(get_inquiry_service),
     current_user: CurrentUser = Depends(require_permission("inquiry.delete")),
     audit_service: AuditService = Depends(get_audit_service),
+    db: AsyncSession = Depends(get_db_session),
+    dispatcher: EventDispatcher = Depends(get_event_dispatcher),
 ) -> dict:
     """Document (Layer-1 list): Action "Delete"."""
     await service.delete_consignment(inquiry_id)
@@ -191,6 +228,14 @@ async def delete_consignment(
         actor=current_user,
         entity_id=inquiry_id,
         description="Deleted consignment.",
+    )
+    await _publish_inquiry_event(
+        db=db,
+        dispatcher=dispatcher,
+        event_type="inquiry.deleted",
+        entity_id=inquiry_id,
+        user_id=current_user.id,
+        changes={},
     )
     return build_success_response(data={"deleted": True}, request_id=request.state.request_id)
 
@@ -207,6 +252,8 @@ async def create_item(
     service: InquiryService = Depends(get_inquiry_service),
     current_user: CurrentUser = Depends(require_permission("inquiry.create")),
     audit_service: AuditService = Depends(get_audit_service),
+    db: AsyncSession = Depends(get_db_session),
+    dispatcher: EventDispatcher = Depends(get_event_dispatcher),
 ) -> dict:
     """
     Add one product line to a consignment, creating the consignment header on first use.
@@ -234,6 +281,14 @@ async def create_item(
         entity_id=item.id,
         description="Added inquiry item.",
         new_values=payload.model_dump(mode="json"),
+    )
+    await _publish_inquiry_event(
+        db=db,
+        dispatcher=dispatcher,
+        event_type="inquiry.created",
+        entity_id=item.id,
+        user_id=current_user.id,
+        changes=payload.model_dump(mode="json"),
     )
     return build_success_response(data=data, request_id=request.state.request_id, message="Inquiry item added.")
 
@@ -272,6 +327,8 @@ async def update_item(
     service: InquiryService = Depends(get_inquiry_service),
     current_user: CurrentUser = Depends(require_permission("inquiry.update")),
     audit_service: AuditService = Depends(get_audit_service),
+    db: AsyncSession = Depends(get_db_session),
+    dispatcher: EventDispatcher = Depends(get_event_dispatcher),
 ) -> dict:
     """Document (Process Flow): "editable in quantity ... (but weight, CBM etc will not be editable)"."""
     item = await service.update_item(inquiry_id, item_id, **payload.model_dump())
@@ -285,6 +342,14 @@ async def update_item(
         description="Updated inquiry item.",
         new_values=payload.model_dump(exclude_none=True, mode="json"),
     )
+    await _publish_inquiry_event(
+        db=db,
+        dispatcher=dispatcher,
+        event_type="inquiry.updated",
+        entity_id=item.id,
+        user_id=current_user.id,
+        changes=payload.model_dump(exclude_none=True, mode="json"),
+    )
     return build_success_response(data=data, request_id=request.state.request_id)
 
 
@@ -297,6 +362,8 @@ async def shift_item(
     service: InquiryService = Depends(get_inquiry_service),
     current_user: CurrentUser = Depends(require_permission("inquiry.update")),
     audit_service: AuditService = Depends(get_audit_service),
+    db: AsyncSession = Depends(get_db_session),
+    dispatcher: EventDispatcher = Depends(get_event_dispatcher),
 ) -> dict:
     """Document (Process Flow): "shifting between FB1 & FB2"."""
     item = await service.shift_item(
@@ -311,6 +378,14 @@ async def shift_item(
         entity_id=item.id,
         description=f"Shifted inquiry item to consignment code {payload.to_consignment_code_id}.",
     )
+    await _publish_inquiry_event(
+        db=db,
+        dispatcher=dispatcher,
+        event_type="inquiry.updated",
+        entity_id=item.id,
+        user_id=current_user.id,
+        changes={"consignment_code_id": str(payload.to_consignment_code_id)},
+    )
     return build_success_response(data=data, request_id=request.state.request_id)
 
 
@@ -322,6 +397,8 @@ async def approve_item(
     service: InquiryService = Depends(get_inquiry_service),
     current_user: CurrentUser = Depends(require_permission("inquiry.approve")),
     audit_service: AuditService = Depends(get_audit_service),
+    db: AsyncSession = Depends(get_db_session),
+    dispatcher: EventDispatcher = Depends(get_event_dispatcher),
 ) -> dict:
     """Document: Status moves Proposed -> Approved; Approved Date/By auto-generated from the acting user."""
     item = await service.approve_item(inquiry_id, item_id, user_id=current_user.id)
@@ -334,6 +411,14 @@ async def approve_item(
         entity_id=item.id,
         description="Approved inquiry item.",
     )
+    await _publish_inquiry_event(
+        db=db,
+        dispatcher=dispatcher,
+        event_type="inquiry.updated",
+        entity_id=item.id,
+        user_id=current_user.id,
+        changes={"status": "Approved"},
+    )
     return build_success_response(data=data, request_id=request.state.request_id)
 
 
@@ -345,6 +430,8 @@ async def revert_item(
     service: InquiryService = Depends(get_inquiry_service),
     current_user: CurrentUser = Depends(require_permission("inquiry.approve")),
     audit_service: AuditService = Depends(get_audit_service),
+    db: AsyncSession = Depends(get_db_session),
+    dispatcher: EventDispatcher = Depends(get_event_dispatcher),
 ) -> dict:
     item = await service.revert_item_to_proposed(inquiry_id, item_id)
     data = InquiryItemRead.model_validate(item).model_dump(mode="json")
@@ -355,6 +442,14 @@ async def revert_item(
         actor=current_user,
         entity_id=item.id,
         description="Reverted inquiry item to Proposed.",
+    )
+    await _publish_inquiry_event(
+        db=db,
+        dispatcher=dispatcher,
+        event_type="inquiry.updated",
+        entity_id=item.id,
+        user_id=current_user.id,
+        changes={"status": "Proposed"},
     )
     return build_success_response(data=data, request_id=request.state.request_id)
 
@@ -368,6 +463,8 @@ async def set_procurement_remarks(
     service: InquiryService = Depends(get_inquiry_service),
     current_user: CurrentUser = Depends(require_permission("inquiry.update")),
     audit_service: AuditService = Depends(get_audit_service),
+    db: AsyncSession = Depends(get_db_session),
+    dispatcher: EventDispatcher = Depends(get_event_dispatcher),
 ) -> dict:
     """Document: "Remarks (by Yinglima China Procurement Team) ... added or edited from 'Action' Panel"."""
     item = await service.set_procurement_remarks(inquiry_id, item_id, remarks=payload.remarks)
@@ -381,6 +478,14 @@ async def set_procurement_remarks(
         description="Updated procurement remarks on inquiry item.",
         new_values=payload.model_dump(mode="json"),
     )
+    await _publish_inquiry_event(
+        db=db,
+        dispatcher=dispatcher,
+        event_type="inquiry.updated",
+        entity_id=item.id,
+        user_id=current_user.id,
+        changes=payload.model_dump(mode="json"),
+    )
     return build_success_response(data=data, request_id=request.state.request_id)
 
 
@@ -392,6 +497,8 @@ async def delete_item(
     service: InquiryService = Depends(get_inquiry_service),
     current_user: CurrentUser = Depends(require_permission("inquiry.delete")),
     audit_service: AuditService = Depends(get_audit_service),
+    db: AsyncSession = Depends(get_db_session),
+    dispatcher: EventDispatcher = Depends(get_event_dispatcher),
 ) -> dict:
     await service.delete_item(inquiry_id, item_id)
     await _record_action(
@@ -401,6 +508,14 @@ async def delete_item(
         actor=current_user,
         entity_id=item_id,
         description="Deleted inquiry item.",
+    )
+    await _publish_inquiry_event(
+        db=db,
+        dispatcher=dispatcher,
+        event_type="inquiry.deleted",
+        entity_id=item_id,
+        user_id=current_user.id,
+        changes={},
     )
     return build_success_response(data={"deleted": True}, request_id=request.state.request_id)
 
@@ -417,6 +532,8 @@ async def bulk_mark_tally_posted(
     service: InquiryService = Depends(get_inquiry_service),
     current_user: CurrentUser = Depends(require_permission("inquiry.update")),
     audit_service: AuditService = Depends(get_audit_service),
+    db: AsyncSession = Depends(get_db_session),
+    dispatcher: EventDispatcher = Depends(get_event_dispatcher),
 ) -> dict:
     """Document: "some easy way to select and change multiple items to 'Posted'"."""
     items = await service.bulk_mark_tally_posted(payload.item_ids, user_id=current_user.id)
@@ -430,4 +547,21 @@ async def bulk_mark_tally_posted(
         description=f"Marked {len(items)} inquiry item(s) as Tally Entry Posted.",
         new_values={"item_ids": [str(i) for i in payload.item_ids]},
     )
+    # Commit once, then broadcast one event per updated item so each
+    # subscriber's liveEntityStore can patch exactly the right row rather
+    # than collapsing a bulk action into a single ambiguous event.
+    await db.commit()
+    from app.events.models import Event
+    from app.events.channels import module_channel
+
+    for item in items:
+        event = Event(
+            event_type="inquiry.updated",
+            entity="inquiry",
+            entity_id=str(item.id),
+            version=None,
+            user_id=str(current_user.id),
+            changes={"tally_entry_posted": True},
+        )
+        await dispatcher.publish(module_channel("inquiries"), event, exclude_user_id=current_user.id)
     return build_success_response(data=data, request_id=request.state.request_id, message=f"{len(items)} item(s) marked Posted.")

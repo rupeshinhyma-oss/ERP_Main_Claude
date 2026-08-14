@@ -32,6 +32,7 @@ from app.middleware.audit_middleware import AuditMiddleware
 from app.middleware.logging_middleware import AccessLogMiddleware
 from app.middleware.request_id import RequestIdMiddleware
 from app.queue.worker import get_worker
+from app.trash.purge_worker import TrashPurgeWorker
 
 logger = get_logger(__name__)
 
@@ -50,11 +51,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         - Start the background queue worker so jobs are processed immediately.
         - Start the background cache cleanup worker so expired cache
           entries are reclaimed even if nothing ever reads them again.
+        - Start the background trash auto-purge worker so soft-deleted
+          records past the 4-year retention window are permanently
+          removed automatically, without anyone needing to trigger it.
 
     Shutdown:
         - Gracefully stop the background queue worker (waits for the
           currently-executing job to finish before stopping).
         - Stop the background cache cleanup worker.
+        - Stop the background trash auto-purge worker.
         - Dispose of the database engine's connection pool cleanly.
 
     This is the correct, modern replacement for FastAPI's deprecated
@@ -89,6 +94,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     cleanup_worker = get_cleanup_worker()
     await cleanup_worker.start()
 
+    # Start the background trash auto-purge worker: permanently deletes
+    # soft-deleted records once they're older than
+    # settings.TRASH_RETENTION_DAYS (4 years) and still sitting
+    # un-restored in Trash. See app.trash.purge_worker for the full
+    # policy this enforces.
+    trash_purge_worker = TrashPurgeWorker()
+    await trash_purge_worker.start()
+
     yield
 
     logger.info("Application shutting down.")
@@ -98,6 +111,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # Stop the cache cleanup worker.
     await cleanup_worker.stop()
+
+    # Stop the trash auto-purge worker.
+    await trash_purge_worker.stop()
 
     await dispose_engine()
 

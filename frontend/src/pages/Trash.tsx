@@ -9,6 +9,7 @@ import { useEffect, useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { Banner } from "@/components/ui";
 import { apiGet, apiPost } from "@/lib/api";
+import { usePendingGuard } from "@/lib/hooks";
 
 interface TrashItem {
   id: string;
@@ -27,6 +28,12 @@ export function TrashPage() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [filterModule, setFilterModule] = useState<string>("ALL");
   const [searchQuery, setSearchQuery] = useState<string>("");
+
+  // Phase 7: double-submit guards. Per-row restore/delete are keyed by
+  // "entityType:id" so clicking one row's button never disables another
+  // row's; bulk restore/delete/empty each only ever have one instance open
+  // at a time, so they share the same keyed guard under fixed keys.
+  const { isPending: isRowActionPending, guard: guardRowAction } = usePendingGuard<string>();
 
   async function loadTrash() {
     try {
@@ -86,52 +93,58 @@ export function TrashPage() {
   }
 
   async function handleRestoreSingle(entityType: string, id: string, name: string) {
-    setError(null);
-    setSuccessMsg(null);
-    try {
-      await apiPost("/trash/restore", { items: [{ entity_type: entityType, id }] });
-      setSuccessMsg(`Successfully restored '${name}' back to active state.`);
-      setSelectedIds(new Set());
-      await loadTrash();
-    } catch (err) {
-      setError(err);
-    }
+    await guardRowAction(`restore:${entityType}:${id}`, async () => {
+      setError(null);
+      setSuccessMsg(null);
+      try {
+        await apiPost("/trash/restore", { items: [{ entity_type: entityType, id }] });
+        setSuccessMsg(`Successfully restored '${name}' back to active state.`);
+        setSelectedIds(new Set());
+        await loadTrash();
+      } catch (err) {
+        setError(err);
+      }
+    });
   }
 
   async function handlePermanentDeleteSingle(entityType: string, id: string, name: string) {
     if (!confirm(`Permanently delete '${name}' from database?\n\nWARNING: This cannot be undone!`)) {
       return;
     }
-    setError(null);
-    setSuccessMsg(null);
-    try {
-      await apiPost("/trash/permanent-delete", { items: [{ entity_type: entityType, id }] });
-      setSuccessMsg(`Permanently deleted '${name}' from database.`);
-      setSelectedIds(new Set());
-      await loadTrash();
-    } catch (err) {
-      setError(err);
-    }
+    await guardRowAction(`delete:${entityType}:${id}`, async () => {
+      setError(null);
+      setSuccessMsg(null);
+      try {
+        await apiPost("/trash/permanent-delete", { items: [{ entity_type: entityType, id }] });
+        setSuccessMsg(`Permanently deleted '${name}' from database.`);
+        setSelectedIds(new Set());
+        await loadTrash();
+      } catch (err) {
+        setError(err);
+      }
+    });
   }
 
   async function handleBulkRestore() {
     if (selectedIds.size === 0) return;
-    setError(null);
-    setSuccessMsg(null);
+    await guardRowAction("bulk-restore", async () => {
+      setError(null);
+      setSuccessMsg(null);
 
-    const payloadItems = Array.from(selectedIds).map((key) => {
-      const [entity_type, id] = key.split(":");
-      return { entity_type, id };
+      const payloadItems = Array.from(selectedIds).map((key) => {
+        const [entity_type, id] = key.split(":");
+        return { entity_type, id };
+      });
+
+      try {
+        await apiPost("/trash/restore", { items: payloadItems });
+        setSuccessMsg(`Successfully restored ${payloadItems.length} selected item(s).`);
+        setSelectedIds(new Set());
+        await loadTrash();
+      } catch (err) {
+        setError(err);
+      }
     });
-
-    try {
-      await apiPost("/trash/restore", { items: payloadItems });
-      setSuccessMsg(`Successfully restored ${payloadItems.length} selected item(s).`);
-      setSelectedIds(new Set());
-      await loadTrash();
-    } catch (err) {
-      setError(err);
-    }
   }
 
   async function handleBulkPermanentDelete() {
@@ -143,22 +156,24 @@ export function TrashPage() {
     ) {
       return;
     }
-    setError(null);
-    setSuccessMsg(null);
+    await guardRowAction("bulk-delete", async () => {
+      setError(null);
+      setSuccessMsg(null);
 
-    const payloadItems = Array.from(selectedIds).map((key) => {
-      const [entity_type, id] = key.split(":");
-      return { entity_type, id };
+      const payloadItems = Array.from(selectedIds).map((key) => {
+        const [entity_type, id] = key.split(":");
+        return { entity_type, id };
+      });
+
+      try {
+        await apiPost("/trash/permanent-delete", { items: payloadItems });
+        setSuccessMsg(`Permanently deleted ${payloadItems.length} item(s) from database.`);
+        setSelectedIds(new Set());
+        await loadTrash();
+      } catch (err) {
+        setError(err);
+      }
     });
-
-    try {
-      await apiPost("/trash/permanent-delete", { items: payloadItems });
-      setSuccessMsg(`Permanently deleted ${payloadItems.length} item(s) from database.`);
-      setSelectedIds(new Set());
-      await loadTrash();
-    } catch (err) {
-      setError(err);
-    }
   }
 
   async function handleEmptyTrash() {
@@ -170,18 +185,20 @@ export function TrashPage() {
     ) {
       return;
     }
-    setError(null);
-    setSuccessMsg(null);
+    await guardRowAction("empty-trash", async () => {
+      setError(null);
+      setSuccessMsg(null);
 
-    try {
-      const res = await apiPost<{ deleted_count: number }>("/trash/empty", {});
-      const count = res?.data?.deleted_count || 0;
-      setSuccessMsg(`Trash emptied. Permanently deleted ${count} item(s).`);
-      setSelectedIds(new Set());
-      await loadTrash();
-    } catch (err) {
-      setError(err);
-    }
+      try {
+        const res = await apiPost<{ deleted_count: number }>("/trash/empty", {});
+        const count = res?.data?.deleted_count || 0;
+        setSuccessMsg(`Trash emptied. Permanently deleted ${count} item(s).`);
+        setSelectedIds(new Set());
+        await loadTrash();
+      } catch (err) {
+        setError(err);
+      }
+    });
   }
 
   return (
@@ -200,6 +217,7 @@ export function TrashPage() {
               type="button"
               className="btn btn-danger"
               onClick={handleEmptyTrash}
+              disabled={isRowActionPending("empty-trash")}
               style={{
                 background: "#dc2626",
                 color: "#ffffff",
@@ -208,13 +226,14 @@ export function TrashPage() {
                 padding: "8px 16px",
                 fontWeight: 600,
                 fontSize: "13.5px",
-                cursor: "pointer",
+                cursor: isRowActionPending("empty-trash") ? "default" : "pointer",
+                opacity: isRowActionPending("empty-trash") ? 0.7 : 1,
                 display: "flex",
                 alignItems: "center",
                 gap: "6px",
               }}
             >
-              🗑️ Empty Trash
+              {isRowActionPending("empty-trash") ? "Emptying…" : "🗑️ Empty Trash"}
             </button>
           )}
         </div>
@@ -292,6 +311,7 @@ export function TrashPage() {
                 type="button"
                 className="btn"
                 onClick={handleBulkRestore}
+                disabled={isRowActionPending("bulk-restore")}
                 style={{
                   background: "#059669",
                   color: "#ffffff",
@@ -300,15 +320,17 @@ export function TrashPage() {
                   padding: "7px 14px",
                   fontSize: "13px",
                   fontWeight: 600,
-                  cursor: "pointer",
+                  cursor: isRowActionPending("bulk-restore") ? "default" : "pointer",
+                  opacity: isRowActionPending("bulk-restore") ? 0.7 : 1,
                 }}
               >
-                🔄 Restore Selected
+                {isRowActionPending("bulk-restore") ? "Restoring…" : "🔄 Restore Selected"}
               </button>
               <button
                 type="button"
                 className="btn"
                 onClick={handleBulkPermanentDelete}
+                disabled={isRowActionPending("bulk-delete")}
                 style={{
                   background: "#dc2626",
                   color: "#ffffff",
@@ -317,10 +339,11 @@ export function TrashPage() {
                   padding: "7px 14px",
                   fontSize: "13px",
                   fontWeight: 600,
-                  cursor: "pointer",
+                  cursor: isRowActionPending("bulk-delete") ? "default" : "pointer",
+                  opacity: isRowActionPending("bulk-delete") ? 0.7 : 1,
                 }}
               >
-                🗑️ Delete Selected Permanently
+                {isRowActionPending("bulk-delete") ? "Deleting…" : "🗑️ Delete Selected Permanently"}
               </button>
             </div>
           )}
@@ -430,6 +453,7 @@ export function TrashPage() {
                             type="button"
                             className="btn btn-sm"
                             onClick={() => handleRestoreSingle(item.entity_type, item.id, item.name)}
+                            disabled={isRowActionPending(`restore:${key}`)}
                             style={{
                               background: "#ecfdf5",
                               color: "#047857",
@@ -438,16 +462,18 @@ export function TrashPage() {
                               borderRadius: "4px",
                               fontSize: "12px",
                               fontWeight: 600,
-                              cursor: "pointer",
+                              cursor: isRowActionPending(`restore:${key}`) ? "default" : "pointer",
+                              opacity: isRowActionPending(`restore:${key}`) ? 0.6 : 1,
                             }}
                             title="Restore back to active state"
                           >
-                            🔄 Restore
+                            {isRowActionPending(`restore:${key}`) ? "Restoring…" : "🔄 Restore"}
                           </button>
                           <button
                             type="button"
                             className="btn btn-sm btn-danger"
                             onClick={() => handlePermanentDeleteSingle(item.entity_type, item.id, item.name)}
+                            disabled={isRowActionPending(`delete:${key}`)}
                             style={{
                               background: "#fef2f2",
                               color: "#dc2626",
@@ -456,11 +482,12 @@ export function TrashPage() {
                               borderRadius: "4px",
                               fontSize: "12px",
                               fontWeight: 600,
-                              cursor: "pointer",
+                              cursor: isRowActionPending(`delete:${key}`) ? "default" : "pointer",
+                              opacity: isRowActionPending(`delete:${key}`) ? 0.6 : 1,
                             }}
                             title="Completely delete from database"
                           >
-                            🗑️ Delete
+                            {isRowActionPending(`delete:${key}`) ? "Deleting…" : "🗑️ Delete"}
                           </button>
                         </div>
                       </td>

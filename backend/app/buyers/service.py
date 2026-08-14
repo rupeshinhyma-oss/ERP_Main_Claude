@@ -121,14 +121,32 @@ class BuyerService:
             raise BadRequestException("The specified country does not exist.")
 
     async def _validate_categories(self, category_ids: list[uuid.UUID]) -> None:
-        for category_id in category_ids:
-            if await self.category_repository.get_by_id(category_id) is None:
-                raise BadRequestException(f"Product category {category_id} does not exist.")
+        """
+        Validate every category ID exists in ONE query, not one query per ID.
+
+        Phase 3 N+1 fix: this used to call ``get_by_id`` in a loop --
+        for a buyer with, say, 5 categories selected, that was 5
+        sequential round trips on every single create/update, purely for
+        validation. ``BaseRepository.get_by_ids`` (already used
+        elsewhere for exactly this reason -- see Shipment Planning's
+        linked-record resolution) fetches every row in a single
+        ``WHERE id IN (...)`` query instead.
+        """
+        if not category_ids:
+            return
+        found = await self.category_repository.get_by_ids(category_ids)
+        missing = [str(cid) for cid in category_ids if cid not in found]
+        if missing:
+            raise BadRequestException(f"Product category {missing[0]} does not exist.")
 
     async def _validate_sub_categories(self, sub_category_ids: list[uuid.UUID]) -> None:
-        for sub_category_id in sub_category_ids:
-            if await self.sub_category_repository.get_by_id(sub_category_id) is None:
-                raise BadRequestException(f"Product sub-category {sub_category_id} does not exist.")
+        """Validate every sub-category ID exists in ONE query -- see ``_validate_categories``'s docstring."""
+        if not sub_category_ids:
+            return
+        found = await self.sub_category_repository.get_by_ids(sub_category_ids)
+        missing = [str(sid) for sid in sub_category_ids if sid not in found]
+        if missing:
+            raise BadRequestException(f"Product sub-category {missing[0]} does not exist.")
 
     def _validate_potential_reason(self, potential: Any, potential_reason: str | None) -> None:
         """Document: "If Potential is No, then reason" -- reason is only meaningful when Potential is No."""
@@ -254,6 +272,16 @@ class BuyerService:
         if "current_status" in field_values:
             self._validate_status_transition(buyer.current_status, field_values["current_status"])
 
+        # Note: `changes` includes `version` (as a plain key, alongside
+        # any other field) whenever the client sends it, since it's a
+        # normal non-None value at this point -- there is no special
+        # extraction here. BaseRepository.update() is what recognizes a
+        # `version` kwarg and treats it as `expected_version` for the
+        # OCC check (see its docstring), the exact same mechanism
+        # app.users.service.UserService.update_user already relies on.
+        # A version-only payload (no other field actually changed) still
+        # correctly reaches repository.update() and is still checked,
+        # since `version` alone makes `changes` non-empty.
         changes = {k: v for k, v in field_values.items() if v is not None}
         if changes:
             await self.repository.update(buyer, **changes)

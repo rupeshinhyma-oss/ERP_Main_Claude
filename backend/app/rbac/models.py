@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING
 from sqlalchemy import Boolean, DateTime, ForeignKey, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.database.base import GUID, Base, TimestampMixin, UUIDPrimaryKeyMixin
+from app.database.base import GUID, Base, SoftDeleteMixin, TimestampMixin, UUIDPrimaryKeyMixin
 
 if TYPE_CHECKING:
     from app.users.models import User
@@ -58,7 +58,7 @@ class Permission(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         return f"<Permission code={self.code!r}>"
 
 
-class Role(Base, UUIDPrimaryKeyMixin, TimestampMixin):
+class Role(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
     """
     A named, assignable bundle of permissions.
 
@@ -66,6 +66,17 @@ class Role(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     (currently just ``super_admin``) and must be protected from deletion or
     renaming through the admin API, since removing them could lock every
     administrator out of the system.
+
+    Soft-delete (``SoftDeleteMixin``): deleting a role must be recoverable
+    like every other module, so this was the second (of two) real
+    hard-delete gaps found in the codebase -- ``RbacService.delete_role``
+    previously called ``session.delete()`` via the base repository's
+    fallback for non-soft-deletable models. Note ``permission_links`` below
+    still declares ``cascade="all, delete-orphan"``, but that cascade only
+    fires on an actual ``session.delete()`` of the Role row itself; a soft
+    delete (setting ``deleted_at``) leaves ``RolePermission`` rows intact,
+    which is what we want -- restoring a soft-deleted role should bring
+    its permission grants back exactly as they were, not an empty role.
     """
 
     __tablename__ = "roles"
@@ -190,4 +201,3 @@ class DesignationPermission(Base, UUIDPrimaryKeyMixin):
 
     def __repr__(self) -> str:
         return f"<DesignationPermission designation_id={self.designation_id} permission_id={self.permission_id}>"
-

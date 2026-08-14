@@ -20,6 +20,7 @@ export function CountriesPage() {
       activeKey="masters-countries"
       apiBase="/masters/countries"
       permissionPrefix="country"
+      liveModule="countries"
       entityName="country"
       heading="Countries (National Level)"
       subtitle="National-level administrative divisions — People's Republic of China and international trading partners."

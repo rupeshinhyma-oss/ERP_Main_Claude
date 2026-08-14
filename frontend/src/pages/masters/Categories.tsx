@@ -13,6 +13,7 @@ export function CategoriesPage() {
       activeKey="masters-categories"
       apiBase="/masters/product-categories"
       permissionPrefix="category"
+      liveModule="categories"
       entityName="category"
       heading="Product Categories"
       subtitle={<>The top level of the category &rarr; sub-category product classification.</>}

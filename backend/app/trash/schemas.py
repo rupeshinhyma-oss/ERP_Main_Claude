@@ -17,6 +17,16 @@ class TrashItemResponse(BaseModel):
     name: str = Field(..., description="Item display name or title.")
     details: str | None = Field(default=None, description="Optional extra detail (SKU, code, etc.).")
     deleted_at: datetime | None = Field(default=None, description="Timestamp when soft deleted.")
+    purge_at: datetime | None = Field(
+        default=None,
+        description=(
+            "Timestamp after which this item is eligible for automatic permanent "
+            "deletion (deleted_at + the company's retention period, currently 4 "
+            "years) if nobody restores it first. Informational only -- the "
+            "background purge worker re-derives this from deleted_at at purge "
+            "time rather than trusting this value."
+        ),
+    )
 
 
 class TrashRestoreRequest(BaseModel):

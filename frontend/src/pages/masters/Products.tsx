@@ -50,6 +50,7 @@ const EMPTY: FormState = {
   secondary_uom_id: "",
   organization_id: "",
   organization_ids_json: "[]",
+  branch_ids_json: "[]",
   supplier_id: "",
   refund_vat_percent: "",
   license_certificate_required: "",
@@ -264,6 +265,7 @@ export function ProductsPage() {
         "HSN Code",
         "UOM",
         "Organization",
+        "Branches",
         "Pack. Qty",
         "Pack. Gross Weight",
         "Pack. Unit CBM",
@@ -336,6 +338,43 @@ export function ProductsPage() {
           },
         },
         {
+          header: "Branches",
+          render: (p) => {
+            const branchIds = p.branch_ids || [];
+            if (!branchIds.length) return "—";
+            const allBranches = organizations.items.flatMap((org: any) => org.branches || []);
+            const matchingBranches = branchIds
+              .map((bId) => {
+                const found = allBranches.find((b: any) => b.id === bId || `${bId}`.endsWith(b.name));
+                return found ? `${found.name}${found.code_prefix ? ` (${found.code_prefix})` : ""}` : null;
+              })
+              .filter(Boolean);
+
+            if (!matchingBranches.length) return "—";
+
+            return (
+              <div style={{ display: "flex", gap: "4px", flexWrap: "wrap" }}>
+                {matchingBranches.map((bName, i) => (
+                  <span
+                    key={i}
+                    style={{
+                      background: "#e0f2fe",
+                      color: "#0369a1",
+                      border: "1px solid #bae6fd",
+                      borderRadius: "4px",
+                      padding: "1px 6px",
+                      fontSize: "11.5px",
+                      fontWeight: 600,
+                    }}
+                  >
+                    🏢 {bName}
+                  </span>
+                ))}
+              </div>
+            );
+          },
+        },
+        {
           header: "Pkg Qty",
           render: (p) => (p.packaging_quantity != null ? p.packaging_quantity : "—"),
         },
@@ -399,6 +438,7 @@ export function ProductsPage() {
                 : (item.organization_id ? [item.organization_id] : []))
               : []
           ),
+          branch_ids_json: JSON.stringify(item?.branch_ids || []),
           supplier_id: str(item?.supplier_id),
           refund_vat_percent: str(item?.refund_vat_percent),
           license_certificate_required: str(item?.license_certificate_required),
@@ -484,6 +524,10 @@ export function ProductsPage() {
             try { return JSON.parse(f.organization_ids_json || "[]"); }
             catch { return []; }
           })(),
+          branch_ids: (() => {
+            try { return JSON.parse(f.branch_ids_json || "[]"); }
+            catch { return []; }
+          })(),
           refund_vat_percent: numOrNull(f.refund_vat_percent) ?? 0,
           license_certificate_required: nullIfBlank(f.license_certificate_required),
           conversion_factor: numOrNull(f.conversion_factor),
@@ -547,11 +591,13 @@ export function ProductsPage() {
                   const cleanTyped = (f.product_name_tally || "").trim().toLowerCase().replace(/[\s-]/g, "");
                   if (!cleanTyped) return null;
                   const matches = existingProducts.items.filter((p) => {
+                    if (f._editing_id && p.id === f._editing_id) return false;
                     const pName = (p.product_name_tally || p.product_name || "").toLowerCase().replace(/[\s-]/g, "");
                     const pCode = (p.product_code || "").toLowerCase().replace(/[\s-]/g, "");
                     return pName.includes(cleanTyped) || pCode.includes(cleanTyped);
                   }).slice(0, 5);
                   const exact = existingProducts.items.find((p) => {
+                    if (f._editing_id && p.id === f._editing_id) return false;
                     const pName = (p.product_name_tally || p.product_name || "").toLowerCase().replace(/[\s-]/g, "");
                     const pCode = (p.product_code || "").toLowerCase().replace(/[\s-]/g, "");
                     return pName === cleanTyped || pCode === cleanTyped;
@@ -670,8 +716,46 @@ export function ProductsPage() {
                 onChange={(newVals) => {
                   set("organization_ids_json", JSON.stringify(newVals));
                   set("organization_id", newVals[0] || "");
+
+                  // Automatically check / pre-select all branches belonging to the selected organization(s)
+                  const selectedOrgs = organizations.items.filter((org) => newVals.includes(org.id));
+                  const autoBranchIds: string[] = selectedOrgs.flatMap((org) => {
+                    const branches: any[] = (org as any).branches || [];
+                    return branches.map((b: any) => b.id || `${org.id}_${b.name}`);
+                  });
+                  set("branch_ids_json", JSON.stringify(autoBranchIds));
                 }}
               />
+
+              {/* Dependent Branch Selection */}
+              {(() => {
+                const selectedOrgIds: string[] = (() => {
+                  try { return JSON.parse(f.organization_ids_json || "[]"); }
+                  catch { return []; }
+                })();
+                const selectedOrgs = organizations.items.filter((org) => selectedOrgIds.includes(org.id));
+                const availableBranchOptions: { id: string; name: string }[] = selectedOrgs.flatMap((org) => {
+                  const branches: any[] = (org as any).branches || [];
+                  return branches.map((b: any) => ({
+                    id: b.id || `${org.id}_${b.name}`,
+                    name: `${org.name} — ${b.name}${b.code_prefix ? ` (${b.code_prefix})` : ""}`,
+                  }));
+                });
+
+                return (
+                  <MultiSelectField
+                    id="branch_ids_json"
+                    label="Branches / Operating Locations"
+                    placeholder={availableBranchOptions.length > 0 ? "-- Select Branches --" : "-- Select Organization First --"}
+                    values={(() => {
+                      try { return JSON.parse(f.branch_ids_json || "[]"); }
+                      catch { return []; }
+                    })()}
+                    options={availableBranchOptions}
+                    onChange={(newVals) => set("branch_ids_json", JSON.stringify(newVals))}
+                  />
+                );
+              })()}
             </div>
 
             <div className="form-grid" style={{ gridTemplateColumns: "1fr 1fr", gap: "20px" }}>

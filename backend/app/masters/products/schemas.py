@@ -27,6 +27,7 @@ class ProductCreate(BaseModel):
     secondary_uom_id: uuid.UUID | None = None
     organization_id: uuid.UUID | None = None
     organization_ids: list[uuid.UUID] | None = None
+    branch_ids: list[str] | None = None
     supplier_id: uuid.UUID | None = None
 
     refund_vat_percent: float | None = Field(default=None, ge=0, le=100)
@@ -80,6 +81,7 @@ class ProductUpdate(BaseModel):
     secondary_uom_id: uuid.UUID | None = None
     organization_id: uuid.UUID | None = None
     organization_ids: list[uuid.UUID] | None = None
+    branch_ids: list[str] | None = None
     supplier_id: uuid.UUID | None = None
 
     refund_vat_percent: float | None = Field(default=None, ge=0, le=100)
@@ -135,6 +137,7 @@ class ProductRead(BaseModel):
     secondary_uom_id: uuid.UUID | None
     organization_id: uuid.UUID | None = None
     organization_ids: list[uuid.UUID] | None = None
+    branch_ids: list[str] | None = None
     supplier_id: uuid.UUID | None = None
     supplier_company_name: str | None = None
 

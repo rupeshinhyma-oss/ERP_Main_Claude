@@ -1,0 +1,45 @@
+Inquiry (Requirement) Form (1st Step in Process)
+Fields in Form (Quick Access & Add New both forms
+Inquiry by (buyer company name) (default from login but editable) as for example, F&B, One Stop, Inhyma. But, admin. can choose the company for which this inquiry is generated. – to add this field in Quick Add Form.
+
+Inquiry consignment code - as for example FB1, FB2, OS1, OS2 (these are for Uganda consignments for F&B and One Stop, then ING1, ING2 (for Inhyma India Gujarat), INM1, INM2 (for Inhyma Mumbai), INC1 (for Chennai), INI1 (for Indore) etc. (respective company users should see only relevant options to choose, but admin can see all) – Master to create and choose from dropdown menu – this field to add in Add New Main Inquiry form.
+
+Product Name (to choose from dropdown menu from masters & keyword suggestions)
+Quantity / UOM (UOM to reflect automatically as per inventory master of that item)
+Brand Preference (description) – By Default should be prefilled as per last but editable.
+Product Specs / Remarks – By Default should be prefilled as per last but editable.
+Status - Proposed / Approved (by default Proposed)
+
+______________________________________________________________________
+
+If any product is selected in inquiry that requires “Any License / Certificate” (field data existing in master), it should highlight in RED colour and show that in Remark in List.
+From above fields, “Brand Preference and Product Specs/Remarks” – these 2 fields Optional, Rest all Mandatory fields in both forms (quick add and add new)
+In List – for example, FB1, FB2 should be seen in 1 window in separate columns (like our excel sheet of master planning) & should be editable to shift between each other.
+Overall List (summary) of all consignments (company wise) should be editable like our Master Planning Excel Sheet (pls refer our master planning sheet of India and Uganda for better understanding)
+Process Flow – First we choose Buyer company (as for example F&B, One Stop or Inhyma (at admin level). At user level they can see only their relevant company. Once we click company, then it opens like our excel master planning sheet with all columns with editable in quantity, shifting between FB1 & FB2 (but weight, CBM etc will not be editable)
+Proposed / Approved Date and Proposed / Approved By (field not needed, but auto generated from user login). This will be separate for each item and seen when we go inside company list.
+Tally Entry Posted ? (to show pending by default in inquiry (consignment) list for each item separately and then some easy way to select and change multiple items to “Posted”. All pending entries to show on top by default. User can see only Approved Items (proposed or rejected items not seen)
+Remarks (by Yinglima China Procurement Team) – To show in list column with “View” Eye Button and can be added or edited from “Action” Panel.
+
+
+
+Columns in List (1ST Layer – company wise)
+Select (Check Box)
+Inquiry by (buyer company name) – Clickable to go inside and see all consignments of that company, then should be possible to edit.
+Inquiry consignment code - for example FB1, FB2, OS1, ING1, INC1 etc – clickable to go inside and see all items of that consignment with details. Then to be possible to edit.
+Status - Proposed / Fully Approved / Partial Approved (because in a consignment, we may have approved some items and some proposed (pending to be approved)
+Total CBM of that consignment (including approved and proposed items)
+Total Weight of that consignment (including approved and proposed items)
+Consignment Proposed / Approved Date and Proposed / Approved By 
+Action – View Details, Edit, Delete.
+
+
+
+Fields in Top Filter (1ST Layer – company wise)
+Top Filters will not be needed in this, as will have few consignments at a time.
+Will use small search filter if need to filter anything.
+However, at inside consignment layer, will need top filters.
+
+
+Clarification
+For Inquiry List (Display Summary), there will be 2 layers in this. 1st layer summary is company wise (for example, F&B, One Stop, Inhyma etc) and then once we click company, goes to 2nd layer and again summary list, Top filters, Actions etc. will appear for that particular consignment code of that company (for example, FB1, OS1, INM1, INM2).

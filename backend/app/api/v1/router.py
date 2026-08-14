@@ -9,7 +9,7 @@ to ``app.main`` are needed.
 
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 
 from app.api.v1.health import router as health_router
 from app.audit.routes import router as audit_router
@@ -18,6 +18,7 @@ from app.buyers.routes import router as buyers_router
 from app.cache.routes import router as cache_router
 from app.departments.routes import router as departments_router
 from app.designations.routes import router as designations_router
+from app.core.responses import build_success_response
 from app.events.routes import router as events_router
 from app.inquiries.routes import router as inquiries_router
 from app.masters.brands.routes import router as brands_router
@@ -89,3 +90,12 @@ api_router.include_router(planning_router)
 # any future module's routes/services publish through this without
 # needing their own router entry here.
 api_router.include_router(events_router)
+
+
+@api_router.get("/organizations/public", summary="Get public organization info for login page")
+async def get_public_org_info(request: Request) -> dict:
+    return build_success_response(
+        data={"id": "default", "name": "Yinglima ERP", "logo_url": None},
+        request_id=getattr(request.state, "request_id", "-"),
+    )
+

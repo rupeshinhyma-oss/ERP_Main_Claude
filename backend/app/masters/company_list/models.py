@@ -6,7 +6,7 @@ Owns the ``master_companies`` table: group operating companies (Inhyma, FNB Solu
 
 from __future__ import annotations
 
-from sqlalchemy import String, Text
+from sqlalchemy import JSON, String, Text
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -22,6 +22,7 @@ class MasterCompany(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
     name: Mapped[str] = mapped_column(String(150), unique=True, nullable=False, index=True)
     code: Mapped[str] = mapped_column(String(50), unique=True, nullable=False, index=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    branches: Mapped[list | None] = mapped_column(JSON, nullable=True)  # list[dict] e.g. [{"id": "...", "name": "Mumbai", "code_prefix": "INM"}]
 
     status: Mapped[RecordStatus] = mapped_column(
         SAEnum(RecordStatus, name="master_company_status", native_enum=False, length=20),

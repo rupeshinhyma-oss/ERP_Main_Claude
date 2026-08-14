@@ -133,6 +133,22 @@ export interface SupplierType extends MasterRecord {
   description?: string | null;
 }
 
+export interface CompanyBranch {
+  id: string;
+  name: string;
+  code_prefix: string;
+  address?: string | null;
+  city?: string | null;
+  status?: string;
+}
+
+export interface MasterCompany extends MasterRecord {
+  code: string;
+  name: string;
+  description?: string | null;
+  branches?: CompanyBranch[] | null;
+}
+
 export interface ProductCategory extends MasterRecord {
   code: string;
   name: string;
@@ -161,6 +177,7 @@ export interface Product extends MasterRecord {
   secondary_uom_id?: string | null;
   organization_id?: string | null;
   organization_ids?: string[] | null;
+  branch_ids?: string[] | null;
   supplier_id?: string | null;
   supplier_company_name?: string | null;
 

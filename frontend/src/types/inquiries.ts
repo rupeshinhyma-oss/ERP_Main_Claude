@@ -8,6 +8,7 @@ export interface ConsignmentCode {
   code: string;
   label?: string | null;
   buyer_id: string;
+  branch_id?: string | null;
   status: string;
   created_at: string;
 }
@@ -37,6 +38,7 @@ export interface InquiryItem {
 export interface Inquiry {
   id: string;
   buyer_id: string;
+  branch_id?: string | null;
   consignment_code_id: string;
   consignment_status: InquiryConsignmentStatus;
   total_cbm: number;
@@ -50,6 +52,7 @@ export interface Inquiry {
 export interface InquiryListItem {
   id: string;
   buyer_id: string;
+  branch_id?: string | null;
   consignment_code_id: string;
   consignment_status: InquiryConsignmentStatus;
   total_cbm: number;
@@ -60,7 +63,13 @@ export interface InquiryListItem {
 
 export interface CompanySummary {
   buyer_id: string;
+  company_name?: string | null;
   consignment_count: number;
+  proposed_count?: number;
+  approved_count?: number;
   total_cbm: number;
   total_weight: number;
+  consignment_status: InquiryConsignmentStatus;
+  consignment_codes: string[];
+  updated_at?: string | null;
 }

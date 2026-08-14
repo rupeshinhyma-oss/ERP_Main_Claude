@@ -590,11 +590,13 @@ export function ProductsPage() {
                   const cleanTyped = (f.product_name_tally || "").trim().toLowerCase().replace(/[\s-]/g, "");
                   if (!cleanTyped) return null;
                   const matches = existingProducts.items.filter((p) => {
+                    if (f._editing_id && p.id === f._editing_id) return false;
                     const pName = (p.product_name_tally || p.product_name || "").toLowerCase().replace(/[\s-]/g, "");
                     const pCode = (p.product_code || "").toLowerCase().replace(/[\s-]/g, "");
                     return pName.includes(cleanTyped) || pCode.includes(cleanTyped);
                   }).slice(0, 5);
                   const exact = existingProducts.items.find((p) => {
+                    if (f._editing_id && p.id === f._editing_id) return false;
                     const pName = (p.product_name_tally || p.product_name || "").toLowerCase().replace(/[\s-]/g, "");
                     const pCode = (p.product_code || "").toLowerCase().replace(/[\s-]/g, "");
                     return pName === cleanTyped || pCode === cleanTyped;

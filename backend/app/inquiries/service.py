@@ -32,7 +32,7 @@ from typing import Any
 
 from app.buyers.repository import BuyerRepository
 from app.core.exceptions import BadRequestException, ConflictException, NotFoundException
-from app.inquiries.models import ConsignmentCode, Inquiry, InquiryItem, InquiryItemStatus
+from app.inquiries.models import ConsignmentCode, Inquiry, InquiryConsignmentStatus, InquiryItem, InquiryItemStatus
 from app.inquiries.repository import ConsignmentCodeRepository, InquiryItemRepository, InquiryRepository
 from app.masters.products.repository import ProductRepository
 
@@ -62,7 +62,9 @@ class InquiryService:
     # Consignment Codes (admin-managed master)
     # ------------------------------------------------------------------
 
-    async def create_consignment_code(self, *, code: str, label: str | None, buyer_id: uuid.UUID) -> ConsignmentCode:
+    async def create_consignment_code(
+        self, *, code: str, label: str | None, buyer_id: uuid.UUID, branch_id: str | None = None
+    ) -> ConsignmentCode:
         """Document: "Master to create and choose from dropdown menu"."""
         code = code.strip().upper()
         if not code:
@@ -71,7 +73,7 @@ class InquiryService:
             raise BadRequestException("The specified buyer does not exist.")
         if await self.consignment_code_repository.get_by_code(code):
             raise ConflictException(f"Consignment code {code!r} already exists.")
-        return await self.consignment_code_repository.create(code=code, label=label, buyer_id=buyer_id)
+        return await self.consignment_code_repository.create(code=code, label=label, buyer_id=buyer_id, branch_id=branch_id)
 
     async def list_consignment_codes(self, *, buyer_id: uuid.UUID | None = None) -> list[ConsignmentCode]:
         if buyer_id is not None:
@@ -133,13 +135,43 @@ class InquiryService:
         buyer_ids = await self.inquiry_repository.list_distinct_buyer_ids()
         summaries = []
         for buyer_id in buyer_ids:
+            buyer = await self.buyer_repository.get_by_id(buyer_id)
             consignments = await self.inquiry_repository.list_for_buyer(buyer_id)
+            if not consignments:
+                continue
+            code_list: list[str] = []
+            statuses: list[InquiryConsignmentStatus] = []
+            for c in consignments:
+                statuses.append(c.consignment_status)
+                if c.consignment_code_id:
+                    cc = await self.consignment_code_repository.get_by_id(c.consignment_code_id)
+                    if cc and cc.code:
+                        code_list.append(cc.code)
+
+            if statuses and all(s == InquiryConsignmentStatus.FULLY_APPROVED for s in statuses):
+                overall_status = InquiryConsignmentStatus.FULLY_APPROVED
+            elif any(s in (InquiryConsignmentStatus.PARTIAL_APPROVED, InquiryConsignmentStatus.FULLY_APPROVED) for s in statuses):
+                overall_status = InquiryConsignmentStatus.PARTIAL_APPROVED
+            else:
+                overall_status = InquiryConsignmentStatus.PROPOSED
+
+            prop_cnt = sum(1 for s in statuses if s == InquiryConsignmentStatus.PROPOSED)
+            app_cnt = sum(1 for s in statuses if s in (InquiryConsignmentStatus.PARTIAL_APPROVED, InquiryConsignmentStatus.FULLY_APPROVED))
+
+            latest_updated = max([c.updated_at for c in consignments]) if consignments else None
+
             summaries.append(
                 {
                     "buyer_id": buyer_id,
+                    "company_name": buyer.company_name if buyer else "Unknown Company",
                     "consignment_count": len(consignments),
+                    "proposed_count": prop_cnt,
+                    "approved_count": app_cnt,
                     "total_cbm": sum(c.total_cbm for c in consignments),
                     "total_weight": sum(c.total_weight for c in consignments),
+                    "consignment_status": overall_status,
+                    "consignment_codes": code_list,
+                    "updated_at": latest_updated,
                 }
             )
         return summaries
@@ -165,6 +197,10 @@ class InquiryService:
         """Document: Layer-1 list Action "Delete"."""
         inquiry = await self.get_inquiry_or_raise(inquiry_id)
         await self.inquiry_repository.delete(inquiry)
+        if inquiry.consignment_code_id:
+            cc = await self.consignment_code_repository.get_by_id(inquiry.consignment_code_id)
+            if cc:
+                await self.consignment_code_repository.delete(cc)
 
     # ------------------------------------------------------------------
     # Layer 2: items within a consignment
@@ -324,4 +360,8 @@ class InquiryService:
     async def delete_item(self, inquiry_id: uuid.UUID, item_id: uuid.UUID) -> None:
         item = await self.get_item_or_raise(inquiry_id, item_id)
         await self.item_repository.delete(item)
-        await self._refresh_rollup(inquiry_id)
+        remaining = await self.item_repository.list_for_inquiry(inquiry_id)
+        if not remaining:
+            await self.delete_consignment(inquiry_id)
+        else:
+            await self._refresh_rollup(inquiry_id)

@@ -20,6 +20,7 @@ class ConsignmentCodeCreate(BaseModel):
     code: str = Field(..., min_length=1, max_length=20, description='e.g. "FB1", "ING1".')
     label: str | None = Field(default=None, max_length=150)
     buyer_id: uuid.UUID
+    branch_id: str | None = None
 
 
 class ConsignmentCodeRead(BaseModel):
@@ -29,6 +30,7 @@ class ConsignmentCodeRead(BaseModel):
     code: str
     label: str | None
     buyer_id: uuid.UUID
+    branch_id: str | None = None
     status: str
     created_at: datetime
 
@@ -48,6 +50,7 @@ class InquiryItemCreate(BaseModel):
     """
 
     buyer_id: uuid.UUID = Field(..., description="Inquiry by (buyer company name).")
+    branch_id: str | None = None
     consignment_code_id: uuid.UUID
     product_id: uuid.UUID
     quantity: float = Field(..., gt=0)
@@ -118,6 +121,7 @@ class InquiryRead(BaseModel):
 
     id: uuid.UUID
     buyer_id: uuid.UUID
+    branch_id: str | None = None
     consignment_code_id: uuid.UUID
     consignment_status: InquiryConsignmentStatus
     total_cbm: float
@@ -135,6 +139,7 @@ class InquiryListItemRead(BaseModel):
 
     id: uuid.UUID
     buyer_id: uuid.UUID
+    branch_id: str | None = None
     consignment_code_id: uuid.UUID
     consignment_status: InquiryConsignmentStatus
     total_cbm: float
@@ -147,6 +152,12 @@ class CompanySummaryRead(BaseModel):
     """One row in the Layer-1 "company wise" summary (document: "1st layer summary is company wise")."""
 
     buyer_id: uuid.UUID
+    company_name: str | None = None
     consignment_count: int
+    proposed_count: int = 0
+    approved_count: int = 0
     total_cbm: float
     total_weight: float
+    consignment_status: InquiryConsignmentStatus = InquiryConsignmentStatus.PROPOSED
+    consignment_codes: list[str] = Field(default_factory=list)
+    updated_at: datetime | None = None

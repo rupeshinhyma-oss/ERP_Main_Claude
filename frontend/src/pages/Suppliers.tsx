@@ -1358,13 +1358,13 @@ export function SuppliersPage() {
                         const cleanTyped = typed.toLowerCase().replace(/[\s-]/g, "");
 
                         const matches = existingSuppliers.items.filter((s) => {
-                          if (currentSupplierId && s.id === currentSupplierId) return false;
+                          if (currentSupplierId && String(s.id).toLowerCase() === String(currentSupplierId).toLowerCase()) return false;
                           const sName = (s.company_name || "").toLowerCase().replace(/[\s-]/g, "");
                           return sName.includes(cleanTyped);
                         }).slice(0, 5);
 
                         const exact = existingSuppliers.items.find((s) => {
-                          if (currentSupplierId && s.id === currentSupplierId) return false;
+                          if (currentSupplierId && String(s.id).toLowerCase() === String(currentSupplierId).toLowerCase()) return false;
                           const sName = (s.company_name || "").toLowerCase().replace(/[\s-]/g, "");
                           return sName === cleanTyped;
                         });

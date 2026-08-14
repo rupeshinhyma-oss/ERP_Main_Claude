@@ -9,7 +9,7 @@ to ``app.main`` are needed.
 
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 
 from app.api.v1.health import router as health_router
 from app.audit.routes import router as audit_router
@@ -82,3 +82,11 @@ api_router.include_router(inquiries_router)
 
 # Shipment Planning: dynamic branch-sheet grid (Mum Branch, MP Branch, ...).
 api_router.include_router(planning_router)
+
+
+@api_router.get("/organizations/public", summary="Get public organization info for login page")
+async def get_public_org_info(request: Request) -> dict:
+    return build_success_response(
+        data={"id": "default", "name": "Yinglima ERP", "logo_url": None},
+        request_id=getattr(request.state, "request_id", "-"),
+    )

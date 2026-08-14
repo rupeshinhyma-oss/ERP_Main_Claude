@@ -37,7 +37,7 @@ import uuid
 from datetime import date, datetime, timezone
 from enum import Enum
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, String, Text, UniqueConstraint, and_
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -96,6 +96,7 @@ class ConsignmentCode(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin
     buyer_id: Mapped[uuid.UUID] = mapped_column(
         GUID(), ForeignKey("buyers.id", ondelete="RESTRICT"), nullable=False, index=True
     )
+    branch_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
     status: Mapped[RecordStatus] = mapped_column(
         SAEnum(RecordStatus, name="consignment_code_status", native_enum=False, length=20),
@@ -127,6 +128,7 @@ class Inquiry(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
     buyer_id: Mapped[uuid.UUID] = mapped_column(
         GUID(), ForeignKey("buyers.id", ondelete="RESTRICT"), nullable=False, index=True
     )
+    branch_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     consignment_code_id: Mapped[uuid.UUID] = mapped_column(
         GUID(), ForeignKey("consignment_codes.id", ondelete="RESTRICT"), nullable=False, index=True
     )
@@ -143,7 +145,10 @@ class Inquiry(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
     created_by: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("users.id"), nullable=False)
 
     items: Mapped[list["InquiryItem"]] = relationship(
-        back_populates="inquiry", cascade="all, delete-orphan", lazy="selectin"
+        back_populates="inquiry",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+        primaryjoin="and_(Inquiry.id == InquiryItem.inquiry_id, InquiryItem.deleted_at.is_(None))",
     )
 
     def __repr__(self) -> str:
@@ -188,14 +193,14 @@ class InquiryItem(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
     )
     proposed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False)
     proposed_by: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("users.id"), nullable=False)
-    approved_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     approved_by: Mapped[uuid.UUID | None] = mapped_column(GUID(), ForeignKey("users.id"), nullable=True)
 
     # Document: "Tally Entry Posted ? (to show pending by default ... easy
     # way to select and change multiple items to 'Posted'. All pending
     # entries to show on top by default.)"
     tally_entry_posted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
-    tally_posted_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    tally_posted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     tally_posted_by: Mapped[uuid.UUID | None] = mapped_column(GUID(), ForeignKey("users.id"), nullable=True)
 
     # Document: "Remarks (by Yinglima China Procurement Team) -- To show

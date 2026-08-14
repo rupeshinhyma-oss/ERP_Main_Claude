@@ -86,7 +86,9 @@ async def create_consignment_code(
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     """Document: "Master to create and choose from dropdown menu"."""
-    code = await service.create_consignment_code(code=payload.code, label=payload.label, buyer_id=payload.buyer_id)
+    code = await service.create_consignment_code(
+        code=payload.code, label=payload.label, buyer_id=payload.buyer_id, branch_id=payload.branch_id
+    )
     data = ConsignmentCodeRead.model_validate(code).model_dump(mode="json")
     await _record_action(
         audit_service=audit_service,
@@ -259,6 +261,8 @@ async def get_inquiry(
     _current_user: CurrentUser = Depends(require_permission("inquiry.read")),
 ) -> dict:
     inquiry = await service.get_inquiry_or_raise(inquiry_id)
+    items = await service.list_items(inquiry_id)
+    inquiry.items = items
     data = InquiryRead.model_validate(inquiry).model_dump(mode="json")
     return build_success_response(data=data, request_id=request.state.request_id)
 

@@ -292,14 +292,14 @@ class TestNamespaceDeletion:
         cache = InMemoryCacheBackend()
         await cache.set(CacheBackend.build_key("permissions", "u1"), {"a"})
         await cache.set(CacheBackend.build_key("permissions", "u2"), {"b"})
-        await cache.set(CacheBackend.build_key("departments", "all"), [1, 2, 3])
+        await cache.set(CacheBackend.build_key("settings", "all"), [1, 2, 3])
 
         removed = await cache.delete_namespace("permissions")
 
         assert removed == 2
         assert await cache.get(CacheBackend.build_key("permissions", "u1")) is None
         assert await cache.get(CacheBackend.build_key("permissions", "u2")) is None
-        assert await cache.get(CacheBackend.build_key("departments", "all")) == [1, 2, 3]
+        assert await cache.get(CacheBackend.build_key("settings", "all")) == [1, 2, 3]
 
     async def test_delete_namespace_with_no_matches_returns_zero(self):
         """delete_namespace() on an unused namespace should return 0 and not raise."""
@@ -353,14 +353,6 @@ class TestCacheManager:
         assert removed == 2
         assert await manager.get_user_permissions("user-1") is None
         assert await manager.get_user_permissions("user-2") is None
-
-    async def test_departments_round_trip(self):
-        """Department list caching should store and retrieve the full list."""
-        manager = CacheManager(InMemoryCacheBackend())
-        await manager.set_departments([{"id": 1, "name": "Engineering"}])
-        assert await manager.get_departments() == [{"id": 1, "name": "Engineering"}]
-        await manager.invalidate_departments()
-        assert await manager.get_departments() is None
 
     async def test_dropdown_named_lookup(self):
         """Dropdown helper should key by the dropdown's own name."""

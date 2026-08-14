@@ -87,15 +87,11 @@ class UserService:
         limit: int,
         query: str | None = None,
         status: str | None = None,
-        department_id: uuid.UUID | None = None,
-        designation_id: uuid.UUID | None = None,
     ) -> tuple[list[User], int]:
         """Return a page of users and total count with optional filters."""
         return await self.user_repository.search(
             query=query,
             status=status,
-            department_id=department_id,
-            designation_id=designation_id,
             offset=offset,
             limit=limit,
         )
@@ -135,8 +131,6 @@ class UserService:
         username: str | None = None,
         middle_name: str | None = None,
         employee_code: str | None = None,
-        department_id: uuid.UUID | None = None,
-        designation_id: uuid.UUID | None = None,
         manager_id: uuid.UUID | None = None,
         date_of_birth=None,
         gender=None,
@@ -200,8 +194,6 @@ class UserService:
             username=resolved_username,
             email=email,
             phone=phone,
-            department_id=department_id,
-            designation_id=designation_id,
             manager_id=manager_id,
             date_of_birth=date_of_birth,
             gender=gender,

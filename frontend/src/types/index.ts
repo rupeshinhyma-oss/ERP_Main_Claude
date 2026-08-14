@@ -270,10 +270,6 @@ export interface User {
   display_name?: string | null;
   employee_name?: string | null;
   employee_code?: string | null;
-  department_id?: string | null;
-  designation_id?: string | null;
-  department_name?: string | null;
-  designation_name?: string | null;
   last_login_at?: string | null;
   failed_login_count?: number | null;
   must_change_password?: boolean;
@@ -284,37 +280,6 @@ export interface User {
 export interface UserSession {
   ip_address?: string | null;
   user_agent?: string | null;
-}
-
-export interface Department {
-  id: string;
-  code: string;
-  name: string;
-  description?: string | null;
-  parent_department_id?: string | null;
-  manager_id?: string | null;
-  status: string;
-}
-
-export interface Designation {
-  id: string;
-  code: string;
-  title: string;
-  /** Some endpoints return `name` instead of `title`. */
-  name?: string;
-  description?: string | null;
-  level?: number | null;
-  status: string;
-}
-
-export interface TeamMember {
-  id: string;
-  full_name: string;
-  username: string;
-  email: string;
-  role: string;
-  department_id?: string | null;
-  designation_id?: string | null;
 }
 
 /* ------------------------------------------------------------------ */
@@ -356,8 +321,6 @@ export interface EffectivePermissionsBreakdown {
   user_info?: {
     employee_name: string;
     username: string;
-    department: string;
-    designation: string;
     system_roles?: string[];
     status: string;
   };

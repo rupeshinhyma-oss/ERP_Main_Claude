@@ -17,8 +17,6 @@ from sqlalchemy import Boolean, Date, DateTime, Enum as SAEnum, ForeignKey, Inte
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database.base import GUID, Base, SoftDeleteMixin, TimestampMixin, UUIDPrimaryKeyMixin, VersionMixin
-from app.departments.models import Department
-from app.designations.models import Designation
 
 
 class Gender(str, Enum):
@@ -80,13 +78,7 @@ class User(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin, SoftDeleteMi
     phone: Mapped[str] = mapped_column(String(30), unique=True, nullable=False, index=True)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
 
-    # Department, Designation & Manager
-    department_id: Mapped[uuid.UUID | None] = mapped_column(
-        GUID(), ForeignKey("departments.id", ondelete="SET NULL"), nullable=True, index=True
-    )
-    designation_id: Mapped[uuid.UUID | None] = mapped_column(
-        GUID(), ForeignKey("designations.id", ondelete="SET NULL"), nullable=True, index=True
-    )
+    # Manager
     manager_id: Mapped[uuid.UUID | None] = mapped_column(
         GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
     )
@@ -143,8 +135,6 @@ class User(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin, SoftDeleteMi
 
     creator: Mapped["User | None"] = relationship("User", remote_side="User.id", foreign_keys=[created_by])
     updater: Mapped["User | None"] = relationship("User", remote_side="User.id", foreign_keys=[updated_by])
-    department: Mapped["Department | None"] = relationship("Department", foreign_keys=[department_id])
-    designation: Mapped["Designation | None"] = relationship("Designation", foreign_keys=[designation_id])
     manager: Mapped["User | None"] = relationship("User", remote_side="User.id", foreign_keys=[manager_id])
 
     @property

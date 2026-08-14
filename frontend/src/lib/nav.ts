@@ -62,9 +62,8 @@ export const NAV_SECTIONS: NavSection[] = [
     ],
   },
   {
-    label: "TEAM",
+    label: "USER MANAGEMENT",
     items: [
-      { key: "teams", label: "Teams", path: "/teams", icon: "users", permission: "employee.view" },
       { key: "users", label: "Users", path: "/users", icon: "user", permission: "user.view" },
       { key: "rbac", label: "Roles & Permissions", path: "/rbac", icon: "shield", permission: "settings.manage" },
     ],
@@ -101,7 +100,6 @@ export const PAGE_TITLES: Record<string, string> = {
   finance: "Finance & Accounts",
   hrms: "Human Resource Management",
   organization: "Organization Settings",
-  teams: "Teams",
   users: "Users",
   "masters-company-list": "Organization List",
   "masters-countries": "Countries (National Level)",
@@ -156,7 +154,8 @@ export const LEGACY_REDIRECTS: Record<string, string> = {
   "/users.html": "/users",
   "/rbac.html": "/rbac",
   "/effective-permissions.html": "/effective-permissions",
-  "/teams.html": "/teams",
+  "/teams.html": "/users",
+  "/teams": "/users",
   "/suppliers.html": "/suppliers",
   "/buyers.html": "/buyers",
   "/inquiries.html": "/inquiries",

@@ -20,8 +20,6 @@ import { useToast } from "@/lib/toast";
 import { friendlyPermissionLabel, groupPermissionsByModule, MODULE_NAMES } from "@/lib/permissionLabels";
 import type {
   BulkPermissionOverrideItem,
-  Department,
-  Designation,
   EffectivePermissionsBreakdown,
   ItemsPage,
   Permission,
@@ -64,8 +62,6 @@ const EMPTY_CREATE = {
   employee_code: "",
   phone: "",
   password: "",
-  department_id: "",
-  designation_id: "",
   role_id: "",
 };
 
@@ -76,8 +72,6 @@ const EMPTY_EDIT = {
   email: "",
   employee_code: "",
   phone: "",
-  department_id: "",
-  designation_id: "",
 };
 
 export function UsersPage() {
@@ -96,8 +90,6 @@ export function UsersPage() {
   const query = useDebouncedValue(searchInput, 300);
 
   const [roles, setRoles] = useState<Role[]>([]);
-  const [departments, setDepartments] = useState<Department[]>([]);
-  const [designations, setDesignations] = useState<Designation[]>([]);
   const [allPermissions, setAllPermissions] = useState<Permission[]>([]);
 
   const [createOpen, setCreateOpen] = useState(false);
@@ -156,18 +148,6 @@ export function UsersPage() {
         setAllPermissions(data || []);
       } catch {
         /* the overrides modal degrades to "no permissions found" */
-      }
-    })();
-    (async () => {
-      try {
-        const [deptRes, desigRes] = await Promise.all([
-          apiGet<Department[]>("/departments?page=1&page_size=100"),
-          apiGet<Designation[]>("/designations?page=1&page_size=100"),
-        ]);
-        setDepartments(deptRes.data || []);
-        setDesignations(desigRes.data || []);
-      } catch {
-        /* ditto for department/designation selects */
       }
     })();
   }, []);
@@ -278,8 +258,6 @@ export function UsersPage() {
       email: user.email || "",
       employee_code: user.employee_code || "",
       phone: user.phone || "",
-      department_id: user.department_id || "",
-      designation_id: user.designation_id || "",
     });
     setEditOpen(true);
   }
@@ -299,8 +277,6 @@ export function UsersPage() {
         employee_code: createForm.employee_code.trim() || null,
         phone: createForm.phone.trim(),
         password: createForm.password,
-        department_id: createForm.department_id || null,
-        designation_id: createForm.designation_id || null,
         role_ids: createForm.role_id ? [createForm.role_id] : [],
       });
       setCreateOpen(false);
@@ -332,8 +308,6 @@ export function UsersPage() {
         email: editForm.email.trim(),
         employee_code: editForm.employee_code.trim() || null,
         phone: editForm.phone.trim() || null,
-        department_id: editForm.department_id || null,
-        designation_id: editForm.designation_id || null,
       });
       setEditOpen(false);
       if (updatedUser) {
@@ -349,8 +323,6 @@ export function UsersPage() {
                 email: editForm.email.trim(),
                 employee_code: editForm.employee_code.trim() || null,
                 phone: editForm.phone.trim() || u.phone,
-                department_id: editForm.department_id || null,
-                designation_id: editForm.designation_id || null,
               }
               : u
           )
@@ -481,17 +453,6 @@ export function UsersPage() {
   const canUpdateUser = hasPermission("user.update");
   const canManage = hasPermission("settings.manage");
 
-  const departmentOptions = departments.map((d) => (
-    <option key={d.id} value={d.id}>
-      {d.name}
-    </option>
-  ));
-  const designationOptions = designations.map((d) => (
-    <option key={d.id} value={d.id}>
-      {d.title || d.name}
-    </option>
-  ));
-
   return (
     <AppShell activeKey="users" pageClassName="page-users">
       <main className="page">
@@ -551,17 +512,15 @@ export function UsersPage() {
                   <th>Email</th>
                   <th>Role</th>
                   <th>Status</th>
-                  <th>Department</th>
-                  <th>Designation</th>
                   <th>Last Login</th>
                   <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {loading ? (
-                  <TableMessageRow colSpan={10}>Loading user accounts...</TableMessageRow>
+                  <TableMessageRow colSpan={8}>Loading user accounts...</TableMessageRow>
                 ) : rows.length === 0 ? (
-                  <TableMessageRow colSpan={10}>No user accounts found.</TableMessageRow>
+                  <TableMessageRow colSpan={8}>No user accounts found.</TableMessageRow>
                 ) : (
                   rows.map((u) => {
                     const statusUpper = (u.status || "").toUpperCase();
@@ -715,8 +674,6 @@ export function UsersPage() {
                         <td>
                           <StatusBadge status={u.status} isActive={u.is_active} />
                         </td>
-                        <td>{dash(u.department_name)}</td>
-                        <td>{dash(u.designation_name)}</td>
                         <td>
                           {u.last_login_at ? new Date(u.last_login_at).toLocaleString() : "Never"}
                         </td>
@@ -807,14 +764,6 @@ export function UsersPage() {
             <TextField id="employee_code" label="Employee Code" placeholder="e.g. EMP-001" value={createForm.employee_code} onChange={(v) => setCreateForm((f) => ({ ...f, employee_code: v }))} />
             <TextField id="phone" label="Mobile Number *" required placeholder="+256..." value={createForm.phone} onChange={(v) => setCreateForm((f) => ({ ...f, phone: v }))} />
             <TextField id="password" label="Password *" type="password" required minLength={1} placeholder="Set the user's initial password" value={createForm.password} onChange={(v) => setCreateForm((f) => ({ ...f, password: v }))} />
-            <SelectField id="department_id" label="Department" value={createForm.department_id} onChange={(v) => setCreateForm((f) => ({ ...f, department_id: v }))}>
-              <option value="">-- Select Department --</option>
-              {departmentOptions}
-            </SelectField>
-            <SelectField id="designation_id" label="Designation" value={createForm.designation_id} onChange={(v) => setCreateForm((f) => ({ ...f, designation_id: v }))}>
-              <option value="">-- Select Designation --</option>
-              {designationOptions}
-            </SelectField>
             <SelectField
               id="role_id"
               label="Assign Initial Role"
@@ -854,21 +803,7 @@ export function UsersPage() {
             <TextField id="editLastName" label="Last Name" maxLength={100} value={editForm.last_name} onChange={(v) => setEditForm((f) => ({ ...f, last_name: v }))} />
             <TextField id="editEmail" label="Work Email" type="email" required value={editForm.email} onChange={(v) => setEditForm((f) => ({ ...f, email: v }))} />
             <TextField id="editEmployeeCode" label="Employee Code" value={editForm.employee_code} onChange={(v) => setEditForm((f) => ({ ...f, employee_code: v }))} />
-            <TextField id="editPhone" label="Mobile Number" value={editForm.phone} onChange={(v) => setEditForm((f) => ({ ...f, phone: v }))} />
-            <SelectField id="editDepartmentId" label="Department" value={editForm.department_id} onChange={(v) => setEditForm((f) => ({ ...f, department_id: v }))}>
-              <option value="">-- Select Department --</option>
-              {departmentOptions}
-            </SelectField>
-            <SelectField
-              id="editDesignationId"
-              label="Designation"
-              value={editForm.designation_id}
-              onChange={(v) => setEditForm((f) => ({ ...f, designation_id: v }))}
-              style={{ gridColumn: "span 2" }}
-            >
-              <option value="">-- Select Designation --</option>
-              {designationOptions}
-            </SelectField>
+            <TextField id="editPhone" label="Mobile Number" value={editForm.phone} onChange={(v) => setEditForm((f) => ({ ...f, phone: v }))} style={{ gridColumn: "span 2" }} />
           </div>
           <div className="form-actions">
             <button type="submit" className="btn btn-primary" disabled={editSubmitting}>
@@ -910,14 +845,6 @@ export function UsersPage() {
                 <div>
                   <span className="detail-label">Full Name:</span>{" "}
                   {dash(viewUser.full_name || viewUser.display_name || viewUser.employee_name)}
-                </div>
-                <div>
-                  <span className="detail-label">Department:</span>{" "}
-                  {dash(viewUser.department_name)}
-                </div>
-                <div>
-                  <span className="detail-label">Designation:</span>{" "}
-                  {dash(viewUser.designation_name)}
                 </div>
                 <div>
                   <span className="detail-label">Status:</span>{" "}

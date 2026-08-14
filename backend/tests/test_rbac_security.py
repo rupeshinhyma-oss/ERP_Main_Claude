@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import uuid
 import pytest
-from app.rbac.models import Permission, Role, UserPermission, DepartmentPermission, DesignationPermission
+from app.rbac.models import Permission, Role, UserPermission
 from app.users.models import User, UserStatus
 from app.auth.service import CurrentUser
 

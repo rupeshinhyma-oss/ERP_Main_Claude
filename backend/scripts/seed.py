@@ -38,34 +38,14 @@ logger = get_logger(__name__)
 # --- Bootstrap permission set (Module -> Page -> Action -> Scope hierarchy) ---
 BOOTSTRAP_PERMISSIONS: list[tuple[str, str, str, str, str, str]] = [
     # (code, module, page, action, scope, description)
-    # Users & Teams
-    ("user.create", "user", "teams", "create", "ALL", "Create user accounts."),
-    ("user.read", "user", "teams", "view", "ALL", "View user accounts."),
-    ("user.view", "user", "teams", "view", "ALL", "View user accounts."),
-    ("user.update", "user", "teams", "update", "ALL", "Update, activate/deactivate, unlock, and reset passwords for users."),
-    ("user.delete", "user", "teams", "delete", "ALL", "Delete user accounts."),
-    ("user.export", "user", "teams", "export", "ALL", "Export user accounts data."),
-    ("user.import", "user", "teams", "import", "ALL", "Import user accounts data."),
-    # Employees
-    ("employee.create", "employee", "teams", "create", "ALL", "Create employee records."),
-    ("employee.read", "employee", "teams", "view", "ALL", "View employee records."),
-    ("employee.view", "employee", "teams", "view", "ALL", "View employee records."),
-    ("employee.update", "employee", "teams", "update", "ALL", "Update, transfer, deactivate/reactivate employee records."),
-    ("employee.delete", "employee", "teams", "delete", "ALL", "Delete employee records."),
-    ("employee.export", "employee", "teams", "export", "ALL", "Export employee records."),
-    ("employee.import", "employee", "teams", "import", "ALL", "Import employee records."),
-    ("employee.approve", "employee", "teams", "approve", "ALL", "Approve employee applications or changes."),
-    # Departments & Designations
-    ("department.create", "department", "teams", "create", "ALL", "Create departments."),
-    ("department.read", "department", "teams", "view", "ALL", "View departments."),
-    ("department.view", "department", "teams", "view", "ALL", "View departments."),
-    ("department.update", "department", "teams", "update", "ALL", "Update departments."),
-    ("department.delete", "department", "teams", "delete", "ALL", "Delete departments."),
-    ("designation.create", "designation", "teams", "create", "ALL", "Create designations."),
-    ("designation.read", "designation", "teams", "view", "ALL", "View designations."),
-    ("designation.view", "designation", "teams", "view", "ALL", "View designations."),
-    ("designation.update", "designation", "teams", "update", "ALL", "Update designations."),
-    ("designation.delete", "designation", "teams", "delete", "ALL", "Delete designations."),
+    # Users
+    ("user.create", "user", "users", "create", "ALL", "Create user accounts."),
+    ("user.read", "user", "users", "view", "ALL", "View user accounts."),
+    ("user.view", "user", "users", "view", "ALL", "View user accounts."),
+    ("user.update", "user", "users", "update", "ALL", "Update, activate/deactivate, unlock, and reset passwords for users."),
+    ("user.delete", "user", "users", "delete", "ALL", "Delete user accounts."),
+    ("user.export", "user", "users", "export", "ALL", "Export user accounts data."),
+    ("user.import", "user", "users", "import", "ALL", "Import user accounts data."),
     # Organization Settings (Super Admin system-level)
     ("organization.manage", "organization", "organization", "manage", "ALL", "View and manage system organization profile."),
     # Suppliers
@@ -207,12 +187,8 @@ DEFAULT_BUSINESS_ROLES = [
 ]
 
 EMPLOYEE_ROLE_PERMISSION_CODES: list[str] = [
-    "employee.read",
-    "employee.view",
-    "department.read",
-    "department.view",
-    "designation.read",
-    "designation.view",
+    "user.read",
+    "user.view",
     "country.read",
     "country.view",
     "state.read",

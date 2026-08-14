@@ -40,8 +40,6 @@ import app.auth.models  # noqa: F401,E402
 import app.queue.models  # noqa: F401,E402 - was missing; autogenerate couldn't see queue_jobs
 import app.audit.models  # noqa: F401,E402
 import app.organizations.models  # noqa: F401,E402 - Phase 6
-import app.designations.models  # noqa: F401,E402 - Phase 6 (imported before departments: no FK dependency)
-import app.departments.models  # noqa: F401,E402 - Phase 6
 import app.masters.countries.models  # noqa: F401,E402 - Phase 7
 import app.masters.states.models  # noqa: F401,E402 - Phase 7
 import app.masters.cities.models  # noqa: F401,E402 - Phase 7
@@ -54,7 +52,9 @@ import app.masters.product_categories.models  # noqa: F401,E402 - Phase 7
 import app.masters.product_sub_categories.models  # noqa: F401,E402 - Phase 7
 import app.masters.products.models  # noqa: F401,E402 - Phase 7
 import app.suppliers.models  # noqa: F401,E402 - Phase 8
-import app.members.models  # noqa: F401,E402 - Phase 9
+import app.buyers.models  # noqa: F401,E402
+import app.inquiries.models  # noqa: F401,E402
+import app.planning.models  # noqa: F401,E402
 
 # This is the Alembic Config object, providing access to the values within
 # the .ini file in use.

@@ -16,8 +16,6 @@ from app.audit.routes import router as audit_router
 from app.auth.routes import router as auth_router
 from app.buyers.routes import router as buyers_router
 from app.cache.routes import router as cache_router
-from app.departments.routes import router as departments_router
-from app.designations.routes import router as designations_router
 from app.core.responses import build_success_response
 from app.events.routes import router as events_router
 from app.inquiries.routes import router as inquiries_router
@@ -55,8 +53,6 @@ api_router.include_router(trash_router)
 
 # Phase 6: Core Organization & User Management.
 api_router.include_router(organizations_router)
-api_router.include_router(departments_router)
-api_router.include_router(designations_router)
 
 # Phase 7: Master Data Management.
 api_router.include_router(countries_router)

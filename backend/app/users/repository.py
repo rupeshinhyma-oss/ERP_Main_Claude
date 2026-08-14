@@ -119,12 +119,10 @@ class UserRepository(BaseRepository[User]):
         *,
         query: str | None = None,
         status: str | None = None,
-        department_id: uuid.UUID | None = None,
-        designation_id: uuid.UUID | None = None,
         offset: int = 0,
         limit: int = 50,
     ) -> tuple[list[User], int]:
-        """Search users with optional keyword, status, department, and designation filters."""
+        """Search users with optional keyword and status filters."""
         from sqlalchemy import func
         from app.users.models import UserStatus
 
@@ -151,11 +149,6 @@ class UserRepository(BaseRepository[User]):
                 filters.append(User.status == st_enum)
             except ValueError:
                 pass
-
-        if department_id is not None:
-            filters.append(User.department_id == department_id)
-        if designation_id is not None:
-            filters.append(User.designation_id == designation_id)
 
         if filters:
             stmt = stmt.where(*filters)

@@ -181,8 +181,6 @@ export function EffectivePermissionsPage() {
               <div className="info-grid">
                 <InfoItem label="Employee Name" value={info.employee_name} />
                 <InfoItem label="Username" value={info.username} />
-                <InfoItem label="Department" value={info.department} />
-                <InfoItem label="Designation" value={info.designation} />
                 <InfoItem label="Assigned Role(s)" value={rolesText} />
                 <InfoItem
                   label="Account Status"

@@ -58,26 +58,12 @@ def get_user_service(
 async def _user_with_roles(
     user: User, rbac_service: RBACService, db: AsyncSession | None = None
 ) -> UserWithRoles:
-    """Shape a ``User`` ORM instance into the response schema, with role names, department, designation, and manager expanded."""
+    """Shape a ``User`` ORM instance into the response schema, with role names and manager expanded."""
     roles = await rbac_service.list_roles_for_user(user.id)
-    dept_name = None
-    desig_name = None
     mgr_name = None
 
     if db is not None:
         from sqlalchemy import select
-        from app.departments.models import Department
-        from app.designations.models import Designation
-        if user.department_id:
-            dept_res = await db.execute(select(Department).where(Department.id == user.department_id))
-            dept = dept_res.scalar_one_or_none()
-            if dept:
-                dept_name = dept.name
-        if user.designation_id:
-            desig_res = await db.execute(select(Designation).where(Designation.id == user.designation_id))
-            desig = desig_res.scalar_one_or_none()
-            if desig:
-                desig_name = getattr(desig, "name", getattr(desig, "title", None))
         if user.manager_id:
             mgr_res = await db.execute(select(User).where(User.id == user.manager_id))
             mgr = mgr_res.scalar_one_or_none()
@@ -88,9 +74,6 @@ async def _user_with_roles(
         **UserRead.model_validate(user).model_dump(),
         roles=[r.name for r in roles],
         employee_name=user.full_name,
-        department_name=dept_name,
-        designation_name=desig_name,
-        designation_title=desig_name,
         manager_name=mgr_name,
     )
 
@@ -145,8 +128,6 @@ async def create_user(
         username=payload.username,
         email=payload.email,
         phone=payload.phone,
-        department_id=payload.department_id,
-        designation_id=payload.designation_id,
         manager_id=payload.manager_id,
         date_of_birth=payload.date_of_birth,
         gender=payload.gender,
@@ -191,21 +172,17 @@ async def list_users(
     page_params: PageParams = Depends(),
     query: str | None = Query(default=None),
     status: str | None = Query(default=None),
-    department_id: uuid.UUID | None = Query(default=None),
-    designation_id: uuid.UUID | None = Query(default=None),
     user_service: UserService = Depends(get_user_service),
     rbac_service: RBACService = Depends(get_rbac_service),
     db: AsyncSession = Depends(get_db_session),
     _current_user: CurrentUser = Depends(require_permission("user.read")),
 ) -> dict:
-    """List users, paginated, with optional query, status, department, and designation search filters."""
+    """List users, paginated, with optional query and status search filters."""
     users, total = await user_service.list_users(
         offset=page_params.offset,
         limit=page_params.limit,
         query=query,
         status=status,
-        department_id=department_id,
-        designation_id=designation_id,
     )
     items = []
     for u in users:

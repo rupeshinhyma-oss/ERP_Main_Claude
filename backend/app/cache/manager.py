@@ -51,8 +51,6 @@ logger = get_logger(__name__)
 TTL_USER_PERMISSIONS = 300        # 5 minutes -- balances freshness vs. DB load
 TTL_USER_ROLES = 300              # 5 minutes
 TTL_APP_SETTINGS = 600            # 10 minutes -- settings change rarely
-TTL_DEPARTMENTS = 600             # 10 minutes
-TTL_DESIGNATIONS = 600            # 10 minutes
 TTL_DROPDOWN_DATA = 900           # 15 minutes -- static reference/lookup lists
 TTL_DASHBOARD_COUNTS = 60         # 1 minute -- counts should feel "live"
 TTL_RECORD = 300                  # 5 minutes -- generic frequently-accessed record
@@ -62,8 +60,6 @@ TTL_RECORD = 300                  # 5 minutes -- generic frequently-accessed rec
 NS_USER_PERMISSIONS = "permissions"
 NS_USER_ROLES = "roles"
 NS_APP_SETTINGS = "settings"
-NS_DEPARTMENTS = "departments"
-NS_DESIGNATIONS = "designations"
 NS_DROPDOWN = "dropdown"
 NS_DASHBOARD = "dashboard"
 NS_RECORD = "record"
@@ -289,36 +285,8 @@ class CacheManager:
         return await self.delete_namespace(NS_APP_SETTINGS)
 
     # ------------------------------------------------------------------
-    # Named helpers: Departments / Designations / Dropdown data
+    # Named helpers: Dropdown data
     # ------------------------------------------------------------------
-
-    async def get_departments(self) -> list[Any] | None:
-        """Return the cached department list, or None on a miss."""
-        return await self.get(CacheBackend.build_key(NS_DEPARTMENTS, "all"))
-
-    async def set_departments(self, departments: list[Any]) -> None:
-        """Cache the full department list."""
-        await self.set(
-            CacheBackend.build_key(NS_DEPARTMENTS, "all"), departments, ttl_seconds=TTL_DEPARTMENTS
-        )
-
-    async def invalidate_departments(self) -> int:
-        """Invalidate the cached department list (call after any department create/update/delete)."""
-        return await self.delete_namespace(NS_DEPARTMENTS)
-
-    async def get_designations(self) -> list[Any] | None:
-        """Return the cached designation list, or None on a miss."""
-        return await self.get(CacheBackend.build_key(NS_DESIGNATIONS, "all"))
-
-    async def set_designations(self, designations: list[Any]) -> None:
-        """Cache the full designation list."""
-        await self.set(
-            CacheBackend.build_key(NS_DESIGNATIONS, "all"), designations, ttl_seconds=TTL_DESIGNATIONS
-        )
-
-    async def invalidate_designations(self) -> int:
-        """Invalidate the cached designation list."""
-        return await self.delete_namespace(NS_DESIGNATIONS)
 
     async def get_dropdown(self, dropdown_name: str) -> list[Any] | None:
         """Return cached dropdown/lookup options by name (e.g. 'countries', 'currencies')."""

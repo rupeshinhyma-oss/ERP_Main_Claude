@@ -60,7 +60,7 @@ class RoleWithPermissions(RoleRead):
 
 
 class GrantPermissionRequest(BaseModel):
-    """Payload to grant a permission to a role, department, or designation."""
+    """Payload to grant a permission to a role."""
 
     permission_id: uuid.UUID
 
@@ -73,11 +73,11 @@ class AssignUserPermissionRequest(BaseModel):
 
 
 class ClonePermissionSetRequest(BaseModel):
-    """Payload to clone permission set between entities (role, department, designation, user)."""
+    """Payload to clone permission set between entities (role, user)."""
 
-    source_type: str = Field(..., description="'role', 'department', 'designation', or 'user'")
+    source_type: str = Field(..., description="'role' or 'user'")
     source_id: uuid.UUID
-    target_type: str = Field(..., description="'role', 'department', 'designation', or 'user'")
+    target_type: str = Field(..., description="'role' or 'user'")
     target_id: uuid.UUID
 
 
@@ -85,11 +85,7 @@ class EffectivePermissionsBreakdown(BaseModel):
     """Effective permissions breakdown for a user."""
 
     is_super_admin: bool
-    department_id: str | None = None
-    designation_id: str | None = None
     role_permissions: list[str] = Field(default_factory=list)
-    department_permissions: list[str] = Field(default_factory=list)
-    designation_permissions: list[str] = Field(default_factory=list)
     user_grants: list[str] = Field(default_factory=list)
     user_denies: list[str] = Field(default_factory=list)
     effective_permissions: list[str] = Field(default_factory=list)

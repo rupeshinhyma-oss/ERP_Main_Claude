@@ -41,29 +41,24 @@ router = APIRouter(prefix="/audit", tags=["Audit (admin)"])
 async def list_audit_logs(
     request: Request,
     query: ListQueryParams = Depends(get_list_query_params),
+    user_name: str | None = None,
+    user_email: str | None = None,
     employee_name: str | None = None,
     employee_email: str | None = None,
-    department_id: uuid.UUID | None = None,
-    designation_id: uuid.UUID | None = None,
     audit_repository: AuditRepository = Depends(get_audit_repository),
     _current_user: CurrentUser = Depends(require_permission("audit.read")),
 ) -> dict:
     """
     List audit log entries, paginated/searchable/sortable/filterable
-    (e.g. ``?action=LOGIN_FAILED``), with additional filters on the
-    ACTING user's employee profile: ``employee_name`` (partial match on
-    first/last/display name), ``employee_email`` (partial match),
-    ``department_id``, ``designation_id`` -- every filter the Teams page
-    needs, covering "employee name, email id, designation, departments
-    and other whatever u have added" from the audit trail requirement.
+    (e.g. ``?action=LOGIN_FAILED``), with optional actor user name / email filters.
     """
-    if any([employee_name, employee_email, department_id, designation_id]):
+    name_filter = user_name or employee_name
+    email_filter = user_email or employee_email
+    if any([name_filter, email_filter]):
         items, total = await audit_repository.paginated_list_with_actor_filters(
             query,
-            employee_name=employee_name,
-            employee_email=employee_email,
-            department_id=department_id,
-            designation_id=designation_id,
+            actor_name=name_filter,
+            actor_email=email_filter,
         )
     else:
         items, total = await audit_repository.paginated_list(query)

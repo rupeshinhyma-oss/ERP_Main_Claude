@@ -24,7 +24,15 @@ export interface ActionDropdownItem {
 
 export type ActionDropdownEntry = ActionDropdownItem | "divider";
 
-export function ActionDropdown({ items }: { items: ActionDropdownEntry[] }) {
+export function ActionDropdown({
+  items,
+  label,
+  iconOnly = false,
+}: {
+  items: ActionDropdownEntry[];
+  label?: string;
+  iconOnly?: boolean;
+}) {
   const [open, setOpen] = useState(false);
   const [position, setPosition] = useState<{ top: number; left: number } | null>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -86,13 +94,13 @@ export function ActionDropdown({ items }: { items: ActionDropdownEntry[] }) {
       <button
         ref={buttonRef}
         type="button"
-        className="action-dropdown-btn"
+        className={`action-dropdown-btn ${iconOnly ? "action-dropdown-icon-btn" : ""}`.trim()}
         onClick={(e) => {
           e.stopPropagation();
           setOpen((v) => !v);
         }}
       >
-        ⋮ Actions ▾
+        {label || (iconOnly ? "⋮" : "⋮ Actions ▾")}
       </button>
       {open &&
         createPortal(

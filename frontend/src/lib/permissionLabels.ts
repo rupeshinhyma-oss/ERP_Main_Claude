@@ -12,6 +12,12 @@ import type { Permission } from "@/types";
 
 /** Friendly category names for permission modules. */
 export const MODULE_NAMES: Record<string, string> = {
+  dashboard: "Dashboard",
+  company: "Companies",
+  buyer: "Agents & Buyers",
+  supplier: "Suppliers",
+  inquiry: "Proforma & Inquiries",
+  planning: "Shipment Planning",
   product: "Products Master",
   category: "Categories",
   subcategory: "Sub-Categories",
@@ -20,13 +26,10 @@ export const MODULE_NAMES: Record<string, string> = {
   uom: "Units of Measurement (UOM)",
   currency: "Currencies",
   country: "Countries",
-  state: "States",
+  state: "States & Provinces",
   city: "Cities",
-  employee: "Employees & HR",
-  department: "Departments",
-  designation: "Designations",
+  user: "Users & Accounts",
   organization: "Organizations",
-  supplier: "Supplier Profiles",
   audit: "System Audit Logs",
   settings: "System Settings",
   rbac: "Roles & Permissions",
@@ -34,18 +37,22 @@ export const MODULE_NAMES: Record<string, string> = {
 };
 
 const ACTION_LABELS: Record<string, string> = {
-  read: "👁️ View",
-  create: "➕ Create",
-  update: "✏️ Edit",
-  delete: "🗑️ Delete",
-  manage: "⚙️ Manage All",
+  read: "View",
+  view: "View",
+  create: "Create",
+  update: "Edit",
+  delete: "Delete",
+  export: "Export",
+  import: "Import",
+  approve: "Approve",
+  manage: "Manage All",
 };
 
-/** "product.create" -> "➕ Create"; unknown actions fall back to the raw code. */
+/** "product.create" -> "Create"; unknown actions fall back to the raw code. */
 export function friendlyPermissionLabel(code: string): string {
   const parts = code.split(".");
   const action = parts[parts.length - 1];
-  return ACTION_LABELS[action] || code;
+  return ACTION_LABELS[action] || parts.slice(1).join(" ") || code;
 }
 
 export function groupPermissionsByModule(permissions: Permission[]): Record<string, Permission[]> {

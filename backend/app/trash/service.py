@@ -36,9 +36,6 @@ from app.masters.company_list.models import MasterCompany
 from app.suppliers.models import Supplier, SupplierContact
 from app.buyers.models import Buyer, BuyerContact
 from app.users.models import User
-from app.employees.models import Employee
-from app.departments.models import Department
-from app.designations.models import Designation
 from app.rbac.models import Role
 from app.inquiries.models import ConsignmentCode, Inquiry, InquiryItem
 from app.planning.models import PlanningSheet, PlanningRow, PlanningColumn, PlanningStatusTag
@@ -70,9 +67,6 @@ MODEL_MAP: dict[str, tuple[Type[Any], str, str | None]] = {
     "Buyer": (Buyer, "company_name", None),
     "Buyer Contact": (BuyerContact, "person_name", None),
     "User": (User, "username", "employee_code"),
-    "Employee": (Employee, "display_name", "employee_code"),
-    "Department": (Department, "name", "code"),
-    "Designation": (Designation, "title", "code"),
     "Role": (Role, "name", None),
     "Consignment Code": (ConsignmentCode, "code", None),
     "Inquiry": (Inquiry, "id", None),

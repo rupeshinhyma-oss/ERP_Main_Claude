@@ -26,9 +26,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.audit.models import AuditLog
 from app.common.base_repository import BaseRepository
 from app.core.exceptions import ForbiddenException
-from app.departments.models import Department
-from app.designations.models import Designation
-from app.employees.models import Employee
 from app.users.models import User
 
 
@@ -61,53 +58,40 @@ class AuditRepository(BaseRepository[AuditLog]):
         self,
         stmt: Select,
         *,
-        employee_name: str | None = None,
-        employee_email: str | None = None,
-        department_id: Any | None = None,
-        designation_id: Any | None = None,
+        actor_name: str | None = None,
+        actor_email: str | None = None,
     ) -> Select:
         """
-        Join out to Users -> Employees -> Departments/Designations and
-        filter on the acting user's employee profile.
-
-        Applies an INNER JOIN only when at least one of these filters is
-        actually requested, so plain audit-log browsing (the common case)
-        never pays the cost of joining three extra tables.
+        Join out to Users and filter on the acting user's profile.
         """
-        if not any([employee_name, employee_email, department_id, designation_id]):
+        if not any([actor_name, actor_email]):
             return stmt
 
-        stmt = stmt.join(User, User.id == AuditLog.user_id).join(Employee, Employee.user_id == User.id)
-        if employee_name:
-            pattern = f"%{employee_name}%"
+        stmt = stmt.join(User, User.id == AuditLog.user_id)
+        if actor_name:
+            pattern = f"%{actor_name}%"
             stmt = stmt.where(
                 or_(
-                    Employee.display_name.ilike(pattern),
-                    Employee.first_name.ilike(pattern),
-                    Employee.last_name.ilike(pattern),
+                    User.display_name.ilike(pattern),
+                    User.first_name.ilike(pattern),
+                    User.last_name.ilike(pattern),
+                    User.username.ilike(pattern),
                 )
             )
-        if employee_email:
-            stmt = stmt.where(Employee.email.ilike(f"%{employee_email}%"))
-        if department_id:
-            stmt = stmt.where(Employee.department_id == department_id)
-        if designation_id:
-            stmt = stmt.where(Employee.designation_id == designation_id)
+        if actor_email:
+            stmt = stmt.where(User.email.ilike(f"%{actor_email}%"))
         return stmt
 
     async def paginated_list_with_actor_filters(
         self,
         query: "Any",
         *,
-        employee_name: str | None = None,
-        employee_email: str | None = None,
-        department_id: Any | None = None,
-        designation_id: Any | None = None,
+        actor_name: str | None = None,
+        actor_email: str | None = None,
     ) -> tuple[list[AuditLog], int]:
         """
         Same contract as :meth:`BaseRepository.paginated_list`, with the
-        employee-profile join-filters applied on top. Used instead of the
-        generic method whenever any actor-profile filter is present.
+        user-profile join-filters applied on top.
         """
         from sqlalchemy import func
 
@@ -116,10 +100,8 @@ class AuditRepository(BaseRepository[AuditLog]):
         base_stmt = self._apply_dynamic_filters(base_stmt, query.filters)
         base_stmt = self.apply_actor_filters(
             base_stmt,
-            employee_name=employee_name,
-            employee_email=employee_email,
-            department_id=department_id,
-            designation_id=designation_id,
+            actor_name=actor_name,
+            actor_email=actor_email,
         )
 
         count_stmt = select(func.count()).select_from(base_stmt.subquery())

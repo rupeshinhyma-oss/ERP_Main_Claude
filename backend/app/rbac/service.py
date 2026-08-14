@@ -13,10 +13,8 @@ import uuid
 
 from app.cache.base import CacheBackend
 from app.core.exceptions import ConflictException, ForbiddenException, NotFoundException
-from app.rbac.models import DepartmentPermission, DesignationPermission, Permission, Role, UserPermission
+from app.rbac.models import Permission, Role, UserPermission
 from app.rbac.repository import (
-    DepartmentPermissionRepository,
-    DesignationPermissionRepository,
     PermissionRepository,
     RoleRepository,
     UserPermissionRepository,
@@ -35,8 +33,6 @@ class RBACService:
         role_repository: RoleRepository,
         permission_repository: PermissionRepository,
         user_role_repository: UserRoleRepository,
-        department_permission_repository: DepartmentPermissionRepository | None = None,
-        designation_permission_repository: DesignationPermissionRepository | None = None,
         user_permission_repository: UserPermissionRepository | None = None,
         cache: CacheBackend | None = None,
     ) -> None:
@@ -44,12 +40,6 @@ class RBACService:
         self.role_repository = role_repository
         self.permission_repository = permission_repository
         self.user_role_repository = user_role_repository
-        self.department_permission_repository = (
-            department_permission_repository or DepartmentPermissionRepository(role_repository.session)
-        )
-        self.designation_permission_repository = (
-            designation_permission_repository or DesignationPermissionRepository(role_repository.session)
-        )
         self.user_permission_repository = (
             user_permission_repository or UserPermissionRepository(role_repository.session)
         )
@@ -161,42 +151,6 @@ class RBACService:
             raise NotFoundException("The role does not have that permission.")
         await self.invalidate_user_permissions_cache()
 
-    # --- Department Permissions ----------------------------------------------------
-    async def list_department_permissions(self, department_id: uuid.UUID) -> list[DepartmentPermission]:
-        return await self.department_permission_repository.list_for_department(department_id)
-
-    async def grant_department_permission(
-        self, department_id: uuid.UUID, permission_id: uuid.UUID, granted_by: uuid.UUID | None = None
-    ) -> DepartmentPermission:
-        await self.get_permission_or_raise(permission_id)
-        link = await self.department_permission_repository.add_permission(department_id, permission_id, granted_by)
-        await self.invalidate_user_permissions_cache()
-        return link
-
-    async def revoke_department_permission(self, department_id: uuid.UUID, permission_id: uuid.UUID) -> None:
-        removed = await self.department_permission_repository.remove_permission(department_id, permission_id)
-        if not removed:
-            raise NotFoundException("The department does not have that permission.")
-        await self.invalidate_user_permissions_cache()
-
-    # --- Designation Permissions ---------------------------------------------------
-    async def list_designation_permissions(self, designation_id: uuid.UUID) -> list[DesignationPermission]:
-        return await self.designation_permission_repository.list_for_designation(designation_id)
-
-    async def grant_designation_permission(
-        self, designation_id: uuid.UUID, permission_id: uuid.UUID, granted_by: uuid.UUID | None = None
-    ) -> DesignationPermission:
-        await self.get_permission_or_raise(permission_id)
-        link = await self.designation_permission_repository.add_permission(designation_id, permission_id, granted_by)
-        await self.invalidate_user_permissions_cache()
-        return link
-
-    async def revoke_designation_permission(self, designation_id: uuid.UUID, permission_id: uuid.UUID) -> None:
-        removed = await self.designation_permission_repository.remove_permission(designation_id, permission_id)
-        if not removed:
-            raise NotFoundException("The designation does not have that permission.")
-        await self.invalidate_user_permissions_cache()
-
     # --- Individual User Permissions ------------------------------------------------
     async def list_user_permissions(self, user_id: uuid.UUID) -> list[UserPermission]:
         return await self.user_permission_repository.list_for_user(user_id)
@@ -229,24 +183,18 @@ class RBACService:
         target_id: uuid.UUID,
         cloned_by: uuid.UUID | None = None,
     ) -> int:
-        """Clone all permission links from a source entity (role, department, designation, user) to a target entity."""
+        """Clone all permission links from a source entity (role, user) to a target entity."""
         source_perm_ids: list[uuid.UUID] = []
         if source_type == "role":
             role = await self.role_repository.get_with_permissions(source_id)
             if not role:
                 raise NotFoundException("Source role not found.")
             source_perm_ids = [link.permission_id for link in role.permission_links]
-        elif source_type == "department":
-            links = await self.department_permission_repository.list_for_department(source_id)
-            source_perm_ids = [link.permission_id for link in links]
-        elif source_type == "designation":
-            links = await self.designation_permission_repository.list_for_designation(source_id)
-            source_perm_ids = [link.permission_id for link in links]
         elif source_type == "user":
             links = await self.user_permission_repository.list_for_user(source_id)
             source_perm_ids = [link.permission_id for link in links if link.is_granted]
         else:
-            raise ConflictException("Invalid source_type. Expected: 'role', 'department', 'designation', or 'user'.")
+            raise ConflictException("Invalid source_type. Expected: 'role' or 'user'.")
 
         cloned_count = 0
         if target_type == "role":
@@ -256,20 +204,12 @@ class RBACService:
                 if perm:
                     await self.role_repository.add_permission(role, perm)
                     cloned_count += 1
-        elif target_type == "department":
-            for perm_id in source_perm_ids:
-                await self.department_permission_repository.add_permission(target_id, perm_id, granted_by=cloned_by)
-                cloned_count += 1
-        elif target_type == "designation":
-            for perm_id in source_perm_ids:
-                await self.designation_permission_repository.add_permission(target_id, perm_id, granted_by=cloned_by)
-                cloned_count += 1
         elif target_type == "user":
             for perm_id in source_perm_ids:
                 await self.user_permission_repository.add_permission(target_id, perm_id, is_granted=True, granted_by=cloned_by)
                 cloned_count += 1
         else:
-            raise ConflictException("Invalid target_type. Expected: 'role', 'department', 'designation', or 'user'.")
+            raise ConflictException("Invalid target_type. Expected: 'role' or 'user'.")
 
         await self.invalidate_user_permissions_cache()
         return cloned_count

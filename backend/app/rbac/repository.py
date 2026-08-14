@@ -17,8 +17,6 @@ from sqlalchemy.orm import selectinload
 
 from app.common.base_repository import BaseRepository
 from app.rbac.models import (
-    DepartmentPermission,
-    DesignationPermission,
     Permission,
     Role,
     RolePermission,
@@ -135,8 +133,6 @@ class RoleRepository(BaseRepository[Role]):
     async def get_effective_permissions_breakdown_for_user(self, user_id: uuid.UUID) -> dict:
         """Fetch full user metadata and permission source breakdown (Read-Only inspector)."""
         from app.users.models import User
-        from app.departments.models import Department
-        from app.designations.models import Designation
 
         # Fetch User
         stmt_user = select(User).where(User.id == user_id)
@@ -173,22 +169,7 @@ class RoleRepository(BaseRepository[Role]):
 
         role_perms_set = set(role_name_map.keys())
 
-        # User details (Department + Designation for display only)
         employee_name = user.full_name or user.display_name or user.username
-        department_name = "N/A"
-        designation_name = "N/A"
-
-        if user.department_id:
-            stmt_dept_obj = select(Department).where(Department.id == user.department_id)
-            dept_obj = (await self.session.execute(stmt_dept_obj)).scalar_one_or_none()
-            if dept_obj:
-                department_name = dept_obj.name
-
-        if user.designation_id:
-            stmt_desig_obj = select(Designation).where(Designation.id == user.designation_id)
-            desig_obj = (await self.session.execute(stmt_desig_obj)).scalar_one_or_none()
-            if desig_obj:
-                designation_name = desig_obj.title or desig_obj.name
 
         # Individual User Overrides
         stmt_user_perms = (
@@ -232,8 +213,6 @@ class RoleRepository(BaseRepository[Role]):
                 "user_id": str(user.id),
                 "username": user.username,
                 "employee_name": employee_name,
-                "department": department_name,
-                "designation": designation_name,
                 "system_roles": system_roles,
                 "status": user.status.value,
             },

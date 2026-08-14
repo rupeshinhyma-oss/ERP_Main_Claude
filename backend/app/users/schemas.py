@@ -30,8 +30,6 @@ class UserCreate(BaseModel):
     email: EmailStr
     phone: str = Field(..., min_length=6, max_length=30, description="Required. Used as a login identifier.")
     
-    department_id: uuid.UUID | None = None
-    designation_id: uuid.UUID | None = None
     manager_id: uuid.UUID | None = None
 
     date_of_birth: date | None = None
@@ -74,8 +72,6 @@ class UserRead(BaseModel):
     email: str
     phone: str
 
-    department_id: uuid.UUID | None = None
-    designation_id: uuid.UUID | None = None
     manager_id: uuid.UUID | None = None
 
     date_of_birth: date | None = None
@@ -105,14 +101,11 @@ class UserRead(BaseModel):
 
 
 class UserWithRoles(UserRead):
-    """A user account with its assigned role names expanded, manager name, and department/designation."""
+    """A user account with its assigned role names expanded and manager name."""
 
     roles: list[str] = Field(default_factory=list)
     created_by_username: str | None = None
     employee_name: str | None = None
-    department_name: str | None = None
-    designation_title: str | None = None
-    designation_name: str | None = None
     manager_name: str | None = None
 
 
@@ -129,8 +122,6 @@ class UserUpdate(BaseModel):
     email: EmailStr | None = None
     phone: str | None = Field(default=None, max_length=30)
 
-    department_id: uuid.UUID | None = None
-    designation_id: uuid.UUID | None = None
     manager_id: uuid.UUID | None = None
 
     date_of_birth: date | None = None

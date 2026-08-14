@@ -372,7 +372,6 @@ export function InquiriesPage() {
           </div>
         </div>
 
->>>>>>> origin/main
         <Banner error={error} />
 
         {view.layer === "companies" && (

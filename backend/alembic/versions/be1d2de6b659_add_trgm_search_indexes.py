@@ -55,13 +55,9 @@ _PLAIN_TRGM_TARGETS: list[tuple[str, str]] = [
     ("products", "product_name_tally"),
     ("products", "product_name_invoice"),
     ("products", "barcode"),
-    # Employees
-    ("employees", "employee_code"),
-    ("employees", "display_name"),
-    ("employees", "first_name"),
-    ("employees", "last_name"),
-    ("employees", "email"),
-    ("employees", "phone"),
+    # Users
+    ("users", "username"),
+    ("users", "email"),
     # Buyers / Suppliers
     ("buyers", "company_name"),
     ("suppliers", "company_name"),
@@ -92,23 +88,30 @@ def upgrade() -> None:
     # pg_trgm ships with PostgreSQL's "contrib" extensions -- this just
     # turns it on for this database if it isn't already.
     op.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm;")
+    import sqlalchemy as sa
+    conn = op.get_bind()
+    inspector = sa.inspect(conn)
+    existing_tables = set(inspector.get_table_names())
 
     for table, column in _PLAIN_TRGM_TARGETS:
+        if table not in existing_tables:
+            continue
         index_name = f"ix_{table}_{column}_trgm"
         op.execute(
             f'CREATE INDEX IF NOT EXISTS "{index_name}" '
             f'ON "{table}" USING gin ("{column}" gin_trgm_ops);'
         )
 
-    for column in _PRODUCT_NORMALIZED_TARGETS:
-        index_name = f"ix_products_{column}_normalized_trgm"
-        # Must match ProductRepository._apply_search's normalized_col
-        # expression EXACTLY (same functions, same argument order) or
-        # Postgres will not recognize this index as usable for that query.
-        op.execute(
-            f'CREATE INDEX IF NOT EXISTS "{index_name}" '
-            f"ON \"products\" USING gin (lower(replace(replace(\"{column}\", ' ', ''), '-', '')) gin_trgm_ops);"
-        )
+    if "products" in existing_tables:
+        for column in _PRODUCT_NORMALIZED_TARGETS:
+            index_name = f"ix_products_{column}_normalized_trgm"
+            # Must match ProductRepository._apply_search's normalized_col
+            # expression EXACTLY (same functions, same argument order) or
+            # Postgres will not recognize this index as usable for that query.
+            op.execute(
+                f'CREATE INDEX IF NOT EXISTS "{index_name}" '
+                f"ON \"products\" USING gin (lower(replace(replace(\"{column}\", ' ', ''), '-', '')) gin_trgm_ops);"
+            )
 
 
 def downgrade() -> None:

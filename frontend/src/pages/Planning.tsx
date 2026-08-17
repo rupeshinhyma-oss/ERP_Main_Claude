@@ -1393,21 +1393,6 @@ export function PlanningPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [organizations.loaded, organizations.items]);
 
-  /**
-   * Change the Organization filter: updates state and re-syncs the URL
-   * (preserving `?sheet=`). Reloading the grid itself is NOT done here --
-   * the `useEffect` below that calls `loadGrid(activeSheetId)` depends on
-   * `loadGrid`, which is itself recreated whenever `activeOrganizationId`
-   * changes, so updating that state alone is what triggers the reload
-   * (always from page 1, since the previously-loaded page may no longer
-   * be page 1 of the filtered result set).
-   */
-  function handleChangeOrganizationFilter(orgId: string | null) {
-    setActiveOrganizationId(orgId);
-    const orgName = orgId ? organizations.items.find((o) => o.id === orgId)?.name ?? null : null;
-    if (activeSheet) setSheetUrlParam(activeSheet.name, orgName);
-  }
-
   const loadSheets = useCallback(async () => {
     try {
       const { data } = await apiGet<PlanningSheet[]>("/planning/sheets");
@@ -2783,79 +2768,6 @@ export function PlanningPage() {
             )}
           </h1>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            {/*
-              Once a sheet has a REAL organization+branch link
-              (grid?.sheet?.organization_id/branch_id -- required for
-              every sheet created going forward, see
-              PlanningService.create_sheet), the backend always filters
-              to that exact branch regardless of any request-time
-              override (see PlanningService.get_grid's docstring) -- so
-              showing an editable "All Organizations" dropdown here would
-              be misleading for a linked sheet; it show a locked badge
-              instead. Only a LEGACY sheet (organization_id is null --
-              created before this feature existed) still shows the old
-              editable dropdown, unchanged.
-            */}
-            {grid?.sheet?.organization_id ? (
-              <span
-                title="This sheet is linked to one specific branch and always shows only that branch's products."
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 6,
-                  border: "1px solid #CBD5E1",
-                  borderRadius: 6,
-                  padding: "6px 10px",
-                  fontSize: 13,
-                  color: "#2563EB",
-                  background: "#EFF6FF",
-                }}
-              >
-                🔒{" "}
-                {organizations.items.find((o) => o.id === grid.sheet.organization_id)?.name ?? "Organization"}
-                {" — "}
-                {(organizations.items.find((o) => o.id === grid.sheet.organization_id)?.branches || []).find(
-                  (b) => b.id === grid.sheet.branch_id
-                )?.name ?? "Branch"}
-              </span>
-            ) : (
-              /*
-                Organization filter -- NOT a real column stored anywhere on
-                this sheet. Membership is read live off each row's linked
-                Product Master record (Product.organization_ids) by the
-                backend on every grid load (see
-                PlanningRowRepository._linked_record_ids_for_organization),
-                the same "extract from Product Master, never a stale copy"
-                rule every other Shipment Planning lookup column already
-                follows. Selecting a value here only changes what's shown
-                for the currently-open sheet -- it can never add/edit/
-                delete anything; that still only happens via Product Master.
-                Only shown for LEGACY sheets (see the branch above) --
-                every sheet created going forward is always linked.
-              */
-              <select
-                value={activeOrganizationId ?? ""}
-                onChange={(e) => handleChangeOrganizationFilter(e.target.value || null)}
-                disabled={!activeSheetId}
-                title="Filter this sheet by Organization (from Product Master)"
-                style={{
-                  border: "1px solid #CBD5E1",
-                  borderRadius: 6,
-                  padding: "6px 10px",
-                  fontSize: 13,
-                  color: activeOrganizationId ? "#2563EB" : "#334155",
-                  background: activeOrganizationId ? "#EFF6FF" : "#FFFFFF",
-                  cursor: activeSheetId ? "pointer" : "not-allowed",
-                }}
-              >
-                <option value="">All Organizations</option>
-                {organizations.items.map((org) => (
-                  <option key={org.id} value={org.id}>
-                    {org.name}
-                  </option>
-                ))}
-              </select>
-            )}
             <button type="button" className="btn btn-secondary" onClick={handleOpenHistory} disabled={!activeSheetId}>
               History
             </button>

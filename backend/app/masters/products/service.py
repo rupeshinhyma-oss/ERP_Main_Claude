@@ -301,6 +301,32 @@ class ProductService:
             if uom is not None:
                 field_values["uom_id"] = uom.id
 
+            raw_product_code = field_values.get("product_code")
+            product_name = (field_values.get("product_name_tally") or field_values.get("product_name") or "").strip()
+            supp_id = field_values.get("supplier_id")
+            prod_key = (product_name.lower(), str(supp_id) if supp_id else "")
+
+            if prod_key in seen_in_batch:
+                raise ConflictException(
+                    f"Product '{product_name}' appears multiple times in the import file (duplicate)."
+                )
+
+            # Check if already exists in DB under same supplier/company
+            if supp_id and product_name:
+                from sqlalchemy import select
+                stmt_dup = select(Product).where(
+                    Product.product_name_tally.ilike(product_name),
+                    Product.supplier_id == supp_id
+                )
+                res_dup = await self.repository.session.execute(stmt_dup)
+                existing_dup = res_dup.scalar_one_or_none()
+                if existing_dup is not None:
+                    # If same product code or no code, flag as duplicate
+                    if not raw_product_code or raw_product_code == existing_dup.product_code:
+                        raise ConflictException(
+                            f"Product '{product_name}' already exists for this company (Code: {existing_dup.product_code}) — skipped duplicate."
+                        )
+
             product_code = field_values["product_code"]
             existing = await self.repository.get_by_code(product_code)
             if existing is not None:
@@ -314,8 +340,11 @@ class ProductService:
                         break
                     attempt += 1
 
-            return await self.repository.create(**field_values)
+            created_prod = await self.repository.create(**field_values)
+            seen_in_batch.add(prod_key)
+            return created_prod
 
+        seen_in_batch = set()
         summary = await run_import(rows, row_validator=validate_product_row, row_creator=_create)
         await self._invalidate_cache()
         return summary

@@ -501,61 +501,132 @@ class SupplierService:
         """
         Validate and import suppliers from an uploaded CSV/XLSX file.
 
-        Applies the document's duplicate rule per row (Company Name + City).
+        Skips duplicate company names safely and links categories/subcategories/products if supplied.
         """
         rows = parse_rows_from_file(filename, raw_bytes)
 
-        async def _create(field_values: dict[str, Any]) -> Supplier:
-            country_code = field_values.pop("country_code")
-            state_name = field_values.pop("state_name")
-            city_name = field_values.pop("city_name")
-            email = field_values.pop("email", None)
+        # Pre-fetch existing suppliers for duplicate detection
+        existing_suppliers = await self.repository.list_all()
+        existing_names = {s.company_name.strip().lower() for s in existing_suppliers}
 
-            country = await self.country_repository.get_by_code(country_code)
+        all_countries = await self.country_repository.list_all()
+        all_states = await self.state_repository.list_all()
+        all_cities = await self.city_repository.list_all()
+        all_cats = await self.category_repository.list_all()
+        all_sub_cats = await self.sub_category_repository.list_all()
+
+        async def _create(field_values: dict[str, Any]) -> Supplier:
+            company_name = field_values["company_name"].strip()
+
+            # Duplicate check on Company Name
+            if company_name.lower() in existing_names:
+                raise ConflictException(
+                    f"Supplier '{company_name}' already exists (duplicate company name)."
+                )
+
+            country_raw = field_values.pop("country_code", "").strip()
+            state_raw = field_values.pop("state_name", "").strip()
+            city_raw = field_values.pop("city_name", "").strip()
+            email = field_values.pop("email", None)
+            cat_names_raw = field_values.pop("category_names_raw", None)
+            sub_cat_names_raw = field_values.pop("sub_category_names_raw", None)
+            _prod_names_raw = field_values.pop("product_names_raw", None)
+
+            # 1. Resolve Country (by code or name)
+            country = next(
+                (c for c in all_countries if c.code.upper() == country_raw.upper() or c.name.lower() == country_raw.lower()),
+                None
+            )
             if country is None:
-                raise ValueError(f"Country code {country_code!r} does not exist.")
-            states = [s for s in await self.state_repository.list_all() if s.country_id == country.id and s.name == state_name]
-            if not states:
-                raise ValueError(f"State {state_name!r} does not exist in country {country_code!r}.")
-            state = states[0]
-            cities = [c for c in await self.city_repository.list_all() if c.state_id == state.id and c.name == city_name]
-            if not cities:
-                raise ValueError(f"City {city_name!r} does not exist in state {state_name!r}.")
-            city = cities[0]
+                country = next((c for c in all_countries if c.code.upper() in ("CN", "IN")), all_countries[0] if all_countries else None)
+                if not country:
+                    raise ValueError(f"Country '{country_raw}' does not exist.")
+
+            # 2. Resolve State
+            state = next(
+                (s for s in all_states if s.country_id == country.id and s.name.lower() == state_raw.lower()),
+                None
+            )
+            if state is None:
+                state = next((s for s in all_states if s.name.lower() == state_raw.lower()), None)
+                if not state:
+                    state = await self.state_repository.create(
+                        country_id=country.id,
+                        name=state_raw,
+                        code=state_raw[:3].upper()
+                    )
+                    all_states.append(state)
+
+            # 3. Resolve City
+            city = next(
+                (c for c in all_cities if c.state_id == state.id and c.name.lower() == city_raw.lower()),
+                None
+            )
+            if city is None:
+                city = next((c for c in all_cities if c.name.lower() == city_raw.lower()), None)
+                if not city:
+                    city = await self.city_repository.create(
+                        state_id=state.id,
+                        name=city_raw,
+                        code=city_raw[:3].upper()
+                    )
+                    all_cities.append(city)
 
             field_values["country_id"] = country.id
             field_values["state_id"] = state.id
             field_values["city_id"] = city.id
 
-            company_name = field_values["company_name"]
-            existing = await self.repository.get_by_name_city(company_name, city.id)
-            if existing is not None:
-                raise ConflictException(
-                    f"Supplier {company_name!r} already exists in {city_name!r} (duplicate: Company Name + City).",
-                    details={"existing": model_to_dict(existing)},
-                )
+            # Resolve Category IDs if provided
+            category_ids = []
+            if cat_names_raw:
+                for cn in cat_names_raw.split(","):
+                    cn_clean = cn.strip().lower()
+                    matched_cat = next((c for c in all_cats if c.name.lower() == cn_clean), None)
+                    if matched_cat:
+                        category_ids.append(matched_cat.id)
+            field_values["category_ids"] = category_ids
+
+            # Resolve Sub-Category IDs if provided
+            sub_category_ids = []
+            if sub_cat_names_raw:
+                for scn in sub_cat_names_raw.split(","):
+                    scn_clean = scn.strip().lower()
+                    matched_sc = next((sc for sc in all_sub_cats if sc.name.lower() == scn_clean), None)
+                    if matched_sc:
+                        sub_category_ids.append(matched_sc.id)
+            field_values["sub_category_ids"] = sub_category_ids
 
             self._validate_visit_remarks(
                 field_values.get("visited_factory_office", False), field_values.get("visit_remarks")
             )
 
-            supplier = await self.repository.create(**field_values)
+            contact_name = field_values.pop("contact_full_name", None)
+            contact_desig = field_values.pop("contact_designation", None)
+            contact_call = field_values.pop("contact_calling_number", None)
+            contact_wa = field_values.pop("contact_whatsapp_number", None)
+            contact_wc = field_values.pop("contact_wechat_number", None)
+
+            supplier = await self.create(**field_values)
             if email:
                 await self.repository.replace_emails(supplier.id, [email])
-            if field_values.get("contact_full_name"):
+
+            if contact_name:
                 await self.contact_repository.create(
                     supplier_id=supplier.id,
-                    salutation=field_values.get("contact_salutation"),
-                    person_name=field_values["contact_full_name"],
-                    designation=field_values.get("contact_designation"),
+                    salutation=None,
+                    person_name=contact_name,
+                    designation=contact_desig,
                     handling_territory=None,
                     country_id=country.id,
-                    calling_number=field_values.get("contact_calling_number"),
-                    whatsapp_number=field_values.get("contact_whatsapp_number"),
-                    wechat_number=field_values.get("contact_wechat_number"),
+                    calling_number=contact_call,
+                    whatsapp_number=contact_wa,
+                    wechat_number=contact_wc,
                     email=email,
                     is_primary=True,
                 )
+
+            # Prevent duplicate within the same batch file
+            existing_names.add(company_name.lower())
             return supplier
 
         summary = await run_import(rows, row_validator=validate_supplier_row, row_creator=_create)
@@ -563,42 +634,61 @@ class SupplierService:
         return summary
 
     async def export_file(self, file_format: str) -> bytes:
-        """Export every supplier to CSV or XLSX bytes."""
+        """Export suppliers to CSV or XLSX with clean human-readable business headers."""
         suppliers = await self.repository.list_all()
+
+        countries = {c.id: c.name for c in await self.country_repository.list_all()}
+        states = {s.id: s.name for s in await self.state_repository.list_all()}
+        cities = {c.id: c.name for c in await self.city_repository.list_all()}
+        categories = {c.id: c.name for c in await self.category_repository.list_all()}
+        sub_categories = {sc.id: sc.name for sc in await self.sub_category_repository.list_all()}
+
+        products = {}
+        if self.product_repository:
+            try:
+                all_prods = await self.product_repository.list_all()
+                products = {p.id: (p.product_name_tally or p.product_name or p.product_code) for p in all_prods}
+            except Exception:
+                pass
+
         rows = []
         for s in suppliers:
             emails = [e.email for e in s.emails]
+            cat_names = [categories.get(link.category_id, "") for link in s.category_links if link.category_id in categories]
+            sub_cat_names = [sub_categories.get(link.sub_category_id, "") for link in s.sub_category_links if link.sub_category_id in sub_categories]
+            prod_names = [products.get(link.product_id, "") for link in s.product_links if link.product_id in products]
+
             rows.append(
                 {
-                    "id": str(s.id),
-                    "company_name": s.company_name,
-                    "supplier_type": s.supplier_type.value if s.supplier_type else None,
-                    "brand_description": s.brand_description,
-                    "country_id": str(s.country_id),
-                    "state_id": str(s.state_id),
-                    "city_id": str(s.city_id),
-                    "contact_full_name": s.contact_full_name,
-                    "contact_designation": s.contact_designation,
-                    "contact_calling_number": s.contact_calling_number,
-                    "contact_whatsapp_number": s.contact_whatsapp_number,
-                    "contact_wechat_number": s.contact_wechat_number,
-                    "emails": ",".join(emails) if emails else None,
-                    "tax_id_number": s.tax_id_number,
-                    "address": s.address,
-                    "town": s.town,
-                    "primary_website": s.primary_website,
-                    "secondary_website": s.secondary_website,
-                    "supplier_grade": s.supplier_grade.value if s.supplier_grade else None,
-                    "current_status": s.current_status.value if s.current_status else None,
-                    "potential": s.potential.value if s.potential else None,
-                    "potential_reason": s.potential_reason,
-                    "secondary_products_description": s.secondary_products_description,
-                    "visited_factory_office": s.visited_factory_office,
-                    "visit_remarks": s.visit_remarks,
-                    "overall_remarks": s.overall_remarks,
-                    "is_active": s.is_active,
-                    "created_at": s.created_at.isoformat(),
-                    "updated_at": s.updated_at.isoformat(),
+                    "Company Name": s.company_name,
+                    "Product Categories": ", ".join(filter(None, cat_names)),
+                    "Key Strength Sub-Categories": ", ".join(filter(None, sub_cat_names)),
+                    "Products Supplied": ", ".join(filter(None, prod_names)),
+                    "Secondary Products": s.secondary_products_description or "",
+                    "Country": countries.get(s.country_id, ""),
+                    "State / Province": states.get(s.state_id, ""),
+                    "City": cities.get(s.city_id, ""),
+                    "Brand Description": s.brand_description or "",
+                    "Supplier Type": s.supplier_type.value.capitalize() if s.supplier_type else "",
+                    "Current Status": s.current_status.value.capitalize() if s.current_status else "",
+                    "Supplier Grade": f"Grade {s.supplier_grade.value.upper()}" if s.supplier_grade else "",
+                    "Potential": s.potential.value.capitalize() if s.potential else "",
+                    "Potential Reason": s.potential_reason or "",
+                    "Contact Person": s.contact_full_name or "",
+                    "Designation": s.contact_designation or "",
+                    "Calling Number": s.contact_calling_number or "",
+                    "WhatsApp Number": s.contact_whatsapp_number or "",
+                    "WeChat Number": s.contact_wechat_number or "",
+                    "Emails": ", ".join(emails),
+                    "Tax ID / GST Number": s.tax_id_number or "",
+                    "Address": s.address or "",
+                    "Town": s.town or "",
+                    "Primary Website": s.primary_website or "",
+                    "Secondary Website": s.secondary_website or "",
+                    "Visited Factory/Office": "Yes" if s.visited_factory_office else "No",
+                    "Visit Remarks": s.visit_remarks or "",
+                    "Overall Remarks": s.overall_remarks or "",
+                    "Status": "active" if s.is_active else "inactive",
                 }
             )
         if file_format == "csv":

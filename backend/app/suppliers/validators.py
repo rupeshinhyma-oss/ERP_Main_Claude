@@ -46,106 +46,150 @@ def validate_email_format(value: str) -> str:
     return value
 
 
-def validate_supplier_row(raw_row: dict[str, str], row_number: int) -> dict[str, Any]:
+def _get_field(row: dict[str, Any], *aliases: str, default: str = "") -> str:
+    """Retrieve a value by trying exact keys, lowercase keys, and normalized keys."""
+    for a in aliases:
+        if a in row and row[a] is not None:
+            v = str(row[a]).strip()
+            if v:
+                return v
+        norm_a = a.lower().replace(" ", "_").replace("-", "_").replace("/", "_").replace("?", "")
+        for k, v in row.items():
+            if v is not None and str(k).strip().lower().replace(" ", "_").replace("-", "_").replace("/", "_").replace("?", "") == norm_a:
+                if str(v).strip():
+                    return str(v).strip()
+    return default
+
+
+def validate_supplier_row(raw_row: dict[str, Any], row_number: int) -> dict[str, Any]:
     """
     Validate one raw import row and return clean field kwargs, or raise on bad data.
 
-    Country/state/city are resolved from codes/names to IDs by the service
-    layer (which has DB access); this function only validates shape.
+    Supports both human-readable UI table column names and backend model keys.
     """
-    company_name = (raw_row.get("company_name") or "").strip()
-    country_code = (raw_row.get("country_code") or "").strip().upper()
-    state_name = (raw_row.get("state_name") or "").strip()
-    city_name = (raw_row.get("city_name") or "").strip()
+    company_name = _get_field(raw_row, "Company Name", "company_name", "Supplier Name", "supplier_name")
+    country_code = _get_field(raw_row, "Country", "country_code", "country_name", "Country Code")
+    state_name = _get_field(raw_row, "State / Province", "State", "Province", "state_name", "province")
+    city_name = _get_field(raw_row, "City", "city_name")
 
     if not company_name:
-        raise BadRequestException(f"Row {row_number}: 'company_name' is required.")
+        raise BadRequestException(f"Row {row_number}: 'Company Name' is required.")
     if not country_code:
-        raise BadRequestException(f"Row {row_number}: 'country_code' is required.")
+        raise BadRequestException(f"Row {row_number}: 'Country' is required.")
     if not state_name:
-        raise BadRequestException(f"Row {row_number}: 'state_name' is required.")
+        raise BadRequestException(f"Row {row_number}: 'State / Province' is required.")
     if not city_name:
-        raise BadRequestException(f"Row {row_number}: 'city_name' is required.")
+        raise BadRequestException(f"Row {row_number}: 'City' is required.")
 
-    supplier_type_raw = (raw_row.get("supplier_type") or "").strip().lower()
+    supplier_type_raw = _get_field(raw_row, "Supplier Type", "supplier_type").lower()
     supplier_type = None
     if supplier_type_raw:
         try:
             supplier_type = SupplierType(supplier_type_raw)
-        except ValueError as exc:
-            raise BadRequestException(
-                f"Row {row_number}: invalid supplier_type {supplier_type_raw!r}."
-            ) from exc
+        except ValueError:
+            # Tolerant match
+            for st in SupplierType:
+                if st.value in supplier_type_raw or supplier_type_raw in st.value:
+                    supplier_type = st
+                    break
 
-    grade_raw = (raw_row.get("supplier_grade") or "").strip().upper()
+    grade_raw = _get_field(raw_row, "Supplier Grade", "Grade", "supplier_grade").upper()
+    if grade_raw.startswith("GRADE "):
+        grade_raw = grade_raw.replace("GRADE ", "").strip()
     grade = None
     if grade_raw:
         try:
             grade = SupplierGrade(grade_raw)
-        except ValueError as exc:
-            raise BadRequestException(f"Row {row_number}: invalid supplier_grade {grade_raw!r}.") from exc
+        except ValueError:
+            pass
 
-    status_raw = (raw_row.get("current_status") or "").strip().lower()
+    status_raw = _get_field(raw_row, "Current Status", "current_status").lower()
     current_status = None
     if status_raw:
         try:
             current_status = SupplierCurrentStatus(status_raw)
-        except ValueError as exc:
-            raise BadRequestException(f"Row {row_number}: invalid current_status {status_raw!r}.") from exc
+        except ValueError:
+            pass
 
-    potential_raw = (raw_row.get("potential") or "").strip().lower()
+    potential_raw = _get_field(raw_row, "Potential", "potential").lower()
     potential = None
     if potential_raw:
         try:
             potential = SupplierPotential(potential_raw)
-        except ValueError as exc:
-            raise BadRequestException(f"Row {row_number}: invalid potential {potential_raw!r}.") from exc
+        except ValueError:
+            pass
 
-    visited_raw = (raw_row.get("visited_factory_office") or "").strip().lower()
+    visited_raw = _get_field(raw_row, "Visited Factory/Office", "Visited Factory/Office?", "visited_factory_office").lower()
     visited_factory_office = visited_raw in ("true", "yes", "1", "y")
 
-    is_active_raw = (raw_row.get("is_active") or "true").strip().lower()
-    is_active = is_active_raw in ("true", "yes", "1", "y")
+    status_str = _get_field(raw_row, "Status", "is_active", default="active").lower()
+    is_active = status_str in ("active", "true", "yes", "1", "y")
+
+    calling_number_raw = _get_field(raw_row, "Calling Number", "Contact Calling Number", "contact_calling_number", "Phone")
+    whatsapp_number_raw = _get_field(raw_row, "WhatsApp Number", "Contact WhatsApp Number", "contact_whatsapp_number", "WhatsApp")
+    wechat_number_raw = _get_field(raw_row, "WeChat Number", "Contact WeChat Number", "contact_wechat_number", "WeChat")
 
     calling_number = validate_phone_number(
-        raw_row.get("contact_calling_number"), field_label=f"Row {row_number}: contact_calling_number"
-    )
-    whatsapp_number = validate_phone_number(
-        raw_row.get("contact_whatsapp_number"), field_label=f"Row {row_number}: contact_whatsapp_number"
-    )
-    wechat_number = validate_phone_number(
-        raw_row.get("contact_wechat_number"), field_label=f"Row {row_number}: contact_wechat_number"
-    )
+        calling_number_raw, field_label=f"Row {row_number}: Calling Number"
+    ) if calling_number_raw else None
 
-    email_raw = (raw_row.get("email") or "").strip()
+    whatsapp_number = validate_phone_number(
+        whatsapp_number_raw, field_label=f"Row {row_number}: WhatsApp Number"
+    ) if whatsapp_number_raw else None
+
+    wechat_number = validate_phone_number(
+        wechat_number_raw, field_label=f"Row {row_number}: WeChat Number"
+    ) if wechat_number_raw else None
+
+    email_raw = _get_field(raw_row, "Emails", "Email", "email", "emails")
     email = validate_email_format(email_raw) if email_raw else None
+
+    brand_desc = _get_field(raw_row, "Brand Description", "Brand", "brand_description")
+    contact_name = _get_field(raw_row, "Contact Person", "Contact Person Name", "contact_full_name", "contact_person")
+    designation = _get_field(raw_row, "Designation", "contact_designation")
+    tax_id = _get_field(raw_row, "Tax ID / GST Number", "Tax ID Number", "tax_id_number", "GST")
+    address = _get_field(raw_row, "Address", "address")
+    town = _get_field(raw_row, "Town", "town")
+    primary_website = _get_field(raw_row, "Primary Website", "Website", "primary_website")
+    secondary_website = _get_field(raw_row, "Secondary Website", "secondary_website")
+    potential_reason = _get_field(raw_row, "Potential Reason", "potential_reason")
+    secondary_products = _get_field(raw_row, "Secondary Products", "secondary_products_description")
+    visit_remarks = _get_field(raw_row, "Visit Remarks", "visit_remarks")
+    overall_remarks = _get_field(raw_row, "Overall Remarks", "overall_remarks")
+
+    category_names_raw = _get_field(raw_row, "Product Categories", "Category", "Categories", "category_names")
+    sub_category_names_raw = _get_field(raw_row, "Key Strength Sub-Categories", "Sub-Category", "Sub Categories", "sub_category_names")
+    product_names_raw = _get_field(raw_row, "Products Supplied", "Products", "product_names")
 
     return {
         "company_name": company_name,
         "supplier_type": supplier_type,
-        "brand_description": (raw_row.get("brand_description") or "").strip() or None,
+        "brand_description": brand_desc or None,
         "country_code": country_code,
         "state_name": state_name,
         "city_name": city_name,
-        "contact_salutation": (raw_row.get("contact_salutation") or "").strip() or None,
-        "contact_full_name": (raw_row.get("contact_full_name") or "").strip() or None,
-        "contact_designation": (raw_row.get("contact_designation") or "").strip() or None,
+        "contact_salutation": None,
+        "contact_full_name": contact_name or None,
+        "contact_designation": designation or None,
         "contact_calling_number": calling_number,
         "contact_whatsapp_number": whatsapp_number,
         "contact_wechat_number": wechat_number,
         "email": email,
-        "tax_id_number": (raw_row.get("tax_id_number") or "").strip() or None,
-        "address": (raw_row.get("address") or "").strip() or None,
-        "town": (raw_row.get("town") or "").strip() or None,
-        "primary_website": (raw_row.get("primary_website") or "").strip() or None,
-        "secondary_website": (raw_row.get("secondary_website") or "").strip() or None,
+        "tax_id_number": tax_id or None,
+        "address": address or None,
+        "town": town or None,
+        "primary_website": primary_website or None,
+        "secondary_website": secondary_website or None,
         "supplier_grade": grade,
         "current_status": current_status,
         "potential": potential,
-        "potential_reason": (raw_row.get("potential_reason") or "").strip() or None,
-        "secondary_products_description": (raw_row.get("secondary_products_description") or "").strip() or None,
+        "potential_reason": potential_reason or None,
+        "secondary_products_description": secondary_products or None,
         "visited_factory_office": visited_factory_office,
-        "visit_remarks": (raw_row.get("visit_remarks") or "").strip() or None,
-        "overall_remarks": (raw_row.get("overall_remarks") or "").strip() or None,
+        "visit_remarks": visit_remarks or None,
+        "overall_remarks": overall_remarks or None,
         "is_active": is_active,
+        "category_names_raw": category_names_raw or None,
+        "sub_category_names_raw": sub_category_names_raw or None,
+        "product_names_raw": product_names_raw or None,
     }

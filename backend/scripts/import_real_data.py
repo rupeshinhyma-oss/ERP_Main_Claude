@@ -22,6 +22,7 @@ Run from backend/:
 
 import sys
 import re
+import json
 import uuid
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -368,8 +369,26 @@ safe_print(f"  Loaded {len(supplier_id_lookup)} suppliers from DB")
 # ==============================================================================
 safe_print("\n-- Step 7: Importing Products --------------------------------------")
 
+ORG_BRANCH_MAP = {
+    "inhyma": {
+        "org_id": "85c12bcb-10a1-4b1f-92ed-6ca72ac1b3b5",
+        "org_ids": json.dumps(["85c12bcb-10a1-4b1f-92ed-6ca72ac1b3b5"]),
+        "branch_ids": json.dumps(["br_1786607288802_tg33", "br_1786607390334_uitw", "br_1786607543358_ugll"])
+    },
+    "darsh": {
+        "org_id": "d864af43-71b1-402f-8bc4-f317c8af7a00",
+        "org_ids": json.dumps(["d864af43-71b1-402f-8bc4-f317c8af7a00"]),
+        "branch_ids": json.dumps(["br_1786607573715_73ya", "br_1786607613556_862i"])
+    },
+    "fnb": {
+        "org_id": "3d7e290e-5b32-4252-8171-f8366fb56a54",
+        "org_ids": json.dumps(["3d7e290e-5b32-4252-8171-f8366fb56a54"]),
+        "branch_ids": json.dumps(["br_1786620385148_idqx"])
+    }
+}
+
 inserted_total = 0
-skipped_total  = 0
+skipped_total = 0
 
 def import_products(rows, col_map, supplier_name, file_label):
     global inserted_total, skipped_total
@@ -427,6 +446,11 @@ def import_products(rows, col_map, supplier_name, file_label):
                 break
             attempt += 1
 
+        org_info = ORG_BRANCH_MAP.get(supplier_name.strip().lower(), {})
+        org_id = org_info.get("org_id")
+        org_ids = org_info.get("org_ids")
+        branch_ids = org_info.get("branch_ids")
+
         pid = new_id()
         try:
             cur.execute(
@@ -436,6 +460,7 @@ def import_products(rows, col_map, supplier_name, file_label):
                     product_name, product_name_tally, product_name_invoice,
                     category_id, sub_category_id, brand_id, hsn_id, uom_id,
                     supplier_id,
+                    organization_id, organization_ids, branch_ids,
                     packaging_quantity, packaging_net_weight, packaging_gross_weight,
                     length_cm, width_cm, height_cm, packaging_unit_cbm,
                     specification,
@@ -448,6 +473,7 @@ def import_products(rows, col_map, supplier_name, file_label):
                     %s, %s, %s,
                     %s, %s, %s, %s, %s,
                     %s,
+                    %s, %s::jsonb, %s::jsonb,
                     %s, %s, %s,
                     %s, %s, %s, %s,
                     %s,
@@ -462,6 +488,7 @@ def import_products(rows, col_map, supplier_name, file_label):
                     tally_name, tally_name, invoice_name,
                     cat_id, sub_id, brand_id, hsn_id, uom_id,
                     supplier_id,
+                    org_id, org_ids, branch_ids,
                     pack_qty, net_weight, gross_weight,
                     length, width, height, cbm,
                     spec,

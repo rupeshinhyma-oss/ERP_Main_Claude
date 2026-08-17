@@ -12,4 +12,32 @@ MODULE_NAME = "buyer"
 PHONE_MIN_DIGITS = 6
 PHONE_MAX_DIGITS = 15
 
-DEFAULT_SALUTATIONS = ("Mr.", "Mrs.", "Ms.")
+DEFAULT_SALUTATIONS = ("Mr.", "Mrs.", "Ms.", "Dr.")
+
+EXPORT_HEADERS = [
+    "Company Name",
+    "Buyer Type",
+    "Product Categories",
+    "Product Sub Categories",
+    "Country",
+    "City",
+    "Address",
+    "Contact Salutation",
+    "Contact Person Name",
+    "Designation",
+    "Calling Number",
+    "WhatsApp Number",
+    "Emails",
+    "Tax ID / GST Number",
+    "Website",
+    "Current Status",
+    "Buyer Grade",
+    "Potential",
+    "Potential Reason",
+    "Product Range",
+    "Currently Buying From",
+    "Overall Remarks",
+    "Status",
+]
+
+IMPORT_HEADERS = EXPORT_HEADERS

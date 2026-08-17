@@ -24,6 +24,8 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.constants import RecordStatus
 from app.database.base import GUID, Base, SoftDeleteMixin, TimestampMixin, UUIDPrimaryKeyMixin, VersionMixin
+import app.masters.company_list.models  # noqa: F401
+import app.suppliers.models  # noqa: F401
 
 
 class Product(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin, SoftDeleteMixin):

@@ -8,6 +8,7 @@ they just validate permissions, call the service, and shape the response.
 
 from __future__ import annotations
 
+import json
 import uuid
 from typing import Any
 
@@ -20,8 +21,8 @@ from app.core.logging import get_logger
 from app.core.responses import build_success_response
 from app.events.dependencies import get_event_dispatcher
 from app.events.dispatcher import EventDispatcher
-from app.planning import source_registry
 from app.planning.dependencies import get_planning_service
+from app.planning.repository import ColumnSearchFilter
 from app.planning.ws_manager import connection_manager
 from app.planning.schemas import (
     MumColumnStatusHistoryEntry,
@@ -39,6 +40,7 @@ from app.planning.schemas import (
     PlanningColumnRoleLockUpdate,
     PlanningColumnStatusColorToggle,
     PlanningColumnSourceConfigure,
+    PlanningColumnWidthUpdate,
     PlanningGridRead,
     PlanningItemAutoPopulate,
     PlanningItemDescriptionUpdate,
@@ -114,6 +116,52 @@ async def sheet_live_updates(
         logger.exception("Planning live-update socket errored.", extra={"sheet_id": str(sheet_id)})
     finally:
         connection_manager.disconnect(sheet_id, websocket)
+
+
+def _parse_search_query_param(search: str | None) -> list[ColumnSearchFilter] | None:
+    """
+    Parse the grid route's ``search`` query param (a JSON-encoded array)
+    into a list of :class:`ColumnSearchFilter`, or ``None`` if not given.
+
+    Malformed JSON or an unexpected shape is treated as "no search" (logs
+    a warning, doesn't 400) -- a transient frontend bug in building the
+    search payload should degrade to "show everything" rather than break
+    the whole grid load for the person searching.
+    """
+    if not search:
+        return None
+    try:
+        raw = json.loads(search)
+    except (ValueError, TypeError):
+        logger.warning("Ignoring malformed search query param (not valid JSON).", extra={"search": search})
+        return None
+    if not isinstance(raw, list):
+        logger.warning("Ignoring malformed search query param (expected a JSON array).")
+        return None
+
+    filters: list[ColumnSearchFilter] = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        raw_column_id = entry.get("column_id")
+        column_id: uuid.UUID | None = None
+        if raw_column_id is not None:
+            try:
+                column_id = uuid.UUID(str(raw_column_id))
+            except (ValueError, AttributeError):
+                continue  # skip this one malformed filter entry, keep the rest
+        text_query = entry.get("text_query")
+        selected_values = entry.get("selected_values")
+        if selected_values is not None and not isinstance(selected_values, list):
+            selected_values = None
+        filters.append(
+            ColumnSearchFilter(
+                column_id=column_id,
+                text_query=str(text_query) if text_query is not None else None,
+                selected_values=[str(v) for v in selected_values] if selected_values else None,
+            )
+        )
+    return filters
 
 
 async def _broadcast(
@@ -244,6 +292,8 @@ async def create_sheet(
 ) -> dict:
     sheet = await service.create_sheet(
         name=payload.name,
+        organization_id=payload.organization_id,
+        branch_id=payload.branch_id,
         mum_group_label=payload.mum_group_label or "Mum",
         description=payload.description,
         user_id=current_user.id,
@@ -403,6 +453,24 @@ async def repair_fixed_mum_formulas(
     return build_success_response(data=data, request_id=request.state.request_id, message="Formula columns repaired.")
 
 
+@router.post("/sheets/{sheet_id}/columns/next-mum-group", summary="Create next Mum column group in a single fast atomic operation")
+async def create_next_mum_group(
+    sheet_id: uuid.UUID,
+    request: Request,
+    service: PlanningService = Depends(get_planning_service),
+    current_user: CurrentUser = Depends(require_permission("planning.column.manage")),
+) -> dict:
+    """
+    Create the next Mum/group column set in a single fast, atomic operation.
+    """
+    columns = await service.create_next_mum_group(
+        sheet_id, user_id=current_user.id, username=current_user.username
+    )
+    data = [PlanningColumnRead.model_validate(c).model_dump(mode="json") for c in columns]
+    await _broadcast(sheet_id, "columns_updated", data, current_user=current_user, service=service)
+    return build_success_response(data=data, request_id=request.state.request_id, message="Next column group created.")
+
+
 @router.delete("/sheets/{sheet_id}", summary="Delete a planning sheet")
 async def delete_sheet(
     sheet_id: uuid.UUID,
@@ -444,171 +512,82 @@ async def get_grid(
         "organization; applied server-side so it covers the whole sheet, not just the "
         "currently-loaded page.",
     ),
+    search: str | None = Query(
+        None,
+        description="Optional JSON-encoded array of per-column search filters, e.g. "
+        '\'[{"column_id": "<uuid-or-null-for-ITEM>", "text_query": "abc", '
+        '"selected_values": ["X", "Y"]}]\'. Searches the WHOLE sheet server-side (every '
+        "row, not just the currently-loaded page) -- see "
+        "PlanningRowRepository._apply_search_column_filters for exactly how each filter "
+        "is matched. Kept as a single JSON-encoded query param (rather than one query "
+        "param per column) since the number of filtered columns is unbounded and this "
+        "keeps the route a real GET.",
+    ),
     service: PlanningService = Depends(get_planning_service),
     _current_user: CurrentUser = Depends(require_permission("planning.read")),
 ) -> dict:
-    grid = await service.get_grid(sheet_id, offset=offset, limit=limit, organization_id=organization_id)
+    search_column_filters = _parse_search_query_param(search)
+    grid = await service.get_grid(
+        sheet_id,
+        offset=offset,
+        limit=limit,
+        organization_id=organization_id,
+        search_column_filters=search_column_filters,
+    )
     columns = grid["columns"]
     rows = grid["rows"]
     sheet = grid["sheet"]
     total_rows = grid["total_rows"]
 
-    # Aggregate columns yield the same value for the whole column, so compute
-    # each one exactly once here rather than once per row -- avoids an
-    # N-times-redundant query against the source module for a sheet with N rows.
-    aggregate_cache: dict[uuid.UUID, str | None] = {}
-    # LINKED_LOOKUP columns: one bulk fetch per column (not one per cell).
-    # Keyed by (column_id, linked_record_id) -> resolved record, mirroring
-    # the same fix applied to the ITEM column via
-    # compute_row_item_displays_for_all_rows -- an admin-added
-    # LINKED_LOOKUP column has the exact same N+1 query risk ITEM did.
-    # Records are cached here and handed to compute_cell_display_value's
-    # prefetched_record param below, so the value-extraction logic itself
-    # (module.value_getter, str() conversion, etc.) still lives in exactly
-    # one place rather than being duplicated here.
-    linked_lookup_records: dict[tuple[uuid.UUID, uuid.UUID], Any] = {}
-    for column in columns:
-        if column.source_type == "aggregate":
-            aggregate_cache[column.id] = await service.compute_cell_display_value(column, None)
-        elif column.source_type == "linked_lookup":
-            module = source_registry.get_source_module(column.source_module or "")
-            if module is None:
-                continue
-            record_ids = {
-                cell.linked_record_id
-                for row in rows
-                for cell in row.cells
-                if cell.column_id == column.id and cell.linked_record_id is not None
-            }
-            # Also bulk-fetch each row's OWN linked record (row.linked_record_id,
-            # i.e. what its ITEM cell is linked to) whenever this column's own
-            # cell has no explicit link yet AND the column pulls from the same
-            # module as ITEM -- see compute_cell_display_value's
-            # `row_linked_record_id` docstring for why this fallback exists.
-            # Guarded to the same module as ITEM: falling back to ITEM's link
-            # for a column pulling from a DIFFERENT module (e.g. "supplier"
-            # while ITEM is "product") would resolve the wrong kind of
-            # record entirely, so that case is intentionally left blank.
-            if column.source_module == sheet.item_source_module:
-                cells_by_row_for_column = {
-                    row.id: next((c for c in row.cells if c.column_id == column.id), None) for row in rows
-                }
-                for row in rows:
-                    existing_cell = cells_by_row_for_column.get(row.id)
-                    if (existing_cell is None or existing_cell.linked_record_id is None) and row.linked_record_id is not None:
-                        record_ids.add(row.linked_record_id)
-            if not record_ids:
-                continue
-            repository = module.repository_factory(service.cell_repository.session)
-            records_by_id = await repository.get_by_ids(list(record_ids))
-            for record_id, record in records_by_id.items():
-                linked_lookup_records[(column.id, record_id)] = record
-
     approval_date_column_id = next(
         (c.id for c in columns if c.name.strip().lower() == "approval date"), None
     )
 
-    # Computed ONCE for the whole sheet -- see get_mum_group_approval_dates_for_all_rows's
-    # docstring for why the old per-row call here was the direct cause of
-    # "Loading grid..." never finishing on a sheet with many rows.
+    # Computed ONCE for the whole sheet -- this is a per-VIEWER display
+    # overlay (which Mum groups the current browser has hidden), not a
+    # stored value, so it's the one piece of per-request computation left
+    # here on purpose. See get_mum_group_approval_dates_for_all_rows's own
+    # docstring for why this was never a candidate for store-on-write:
+    # there is no single correct stored answer to persist, since it
+    # depends on which columns THIS viewer currently has hidden.
     mum_approval_dates_by_row = await service.get_mum_group_approval_dates_for_all_rows(
         sheet_id, columns=columns, rows=rows
     )
-
-    # ITEM's own display value, batched the same way as the LINKED_LOOKUP
-    # columns above -- one query for every linked product on the sheet,
-    # not one per row. See compute_row_item_displays_for_all_rows's
-    # docstring for why this was the dominant cost behind the hang.
-    item_display_by_row = await service.compute_row_item_displays_for_all_rows(sheet, rows)
 
     row_reads = []
     for row in rows:
         cells_by_column_id = {cell.column_id: cell for cell in row.cells}
         cell_reads = []
-        # Every Mum group's approval date for this row, keyed by group
-        # number as a string (JSON-friendly) -- looked up from the
-        # sheet-wide computation above, reused below for the Approval
-        # Date column's fallback display, AND sent to the frontend as
-        # `mum_approval_dates` so it can recompute "the first non-hidden
-        # Mum's date" itself whenever the viewer's hidden-column selection
-        # changes, without another round-trip (hiding is a per-user
-        # browser preference the backend has no concept of).
         mum_approval_dates = mum_approval_dates_by_row.get(row.id, {})
-        # Iterate every column, not just columns with a stored cell:
-        # FORMULA and AGGREGATE columns routinely have no PlanningCell row
-        # at all for a given row (direct edits to them are rejected, and
-        # nothing auto-creates one), but the frontend still needs one grid
-        # entry per (row, column) to render the cell and its computed value.
+        # Iterate every column, not just columns with a stored cell: a
+        # LINKED_LOOKUP/AGGREGATE/FORMULA column whose computed value is
+        # None (e.g. an unlinked row, or a formula referencing a still-
+        # empty sibling) has no PlanningCell row at all -- the frontend
+        # still needs one grid entry per (row, column) to render an empty
+        # cell.
         for column in columns:
             cell = cells_by_column_id.get(column.id)
-            if column.source_type == "aggregate":
-                display_value = aggregate_cache.get(column.id)
-            elif column.source_type == "linked_lookup":
-                # The record id this cell will actually resolve against:
-                # its own explicit link if it has one, otherwise (when this
-                # column pulls from the same module as ITEM) the row's own
-                # ITEM link -- same fallback compute_cell_display_value
-                # applies itself; mirrored here so the prefetched-record
-                # cache lookup below is keyed by the SAME id it will use.
-                own_record_id = cell.linked_record_id if cell is not None else None
-                fallback_record_id = (
-                    row.linked_record_id
-                    if own_record_id is None and column.source_module == sheet.item_source_module
-                    else None
-                )
-                effective_record_id = own_record_id or fallback_record_id
-                # Use the sheet-wide bulk-fetched record from above (see
-                # linked_lookup_records) instead of letting
-                # compute_cell_display_value do its own per-cell
-                # get_by_id -- the whole point of batching it above.
-                prefetched = (
-                    linked_lookup_records.get((column.id, effective_record_id))
-                    if effective_record_id is not None
-                    else None
-                )
-                display_value = await service.compute_cell_display_value(
-                    column,
-                    cell,
-                    row_id=row.id,
-                    prefetched_record=prefetched,
-                    prefetched_sibling_columns=columns,
-                    prefetched_row_cells=cells_by_column_id,
-                    row_linked_record_id=row.linked_record_id,
-                )
-            else:
-                # FORMULA and MANUAL columns land here. FORMULA columns
-                # (including the fixed NO. OF PKG/TOTAL WEIGHT/TOTAL CBM
-                # totals) can internally need PKG QTY / UNIT WEIGHT/PKG /
-                # CBM/PKG's OWN values -- see
-                # _compute_mum_derived_value's row_linked_record_id
-                # docstring -- and those sibling LINKED_LOOKUP columns
-                # resolve via that same row-level fallback whenever their
-                # own cell was never explicitly linked. This branch used
-                # to omit row_linked_record_id entirely (unlike the
-                # linked_lookup branch just above, which always passed
-                # it), so that fallback silently never activated for
-                # anything computed THROUGH a formula -- the totals
-                # stayed blank even once the LINKED_LOOKUP columns being
-                # divided/multiplied were themselves displaying correctly
-                # as their own top-level cells.
-                display_value = await service.compute_cell_display_value(
-                    column,
-                    cell,
-                    row_id=row.id,
-                    prefetched_sibling_columns=columns,
-                    prefetched_row_cells=cells_by_column_id,
-                    row_linked_record_id=row.linked_record_id,
-                )
+            # Everything is already computed and stored -- see
+            # PlanningService.recompute_and_store_cell and every write
+            # path that calls it (set_cell_value, link_row_to_*,
+            # configure_column_source, auto_populate_rows_from_item_source,
+            # and the cross-module hooks in
+            # app.masters.products/suppliers/buyers' own update() methods
+            # via app.planning.ws_manager.refresh_planning_cells_for_record).
+            # Reading the grid is now a plain read of already-stored
+            # values: no recomputation of any kind happens here, which is
+            # the entire point of the store-on-write architecture -- a
+            # sheet with 10,000+ rows costs exactly the same per-row work
+            # to display as one with 10.
+            display_value = cell.value if cell is not None else None
             # Document: "the Approval column should show over the cell the
             # date ... when that Mum ... got the blue number". The Approval
             # Date column stays MANUAL (admins can still type over it), but
             # when nobody has typed a value for this row, auto-show the
             # earliest-numbered Mum group's approval date instead of a
-            # blank cell -- computed live from the change log, never
-            # persisted. This picks the globally-first Mum group
-            # regardless of what any one viewer has hidden; the frontend
-            # overrides it with a hidden-aware pick using
-            # `mum_approval_dates` right after the grid loads.
+            # blank cell -- see this function's own note above on why this
+            # one piece stays a per-request overlay rather than a stored
+            # value.
             auto_approval_date: str | None = None
             if column.id == approval_date_column_id and not display_value and mum_approval_dates:
                 auto_approval_date = mum_approval_dates[min(mum_approval_dates.keys())]
@@ -630,11 +609,9 @@ async def get_grid(
                 }
             cell_data["display_value"] = display_value
             # The frontend's grid cell renders MANUAL columns from `value`,
-            # not `display_value` (display_value is only read for
-            # computed/FORMULA/LINKED_LOOKUP/AGGREGATE columns) -- the
-            # Approval Date column is MANUAL, so the auto-computed date
-            # must also be surfaced as `value`, or it silently never
-            # renders even though the backend computed it correctly.
+            # not `display_value` -- the Approval Date column is MANUAL, so
+            # the auto-computed date must also be surfaced as `value`, or it
+            # silently never renders even though it was computed correctly.
             # Real typed-in values (the `cell is not None` case above)
             # already have their own `value` from the DB and are left untouched.
             is_auto_filled = auto_approval_date is not None and cell_data.get("value") in (None, "")
@@ -652,14 +629,13 @@ async def get_grid(
         row_data = PlanningRowRead.model_validate(row).model_dump(mode="json")
         row_data["cells"] = cell_reads
         row_data["mum_approval_dates"] = {str(k): v for k, v in mum_approval_dates.items()}
-        # ITEM is the sheet's built-in first column, not a row in `columns`
-        # above -- when the admin has configured it as linked-lookup or
-        # formula (see PlanningItemSourceConfigure), show the live computed
-        # value instead of the raw stored label, same "never trust a stale
-        # value" behavior as every other dynamic column. Looked up from
-        # the sheet-wide batch computed above (item_display_by_row), not
-        # recomputed per row here.
-        row_data["label"] = item_display_by_row.get(row.id, row.label)
+        # ITEM's stored label is already correct -- see
+        # PlanningService.recompute_and_store_row (called from every row-
+        # affecting write path) and configure_item_source, both of which
+        # keep PlanningRow.label current whenever the ITEM configuration
+        # or its linked record could have changed it. No per-row
+        # computation happens here anymore.
+        row_data["label"] = row.label
         row_reads.append(row_data)
 
     data = {
@@ -720,6 +696,30 @@ async def rename_column(
     data = PlanningColumnRead.model_validate(column).model_dump(mode="json")
     await _broadcast(sheet_id, "column_renamed", data, current_user=current_user, service=service)
     return build_success_response(data=data, request_id=request.state.request_id, message="Column renamed.")
+
+
+@router.patch(
+    "/sheets/{sheet_id}/columns/{column_id}/width",
+    summary="Set (or clear) a column's server-persisted display width",
+)
+async def set_column_width(
+    sheet_id: uuid.UUID,
+    column_id: uuid.UUID,
+    payload: PlanningColumnWidthUpdate,
+    request: Request,
+    service: PlanningService = Depends(get_planning_service),
+    current_user: CurrentUser = Depends(require_permission("planning.column.manage")),
+) -> dict:
+    """
+    Drag-to-resize a column. Shared across every user viewing the sheet
+    (unlike Hide/Freeze, which stay local to each browser) -- see
+    PlanningColumn.width_px's docstring. Not logged to the sheet's change
+    history: resizing is a cosmetic preference, not a data edit.
+    """
+    column = await service.set_column_width(sheet_id, column_id, width_px=payload.width_px)
+    data = PlanningColumnRead.model_validate(column).model_dump(mode="json")
+    await _broadcast(sheet_id, "column_width_changed", data, current_user=current_user, service=service)
+    return build_success_response(data=data, request_id=request.state.request_id, message="Column width updated.")
 
 
 @router.post("/sheets/{sheet_id}/columns/{column_id}/move", summary="Move a column to a new position")
@@ -903,12 +903,19 @@ async def auto_populate_rows_from_item_source(
     # not any rows -- fetch it directly instead of paying for a row page
     # via get_grid just to reach into grid["sheet"].
     sheet = await service.get_sheet_or_raise(sheet_id)
+    # A branch-linked sheet's own organization/branch always wins over
+    # whatever the request happens to pass -- see get_grid's identical
+    # rule and its docstring for why. Only a legacy, never-linked sheet
+    # falls back to the payload's organization_id.
+    effective_organization_id = sheet.organization_id if sheet.organization_id is not None else payload.organization_id
+    effective_branch_id = sheet.branch_id if sheet.organization_id is not None else None
     rows = await service.auto_populate_rows_from_item_source(
         sheet_id,
         limit=payload.limit,
         user_id=current_user.id,
         username=current_user.username,
-        organization_id=payload.organization_id,
+        organization_id=effective_organization_id,
+        branch_id=effective_branch_id,
     )
     # Batched the same way as get_grid -- one query for every linked
     # record just created, not one per row. This route creates up to

@@ -3,8 +3,8 @@
  *
  * Ported from initUniversalSearch() in nav.js. Queries the backend's
  * `GET /search?q=` endpoint (app/search/service.py), which searches across
- * every major entity type -- organization, users, suppliers, tasks, products,
- * categories, brands, departments/designations, HSN codes, and the geography
+ * every major entity type -- organization, users, suppliers, products,
+ * categories, brands, HSN codes, and the geography
  * and currency/UOM masters -- and groups results by category.
  *
  * The backend predates the SPA rewrite: it still returns legacy relative URLs

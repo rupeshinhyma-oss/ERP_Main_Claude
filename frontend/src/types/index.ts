@@ -442,6 +442,16 @@ export interface ImportDuplicate {
   existing?: Record<string, unknown> | null;
 }
 
+/** A row skipped because an earlier row in the *same file* already had the same
+ *  identity (as opposed to `ImportDuplicate`, which collided with a record
+ *  already in the database). */
+export interface InFileDuplicate {
+  row: number;
+  row_data?: Record<string, unknown>;
+  /** Row number (within the uploaded file) of the earlier row it duplicates. */
+  matchedRow?: number;
+}
+
 export interface ImportSummary {
   total_rows: number;
   created: number;
@@ -449,6 +459,8 @@ export interface ImportSummary {
   duplicate_count: number;
   errors: ImportRowError[];
   duplicates: ImportDuplicate[];
+  in_file_duplicate_count?: number;
+  in_file_duplicates?: InFileDuplicate[];
 }
 
 /** A parsed spreadsheet row: column name -> cell value. */

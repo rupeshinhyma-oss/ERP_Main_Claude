@@ -333,8 +333,46 @@ export function SelectField({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
+  /**
+   * Recursively collect every real <option> element out of `children`,
+   * descending through React Fragments (<>...</>) and arrays.
+   *
+   * BUG THIS FIXES: `React.Children.forEach` only visits DIRECT children
+   * -- if a caller wraps its <option>s in a Fragment (e.g. a conditional
+   * block like `{cond ? <option/> : <><option/><option/></>}`, which is a
+   * completely ordinary, valid way to conditionally render multiple
+   * options), every option nested inside that Fragment was silently
+   * invisible to the old flat forEach loop: `child.type` for the
+   * Fragment itself is the Fragment symbol, never the string
+   * `"option"`, so the check below always failed for anything nested
+   * inside one. The dropdown would then show "No matching results" with
+   * NO error anywhere -- indistinguishable from "there really are no
+   * options" from the caller's point of view. This was a live production
+   * bug (Shipment Planning's branch picker: Darsh Impex genuinely has
+   * two branches, but they were wrapped in a Fragment, so zero options
+   * ever rendered).
+   *
+   * Plain <option> elements (the overwhelmingly common case, no
+   * Fragment) are unaffected -- this is purely additive.
+   */
+  function collectOptionElements(nodes: ReactNode): ReactNode[] {
+    const collected: ReactNode[] = [];
+    React.Children.forEach(nodes, (child) => {
+      if (!React.isValidElement(child)) return;
+      if (child.type === React.Fragment) {
+        collected.push(...collectOptionElements((child.props as { children?: ReactNode }).children));
+      } else if (child.type === "option") {
+        collected.push(child);
+      }
+      // Any other element type is intentionally ignored, matching the
+      // previous behavior -- this component only ever expects <option>
+      // children (optionally nested in Fragments).
+    });
+    return collected;
+  }
+
   const options: { value: string; label: string; element: ReactNode }[] = [];
-  React.Children.forEach(children, (child) => {
+  collectOptionElements(children).forEach((child) => {
     if (React.isValidElement(child) && child.type === "option") {
       const childProps = child.props as { value?: string | number; children?: ReactNode };
       const valStr = String(childProps.value ?? "");
@@ -423,31 +461,31 @@ export function SelectField({
         >
           {/* Search Bar — shown for all lists */}
           {options.length > 0 && (
-          <div style={{ padding: "8px", borderBottom: "1px solid #f1f5f9", background: "#f8fafc" }}>
-            <input
-              ref={searchInputRef}
-              type="text"
-              placeholder="Search / Type here..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && filteredOptions.length > 0) {
-                  e.preventDefault();
-                  onChange(filteredOptions[0].value);
-                  setOpen(false);
-                }
-              }}
-              style={{
-                width: "100%",
-                padding: "6px 10px",
-                fontSize: "13px",
-                border: "1px solid #cbd5e0",
-                borderRadius: "4px",
-                outline: "none",
-                background: "#ffffff",
-              }}
-            />
-          </div>
+            <div style={{ padding: "8px", borderBottom: "1px solid #f1f5f9", background: "#f8fafc" }}>
+              <input
+                ref={searchInputRef}
+                type="text"
+                placeholder="Search / Type here..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && filteredOptions.length > 0) {
+                    e.preventDefault();
+                    onChange(filteredOptions[0].value);
+                    setOpen(false);
+                  }
+                }}
+                style={{
+                  width: "100%",
+                  padding: "6px 10px",
+                  fontSize: "13px",
+                  border: "1px solid #cbd5e0",
+                  borderRadius: "4px",
+                  outline: "none",
+                  background: "#ffffff",
+                }}
+              />
+            </div>
           )}
 
           {/* Options List */}
@@ -977,7 +1015,7 @@ export function MultiSelectField({
                     <input
                       type="checkbox"
                       checked={isChecked}
-                      onChange={() => {}}
+                      onChange={() => { }}
                       style={{ cursor: "pointer" }}
                     />
                     <span>{opt.name}</span>

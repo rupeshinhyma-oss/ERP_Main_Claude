@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass, field
+from typing import Any
 
 from fastapi import WebSocket
 
@@ -149,5 +150,73 @@ async def notify_source_record_changed(module_key: str, record_id: uuid.UUID) ->
         )
     except Exception:  # noqa: BLE001
         logger.exception(
-            "Failed to broadcast source-record-changed event.", extra={"module": module_key, "record_id": str(record_id)}
+            "Failed to broadcast source-record-changed event.", extra={"source_module": module_key, "record_id": str(record_id)}
+        )
+
+
+async def refresh_planning_cells_for_record(session: Any, module_key: str, record_id: uuid.UUID) -> None:
+    """
+    Recompute and PERSIST every Planning cell that could be affected by a
+    change to one record in ``module_key`` (e.g. a Product being edited)
+    -- the store-on-write counterpart to ``notify_source_record_changed``
+    above, which only broadcasts a live-refresh hint to already-open
+    browser tabs and never touches the database.
+
+    Call this from the SAME source-module service method that calls
+    ``notify_source_record_changed`` (e.g.
+    ``app.masters.products.service.ProductService.update``, right after
+    it), passing that method's own already-open ``AsyncSession`` --
+    reusing the caller's session/transaction rather than opening a new
+    one keeps this part of the same commit as the record edit itself, so
+    a Planning cell's stored value and the record it was computed from
+    can never end up out of sync even if the process crashes between the
+    two writes.
+
+    Deliberately decoupled from any particular source module's service,
+    mirroring ``notify_source_record_changed``'s own docstring: only this
+    one small function (plus that one) crosses the module boundary
+    between Products/Suppliers/Buyers and Planning.
+
+    Best-effort, never raises -- a background recompute failing must
+    never turn a successful product/supplier/buyer save into a failed
+    HTTP response for the user who made it. Failures are logged so they
+    can be investigated, and the affected cells simply keep showing
+    their last-known value until the next successful recompute (the next
+    edit to the same record, or a future manual "refresh this cell"
+    action) rather than the request failing outright.
+    """
+    try:
+        from app.audit.repository import AuditRepository
+        from app.audit.service import AuditService
+        from app.planning.repository import (
+            PlanningCellRepository,
+            PlanningChangeLogRepository,
+            PlanningColumnRepository,
+            PlanningColumnRoleLockRepository,
+            PlanningRowRepository,
+            PlanningSheetRepository,
+            PlanningStatusTagRepository,
+        )
+        from app.planning.service import PlanningService
+
+        service = PlanningService(
+            PlanningSheetRepository(session),
+            PlanningRowRepository(session),
+            PlanningColumnRepository(session),
+            PlanningCellRepository(session),
+            PlanningStatusTagRepository(session),
+            PlanningChangeLogRepository(session),
+            AuditService(AuditRepository(session)),
+            PlanningColumnRoleLockRepository(session),
+        )
+        touched = await service.recompute_and_store_cells_referencing_record(module_key, record_id)
+        if touched:
+            logger.info(
+                "Refreshed Planning cells after source-module record change.",
+                extra={"source_module": module_key, "record_id": str(record_id), "cells_touched": touched},
+            )
+    except Exception:  # noqa: BLE001
+        logger.exception(
+            "Failed to refresh Planning cells for changed source record.",
+            extra={"source_module": module_key, "record_id": str(record_id)},
         )

@@ -20,6 +20,8 @@ import uuid
 from decimal import Decimal
 from typing import Any
 
+from sqlalchemy import select, update
+
 from app.audit.constants import AuditAction
 from app.audit.service import AuditService
 from app.core.exceptions import BadRequestException, ConflictException, ForbiddenException, NotFoundException
@@ -37,6 +39,7 @@ from app.planning.models import (
     PlanningStatusTag,
 )
 from app.planning.repository import (
+    ColumnSearchFilter,
     PlanningCellRepository,
     PlanningChangeLogRepository,
     PlanningColumnRepository,
@@ -74,9 +77,9 @@ def mum_num_from_column_name(col_name: str, *, label: str = "Mum") -> int | None
     site.
     """
     cleaned = col_name.strip().lower()
-    if cleaned.startswith(("no. of pkg", "total")):
+    if "remark" in cleaned or cleaned.startswith(("no. of pkg", "total")):
         return None
-    match = re.search(rf"{re.escape(label.lower())}\s*(\d+)", cleaned, re.IGNORECASE)
+    match = re.search(rf"^{re.escape(label.lower())}\s*(\d+)$", cleaned, re.IGNORECASE)
     return int(match.group(1)) if match else None
 
 
@@ -192,6 +195,7 @@ class PlanningService:
         audit_service: AuditService,
         column_role_lock_repository: PlanningColumnRoleLockRepository,
         user_role_repository: Any = None,
+        company_repository: Any = None,
     ) -> None:
         self.sheet_repository = sheet_repository
         self.row_repository = row_repository
@@ -207,6 +211,13 @@ class PlanningService:
         # Planning needs to ask "what roles does this user have" for the
         # per-column role-lock feature.
         self.user_role_repository = user_role_repository
+        # Same pattern as user_role_repository above: typed Any / optional
+        # rather than importing app.masters.company_list.repository.CompanyRepository
+        # directly, since Planning and Masters are otherwise independent
+        # modules. Used only by create_sheet, to validate that a new
+        # sheet's chosen branch_id actually exists inside organization_id's
+        # MasterCompany.branches list before linking the sheet to it.
+        self.company_repository = company_repository
         # Request-scoped cache: sheet_id -> mum_group_label. Populated by
         # _get_mum_group_label, which many recursive per-cell/per-row calls
         # (compute_cell_display_value, its FORMULA branch, approval-date
@@ -290,6 +301,8 @@ class PlanningService:
         self,
         *,
         name: str,
+        organization_id: uuid.UUID,
+        branch_id: str,
         mum_group_label: str = "Mum",
         description: str | None = None,
         user_id: uuid.UUID,
@@ -302,12 +315,33 @@ class PlanningService:
         mum_group_label = (mum_group_label or "Mum").strip() or "Mum"
         if await self.sheet_repository.get_by_name(name):
             raise ConflictException(f"A sheet named {name!r} already exists.")
+
+        # Validate organization_id/branch_id against Product Master's real
+        # organization/branch list -- every sheet must represent one
+        # actual, existing branch, not just a name that sounds like one.
+        branch_id = (branch_id or "").strip()
+        if not branch_id:
+            raise BadRequestException("A branch is required to create a sheet.")
+        if self.company_repository is None:
+            raise BadRequestException("Cannot validate the selected branch right now -- please try again.")
+        organization = await self.company_repository.get_by_id(organization_id)
+        if organization is None:
+            raise BadRequestException("The selected organization does not exist.")
+        branch_ids_on_org = {str(b.get("id")) for b in (organization.branches or []) if isinstance(b, dict)}
+        if branch_id not in branch_ids_on_org:
+            raise BadRequestException(
+                f"{branch_id!r} is not a branch of {organization.name!r}. "
+                "Pick a branch from that organization's own list."
+            )
+
         position = await self.sheet_repository.next_position()
         sheet = await self.sheet_repository.create(
             name=name,
             description=description,
             position=position,
             created_by=user_id,
+            organization_id=organization_id,
+            branch_id=branch_id,
             item_source_type=PlanningColumnSourceType.LINKED_LOOKUP,
             item_source_module="product",
             item_source_field="product_name",
@@ -323,7 +357,7 @@ class PlanningService:
             new_value=name,
             description=f"Created sheet '{name}'.",
         )
-        # Populate base default columns for new sheets (no pre-created groups; user creates them via + Next {GroupLabel})
+        # Populate base default columns in one single batch insert
         base_columns = [
             ("TEST(Y/N)", PlanningColumnDataType.TEXT, PlanningColumnSourceType.MANUAL, None, None),
             ("APPROVAL DATE", PlanningColumnDataType.TEXT, PlanningColumnSourceType.MANUAL, None, None),
@@ -333,27 +367,32 @@ class PlanningService:
             ("UNIT WEIGHT/PKG (KG)", PlanningColumnDataType.NUMBER, PlanningColumnSourceType.LINKED_LOOKUP, "product", "packaging_gross_weight"),
             ("CBM/PKG (KG)", PlanningColumnDataType.NUMBER, PlanningColumnSourceType.LINKED_LOOKUP, "product", "packaging_unit_cbm"),
         ]
-        for idx, (col_name, data_type, source_type, src_mod, src_field) in enumerate(base_columns):
-            col = await self.column_repository.create(
+        created_cols = [
+            PlanningColumn(
                 sheet_id=sheet.id,
                 name=col_name,
                 data_type=data_type,
                 position=idx,
                 created_by=user_id,
+                source_type=source_type,
+                source_module=src_mod,
+                source_field=src_field,
+                auto_populate_enabled=(source_type == PlanningColumnSourceType.LINKED_LOOKUP),
             )
-            if source_type == PlanningColumnSourceType.LINKED_LOOKUP:
-                await self.column_repository.update(
-                    col,
-                    source_type=source_type,
-                    source_module=src_mod,
-                    source_field=src_field,
-                    auto_populate_enabled=True,
-                )
+            for idx, (col_name, data_type, source_type, src_mod, src_field) in enumerate(base_columns)
+        ]
+        self.column_repository.session.add_all(created_cols)
+        await self.column_repository.session.flush()
 
         if auto_populate:
             try:
                 await self.auto_populate_rows_from_item_source(
-                    sheet.id, limit=50, user_id=user_id, username=username
+                    sheet.id,
+                    limit=50,
+                    user_id=user_id,
+                    username=username,
+                    organization_id=organization_id,
+                    branch_id=branch_id,
                 )
             except (BadRequestException, ConflictException):
                 pass
@@ -589,6 +628,14 @@ class PlanningService:
             new_value=mum_group_label,
             description=f"Changed sheet '{sheet.name}' group label from '{old_label}' to '{mum_group_label}'.",
         )
+        # Relabeling can shift which columns count as "fixed Mum-derived
+        # formulas" (see is_fixed_mum_derived_column) and rewrites ordinary
+        # FORMULA columns' stored expression text -- every non-MANUAL
+        # column's stored cell values need recomputing across every row,
+        # or they'd keep showing results computed under the OLD label.
+        refreshed_columns = await self.column_repository.list_for_sheet(sheet_id)
+        for refreshed_column in refreshed_columns:
+            await self.recompute_and_store_column_for_all_rows(sheet_id, refreshed_column)
         return sheet
 
     async def normalize_column_order(
@@ -841,6 +888,261 @@ class PlanningService:
             )
         return await self.column_repository.list_for_sheet(sheet_id)
 
+    async def create_next_mum_group(
+        self, sheet_id: uuid.UUID, *, user_id: uuid.UUID, username: str
+    ) -> list[PlanningColumn]:
+        """
+        Create the next Mum/group column set in a single fast, atomic operation.
+
+        Batch-creates:
+          1. <Label> <N> (manual number column, enable_status_color=True)
+          2. <Label><N> Remarks (manual text column)
+          3. NO. OF PKG <LABEL><N> (fixed formula column)
+          4. TOTAL WEIGHT <LABEL><N> (fixed formula column)
+          5. TOTAL CBM <LABEL><N> (fixed formula column)
+
+        Also ensures the prerequisite shared Product lookup block (Supplier Name, City,
+        PKG QTY, UNIT WEIGHT/PKG (KG), CBM/PKG (KG)) exists on the sheet.
+        Normalizes all column positions into the canonical layout in one database pass.
+        """
+        sheet = await self.get_sheet_or_raise(sheet_id)
+        mum_label = sheet.mum_group_label or "Mum"
+        columns = await self.column_repository.list_for_sheet(sheet_id)
+
+        # 1. Detect latest Mum group number
+        max_mum = 0
+        for col in columns:
+            num = mum_num_from_column_name(col.name, label=mum_label)
+            if num is not None and num > max_mum:
+                max_mum = num
+            derived = _mum_derived_kind_and_group(col.name, label=mum_label)
+            if derived is not None and derived[1] > max_mum:
+                max_mum = derived[1]
+            remarks_match = re.match(rf"^{re.escape(mum_label)}\s*(\d+)\s*remarks$", col.name.strip(), re.IGNORECASE)
+            if remarks_match and int(remarks_match.group(1)) > max_mum:
+                max_mum = int(remarks_match.group(1))
+
+        next_mum_num = max_mum + 1 if max_mum > 0 else 1
+
+        new_columns_to_add: list[PlanningColumn] = []
+
+        # 2. Check and ensure shared product lookup columns exist
+        base_lookup_specs = [
+            ("Supplier Name", PlanningColumnDataType.TEXT, "supplier_name"),
+            ("City", PlanningColumnDataType.TEXT, "supplier_city"),
+            ("PKG QTY", PlanningColumnDataType.NUMBER, "packaging_quantity"),
+            ("UNIT WEIGHT/PKG (KG)", PlanningColumnDataType.NUMBER, "packaging_gross_weight"),
+            ("CBM/PKG (KG)", PlanningColumnDataType.NUMBER, "packaging_unit_cbm"),
+        ]
+
+        all_cols_list = list(columns)
+        for label_text, dtype, field in base_lookup_specs:
+            existing = next(
+                (
+                    c
+                    for c in all_cols_list
+                    if c.source_type == PlanningColumnSourceType.LINKED_LOOKUP
+                    and c.source_module == "product"
+                    and c.source_field == field
+                ),
+                None,
+            )
+            if not existing:
+                lookup_col = PlanningColumn(
+                    sheet_id=sheet_id,
+                    name=label_text,
+                    data_type=dtype,
+                    position=len(all_cols_list),
+                    created_by=user_id,
+                    source_type=PlanningColumnSourceType.LINKED_LOOKUP,
+                    source_module="product",
+                    source_field=field,
+                    auto_populate_enabled=True,
+                    is_locked=True,
+                )
+                new_columns_to_add.append(lookup_col)
+                all_cols_list.append(lookup_col)
+
+        # 3. Create the 5 companion columns for next_mum_num
+        label_upper = mum_label.upper()
+        mum_col_name = f"{mum_label} {next_mum_num}"
+        remarks_col_name = f"{mum_label}{next_mum_num} Remarks"
+        pkg_col_name = f"NO. OF PKG {label_upper}{next_mum_num}"
+        weight_col_name = f"TOTAL WEIGHT {label_upper}{next_mum_num}"
+        cbm_col_name = f"TOTAL CBM {label_upper}{next_mum_num}"
+
+        col_main = PlanningColumn(
+            sheet_id=sheet_id,
+            name=mum_col_name,
+            data_type=PlanningColumnDataType.NUMBER,
+            position=len(all_cols_list),
+            created_by=user_id,
+            source_type=PlanningColumnSourceType.MANUAL,
+            enable_status_color=True,
+        )
+        new_columns_to_add.append(col_main)
+        all_cols_list.append(col_main)
+
+        col_remarks = PlanningColumn(
+            sheet_id=sheet_id,
+            name=remarks_col_name,
+            data_type=PlanningColumnDataType.TEXT,
+            position=len(all_cols_list),
+            created_by=user_id,
+            source_type=PlanningColumnSourceType.MANUAL,
+        )
+        new_columns_to_add.append(col_remarks)
+        all_cols_list.append(col_remarks)
+
+        col_pkg = PlanningColumn(
+            sheet_id=sheet_id,
+            name=pkg_col_name,
+            data_type=PlanningColumnDataType.NUMBER,
+            position=len(all_cols_list),
+            created_by=user_id,
+            source_type=PlanningColumnSourceType.FORMULA,
+            formula_expression=f"[{mum_col_name}] / [PKG QTY]  (fixed)",
+            is_locked=True,
+        )
+        new_columns_to_add.append(col_pkg)
+        all_cols_list.append(col_pkg)
+
+        col_weight = PlanningColumn(
+            sheet_id=sheet_id,
+            name=weight_col_name,
+            data_type=PlanningColumnDataType.NUMBER,
+            position=len(all_cols_list),
+            created_by=user_id,
+            source_type=PlanningColumnSourceType.FORMULA,
+            formula_expression=f"NO. OF PKG {label_upper}{next_mum_num} * [UNIT WEIGHT/PKG (KG)]  (fixed)",
+            is_locked=True,
+        )
+        new_columns_to_add.append(col_weight)
+        all_cols_list.append(col_weight)
+
+        col_cbm = PlanningColumn(
+            sheet_id=sheet_id,
+            name=cbm_col_name,
+            data_type=PlanningColumnDataType.NUMBER,
+            position=len(all_cols_list),
+            created_by=user_id,
+            source_type=PlanningColumnSourceType.FORMULA,
+            formula_expression=f"NO. OF PKG {label_upper}{next_mum_num} * [CBM/PKG (KG)]  (fixed)",
+            is_locked=True,
+        )
+        new_columns_to_add.append(col_cbm)
+        all_cols_list.append(col_cbm)
+
+        # Add all new columns to session
+        self.column_repository.session.add_all(new_columns_to_add)
+        await self.column_repository.session.flush()
+
+        # 4. Canonical column ordering
+        item_col = next((c for c in all_cols_list if c.name.strip().lower() == "item"), None)
+        test_col = next((c for c in all_cols_list if c.name.strip().lower() == "test(y/n)"), None)
+        approval_col = next((c for c in all_cols_list if c.name.strip().lower() == "approval date"), None)
+        supplier_col = next(
+            (
+                c
+                for c in all_cols_list
+                if c.source_type == PlanningColumnSourceType.LINKED_LOOKUP and c.source_field == "supplier_name"
+            ),
+            None,
+        )
+        city_col = next(
+            (
+                c
+                for c in all_cols_list
+                if c.source_type == PlanningColumnSourceType.LINKED_LOOKUP and c.source_field == "supplier_city"
+            ),
+            None,
+        )
+        pkg_qty_col = next(
+            (
+                c
+                for c in all_cols_list
+                if c.source_type == PlanningColumnSourceType.LINKED_LOOKUP and c.source_field == "packaging_quantity"
+            ),
+            None,
+        )
+        unit_weight_col = next(
+            (
+                c
+                for c in all_cols_list
+                if c.source_type == PlanningColumnSourceType.LINKED_LOOKUP and c.source_field == "packaging_gross_weight"
+            ),
+            None,
+        )
+        cbm_col = next(
+            (
+                c
+                for c in all_cols_list
+                if c.source_type == PlanningColumnSourceType.LINKED_LOOKUP and c.source_field == "packaging_unit_cbm"
+            ),
+            None,
+        )
+        shared_block = [c for c in (supplier_col, city_col, pkg_qty_col, unit_weight_col, cbm_col) if c is not None]
+
+        groups: dict[int, dict[str, PlanningColumn]] = {}
+        remaining: list[PlanningColumn] = []
+        already_placed = {c for c in (item_col, test_col, approval_col, *shared_block) if c is not None}
+
+        for column in all_cols_list:
+            if column in already_placed:
+                continue
+            main_num = mum_num_from_column_name(column.name, label=mum_label)
+            if main_num is not None:
+                groups.setdefault(main_num, {})["main"] = column
+                continue
+            derived = _mum_derived_kind_and_group(column.name, label=mum_label)
+            if derived is not None:
+                kind, group_num = derived
+                groups.setdefault(group_num, {})[kind] = column
+                continue
+            remarks_match = re.match(rf"^{re.escape(mum_label)}\s*(\d+)\s*remarks$", column.name.strip(), re.IGNORECASE)
+            if remarks_match:
+                groups.setdefault(int(remarks_match.group(1)), {})["remarks"] = column
+                continue
+            remaining.append(column)
+
+        ordered_group_numbers = sorted(n for n, g in groups.items() if "main" in g)
+        for n in list(groups.keys()):
+            if n not in ordered_group_numbers:
+                remaining.extend(groups.pop(n).values())
+
+        ordered: list[PlanningColumn] = [c for c in (item_col, test_col, approval_col) if c is not None]
+        for group_num in ordered_group_numbers:
+            group = groups[group_num]
+            if "main" in group:
+                ordered.append(group["main"])
+            if "remarks" in group:
+                ordered.append(group["remarks"])
+        ordered.extend(shared_block)
+        for group_num in ordered_group_numbers:
+            group = groups[group_num]
+            for kind in ("pkg_count", "total_weight", "total_cbm"):
+                if kind in group:
+                    ordered.append(group[kind])
+        remaining.sort(key=lambda c: c.position if c.position is not None else 9999)
+        ordered.extend(remaining)
+
+        for new_position, column in enumerate(ordered):
+            if column.position != new_position:
+                column.position = new_position
+
+        await self.column_repository.session.flush()
+
+        await self._record_change(
+            action=PlanningChangeAction.COLUMN_ADDED,
+            sheet_id=sheet_id,
+            user_id=user_id,
+            username=username,
+            new_value=mum_col_name,
+            description=f"Created {mum_label} {next_mum_num} column group ({mum_col_name}, {remarks_col_name}, and totals).",
+        )
+
+        return ordered
+
     async def delete_sheet(self, sheet_id: uuid.UUID, *, user_id: uuid.UUID, username: str) -> None:
         sheet = await self.get_sheet_or_raise(sheet_id)
         name = sheet.name
@@ -863,6 +1165,7 @@ class PlanningService:
         offset: int = 0,
         limit: int | None = 50,
         organization_id: uuid.UUID | None = None,
+        search_column_filters: list[ColumnSearchFilter] | None = None,
     ) -> dict[str, Any]:
         """
         Fetch everything needed to render one page of one sheet's grid.
@@ -872,18 +1175,46 @@ class PlanningService:
         sheet). The default (50) is what the grid endpoint uses, matching
         Product Master's own default page size -- a sheet with hundreds
         of rows no longer pays for computing every row's cells on every
-        single load; scrolling/"Load more" just asks for the next page
-        instead of the whole grid growing every time. Columns are never
+        single load; scrolling loads the next page automatically instead
+        of the whole grid growing every time (see the frontend's
+        IntersectionObserver-driven auto-load). Columns are never
         paginated (a sheet rarely has more than a few dozen), only rows.
 
-        ``organization_id`` (optional) is the Organization filter shown
-        next to the sheet tabs in the UI -- restricts the page (and the
-        total count) to rows whose linked Product Master record belongs
-        to that organization. Nothing about organization membership is
-        stored on the row/sheet itself; it's read live off Product
-        Master's ``organization_ids`` on every call, the same "never a
-        stale copy" rule every other Shipment Planning lookup column
-        follows (see ``PlanningRowRepository._linked_record_ids_for_organization``).
+        ``organization_id`` (optional) is a REQUEST-TIME override, used
+        only as a fallback for sheets created before the branch-link
+        feature existed (``sheet.organization_id is None``) -- see the
+        "All Organizations" dropdown in the UI, which still works exactly
+        as before for those legacy, unlinked sheets. For any sheet that
+        HAS a real link (``sheet.organization_id``/``sheet.branch_id`` --
+        every sheet created going forward always has one, see
+        ``create_sheet``), that link is used automatically and always,
+        regardless of what (if anything) the caller passes here: the
+        whole point of linking a sheet to one specific branch is that
+        filtering to that branch's products is automatic, not something
+        that has to be re-selected via a dropdown on every visit.
+
+        Nothing about organization/branch membership is stored on the
+        row itself; it's read live off Product Master's
+        ``organization_ids``/``branch_ids`` on every call, the same
+        "never a stale copy" rule every other Shipment Planning lookup
+        column follows (see
+        ``PlanningRowRepository._linked_record_ids_for_organization``).
+
+        ``search_column_filters`` (optional) is the server-side
+        per-column search/filter (see
+        ``PlanningRowRepository._apply_search_column_filters``) -- when
+        given, this searches EVERY row on the sheet, not just whichever
+        page is currently loaded in the browser. When a search is
+        active, the auto-population-on-read behavior below is
+        deliberately SKIPPED: a not-yet-materialized Product Master
+        record has no computed cell values yet for a search to match
+        against, so "does this search have more matches further down"
+        can only ever mean "further down among rows that already
+        exist" -- conjuring up new rows here would not help a search
+        find anything it couldn't already find, and would do
+        (potentially large amounts of) row-creation work for a read-only
+        action. ``total_rows`` in that case is the true COUNT OF MATCHES
+        across the whole sheet, not the source-module total.
 
         --- Auto-population on read (fixes "Showing 1-50 of 50" getting
         permanently stuck on a sheet whose ITEM is LINKED_LOOKUP onto a
@@ -892,18 +1223,18 @@ class PlanningService:
         For a LINKED_LOOKUP-onto-a-module ITEM column, ``total_rows`` is
         no longer "how many PlanningRow records happen to exist yet" --
         it's the TRUE count of matching source records (e.g. every live
-        Product Master row, or every one belonging to ``organization_id``
-        when that filter is set). A brand-new sheet (which starts with
+        Product Master row, or every one belonging to this sheet's
+        linked organization/branch). A brand-new sheet (which starts with
         only its first 50 rows materialized -- see ``create_sheet``) or
-        one an admin previously capped via "Load More Products" now
-        reports the real total from the very first load, not just
-        whatever happened to be linked already.
+        one an admin previously capped via scrolling now reports the
+        real total from the very first load, not just whatever happened
+        to be linked already.
 
         To back that number with real rows once the person actually
-        scrolls/pages that far, this transparently creates whatever
-        linked rows are still missing to satisfy ``offset + limit``
-        (capped at the true total) BEFORE reading the page -- the exact
-        same row-creation path "Load More Products" already used
+        scrolls that far, this transparently creates whatever linked
+        rows are still missing to satisfy ``offset + limit`` (capped at
+        the true total) BEFORE reading the page -- the exact same
+        row-creation path scrolling already used
         (``auto_populate_rows_from_item_source``), just triggered
         automatically instead of requiring a separate explicit click.
         Skips this entirely for MANUAL/other ITEM configs, where there is
@@ -912,34 +1243,69 @@ class PlanningService:
         """
         sheet = await self.get_sheet_or_raise(sheet_id)
 
-        source_total: int | None = None
+        # A branch-linked sheet's own link always wins over whatever the
+        # request happens to pass; only a legacy, never-linked sheet falls
+        # back to the request-time organization_id (the old "All
+        # Organizations" dropdown behavior).
+        effective_organization_id = sheet.organization_id if sheet.organization_id is not None else organization_id
+        effective_branch_id = sheet.branch_id if sheet.organization_id is not None else None
+
+        has_active_search = bool(search_column_filters) and any(
+            (f.text_query or "").strip() or f.selected_values for f in search_column_filters
+        )
+
+        # Automatically clean up any rows whose linked product master records were deleted
         if sheet.item_source_type == PlanningColumnSourceType.LINKED_LOOKUP and sheet.item_source_module == "product":
-            all_matching_ids = await self.row_repository._all_product_ids_for_organization(organization_id)
+            await self.row_repository.cleanup_orphaned_product_rows(sheet_id)
+
+        source_total: int | None = None
+        if (
+            not has_active_search
+            and sheet.item_source_type == PlanningColumnSourceType.LINKED_LOOKUP
+            and sheet.item_source_module == "product"
+        ):
+            all_matching_ids = await self.row_repository._all_product_ids_for_organization(
+                effective_organization_id, branch_id=effective_branch_id
+            )
             source_total = len(all_matching_ids)
 
             if limit is not None and source_total > 0:
                 needed = min(offset + limit, source_total)
-                currently_linked = await self.row_repository.count_for_sheet(sheet_id, organization_id=organization_id)
+                currently_linked = await self.row_repository.count_for_sheet(
+                    sheet_id, organization_id=effective_organization_id, branch_id=effective_branch_id
+                )
                 if currently_linked < needed:
-                    # Pull enough of THIS organization's records to cover
-                    # the requested page -- e.g. asking for offset=50,
-                    # limit=50 with 31 currently linked needs 69 more created.
+                    # Pull enough of THIS organization's (and, if linked,
+                    # this exact branch's) records to cover the requested
+                    # page -- e.g. asking for offset=50, limit=50 with 31
+                    # currently linked needs 69 more created.
                     await self.auto_populate_rows_from_item_source(
                         sheet_id,
                         limit=needed,
                         user_id=sheet.created_by,  # system-driven creation; attributed to the sheet's owner, mirrors seed-time auto-populate
                         username="system",
-                        organization_id=organization_id,
+                        organization_id=effective_organization_id,
+                        branch_id=effective_branch_id,
                     )
 
         columns = await self.column_repository.list_for_sheet(sheet_id)
         rows = await self.row_repository.list_page_for_sheet(
-            sheet_id, offset=offset, limit=limit, organization_id=organization_id
+            sheet_id,
+            offset=offset,
+            limit=limit,
+            organization_id=effective_organization_id,
+            branch_id=effective_branch_id,
+            search_column_filters=search_column_filters,
         )
         total_rows = (
             source_total
             if source_total is not None
-            else await self.row_repository.count_for_sheet(sheet_id, organization_id=organization_id)
+            else await self.row_repository.count_for_sheet(
+                sheet_id,
+                organization_id=effective_organization_id,
+                branch_id=effective_branch_id,
+                search_column_filters=search_column_filters,
+            )
         )
         return {"sheet": sheet, "columns": columns, "rows": rows, "total_rows": total_rows}
 
@@ -1018,6 +1384,24 @@ class PlanningService:
             description=f"Renamed column '{old_name}' to '{name}'.",
         )
         return column
+
+    async def set_column_width(
+        self, sheet_id: uuid.UUID, column_id: uuid.UUID, *, width_px: int | None
+    ) -> PlanningColumn:
+        """
+        Set (or clear, if ``width_px`` is None) a column's server-persisted width.
+
+        Deliberately does NOT call ``_record_change``/broadcast a change-log
+        entry the way rename/move do -- dragging a column wider or narrower
+        is a cosmetic display preference shared across users (see
+        PlanningColumn.width_px's docstring for why this is server-side at
+        all, unlike Hide/Freeze), not a data change worth surfacing in the
+        sheet's audit trail. It still broadcasts a lightweight live-update
+        event (see the route) so other users viewing the sheet see the new
+        width without needing to reload.
+        """
+        column = await self._get_column_or_raise(sheet_id, column_id)
+        return await self.column_repository.update(column, width_px=width_px)
 
     async def move_column(
         self, sheet_id: uuid.UUID, column_id: uuid.UUID, *, new_position: int, user_id: uuid.UUID, username: str
@@ -1346,6 +1730,13 @@ class PlanningService:
             new_value=source_type.value,
             description=f"Configured column '{column.name}' as {source_type.value}.",
         )
+        # The column's configuration just changed -- every existing row's
+        # stored cell for THIS column reflects the OLD configuration, so
+        # recompute all of them now rather than leaving them stale until
+        # some unrelated future edit happens to touch each row. A no-op
+        # for MANUAL (nothing to compute; recompute_and_store_column_for_all_rows
+        # returns immediately for it).
+        await self.recompute_and_store_column_for_all_rows(sheet_id, updated)
         return updated
 
     async def link_row_to_source_record(
@@ -1363,8 +1754,13 @@ class PlanningService:
 
         E.g. "this row's Product Weight column is linked to Product X" --
         the displayed value (Product X's packaging_net_weight) is computed
-        fresh on every read, not frozen at link time, so it stays correct
-        if the Product master's data changes later.
+        and PERSISTED right now (see recompute_and_store_cell), not
+        recomputed live on every future read. It stays correct if the
+        Product master's data changes later because
+        app.masters.products.service (and Suppliers'/Buyers' equivalents)
+        calls recompute_and_store_cells_referencing_record after every
+        successful save, refreshing every cell that points at the edited
+        record -- not because this cell recomputes itself on read.
         """
         row = await self._get_row_or_raise(sheet_id, row_id)
         column = await self._get_column_or_raise(sheet_id, column_id)
@@ -1388,6 +1784,10 @@ class PlanningService:
             )
         else:
             cell = await self.cell_repository.update(cell, linked_record_id=record_id, updated_by=user_id)
+
+        # Persist the computed display value now -- see this method's
+        # docstring for why reads no longer recompute it themselves.
+        cell = await self.recompute_and_store_cell(column, row_id=row_id) or cell
 
         await self._record_change(
             action=PlanningChangeAction.CELL_VALUE_CHANGED,
@@ -1457,6 +1857,9 @@ class PlanningService:
                 )
             else:
                 cell = await self.cell_repository.update(existing_cell, linked_record_id=row.linked_record_id, updated_by=user_id)
+            # Persist the computed display value now for this row's newly
+            # (re)linked cell -- see recompute_and_store_cell.
+            cell = await self.recompute_and_store_cell(column, row_id=row.id) or cell
             updated.append(cell)
 
         if updated:
@@ -1553,6 +1956,16 @@ class PlanningService:
             username=username,
             description=f"Configured ITEM column as {source_type.value}.",
         )
+        # ITEM's configuration just changed -- every existing row's stored
+        # label reflects the OLD configuration (see
+        # compute_row_item_display/PlanningRow.label), so refresh every
+        # row now rather than leaving them stale.
+        if updated.item_source_type != PlanningColumnSourceType.MANUAL:
+            all_rows = await self.row_repository.list_for_sheet(sheet_id)
+            for existing_row in all_rows:
+                new_label = await self.compute_row_item_display(updated, existing_row)
+                if new_label and new_label != existing_row.label:
+                    await self.row_repository.update(existing_row, label=new_label)
         return updated
 
     async def link_row_to_item_source_record(
@@ -1581,6 +1994,14 @@ class PlanningService:
 
         row = await self.row_repository.update(row, linked_record_id=record_id, updated_by=user_id)
 
+        # This row's ITEM link just changed, which can affect every
+        # sibling LINKED_LOOKUP column that has no explicit link of its
+        # own (they fall back to the row's ITEM link -- see
+        # compute_cell_display_value's row_linked_record_id docstring),
+        # plus any FORMULA column referencing them -- recompute the whole
+        # row's non-MANUAL cells together, not just one.
+        await self.recompute_and_store_row(sheet_id, row_id)
+
         await self._record_change(
             action=PlanningChangeAction.CELL_VALUE_CHANGED,
             sheet_id=sheet_id,
@@ -1600,6 +2021,7 @@ class PlanningService:
         user_id: uuid.UUID,
         username: str,
         organization_id: uuid.UUID | None = None,
+        branch_id: str | None = None,
     ) -> list[PlanningRow]:
         """
         Bulk-create rows straight from the sheet's configured item source
@@ -1618,8 +2040,13 @@ class PlanningService:
         organization -- only meaningful when the source module is
         ``"product"`` (the only module with an Organization concept right
         now; see ``app.masters.products.models.Product.organization_ids``).
+        ``branch_id`` (optional, only meaningful together with
+        ``organization_id``) further restricts to that organization's
+        specific branch (``Product.branch_ids``) -- this is what a sheet
+        LINKED to a branch (``PlanningSheet.branch_id``) always passes, per
+        the "only pull products in this exact branch" requirement.
         Ignored for any other source module. This is what lets the
-        Organization filter (see ``PlanningService.get_grid``'s
+        Organization/branch filter (see ``PlanningService.get_grid``'s
         auto-population-on-read) create exactly the rows it needs when a
         filtered page runs past how many matching rows already exist,
         instead of only ever pulling from the front of the WHOLE
@@ -1632,15 +2059,22 @@ class PlanningService:
         if module is None:
             raise ConflictException("The ITEM column references an unregistered source module.")
 
-        if organization_id is not None and module.key == "product":
-            record_ids = await self.row_repository._all_product_ids_for_organization(organization_id)
-            record_ids = record_ids if limit is None else record_ids[:limit]
-            repository = module.repository_factory(self.row_repository.session)
-            records_by_id = await repository.get_by_ids(record_ids)
-            # get_by_ids returns a dict (arbitrary key order in some drivers) --
-            # re-sort back into record_ids' deterministic order, so
-            # position/next_position assignment below stays stable.
-            records = [records_by_id[rid] for rid in record_ids if rid in records_by_id]
+        if module.key == "product":
+            if organization_id is not None:
+                record_ids = await self.row_repository._all_product_ids_for_organization(organization_id, branch_id=branch_id)
+                record_ids = record_ids if limit is None else record_ids[:limit]
+                repository = module.repository_factory(self.row_repository.session)
+                records_by_id = await repository.get_by_ids(record_ids)
+                # get_by_ids returns a dict (arbitrary key order in some drivers) --
+                # re-sort back into record_ids' deterministic order, so
+                # position/next_position assignment below stays stable.
+                records = [records_by_id[rid] for rid in record_ids if rid in records_by_id]
+            else:
+                repository = module.repository_factory(self.row_repository.session)
+                order_by = getattr(repository.model, "created_at", None)
+                records = await repository.list(offset=0, limit=limit, order_by=order_by)
+            # Batch attach supplier info in 1 fast query for all records
+            await repository.attach_planning_supplier_info(records)
         else:
             repository = module.repository_factory(self.row_repository.session)
             order_by = getattr(repository.model, "created_at", None)
@@ -1649,14 +2083,20 @@ class PlanningService:
         existing_rows = await self.row_repository.list_for_sheet(sheet_id)
         already_linked_ids = {r.linked_record_id for r in existing_rows if r.linked_record_id is not None}
         next_position = len(existing_rows)
+        sibling_columns = await self.column_repository.list_for_sheet(sheet_id)
 
         created: list[PlanningRow] = []
+        created_cells: list[PlanningCell] = []
         for record in records:
             if record.id in already_linked_ids:
                 continue
-            row = await self.row_repository.create(
+            item_display = module.value_getter(record, sheet.item_source_field or "")
+            label_val = str(item_display) if item_display is not None else f"{module.label} record"
+            row_id = uuid.uuid4()
+            row = PlanningRow(
+                id=row_id,
                 sheet_id=sheet_id,
-                label=f"{module.label} record",  # placeholder only -- LINKED_LOOKUP always displays the live computed value instead
+                label=label_val,
                 position=next_position,
                 linked_record_id=record.id,
                 created_by=user_id,
@@ -1664,7 +2104,26 @@ class PlanningService:
             next_position += 1
             created.append(row)
 
+            # Materialize cells for all matching LINKED_LOOKUP columns in batch
+            for col in sibling_columns:
+                if col.source_type == PlanningColumnSourceType.LINKED_LOOKUP and col.source_module == module.key:
+                    val = module.value_getter(record, col.source_field or "")
+                    if val is not None:
+                        created_cells.append(
+                            PlanningCell(
+                                id=uuid.uuid4(),
+                                row_id=row_id,
+                                column_id=col.id,
+                                value=str(val),
+                            )
+                        )
+
         if created:
+            self.row_repository.session.add_all(created)
+            if created_cells:
+                self.cell_repository.session.add_all(created_cells)
+            await self.row_repository.session.flush()
+
             await self._record_change(
                 action=PlanningChangeAction.ROW_ADDED,
                 sheet_id=sheet_id,
@@ -1956,6 +2415,287 @@ class PlanningService:
 
         return None
 
+    async def recompute_and_store_cell(
+        self,
+        column: PlanningColumn,
+        *,
+        row_id: uuid.UUID,
+        prefetched_sibling_columns: Any = _UNSET,
+        prefetched_row_cells: Any = _UNSET,
+        row_linked_record_id: Any = _UNSET,
+    ) -> PlanningCell | None:
+        """
+        Recompute one (row, column) cell's effective value ONCE, right now,
+        and persist it into ``PlanningCell.value`` -- the write-time half of
+        the store-on-write architecture (see the module-level docstring
+        note above ``compute_cell_display_value``). This is the ONLY place
+        a LINKED_LOOKUP/AGGREGATE/FORMULA cell's stored value should ever be
+        written; every other write path (a Product edit, a column
+        reconfigured, a new row created, a sibling cell changing) calls
+        this rather than recomputing inline, so there is exactly one
+        function that ever decides "what does this cell currently equal".
+
+        Grid reads (``PlanningService.get_grid`` / the grid route) then
+        just read ``PlanningCell.value`` directly -- no computation on
+        read, ever, which is the whole point: viewing/scrolling/opening a
+        sheet costs one plain SELECT no matter how large it's grown,
+        instead of recomputing every LINKED_LOOKUP/AGGREGATE/FORMULA cell
+        fresh on every single page load.
+
+        No-op (returns None, writes nothing) for MANUAL columns -- a
+        MANUAL cell's value IS the stored value; there's nothing to
+        "recompute" for it, and calling this on one would be a caller
+        bug, not a legitimate state to silently handle.
+
+        Returns the (created-or-updated) ``PlanningCell``, or ``None`` if
+        the column is MANUAL or the computed value is ``None`` (an empty
+        LINKED_LOOKUP/AGGREGATE/FORMULA cell has nothing to persist -- see
+        the "clear existing cell" branch below for what happens to an
+        existing stored value in that case).
+        """
+        if column.source_type == PlanningColumnSourceType.MANUAL:
+            return None
+
+        display_value = await self.compute_cell_display_value(
+            column,
+            None,
+            row_id=row_id,
+            prefetched_sibling_columns=prefetched_sibling_columns,
+            prefetched_row_cells=prefetched_row_cells,
+            row_linked_record_id=row_linked_record_id,
+        )
+
+        existing = await self.cell_repository.get_by_row_and_column(row_id, column.id)
+        if display_value is None:
+            # Nothing to store. If a cell row already exists (e.g. its
+            # source record was deleted/unlinked since the last
+            # computation), clear its stored value rather than leaving a
+            # now-stale value sitting there forever -- a cell with no
+            # computed value should read back as empty, not as whatever
+            # it last successfully computed to.
+            if existing is not None and existing.value is not None:
+                await self.cell_repository.update(existing, value=None)
+            return existing
+
+        if existing is not None:
+            await self.cell_repository.update(existing, value=display_value)
+            return existing
+
+        created = await self.cell_repository.create(row_id=row_id, column_id=column.id, value=display_value)
+        return created
+
+    async def recompute_and_store_row(
+        self,
+        sheet_id: uuid.UUID,
+        row_id: uuid.UUID,
+        *,
+        columns: Any = _UNSET,
+    ) -> None:
+        """
+        Recompute and persist EVERY non-MANUAL column's cell for one row.
+
+        Used whenever a whole row's computed values need refreshing at
+        once: a new row was just created/auto-populated (nothing has ever
+        been computed for it yet), or the row's own linked-record changed
+        (its ITEM link, or any per-column 🔗 link), which can affect
+        several columns' values simultaneously, not just one.
+
+        ``columns`` lets a caller that already fetched the sheet's column
+        list (e.g. bulk row creation) pass it straight in instead of this
+        method re-querying it per row.
+        """
+        sibling_columns = (
+            prefetched_sibling_columns
+            if (prefetched_sibling_columns := columns) is not _UNSET
+            else await self.column_repository.list_for_sheet(sheet_id)
+        )
+        row_cells = await self.cell_repository.list_for_rows([row_id])
+        cells_by_column_id = {rc.column_id: rc for rc in row_cells}
+        row = await self.row_repository.get_by_id(row_id)
+        row_linked_record_id = row.linked_record_id if row is not None else None
+
+        for column in sibling_columns:
+            if column.source_type == PlanningColumnSourceType.MANUAL:
+                continue
+            await self.recompute_and_store_cell(
+                column,
+                row_id=row_id,
+                prefetched_sibling_columns=sibling_columns,
+                prefetched_row_cells=cells_by_column_id,
+                row_linked_record_id=row_linked_record_id,
+            )
+
+        # ITEM itself isn't a PlanningColumn (its config lives on the
+        # sheet, its computed value is stored in PlanningRow.label, not a
+        # PlanningCell -- see compute_row_item_display) but is
+        # conceptually "one of this row's columns" the same as any other
+        # non-MANUAL one, so it needs refreshing here too whenever the
+        # rest of the row does.
+        if row is not None:
+            sheet = await self.get_sheet_or_raise(sheet_id)
+            if sheet.item_source_type != PlanningColumnSourceType.MANUAL:
+                new_label = await self.compute_row_item_display(sheet, row)
+                if new_label and new_label != row.label:
+                    await self.row_repository.update(row, label=new_label)
+
+    async def recompute_and_store_column_for_all_rows(self, sheet_id: uuid.UUID, column: PlanningColumn) -> int:
+        """
+        Recompute and persist one column's cell across EVERY row on the sheet.
+
+        Used when a column's own configuration just changed (source
+        type/module/field/aggregate-fn/formula-expression edited, or the
+        sheet's mum_group_label changed, which shifts which columns count
+        as "fixed Mum-derived formulas") -- every existing row's cell for
+        THIS column needs recomputing once, right now, since their stored
+        values reflect the column's OLD configuration.
+
+        Returns the number of rows whose cell was touched, purely for
+        logging/change-log messages (see callers).
+        """
+        if column.source_type == PlanningColumnSourceType.MANUAL:
+            return 0
+        rows = await self.row_repository.list_for_sheet(sheet_id)
+        sibling_columns = await self.column_repository.list_for_sheet(sheet_id)
+        all_row_ids = [r.id for r in rows]
+        all_cells = await self.cell_repository.list_for_rows(all_row_ids) if all_row_ids else []
+        cells_by_row: dict[uuid.UUID, dict[uuid.UUID, PlanningCell]] = {}
+        for c in all_cells:
+            cells_by_row.setdefault(c.row_id, {})[c.column_id] = c
+
+        touched = 0
+        for row in rows:
+            await self.recompute_and_store_cell(
+                column,
+                row_id=row.id,
+                prefetched_sibling_columns=sibling_columns,
+                prefetched_row_cells=cells_by_row.get(row.id, {}),
+                row_linked_record_id=row.linked_record_id,
+            )
+            touched += 1
+        return touched
+
+    async def recompute_and_store_cells_referencing_record(
+        self, source_module_key: str, record_id: uuid.UUID
+    ) -> int:
+        """
+        Recompute every Planning cell that could be affected by a change
+        to one record in ``source_module_key`` (e.g. a Product being
+        edited) -- called by that module's own service after a
+        successful save (see e.g. app.masters.products.service.update).
+
+        Two independent things can go stale from one record edit:
+
+        1. Every LINKED_LOOKUP cell (across every sheet) whose
+           ``linked_record_id`` points at this exact record, OR whose row
+           falls back to this record via its own ITEM link (see
+           compute_cell_display_value's row_linked_record_id fallback) --
+           these need recomputing because THIS SPECIFIC record's data
+           changed.
+        2. Every AGGREGATE cell (across every sheet) whose
+           ``source_module`` is this module -- these need recomputing
+           regardless of WHICH record in the module changed, since an
+           aggregate summarizes across many records, not one linked one
+           (confirmed as the intended behavior: aggregates recompute on
+           ANY change to their source module, not just a targeted one).
+
+        Any FORMULA column that references one of the above (directly or
+        transitively) reads the now-freshly-stored sibling value the next
+        time IT is recomputed -- this function does not need to chase
+        that chain itself, because FORMULA cells are only ever recomputed
+        by direct edits to a row (recompute_and_store_row) or a column
+        reconfigure (recompute_and_store_column_for_all_rows), and those
+        already recompute every non-MANUAL column on the affected row(s)
+        together, formula included.
+
+        Returns the number of cells touched, purely for logging.
+        """
+        touched = 0
+
+        # If the source record was deleted or soft-deleted, clean up any planning rows and cells linked to it
+        if source_module_key == "product":
+            from app.masters.products.models import Product
+            stmt_p = select(Product.id).where(Product.id == record_id, Product.deleted_at.is_(None))
+            active_prod = (await self.row_repository.session.execute(stmt_p)).scalar_one_or_none()
+            if active_prod is None:
+                deleted_rows = await self.row_repository.soft_delete_linked_to_record(record_id)
+                await self.cell_repository.unlink_or_clear_record(record_id)
+                return deleted_rows
+
+        # --- 1. LINKED_LOOKUP cells pointing at this exact record ---
+        affected_cells = await self.cell_repository.list_linked_to_record(record_id)
+        # Group by row so each row's sibling/row-link context is fetched once,
+        # not once per affected cell (a row can have more than one
+        # LINKED_LOOKUP column pointing at the same record, e.g. "Supplier
+        # Name" and "City" both pulling from the same linked Product).
+        rows_needing_recompute: dict[uuid.UUID, set[uuid.UUID]] = {}
+        for cell in affected_cells:
+            rows_needing_recompute.setdefault(cell.row_id, set()).add(cell.column_id)
+
+        # Rows that fall back to this record via their OWN item link
+        # (row.linked_record_id) rather than an explicit per-cell 🔗 --
+        # e.g. "Supplier Name"/"City" columns that were never individually
+        # linked, relying on the row's ITEM link instead (see
+        # compute_cell_display_value's row_linked_record_id fallback).
+        rows_linked_via_item = await self.row_repository.list_linked_to_record(record_id)
+        for row in rows_linked_via_item:
+            rows_needing_recompute.setdefault(row.id, set())
+
+        if rows_needing_recompute:
+            columns_by_sheet: dict[uuid.UUID, list[PlanningColumn]] = {}
+            all_row_ids = list(rows_needing_recompute.keys())
+            rows_by_id = await self.row_repository.get_by_ids(all_row_ids)
+            all_cells_for_rows = await self.cell_repository.list_for_rows(all_row_ids)
+            cells_by_row: dict[uuid.UUID, dict[uuid.UUID, PlanningCell]] = {}
+            for c in all_cells_for_rows:
+                cells_by_row.setdefault(c.row_id, {})[c.column_id] = c
+
+            for row_id in all_row_ids:
+                row = rows_by_id.get(row_id)
+                if row is None:
+                    continue
+                if row.sheet_id not in columns_by_sheet:
+                    columns_by_sheet[row.sheet_id] = await self.column_repository.list_for_sheet(row.sheet_id)
+                sheet_columns = columns_by_sheet[row.sheet_id]
+                for column in sheet_columns:
+                    if column.source_type == PlanningColumnSourceType.MANUAL:
+                        continue
+                    # Only recompute columns that actually pull from this
+                    # module -- a FORMULA column gets swept up too since it
+                    # may reference an affected sibling; recomputing it is
+                    # cheap and always safe (it just reads current stored
+                    # sibling values), whereas skipping it risks leaving a
+                    # formula's stored result referencing a now-stale
+                    # sibling value.
+                    if column.source_type in (
+                        PlanningColumnSourceType.LINKED_LOOKUP,
+                        PlanningColumnSourceType.AGGREGATE,
+                    ) and column.source_module != source_module_key:
+                        continue
+                    await self.recompute_and_store_cell(
+                        column,
+                        row_id=row_id,
+                        prefetched_sibling_columns=sheet_columns,
+                        prefetched_row_cells=cells_by_row.get(row_id, {}),
+                        row_linked_record_id=row.linked_record_id,
+                    )
+                    touched += 1
+
+        # --- 2. AGGREGATE cells summarizing this module (any record) ---
+        aggregate_columns = await self.column_repository.list_aggregate_columns_for_module(source_module_key)
+        for column in aggregate_columns:
+            rows = await self.row_repository.list_for_sheet(column.sheet_id)
+            sibling_columns = await self.column_repository.list_for_sheet(column.sheet_id)
+            for row in rows:
+                await self.recompute_and_store_cell(
+                    column,
+                    row_id=row.id,
+                    prefetched_sibling_columns=sibling_columns,
+                    row_linked_record_id=row.linked_record_id,
+                )
+                touched += 1
+
+        return touched
+
     async def _compute_mum_derived_value(
         self,
         column: PlanningColumn,
@@ -2169,6 +2909,19 @@ class PlanningService:
         row = await self.row_repository.create(
             sheet_id=sheet_id, label=label, position=target_position, created_by=user_id
         )
+        # AGGREGATE columns don't depend on this row's own data at all
+        # (they show the same sheet-wide computed value for every row --
+        # see compute_cell_display_value's AGGREGATE branch), so they can
+        # be computed and stored immediately even though this brand-new
+        # row has no linked record and no other cells yet. LINKED_LOOKUP
+        # and FORMULA columns are left alone here -- they have nothing
+        # meaningful to compute until the row is actually linked (see
+        # link_row_to_item_source_record, which calls
+        # recompute_and_store_row once that happens).
+        sibling_columns = await self.column_repository.list_for_sheet(sheet_id)
+        for sibling in sibling_columns:
+            if sibling.source_type == PlanningColumnSourceType.AGGREGATE:
+                await self.recompute_and_store_cell(sibling, row_id=row.id)
         await self._record_change(
             action=PlanningChangeAction.ROW_ADDED,
             sheet_id=sheet_id,
@@ -2341,6 +3094,16 @@ class PlanningService:
                     )
                 except BadRequestException:
                     pass
+            # This cell's own new value is already stored above (it's
+            # MANUAL). But a FORMULA column elsewhere on this same row may
+            # reference THIS column by name -- recompute every other
+            # non-MANUAL column on the row so any such formula's stored
+            # result reflects the value that was just typed in, rather
+            # than going stale until something else happens to trigger a
+            # recompute. recompute_and_store_row already skips MANUAL
+            # columns (including this one), so this cell's own stored
+            # value is left untouched.
+            await self.recompute_and_store_row(sheet_id, row_id)
         return cell
 
     async def set_cell_status(

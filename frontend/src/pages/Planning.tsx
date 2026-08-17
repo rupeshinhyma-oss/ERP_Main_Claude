@@ -36,7 +36,6 @@ import type {
   PlanningCellStatusColor,
   PlanningChangeLogEntry,
   PlanningColumn,
-  PlanningColumnDataType,
   PlanningColumnSourceType,
   PlanningGrid,
   PlanningRow,
@@ -69,18 +68,61 @@ import { BUILTIN_STATUS_COLORS } from "@/types/planning";
 // vertical height / padding / header height / minimum width / unused
 // whitespace... make the grid compact and dense like a practical ERP
 // spreadsheet, while keeping text readable and cells comfortable enough
-// to edit"). These two constants are the SINGLE source of truth for
-// every column's width -- both the generic <th>/<td> (GridHeaderCell /
-// GridCell) and the special ITEM column use them directly, and the
-// sticky-column offset math (`stickyLeftByColumnId`, using
-// CELL_MIN_WIDTH per non-ITEM frozen column) derives from the same
-// values -- so reducing them here automatically keeps frozen/sticky
-// column positioning correct with no separate fix needed. Previous
-// values were 150 / 240; a numeric "MUM1" or "PKG QTY" cell never
-// needed 150px, and ITEM (the longest real content -- product names)
-// still gets a readable 190px rather than an oversized 240px.
-const CELL_MIN_WIDTH = 108;
+// to edit").
+//
+// Column width is no longer one fixed number for every column -- a
+// column's default width is now computed from its OWN header label's
+// length via `computeHeaderWidth` below (e.g. "TEST (Y/N)" gets a much
+// narrower column than "SUPPLIER NAME", instead of both getting the same
+// fixed width regardless of what they actually hold), and can be
+// overridden per column by dragging its resize handle (persisted
+// server-side via PlanningColumn.width_px, shared across every user
+// viewing the sheet -- see that field's docstring for why this is
+// server-side unlike Hide/Freeze).
+//
+// CELL_MIN_WIDTH is now only the absolute FLOOR every computed/dragged
+// width is clamped to (so even a 1-character header like "Y" stays
+// comfortably clickable/editable) -- not the width every column gets.
+// ITEM_COL_WIDTH remains fixed (the ITEM column isn't user-resizable in
+// this pass; it's derived from product names, not an admin-typed label,
+// so auto-sizing it the same way wouldn't make sense).
+const CELL_MIN_WIDTH = 64;
+const CELL_MAX_WIDTH = 320;
 const ITEM_COL_WIDTH = 190;
+
+/**
+ * Roughly how many pixels one character of a bold ~13px header label
+ * needs, plus fixed padding/icon allowance (filter icon, source badge,
+ * delete button on hover, etc. all share the header's horizontal space).
+ * Deliberately an estimate, not exact text measurement (e.g. via canvas)
+ * -- exact measurement would need to run per-column on every render and
+ * still be immediately overridable by drag-resize anyway, so a cheap,
+ * good-enough estimate that a user can always correct by dragging is a
+ * better trade than the complexity of pixel-perfect auto-sizing.
+ */
+const HEADER_CHAR_WIDTH_PX = 7.2;
+const HEADER_WIDTH_PADDING_PX = 40;
+
+/**
+ * Compute a column's default width purely from its header label's
+ * length, clamped to [CELL_MIN_WIDTH, CELL_MAX_WIDTH] -- e.g. "Y/N" or
+ * "Test (Y/N)" naturally lands near the floor, "Supplier Name" or a long
+ * admin-typed header lands wider, both without any per-column type-based
+ * guessing. Used as the fallback whenever a column has no manually-set
+ * ``width_px`` yet (see PlanningColumn.width_px's docstring) -- once a
+ * user drags a column's resize handle, that persisted value takes over
+ * completely and this function is no longer consulted for that column.
+ */
+function computeHeaderWidth(label: string): number {
+  const estimated = Math.ceil((label || "").length * HEADER_CHAR_WIDTH_PX) + HEADER_WIDTH_PADDING_PX;
+  return Math.max(CELL_MIN_WIDTH, Math.min(CELL_MAX_WIDTH, estimated));
+}
+
+/** A column's effective width: its manually-resized width_px if set, otherwise computed from its header label. */
+function effectiveColumnWidth(column: { name: string; width_px?: number | null }): number {
+  if (column.width_px != null) return Math.max(CELL_MIN_WIDTH, Math.min(CELL_MAX_WIDTH, column.width_px));
+  return computeHeaderWidth(column.name);
+}
 
 /**
  * Hide/Freeze are per-user *display* preferences (which columns to show,
@@ -141,20 +183,6 @@ function mumGroupNumber(columnName: string, label?: string): number | null {
   if (!match) return null;
   const num = parseInt(match[1], 10);
   return Number.isNaN(num) ? null : num;
-}
-
-/**
- * Wrap a column name for safe use inside a FORMULA expression.
- *
- * Backend formulas (app.planning.formula) accept bare identifiers only
- * when the column name is already a valid one (e.g. "Mum40"); any column
- * name with spaces or special characters (e.g. "PKG QTY", "Mum 1") must
- * be wrapped in square brackets so the backend's expression rewriter can
- * find and safely mangle it. Wrapping is harmless even for names that
- * would already be valid bare identifiers, so this is always safe to use.
- */
-function quoteColumnRef(columnName: string): string {
-  return `[${columnName}]`;
 }
 
 function hiddenColumnsStorageKey(sheetId: string): string {
@@ -574,9 +602,23 @@ function MumStatusHistoryPopover({
     };
   }, [sheetId, rowId]);
 
+  /**
+   * Group every entry (status change OR value edit) by its Mum group
+   * number, newest-first within each group -- unlike the old behavior
+   * (kept only the single latest status entry per group, discarding the
+   * rest), this keeps the FULL history so the eye button shows every
+   * time a cell's color or value ever changed, who did it, and when.
+   * Deleted columns are already excluded server-side (the backend only
+   * returns entries for columns still on the sheet -- see
+   * PlanningService.get_mum_column_status_history_for_row's docstring),
+   * and hidden columns are excluded here the same way the old code did,
+   * via visibleMumGroupNumbers (hide is a local/client-side display
+   * preference, so filtering it here rather than server-side is
+   * intentional -- see hiddenColumnsStorageKey).
+   */
   const groupedEntries = useMemo(() => {
     if (!entries || entries.length === 0) return [];
-    const latestByGroup = new Map<number, MumColumnStatusHistoryEntry>();
+    const byGroup = new Map<number, MumColumnStatusHistoryEntry[]>();
     const unGrouped: MumColumnStatusHistoryEntry[] = [];
 
     for (const entry of entries) {
@@ -588,15 +630,33 @@ function MumStatusHistoryPopover({
       if (visibleMumGroupNumbers && visibleMumGroupNumbers.size > 0 && !visibleMumGroupNumbers.has(groupNum)) {
         continue;
       }
-      const existing = latestByGroup.get(groupNum);
-      if (!existing || new Date(entry.changed_at).getTime() > new Date(existing.changed_at).getTime()) {
-        latestByGroup.set(groupNum, entry);
-      }
+      const list = byGroup.get(groupNum);
+      if (list) list.push(entry);
+      else byGroup.set(groupNum, [entry]);
     }
-    const grouped = [...latestByGroup.entries()].sort((a, b) => a[0] - b[0]).map(([groupNum, entry]) => ({ groupNum, entry }));
-    const fallbackUnGrouped = unGrouped.map((entry, idx) => ({ groupNum: 9000 + idx, entry }));
-    return [...grouped, ...fallbackUnGrouped];
-  }, [entries, visibleMumGroupNumbers]);
+
+    for (const list of byGroup.values()) {
+      list.sort((a, b) => new Date(b.changed_at).getTime() - new Date(a.changed_at).getTime());
+    }
+    unGrouped.sort((a, b) => new Date(b.changed_at).getTime() - new Date(a.changed_at).getTime());
+
+    const grouped = [...byGroup.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([groupNum, groupEntries]) => ({ groupNum, entries: groupEntries }));
+    if (unGrouped.length > 0) grouped.push({ groupNum: 9000, entries: unGrouped });
+    return grouped;
+  }, [entries, visibleMumGroupNumbers, mumGroupLabel]);
+
+  function formatEntryTime(changedAt: string): string {
+    const d = new Date(changedAt);
+    if (isNaN(d.getTime())) return changedAt;
+    const day = String(d.getDate()).padStart(2, "0");
+    const month = String(d.getMonth() + 1).padStart(2, "0");
+    const year = d.getFullYear();
+    const hours = String(d.getHours()).padStart(2, "0");
+    const minutes = String(d.getMinutes()).padStart(2, "0");
+    return `${day}/${month}/${year} ${hours}:${minutes}`;
+  }
 
   return (
     <>
@@ -604,11 +664,11 @@ function MumStatusHistoryPopover({
       <div
         style={{
           position: "fixed",
-          top: Math.min(rect.bottom + 4, window.innerHeight - 300),
-          left: Math.max(10, Math.min(rect.left, window.innerWidth - 320)),
+          top: Math.min(rect.bottom + 4, window.innerHeight - 340),
+          left: Math.max(10, Math.min(rect.left, window.innerWidth - 340)),
           zIndex: 200,
-          width: 300,
-          maxHeight: 280,
+          width: 320,
+          maxHeight: 380,
           overflowY: "auto",
           background: "#fff",
           border: "1px solid #CBD5E1",
@@ -619,62 +679,72 @@ function MumStatusHistoryPopover({
         }}
       >
         <div style={{ fontSize: 11, fontWeight: 700, color: "#64748B", marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.05em" }}>
-          Mum Column Status History
+          Cell Change History
         </div>
         {loading ? (
-          <div className="muted" style={{ fontSize: 12 }}>Loading status history…</div>
+          <div className="muted" style={{ fontSize: 12 }}>Loading history…</div>
         ) : !groupedEntries || groupedEntries.length === 0 ? (
-          <div className="muted" style={{ fontSize: 12 }}>No status changes recorded on Mum columns yet.</div>
+          <div className="muted" style={{ fontSize: 12 }}>No changes recorded on these columns yet.</div>
         ) : (
-          groupedEntries.map(({ groupNum, entry: e }, i) => {
-            const builtinEntry =
-              e.new_status && e.new_status !== "custom"
-                ? BUILTIN_STATUS_COLORS[e.new_status as Exclude<PlanningCellStatusColor, "custom">]
-                : undefined;
-            const swatch = builtinEntry?.hex ?? "#94A3B8";
-            const label = e.new_status ? builtinEntry?.label || e.new_status : "Cleared";
-            const d = new Date(e.changed_at);
-            const day = String(d.getDate()).padStart(2, "0");
-            const month = String(d.getMonth() + 1).padStart(2, "0");
-            const year = d.getFullYear();
-            const hours = String(d.getHours()).padStart(2, "0");
-            const minutes = String(d.getMinutes()).padStart(2, "0");
-            const formattedTime = isNaN(d.getTime()) ? e.changed_at : `${day}/${month}/${year} ${hours}:${minutes}`;
-            return (
-              <div
-                key={groupNum}
-                style={{
-                  display: "flex",
-                  alignItems: "flex-start",
-                  gap: 8,
-                  padding: "6px 0",
-                  borderBottom: i < groupedEntries.length - 1 ? "1px solid #F1F5F9" : "none",
-                }}
-              >
-                <span
-                  style={{
-                    width: 10,
-                    height: 10,
-                    borderRadius: "50%",
-                    background: swatch,
-                    flexShrink: 0,
-                    marginTop: 3,
-                  }}
-                />
-                <div style={{ fontSize: 12, color: "#334155", flex: 1 }}>
-                  <div>
-                    <strong style={{ color: "#0F172A" }}>{e.column_name}</strong>:{" "}
-                    <span style={{ fontWeight: 600, color: swatch !== "#94A3B8" ? swatch : "#475569" }}>
-                      {label}
-                    </span>
-                  </div>
-                  <div style={{ fontSize: 11, color: "#64748B", marginTop: 2 }}>
-                    {formattedTime} · <span style={{ color: "#334155", fontWeight: 500 }}>{e.changed_by_username}</span>
-                  </div>
-                </div>
+          groupedEntries.map(({ groupNum, entries: groupEntries }) => (
+            <div key={groupNum} style={{ marginBottom: 10 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#334155", marginBottom: 4 }}>
+                {groupEntries[0].column_name}
               </div>
-            );
-          })
+              {groupEntries.map((e, i) => {
+                const isStatus = (e.entry_type ?? "status") === "status";
+                const builtinEntry =
+                  isStatus && e.new_status && e.new_status !== "custom"
+                    ? BUILTIN_STATUS_COLORS[e.new_status as Exclude<PlanningCellStatusColor, "custom">]
+                    : undefined;
+                const swatch = isStatus ? builtinEntry?.hex ?? "#94A3B8" : "#94A3B8";
+
+                return (
+                  <div
+                    key={i}
+                    style={{
+                      display: "flex",
+                      alignItems: "flex-start",
+                      gap: 8,
+                      padding: "5px 0",
+                      borderBottom: i < groupEntries.length - 1 ? "1px solid #F1F5F9" : "none",
+                    }}
+                  >
+                    {isStatus ? (
+                      <span
+                        style={{ width: 10, height: 10, borderRadius: "50%", background: swatch, flexShrink: 0, marginTop: 3 }}
+                      />
+                    ) : (
+                      <span
+                        title="Value edited"
+                        style={{ width: 10, textAlign: "center", flexShrink: 0, marginTop: 1, fontSize: 11, color: "#94A3B8" }}
+                      >
+                        ✎
+                      </span>
+                    )}
+                    <div style={{ fontSize: 12, color: "#334155", flex: 1, minWidth: 0 }}>
+                      {isStatus ? (
+                        <div>
+                          <span style={{ fontWeight: 600, color: swatch !== "#94A3B8" ? swatch : "#475569" }}>
+                            {e.new_status ? builtinEntry?.label || e.new_status : "Cleared"}
+                          </span>
+                        </div>
+                      ) : (
+                        <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          <span style={{ color: "#94A3B8" }}>{e.old_value || "(empty)"}</span>
+                          {" → "}
+                          <span style={{ fontWeight: 600, color: "#0F172A" }}>{e.new_value || "(empty)"}</span>
+                        </div>
+                      )}
+                      <div style={{ fontSize: 11, color: "#64748B", marginTop: 1 }}>
+                        {formatEntryTime(e.changed_at)} · <span style={{ color: "#334155", fontWeight: 500 }}>{e.changed_by_username}</span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ))
         )}
       </div>
     </>
@@ -700,6 +770,7 @@ function GridCell({
   isFrozen,
   isLastFrozen,
   stickyLeft,
+  width,
 }: {
   value: string | null | undefined;
   displayValue: string | null | undefined;
@@ -722,6 +793,8 @@ function GridCell({
   isFrozen?: boolean;
   isLastFrozen?: boolean;
   stickyLeft?: number;
+  /** This column's effective width (computed from its header label, or manually resized). Falls back to CELL_MIN_WIDTH if omitted. */
+  width?: number;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value ?? "");
@@ -731,6 +804,7 @@ function GridCell({
   const isManual = sourceType === "manual";
   const rawShownValue = isManual ? (value ?? displayValue) : (displayValue ?? value);
   const shownValue = showMumHistory ? formatDaysMonthYear(rawShownValue) : rawShownValue;
+  const colWidth = width ?? CELL_MIN_WIDTH;
 
   useEffect(() => {
     if (editing) inputRef.current?.focus();
@@ -751,9 +825,9 @@ function GridCell({
         position: isFrozen ? "sticky" : "relative",
         left: isFrozen ? stickyLeft : undefined,
         zIndex: isFrozen ? 3 : undefined,
-        minWidth: CELL_MIN_WIDTH,
-        width: CELL_MIN_WIDTH,
-        maxWidth: CELL_MIN_WIDTH,
+        minWidth: colWidth,
+        width: colWidth,
+        maxWidth: colWidth,
         boxSizing: "border-box",
         padding: 0,
         textAlign: "center",
@@ -1098,16 +1172,31 @@ export function PlanningPage() {
    * same pattern the active sheet tab already uses, so a link to a
    * filtered view can be shared/bookmarked.
    */
-  const organizations = useLookup<{ id: string; name: string }>("/masters/company-list", 250);
+  const organizations = useLookup<{ id: string; name: string; branches?: { id: string; name: string; code_prefix?: string }[] | null }>("/masters/company-list", 250);
   const [activeOrganizationId, setActiveOrganizationId] = useState<string | null>(null);
+  /**
+   * Which organization's sheet TABS are currently shown at all (Mumbai/
+   * Chennai/Inhyma Mumbai etc.) -- completely separate from
+   * `activeOrganizationId` above, which is the legacy per-request ROW
+   * filter for sheets that predate the branch-link feature. This one
+   * controls which tabs even appear in the tab bar: picking an
+   * organization here hides every sheet not linked to it (see
+   * `visibleSheets` below); null means "no organization filter chosen
+   * yet" and defaults to showing whichever organization the
+   * first-loaded sheet belongs to (see the effect below), so the page
+   * never shows a confusing mix of every organization's branches at
+   * once by default.
+   */
+  const [tabOrganizationFilterId, setTabOrganizationFilterId] = useState<string | null>(null);
   const [itemHeaderTitle, setItemHeaderTitle] = useState("ITEM");
   const [customTags, setCustomTags] = useState<PlanningStatusTag[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<unknown>(null);
 
   const [addSheetOpen, setAddSheetOpen] = useState(false);
-  const [newSheetName, setNewSheetName] = useState("");
   const [newSheetGroupLabel, setNewSheetGroupLabel] = useState("Mum");
+  const [newSheetOrganizationId, setNewSheetOrganizationId] = useState("");
+  const [newSheetBranchId, setNewSheetBranchId] = useState("");
 
   const [statusPicker, setStatusPicker] = useState<{ anchor: HTMLElement; rowId: string; columnId: string } | null>(null);
   const [mumHistoryPopover, setMumHistoryPopover] = useState<{ anchor: HTMLElement; rowId: string } | null>(null);
@@ -1123,6 +1212,43 @@ export function PlanningPage() {
   const [frozenColumnIds, setFrozenColumnIds] = useState<Set<string>>(new Set());
   const [columnsPanelOpen, setColumnsPanelOpen] = useState(false);
   const [activeColumnFilters, setActiveColumnFilters] = useState<Record<string, { selectedValues?: Set<string>; textQuery?: string }>>({});
+
+  /**
+   * Server-side search payload derived from `activeColumnFilters`,
+   * scoped to the currently-active sheet -- built into the exact shape
+   * `app.planning.routes._parse_search_query_param` expects: a JSON
+   * array of `{column_id, text_query, selected_values}`, one entry per
+   * column with an active filter. `column_id: null` means the ITEM
+   * column (matched server-side against `PlanningRow.label`, since ITEM
+   * has no real `PlanningColumn`/`PlanningCell` of its own).
+   *
+   * This is what makes search cover the WHOLE sheet (10,000+ rows and
+   * counting) instead of only whatever page happened to already be
+   * loaded in the browser -- see PlanningRowRepository's
+   * `_apply_search_column_filters` for the matching SQL.
+   */
+  const searchQueryParam = useMemo(() => {
+    if (!activeSheetId) return undefined;
+    const prefix = `${activeSheetId}:`;
+    const entries = Object.entries(activeColumnFilters)
+      .filter(([key, state]) => {
+        if (!key.startsWith(prefix)) return false;
+        const hasValues = state.selectedValues && state.selectedValues.size > 0;
+        const hasQuery = state.textQuery && state.textQuery.trim().length > 0;
+        return hasValues || hasQuery;
+      })
+      .map(([key, state]) => {
+        const colId = key.slice(prefix.length);
+        return {
+          column_id: colId === "item-header-col" ? null : colId,
+          text_query: state.textQuery && state.textQuery.trim() ? state.textQuery.trim() : undefined,
+          selected_values: state.selectedValues && state.selectedValues.size > 0 ? Array.from(state.selectedValues) : undefined,
+        };
+      });
+    if (entries.length === 0) return undefined;
+    return JSON.stringify(entries);
+  }, [activeSheetId, activeColumnFilters]);
+
   const [filterPopover, setFilterPopover] = useState<{ anchor: HTMLElement; columnId: string; columnName: string } | null>(null);
   /** Draft text for the "Group Label" fix-in-place field inside the Configuration panel. Reset to the sheet's current label whenever the panel opens. */
   const [groupLabelDraft, setGroupLabelDraft] = useState("");
@@ -1262,12 +1388,53 @@ export function PlanningPage() {
         const target = matched || (activeSheetId ? data.find((s) => s.id === activeSheetId) || data[0] : data[0]);
         setActiveSheetId(target.id);
         setSheetUrlParam(target.name);
+        // Default the tab-visibility filter to the initially-resolved
+        // sheet's own organization, exactly once (never overrides a
+        // filter the user already picked) -- otherwise every
+        // organization's branches would show mixed together in the tab
+        // bar on first load, which is what this whole feature exists to
+        // avoid. A legacy, never-linked sheet (organization_id is null)
+        // leaves the filter unset (null = "no filter", every sheet
+        // still shown), since there's no organization to default to.
+        setTabOrganizationFilterId((prev) => (prev !== null ? prev : target.organization_id ?? null));
       }
     } catch (err) {
       setError(err);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams, setSearchParams]);
+
+  /**
+   * Sheets currently shown as tabs, restricted to whichever organization
+   * `tabOrganizationFilterId` is set to (null = no filter, every sheet
+   * shown -- e.g. for legacy unlinked sheets, or before any sheet has
+   * loaded yet). A sheet with no organization_id (created before the
+   * branch-link feature existed) never matches a real filter selection,
+   * by design -- picking "Darsh Impex" should show ONLY Darsh Impex's
+   * branches, not every unlinked legacy sheet as well.
+   */
+  const visibleSheets = useMemo(() => {
+    if (tabOrganizationFilterId === null) return sheets;
+    return sheets.filter((s) => s.organization_id === tabOrganizationFilterId);
+  }, [sheets, tabOrganizationFilterId]);
+
+  /**
+   * Keep `activeSheetId` valid whenever the tab-visibility filter
+   * changes: if the currently active sheet is still visible under the
+   * new filter, leave it selected; otherwise switch to the new filter's
+   * first sheet, or go blank (no active sheet, no grid shown) if that
+   * organization has no sheets at all yet -- exactly the "if not show
+   * blank" behavior asked for, rather than silently falling back to some
+   * unrelated organization's sheet.
+   */
+  useEffect(() => {
+    if (visibleSheets.some((s) => s.id === activeSheetId)) return;
+    const next = visibleSheets[0] ?? null;
+    setGrid(null);
+    setActiveSheetId(next?.id ?? null);
+    if (next) setSheetUrlParam(next.name);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visibleSheets]);
 
   /**
    * Live sync for the SHEET LIST only (Phase 5, consolidated onto the
@@ -1321,6 +1488,7 @@ export function PlanningPage() {
           offset: 0,
           limit: GRID_PAGE_SIZE,
           ...(organizationId ? { organization_id: organizationId } : {}),
+          ...(searchQueryParam ? { search: searchQueryParam } : {}),
         });
         const { data } = await apiGet<PlanningGrid>(`/planning/sheets/${sheetId}/grid${qs}`);
         setGrid(data);
@@ -1330,18 +1498,19 @@ export function PlanningPage() {
         setLoading(false);
       }
     },
-    [activeOrganizationId]
+    [activeOrganizationId, searchQueryParam]
   );
 
   const [loadingMoreRows, setLoadingMoreRows] = useState(false);
 
   /**
-   * Fetch the NEXT page of already-existing rows and append them to the
-   * currently-loaded grid, instead of re-fetching (and recomputing) every
-   * row on the sheet from scratch. This is what powers both the "Load
-   * more rows" control (once more rows already exist on the sheet than
-   * are currently loaded) and is reused by `handleLoadMoreProducts` after
-   * it asks the backend to create new rows from Product Master.
+   * Fetch the NEXT page of already-existing (or, absent an active
+   * search, freshly auto-populated from Product Master -- see
+   * PlanningService.get_grid's docstring) rows and append them to the
+   * currently-loaded grid, instead of re-fetching (and recomputing)
+   * every row on the sheet from scratch. Powers the automatic
+   * scroll-triggered loading (see the IntersectionObserver effect
+   * above).
    */
   const loadMoreRows = useCallback(async () => {
     if (!activeSheetId) return;
@@ -1353,6 +1522,7 @@ export function PlanningPage() {
         offset: currentCount,
         limit: GRID_PAGE_SIZE,
         ...(activeOrganizationId ? { organization_id: activeOrganizationId } : {}),
+        ...(searchQueryParam ? { search: searchQueryParam } : {}),
       });
       const { data } = await apiGet<PlanningGrid>(`/planning/sheets/${activeSheetId}/grid${qs}`);
       setGrid((prev) => {
@@ -1366,7 +1536,73 @@ export function PlanningPage() {
     } finally {
       setLoadingMoreRows(false);
     }
-  }, [activeSheetId, grid, activeOrganizationId]);
+  }, [activeSheetId, grid, activeOrganizationId, searchQueryParam]);
+
+  /**
+   * Auto-load-ahead while scrolling: a tiny invisible sentinel row sits
+   * right after the last currently-rendered row. An IntersectionObserver
+   * watches it (relative to the scrollable grid container, not the
+   * whole page -- see `root: scrollContainerRef.current` below) and
+   * fires `loadMoreRows()` the moment it comes within `rootMargin` of
+   * being visible, well BEFORE the user actually reaches the literal
+   * bottom -- this is what makes the next batch feel "already ready"
+   * rather than causing a visible pause once the user gets there.
+   *
+   * Replaces both the old "Load More Products" button (this now happens
+   * automatically as part of ordinary scrolling -- see get_grid's own
+   * docstring for why one `loadMoreRows()` call already transparently
+   * auto-populates new Product Master rows AND returns already-existing
+   * ones, so a single trigger covers both) and the pagination footer's
+   * manual "Load N more" button.
+   *
+   * `loadingRef` (a ref, not state) guards against firing a second
+   * overlapping fetch while one is already in flight -- state updates
+   * are asynchronous and batched, so relying on `loadingMoreRows` state
+   * alone inside the observer's callback could still let a fast series
+   * of intersection events slip through before the first fetch's
+   * `setLoadingMoreRows(true)` has actually re-rendered.
+   */
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const scrollSentinelRef = useRef<HTMLTableRowElement>(null);
+  const loadMoreRowsRef = useRef(loadMoreRows);
+  loadMoreRowsRef.current = loadMoreRows;
+  const isFetchingMoreRef = useRef(false);
+
+  useEffect(() => {
+    const sentinel = scrollSentinelRef.current;
+    const container = scrollContainerRef.current;
+    if (!sentinel || !container) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (!entries[0]?.isIntersecting) return;
+        if (isFetchingMoreRef.current) return;
+        const currentCount = grid?.rows.length ?? 0;
+        const total = grid?.total_rows ?? 0;
+        if (currentCount >= total) return; // everything already loaded -- nothing to prefetch
+        isFetchingMoreRef.current = true;
+        void loadMoreRowsRef.current().finally(() => {
+          isFetchingMoreRef.current = false;
+        });
+      },
+      {
+        root: container,
+        // Fire ~2 rows' worth of scroll before the sentinel is literally
+        // on-screen, so the next page is already loading in the
+        // background by the time the user gets there.
+        rootMargin: "120px 0px",
+        threshold: 0,
+      }
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+    // Re-attach whenever the sheet changes (new container contents) or
+    // the row/total counts change (so a just-finished fetch's updated
+    // grid.total_rows is visible to the NEXT intersection check without
+    // waiting for an unrelated re-render to happen to recreate this
+    // effect first).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSheetId, grid?.rows.length, grid?.total_rows]);
 
   const loadCustomTags = useCallback(async () => {
     try {
@@ -1438,7 +1674,8 @@ export function PlanningPage() {
           case "column_source_configured":
           case "column_role_lock_changed":
           case "column_status_color_toggled":
-          case "column_description_changed": {
+          case "column_description_changed":
+          case "column_width_changed": {
             return {
               ...prev,
               columns: prev.columns.map((c) => (c.id === payload.id ? payload : c)).sort((a, b) => a.position - b.position),
@@ -1886,43 +2123,6 @@ export function PlanningPage() {
     [rows, cellByRowColumn]
   );
 
-  const filteredRows = useMemo(() => {
-    if (!activeSheetId) return rows;
-
-    const activeEntries = Object.entries(activeColumnFilters).filter(([key, state]) => {
-      if (!key.startsWith(`${activeSheetId}:`)) return false;
-      const hasValues = state.selectedValues && state.selectedValues.size > 0;
-      const hasQuery = state.textQuery && state.textQuery.trim().length > 0;
-      return hasValues || hasQuery;
-    });
-
-    if (activeEntries.length === 0) return rows;
-
-    return rows.filter((row) => {
-      for (const [key, filterState] of activeEntries) {
-        const colId = key.split(":")[1];
-        let val = "";
-        if (colId === "item-header-col") {
-          val = row.label || "(Blanks)";
-        } else {
-          const cell = cellByRowColumn.get(`${row.id}:${colId}`);
-          const raw = cell?.display_value ?? cell?.value;
-          val = raw !== null && raw !== undefined && raw.trim() !== "" ? raw.trim() : "(Blanks)";
-        }
-
-        if (filterState.textQuery && filterState.textQuery.trim()) {
-          const q = filterState.textQuery.trim().toLowerCase();
-          if (!val.toLowerCase().includes(q)) return false;
-        }
-
-        if (filterState.selectedValues && filterState.selectedValues.size > 0) {
-          if (!filterState.selectedValues.has(val)) return false;
-        }
-      }
-      return true;
-    });
-  }, [rows, activeSheetId, activeColumnFilters, cellByRowColumn]);
-
   const activeFilterCount = useMemo(() => {
     if (!activeSheetId) return 0;
     return Object.entries(activeColumnFilters).filter(([key, state]) => {
@@ -1961,7 +2161,7 @@ export function PlanningPage() {
       const isFrozen = isTestColumn(col.name) || isApprovalDateColumn(col.name) || frozenColumnIds.has(col.id);
       if (!isFrozen) break;
       map.set(col.id, left);
-      left += CELL_MIN_WIDTH;
+      left += effectiveColumnWidth(col);
     }
     return map;
   }, [orderedColumns, frozenColumnIds]);
@@ -1998,14 +2198,27 @@ export function PlanningPage() {
 
   async function handleCreateSheet(e: React.FormEvent) {
     e.preventDefault();
-    if (!newSheetName.trim() || !newSheetGroupLabel.trim()) return;
+    if (!newSheetGroupLabel.trim() || !newSheetOrganizationId || !newSheetBranchId) return;
+    // The sheet's name is always exactly the selected branch's name from
+    // Product Master's organization list -- there is no separate
+    // free-typed "sheet name" anymore. This can never be empty when the
+    // guard above passed, since newSheetBranchId can only be set to a
+    // real branch id that came from this same organization's branches
+    // list (see the Branch <SelectField> below).
+    const branchName =
+      organizations.items.find((o) => o.id === newSheetOrganizationId)?.branches?.find((b) => b.id === newSheetBranchId)
+        ?.name ?? "";
+    if (!branchName.trim()) return;
     try {
       const { data } = await apiPost<PlanningSheet>("/planning/sheets", {
-        name: newSheetName.trim(),
+        name: branchName.trim(),
+        organization_id: newSheetOrganizationId,
+        branch_id: newSheetBranchId,
         mum_group_label: newSheetGroupLabel.trim(),
       });
-      setNewSheetName("");
       setNewSheetGroupLabel("Mum");
+      setNewSheetOrganizationId("");
+      setNewSheetBranchId("");
       setAddSheetOpen(false);
       await loadSheets();
       setActiveSheetId(data.id);
@@ -2038,60 +2251,20 @@ export function PlanningPage() {
     }
   }
 
-  const [fixingColumnOrder, setFixingColumnOrder] = useState(false);
-
-  /**
-   * One-time repair for a sheet whose columns ended up in the wrong
-   * order (see PlanningService.normalize_column_order) -- groups every
-   * Mum group's main+Remarks columns together (ascending), the shared
-   * Supplier Name/City/PKG QTY/Weight/CBM block once, then every group's
-   * NO. OF PKG/TOTAL WEIGHT/TOTAL CBM totals together (also ascending).
-   * Reloads the grid afterward since column POSITIONS changed sheet-wide.
-   */
-  async function handleFixColumnOrder() {
-    if (!activeSheetId) return;
-    setFixingColumnOrder(true);
-    try {
-      await apiPost(`/planning/sheets/${activeSheetId}/columns/normalize-order`, {});
-      await loadGrid(activeSheetId);
-    } catch (err) {
-      setError(err);
-    } finally {
-      setFixingColumnOrder(false);
-    }
-  }
-
-  const [repairingFormulas, setRepairingFormulas] = useState(false);
-
-  /**
-   * One-time repair for a sheet whose NO. OF PKG/TOTAL WEIGHT/TOTAL CBM
-   * columns never got wired to a live formula (stuck as plain MANUAL
-   * columns, no "ƒx" badge) -- see
-   * PlanningService.repair_fixed_mum_formulas and this function's own
-   * `handleCreateNextMumGroup` sibling for the root cause (a since-fixed
-   * bug that only matched columns literally named "MUM<n>"). Reloads the
-   * grid afterward since these columns' source_type just changed.
-   */
-  async function handleRepairFixedFormulas() {
-    if (!activeSheetId) return;
-    setRepairingFormulas(true);
-    try {
-      await apiPost(`/planning/sheets/${activeSheetId}/columns/repair-fixed-formulas`, {});
-      await loadGrid(activeSheetId);
-    } catch (err) {
-      setError(err);
-    } finally {
-      setRepairingFormulas(false);
-    }
-  }
-
   async function handleDeleteSheet(sheetId: string, sheetName: string) {
     if (!window.confirm(`Are you sure you want to delete sheet '${sheetName}'? This will remove the sheet and all its columns and rows.`)) return;
     try {
       await apiDelete(`/planning/sheets/${sheetId}`);
       await loadSheets();
       if (activeSheetId === sheetId) {
-        const remaining = sheets.filter((s) => s.id !== sheetId);
+        // Fall back within the currently-VISIBLE (organization-filtered)
+        // set only -- picking from the full unfiltered `sheets` here
+        // could otherwise silently jump the user to a different
+        // organization's sheet after deleting the last one in the
+        // filtered view, which the tab-visibility filter above exists
+        // specifically to prevent. Mirrors the same fallback the
+        // `visibleSheets` effect performs on any other filter change.
+        const remaining = visibleSheets.filter((s) => s.id !== sheetId);
         if (remaining.length > 0) {
           setActiveSheetId(remaining[0].id);
           setSheetUrlParam(remaining[0].name);
@@ -2125,197 +2298,17 @@ export function PlanningPage() {
     setCreatingNextMum(true);
     setError(null);
     try {
-      const mumLabel = grid?.sheet?.mum_group_label || "Mum";
-      let maxMum = 0;
-      for (const col of columns) {
-        const num = mumGroupNumber(col.name, mumLabel);
-        if (num !== null && num > maxMum) maxMum = num;
-      }
-      const nextMumNum = maxMum > 0 ? maxMum + 1 : 1;
-
-      // PKG QTY / UNIT WEIGHT/PKG (KG) / CBM/PKG (KG) / Supplier Name / City
-      // are always extracted from Product Master, never typed in -- find
-      // each by its LINKED_LOOKUP source_field (product master's
-      // packaging_quantity / packaging_gross_weight / packaging_unit_cbm /
-      // supplier_name / supplier_city), creating it as a LINKED_LOOKUP
-      // column the first time this sheet needs it. Every item's exact
-      // supplier/city/packaging numbers come from that exact item's own
-      // Product Master record -- editing Product Master updates these
-      // columns immediately, with nothing to type or keep in sync by hand.
-      async function findOrCreateProductLookupColumn(
-        label: string,
-        sourceField: string,
-        dataType: PlanningColumnDataType,
-        position: number | null
-      ): Promise<PlanningColumn> {
-        const existing = columns.find(
-          (c) => c.source_type === "linked_lookup" && c.source_module === "product" && c.source_field === sourceField
-        );
-        if (existing) return existing;
-
-        const { data: created } = await apiPost<PlanningColumn>(`/planning/sheets/${activeSheetId}/columns`, {
-          name: label,
-          data_type: dataType,
-          position,
-        });
-        await apiPut(`/planning/sheets/${activeSheetId}/columns/${created.id}/source`, {
-          source_type: "linked_lookup",
-          source_module: "product",
-          source_field: sourceField,
-          enable_description: false,
-          auto_populate_enabled: true, // bulk-link every row to its ITEM's Product Master record immediately
-          auto_populate_limit: null,
-        });
-        try {
-          await apiPost(`/planning/sheets/${activeSheetId}/columns/${created.id}/auto-link`);
-        } catch {
-          // Non-fatal: existing rows just stay unlinked for this column until
-          // the admin reruns "Load all records automatically" from its config modal.
-        }
-        columns.push({ ...created, source_type: "linked_lookup", source_module: "product", source_field: sourceField });
-        return created;
-      }
-
-      const supplierCol = columns.find((c) => /supplier/i.test(c.name));
-      const supplierNameCol = await findOrCreateProductLookupColumn(
-        "Supplier Name",
-        "supplier_name",
-        "text",
-        supplierCol ? supplierCol.position : 0
+      const { data: updatedColumns } = await apiPost<PlanningColumn[]>(
+        `/planning/sheets/${activeSheetId}/columns/next-mum-group`
       );
-      const cityCol = await findOrCreateProductLookupColumn(
-        "City",
-        "supplier_city",
-        "text",
-        supplierNameCol.position + 1
-      );
-      const pkgQtyCol = await findOrCreateProductLookupColumn("PKG QTY", "packaging_quantity", "number", null);
-      const unitWeightCol = await findOrCreateProductLookupColumn(
-        "UNIT WEIGHT/PKG (KG)",
-        "packaging_gross_weight",
-        "number",
-        null
-      );
-      const cbmPerPkgCol = await findOrCreateProductLookupColumn("CBM/PKG (KG)", "packaging_unit_cbm", "number", null);
-
-      const mumMainPos = cityCol.position + 1;
-      // Use cbmPerPkgCol's OWN position directly -- it was just
-      // found-or-created a few lines above (findOrCreateProductLookupColumn
-      // returns its position either way), so this is always accurate.
-      // Previously this re-searched the `columns` array by regex instead
-      // (`columns.find(c => /cbm\s*[\/\.]?\s*pkg/i.test(c.name))`), which
-      // missed the CBM/PKG (KG) column on any sheet where it had JUST been
-      // created by findOrCreateProductLookupColumn above (a brand-new
-      // sheet, or one whose CBM/PKG column didn't exist yet) -- the
-      // component-scope `columns` array reflects the grid as of this
-      // render, not the column that particular async call just created
-      // moments earlier in this same function run. That silently made
-      // mumTotalsPos null, which fell through to appending NO. OF PKG /
-      // TOTAL WEIGHT / TOTAL CBM at the very END of the sheet instead of
-      // right after CBM/PKG (KG) as intended.
-      const mumTotalsPos = cbmPerPkgCol.position + 1;
-
-      const mumColName = `${mumLabel} ${nextMumNum}`;
-      const companions: { name: string; data_type: PlanningColumnDataType; pos: number | null }[] = [
-        { name: mumColName, data_type: "number", pos: mumMainPos },
-        { name: `${mumLabel}${nextMumNum} Remarks`, data_type: "text", pos: mumMainPos !== null ? mumMainPos + 1 : null },
-        { name: `NO. OF PKG ${mumLabel.toUpperCase()}${nextMumNum}`, data_type: "number", pos: mumTotalsPos },
-        { name: `TOTAL WEIGHT ${mumLabel.toUpperCase()}${nextMumNum}`, data_type: "number", pos: mumTotalsPos + 1 },
-        { name: `TOTAL CBM ${mumLabel.toUpperCase()}${nextMumNum}`, data_type: "number", pos: mumTotalsPos + 2 },
-      ];
-
-      const created: PlanningColumn[] = [];
-      for (const companion of companions) {
-        const { data } = await apiPost<PlanningColumn>(`/planning/sheets/${activeSheetId}/columns`, {
-          name: companion.name,
-          data_type: companion.data_type,
-          position: companion.pos,
-        });
-        if (data) created.push(data);
+      if (updatedColumns && Array.isArray(updatedColumns)) {
+        setGrid((prev) => (prev ? { ...prev, columns: updatedColumns } : prev));
       }
-
-      // NO. OF PKG / TOTAL WEIGHT / TOTAL CBM <LABEL><n> always use one
-      // fixed backend formula (<Label><n> / PKG QTY, then x UNIT
-      // WEIGHT/PKG or x CBM/PKG) -- the backend recognizes these three
-      // names (using the SHEET'S OWN group label, never hardcoded "Mum";
-      // see app.planning.service.is_fixed_mum_derived_column) and
-      // computes them itself; the formula_expression sent here is just a
-      // human-readable label, not something the backend actually
-      // evaluates for these columns.
-      //
-      // The lookups below use `${labelUpper}${nextMumNum}` (matching how
-      // `companions` above actually named these columns at creation,
-      // via `mumLabel.toUpperCase()`), NOT a hardcoded "MUM" -- a
-      // previous version of this code searched for literally
-      // `NO. OF PKG MUM${nextMumNum}` regardless of the sheet's real
-      // label, so on any CN/TN/etc-labeled sheet `created.find(...)`
-      // never matched (the column was actually named "NO. OF PKG CN1",
-      // not "NO. OF PKG MUM1"), `wireFixedFormula` silently no-op'd for
-      // all three columns, and they stayed plain MANUAL number columns
-      // forever -- no formula wiring, no "ƒx" badge, and no live
-      // recomputation, even though the identically-named Mum-labeled
-      // sheet's totals worked perfectly.
-      const labelUpper = mumLabel.toUpperCase();
-      const pkgCol = created.find((c) => c.name === `NO. OF PKG ${labelUpper}${nextMumNum}`);
-      const weightCol = created.find((c) => c.name === `TOTAL WEIGHT ${labelUpper}${nextMumNum}`);
-      const cbmCol = created.find((c) => c.name === `TOTAL CBM ${labelUpper}${nextMumNum}`);
-
-      async function wireFixedFormula(col: PlanningColumn | undefined, label: string) {
-        if (!col || !activeSheetId) return;
-        try {
-          await apiPut(`/planning/sheets/${activeSheetId}/columns/${col.id}/source`, {
-            source_type: "formula",
-            formula_expression: label,
-            enable_description: false,
-            auto_populate_enabled: false,
-            auto_populate_limit: null,
-          });
-        } catch {
-          // Non-fatal: the column just stays a plain manual number column if the formula couldn't be saved.
-        }
-      }
-
-      await wireFixedFormula(pkgCol, `${quoteColumnRef(mumColName)} / ${quoteColumnRef(pkgQtyCol.name)}`);
-      await wireFixedFormula(weightCol, `NO. OF PKG ${labelUpper}${nextMumNum} * ${quoteColumnRef(unitWeightCol.name)}`);
-      await wireFixedFormula(cbmCol, `NO. OF PKG ${labelUpper}${nextMumNum} * ${quoteColumnRef(cbmPerPkgCol.name)}`);
-
       await loadGrid(activeSheetId);
     } catch (err) {
       setError(err);
     } finally {
       setCreatingNextMum(false);
-    }
-  }
-
-  const [loadingMoreProducts, setLoadingMoreProducts] = useState(false);
-
-  /**
-   * "Load more products" -- pulls the next page of Product Master
-   * records into the sheet as new linked rows.
-   *
-   * `grid.total_rows` is now the TRUE Product Master total (optionally
-   * narrowed by the active Organization filter), not just how many rows
-   * happen to be linked already -- see PlanningService.get_grid's
-   * auto-population-on-read. That means `loadMoreRows()` (a plain
-   * `/grid?offset=...` call) is now sufficient on its own: the backend
-   * transparently creates whatever linked rows are still missing to
-   * cover the requested page before returning it, the same
-   * `auto_populate_rows_from_item_source` path this button used to call
-   * directly. Kept as a distinctly-labeled button (matching Product
-   * Master's own "Load More" language) since "pull the next batch from
-   * Product Master" reads more clearly here than a generic "Load more"
-   * would, but it no longer needs its own separate API call.
-   */
-  async function handleLoadMoreProducts() {
-    if (!activeSheetId) return;
-    setLoadingMoreProducts(true);
-    setError(null);
-    try {
-      await loadMoreRows();
-    } catch (err) {
-      setError(err);
-    } finally {
-      setLoadingMoreProducts(false);
     }
   }
 
@@ -2374,6 +2367,29 @@ export function PlanningPage() {
           }
           : prev
       );
+    } catch (err) {
+      setError(err);
+    }
+  }
+
+  /**
+   * Persist a drag-resized column width to the server (shared across
+   * every user viewing this sheet -- see PlanningColumn.width_px's
+   * docstring). Updates local state optimistically first since the drag
+   * gesture itself already gave the user immediate visual feedback (see
+   * ColumnHeader's handleResizeStart) -- this call is just making that
+   * already-applied width durable, not the thing that makes the column
+   * visually resize.
+   */
+  async function handleResizeColumn(columnId: string, widthPx: number) {
+    if (!activeSheetId) return;
+    setGrid((prev) =>
+      prev
+        ? { ...prev, columns: prev.columns.map((c) => (c.id === columnId ? { ...c, width_px: widthPx } : c)) }
+        : prev
+    );
+    try {
+      await apiPatch(`/planning/sheets/${activeSheetId}/columns/${columnId}/width`, { width_px: widthPx });
     } catch (err) {
       setError(err);
     }
@@ -2717,39 +2733,78 @@ export function PlanningPage() {
           </h1>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             {/*
-              Organization filter -- NOT a real column stored anywhere on
-              this sheet. Membership is read live off each row's linked
-              Product Master record (Product.organization_ids) by the
-              backend on every grid load (see
-              PlanningRowRepository._linked_record_ids_for_organization),
-              the same "extract from Product Master, never a stale copy"
-              rule every other Shipment Planning lookup column already
-              follows. Selecting a value here only changes what's shown
-              for the currently-open sheet -- it can never add/edit/
-              delete anything; that still only happens via Product Master.
+              Once a sheet has a REAL organization+branch link
+              (grid?.sheet?.organization_id/branch_id -- required for
+              every sheet created going forward, see
+              PlanningService.create_sheet), the backend always filters
+              to that exact branch regardless of any request-time
+              override (see PlanningService.get_grid's docstring) -- so
+              showing an editable "All Organizations" dropdown here would
+              be misleading for a linked sheet; it show a locked badge
+              instead. Only a LEGACY sheet (organization_id is null --
+              created before this feature existed) still shows the old
+              editable dropdown, unchanged.
             */}
-            <select
-              value={activeOrganizationId ?? ""}
-              onChange={(e) => handleChangeOrganizationFilter(e.target.value || null)}
-              disabled={!activeSheetId}
-              title="Filter this sheet by Organization (from Product Master)"
-              style={{
-                border: "1px solid #CBD5E1",
-                borderRadius: 6,
-                padding: "6px 10px",
-                fontSize: 13,
-                color: activeOrganizationId ? "#2563EB" : "#334155",
-                background: activeOrganizationId ? "#EFF6FF" : "#FFFFFF",
-                cursor: activeSheetId ? "pointer" : "not-allowed",
-              }}
-            >
-              <option value="">All Organizations</option>
-              {organizations.items.map((org) => (
-                <option key={org.id} value={org.id}>
-                  {org.name}
-                </option>
-              ))}
-            </select>
+            {grid?.sheet?.organization_id ? (
+              <span
+                title="This sheet is linked to one specific branch and always shows only that branch's products."
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  border: "1px solid #CBD5E1",
+                  borderRadius: 6,
+                  padding: "6px 10px",
+                  fontSize: 13,
+                  color: "#2563EB",
+                  background: "#EFF6FF",
+                }}
+              >
+                🔒{" "}
+                {organizations.items.find((o) => o.id === grid.sheet.organization_id)?.name ?? "Organization"}
+                {" — "}
+                {(organizations.items.find((o) => o.id === grid.sheet.organization_id)?.branches || []).find(
+                  (b) => b.id === grid.sheet.branch_id
+                )?.name ?? "Branch"}
+              </span>
+            ) : (
+              /*
+                Organization filter -- NOT a real column stored anywhere on
+                this sheet. Membership is read live off each row's linked
+                Product Master record (Product.organization_ids) by the
+                backend on every grid load (see
+                PlanningRowRepository._linked_record_ids_for_organization),
+                the same "extract from Product Master, never a stale copy"
+                rule every other Shipment Planning lookup column already
+                follows. Selecting a value here only changes what's shown
+                for the currently-open sheet -- it can never add/edit/
+                delete anything; that still only happens via Product Master.
+                Only shown for LEGACY sheets (see the branch above) --
+                every sheet created going forward is always linked.
+              */
+              <select
+                value={activeOrganizationId ?? ""}
+                onChange={(e) => handleChangeOrganizationFilter(e.target.value || null)}
+                disabled={!activeSheetId}
+                title="Filter this sheet by Organization (from Product Master)"
+                style={{
+                  border: "1px solid #CBD5E1",
+                  borderRadius: 6,
+                  padding: "6px 10px",
+                  fontSize: 13,
+                  color: activeOrganizationId ? "#2563EB" : "#334155",
+                  background: activeOrganizationId ? "#EFF6FF" : "#FFFFFF",
+                  cursor: activeSheetId ? "pointer" : "not-allowed",
+                }}
+              >
+                <option value="">All Organizations</option>
+                {organizations.items.map((org) => (
+                  <option key={org.id} value={org.id}>
+                    {org.name}
+                  </option>
+                ))}
+              </select>
+            )}
             <button type="button" className="btn btn-secondary" onClick={handleOpenHistory} disabled={!activeSheetId}>
               History
             </button>
@@ -2758,8 +2813,9 @@ export function PlanningPage() {
                 type="button"
                 className="btn btn-secondary"
                 onClick={() => {
-                  setNewSheetName("");
                   setNewSheetGroupLabel("Mum");
+                  setNewSheetOrganizationId("");
+                  setNewSheetBranchId("");
                   setAddSheetOpen(true);
                 }}
               >
@@ -2771,9 +2827,48 @@ export function PlanningPage() {
 
         <Banner error={error} />
 
+        {/*
+          Which organization's branches show as tabs at all -- separate
+          from the "Organization" control in the toolbar above (which
+          either filters ROWS on the currently-open legacy sheet, or
+          shows a locked badge for a branch-linked sheet). This one
+          controls the TAB BAR itself: pick an organization here and
+          only ITS sheets remain visible below; if it has none yet, the
+          tab bar goes blank rather than falling back to some other
+          organization's sheet (see the visibleSheets/effect above for
+          the exact fallback rules).
+        */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+          <label htmlFor="tab_organization_filter" style={{ fontSize: 13, fontWeight: 600, color: "#475569" }}>
+            Organization:
+          </label>
+          <select
+            id="tab_organization_filter"
+            value={tabOrganizationFilterId ?? ""}
+            onChange={(e) => setTabOrganizationFilterId(e.target.value || null)}
+            title="Show only this organization's branch tabs"
+            style={{
+              border: "1px solid #CBD5E1",
+              borderRadius: 6,
+              padding: "6px 10px",
+              fontSize: 13,
+              color: tabOrganizationFilterId ? "#2563EB" : "#334155",
+              background: tabOrganizationFilterId ? "#EFF6FF" : "#FFFFFF",
+              cursor: "pointer",
+            }}
+          >
+            <option value="">All Organizations</option>
+            {organizations.items.map((org) => (
+              <option key={org.id} value={org.id}>
+                {org.name}
+              </option>
+            ))}
+          </select>
+        </div>
+
         {/* Sheet tabs -- one per branch (Mum Branch, MP Branch, GJ Branch, ...), unlimited. */}
         <div style={{ display: "flex", gap: 4, borderBottom: "1px solid #E2E8F0", marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
-          {sheets.map((sheet) => (
+          {visibleSheets.map((sheet) => (
             <div
               key={sheet.id}
               style={{
@@ -2835,8 +2930,12 @@ export function PlanningPage() {
               </Can>
             </div>
           ))}
-          {sheets.length === 0 && !loading && (
-            <div className="muted" style={{ padding: "8px 4px" }}>No sheets yet. Add one to get started.</div>
+          {visibleSheets.length === 0 && !loading && (
+            <div className="muted" style={{ padding: "8px 4px" }}>
+              {sheets.length === 0
+                ? "No sheets yet. Add one to get started."
+                : `No sheets yet for ${organizations.items.find((o) => o.id === tabOrganizationFilterId)?.name ?? "this organization"}.`}
+            </div>
           )}
         </div>
 
@@ -2865,20 +2964,9 @@ export function PlanningPage() {
                   {creatingNextMum ? `Creating Next ${grid?.sheet?.mum_group_label || "Mum"}…` : `+ Next ${grid?.sheet?.mum_group_label || "Mum"}`}
                 </button>
               </Can>
-              <Can permission="planning.row.manage">
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  onClick={handleLoadMoreProducts}
-                  disabled={loadingMoreProducts || !activeSheetId || !grid || rows.length >= (grid.total_rows ?? 0)}
-                  title="Pull the next 50 products from Product Master as new rows (already-loaded products are skipped)"
-                >
-                  {loadingMoreProducts ? "Loading…" : "Load More Products"}
-                </button>
-              </Can>
               {activeFilterCount > 0 && (
                 <div style={{ display: "flex", alignItems: "center", gap: 6, background: "#EFF6FF", border: "1px solid #BFDBFE", borderRadius: 6, padding: "5px 10px", fontSize: 12, color: "#1E40AF", marginLeft: "auto" }}>
-                  <span>🔍 <strong>{activeFilterCount}</strong> filter(s) active ({filteredRows.length} of {rows.length} rows)</span>
+                  <span>🔍 <strong>{activeFilterCount}</strong> filter(s) active ({grid?.total_rows ?? rows.length} matching row{(grid?.total_rows ?? rows.length) === 1 ? "" : "s"} across the whole sheet)</span>
                   <button
                     type="button"
                     onClick={clearAllSheetFilters}
@@ -2890,7 +2978,7 @@ export function PlanningPage() {
               )}
             </div>
 
-            <div style={{ overflow: "auto", border: "1px solid #E2E8F0", borderRadius: 8, maxHeight: "calc(100vh - 210px)" }}>
+            <div ref={scrollContainerRef} style={{ overflow: "auto", border: "1px solid #E2E8F0", borderRadius: 8, maxHeight: "calc(100vh - 210px)" }}>
               <table style={{ borderCollapse: "separate", borderSpacing: 0, width: "max-content", minWidth: "100%", fontSize: 13 }}>
                 <thead>
                   <tr style={{ background: "#F8FAFC" }}>
@@ -2917,6 +3005,8 @@ export function PlanningPage() {
                         stickyLeft={stickyLeftByColumnId.get(col.id)}
                         isFiltered={!!(activeColumnFilters[`${activeSheetId}:${col.id}`]?.selectedValues?.size || activeColumnFilters[`${activeSheetId}:${col.id}`]?.textQuery)}
                         onOpenFilter={(anchor) => setFilterPopover({ anchor, columnId: col.id, columnName: col.name })}
+                        width={effectiveColumnWidth(col)}
+                        onResize={canManageColumns ? (widthPx) => handleResizeColumn(col.id, widthPx) : undefined}
                       />
                     ))}
                   </tr>
@@ -2925,20 +3015,24 @@ export function PlanningPage() {
                   {loading ? (
                     <TableMessageRow colSpan={orderedColumns.length + 1}>Loading grid…</TableMessageRow>
                   ) : rows.length === 0 ? (
-                    <TableMessageRow colSpan={orderedColumns.length + 1}>No rows yet. Add one to get started.</TableMessageRow>
-                  ) : filteredRows.length === 0 ? (
                     <TableMessageRow colSpan={orderedColumns.length + 1}>
-                      No rows match the active filter(s).{" "}
-                      <button
-                        type="button"
-                        onClick={clearAllSheetFilters}
-                        style={{ border: "none", background: "transparent", cursor: "pointer", color: "#2563EB", textDecoration: "underline", fontSize: 13 }}
-                      >
-                        Clear filters
-                      </button>
+                      {activeFilterCount > 0 ? (
+                        <>
+                          No rows match the active filter(s).{" "}
+                          <button
+                            type="button"
+                            onClick={clearAllSheetFilters}
+                            style={{ border: "none", background: "transparent", cursor: "pointer", color: "#2563EB", textDecoration: "underline", fontSize: 13 }}
+                          >
+                            Clear filters
+                          </button>
+                        </>
+                      ) : (
+                        "No rows yet. Add one to get started."
+                      )}
                     </TableMessageRow>
                   ) : (
-                    filteredRows.map((row) => (
+                    rows.map((row) => (
                       <tr key={row.id}>
                         <EditableRowLabel
                           label={row.label}
@@ -2971,23 +3065,42 @@ export function PlanningPage() {
                               isFrozen={isTestColumn(col.name) || isApprovalDateColumn(col.name) || frozenColumnIds.has(col.id)}
                               isLastFrozen={col.id === lastFrozenColumnId}
                               stickyLeft={stickyLeftByColumnId.get(col.id)}
+                              width={effectiveColumnWidth(col)}
                             />
                           );
                         })}
                       </tr>
                     ))
                   )}
+                  {/*
+                    Auto-load-ahead sentinel: an empty, near-invisible row
+                    the IntersectionObserver above watches. Only rendered
+                    while there are still more rows to fetch (or an
+                    in-flight fetch we're waiting on) -- once every row is
+                    loaded there's nothing left to trigger, so it's
+                    removed entirely rather than sitting there as dead
+                    weight. A small text hint doubles as a "yes, this is
+                    still loading" affordance for anyone watching closely,
+                    without being an actual clickable "Load more" control
+                    -- the whole point is that no click is needed.
+                  */}
+                  {!loading && grid && rows.length < (grid.total_rows ?? 0) && (
+                    <tr ref={scrollSentinelRef}>
+                      <td colSpan={orderedColumns.length + 1} style={{ textAlign: "center", padding: "10px 0", color: "#94A3B8", fontSize: 12, border: "none" }}>
+                        {loadingMoreRows ? "Loading more…" : ""}
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>
 
             {/*
-              Pagination footer -- "Showing 1-50 of N total" plus a "Load more"
-              button, mirroring Product Master's own list footer. The grid
-              endpoint now only returns one page of rows at a time (see
-              loadGrid/loadMoreRows above); clicking "Load more" appends the
-              next page onto what's already rendered rather than replacing
-              it, so nothing already loaded is ever dropped.
+              Footer: "Showing X of Y total" only -- no manual "Load
+              more" button anymore. Rows beyond what's currently
+              rendered load automatically as the user scrolls (see the
+              sentinel row + IntersectionObserver above), so this is
+              purely informational now.
             */}
             {grid && typeof grid.total_rows === "number" && grid.total_rows > 0 && (
               <div
@@ -3005,12 +3118,8 @@ export function PlanningPage() {
               >
                 <span>
                   Showing <strong>1–{rows.length}</strong> of <strong>{grid.total_rows}</strong> total
+                  {rows.length < grid.total_rows && <span style={{ color: "#94A3B8" }}> · scroll for more</span>}
                 </span>
-                {rows.length < grid.total_rows && (
-                  <button type="button" className="btn btn-secondary" onClick={() => void loadMoreRows()} disabled={loadingMoreRows}>
-                    {loadingMoreRows ? "Loading…" : `Load ${Math.min(GRID_PAGE_SIZE, grid.total_rows - rows.length)} more`}
-                  </button>
-                )}
               </div>
             )}
           </>
@@ -3059,46 +3168,6 @@ export function PlanningPage() {
               <div style={{ fontSize: 12, color: "#94A3B8", marginTop: 6 }}>
                 Renames every "{grid?.sheet?.mum_group_label || "Mum"} N" column and formula on this sheet to "
                 {groupLabelDraft.trim() || "…"} N" -- row and cell data is unaffected.
-              </div>
-            </div>
-            {/*
-              Column-order repair -- separate one-off action for sheets
-              affected by the since-fixed "+Next <label>" positioning bug
-              (see PlanningService.normalize_column_order). Safe to click
-              even if the order already looks right -- it's a no-op then.
-            */}
-            <div style={{ marginBottom: 14, paddingBottom: 14, borderBottom: "1px solid #E2E8F0" }}>
-              <div style={{ fontSize: 11, fontWeight: 600, color: "#94A3B8", textTransform: "uppercase", marginBottom: 6 }}>
-                Column Order
-              </div>
-              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                <button type="button" className="btn btn-secondary" onClick={() => void handleFixColumnOrder()} disabled={fixingColumnOrder}>
-                  {fixingColumnOrder ? "Fixing…" : "Fix Column Order"}
-                </button>
-                <span style={{ fontSize: 12, color: "#94A3B8" }}>
-                  Groups every group's columns together, then the shared block, then every group's totals together. Safe to run anytime.
-                </span>
-              </div>
-            </div>
-            {/*
-              Fixed-formula repair -- separate one-off action for sheets
-              whose NO. OF PKG/TOTAL WEIGHT/TOTAL CBM columns never got
-              wired to a live formula because "+Next <label>" used to
-              only match columns literally named "MUM<n>" (see
-              PlanningService.repair_fixed_mum_formulas). Safe to click
-              even if every column is already wired -- it's a no-op then.
-            */}
-            <div style={{ marginBottom: 14, paddingBottom: 14, borderBottom: "1px solid #E2E8F0" }}>
-              <div style={{ fontSize: 11, fontWeight: 600, color: "#94A3B8", textTransform: "uppercase", marginBottom: 6 }}>
-                Formula Columns
-              </div>
-              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                <button type="button" className="btn btn-secondary" onClick={() => void handleRepairFixedFormulas()} disabled={repairingFormulas}>
-                  {repairingFormulas ? "Repairing…" : "Repair Formula Columns"}
-                </button>
-                <span style={{ fontSize: 12, color: "#94A3B8" }}>
-                  Wires up any NO. OF PKG / TOTAL WEIGHT / TOTAL CBM column stuck without the "ƒx" live calculation. Safe to run anytime.
-                </span>
               </div>
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 2, maxHeight: "50vh", overflowY: "auto" }}>
@@ -3210,33 +3279,84 @@ export function PlanningPage() {
         {addSheetOpen && (
           <SimpleModal title="Add Sheet (Branch Tab)" onClose={() => setAddSheetOpen(false)}>
             <form onSubmit={handleCreateSheet}>
-              <TextField
-                id="new_sheet_name"
-                label="Sheet / Branch Name *"
-                required
-                placeholder="e.g. CN Branch, MP Branch, Mum branch"
-                value={newSheetName}
-                onChange={(val) => {
-                  setNewSheetName(val);
-                  const firstWord = val.trim().split(/\s+/)[0];
-                  if (firstWord && (newSheetGroupLabel === "" || newSheetGroupLabel === "Mum")) {
-                    setNewSheetGroupLabel(firstWord);
+              {/*
+                Every sheet must now be linked to one real branch from
+                Product Master's organization list (see
+                PlanningSheet.organization_id/branch_id) -- this replaces
+                "branch" being nothing more than whatever text was typed
+                into a name field. There is no separate sheet-name input
+                anymore: the sheet's name is always exactly the selected
+                branch's own name (see handleCreateSheet), so the tab
+                shown next to "Mumbai Branch"/"Chennai Branch" always
+                matches Product Master's branch list verbatim, instead of
+                risking two different names for the same branch. Branch
+                options are scoped to whichever organization is currently
+                selected; picking a different organization clears the
+                branch selection since a branch id from one organization
+                is meaningless for another.
+              */}
+              <div style={{ marginTop: 12 }}>
+                <SelectField
+                  id="new_sheet_organization"
+                  label="Organization *"
+                  required
+                  value={newSheetOrganizationId}
+                  onChange={(v) => {
+                    setNewSheetOrganizationId(v);
+                    setNewSheetBranchId("");
+                  }}
+                  hint="Which Product Master organization this sheet's branch belongs to."
+                >
+                  <option value="">Select an organization…</option>
+                  {organizations.items.map((org) => (
+                    <option key={org.id} value={org.id}>
+                      {org.name}
+                    </option>
+                  ))}
+                </SelectField>
+              </div>
+              <div style={{ marginTop: 12 }}>
+                <SelectField
+                  id="new_sheet_branch"
+                  label="Branch *"
+                  required
+                  value={newSheetBranchId}
+                  onChange={setNewSheetBranchId}
+                  hint={
+                    !newSheetOrganizationId
+                      ? "Pick an organization first."
+                      : "This sheet will only show Product Master rows in this exact branch."
                   }
-                }}
-              />
-              <TextField
-                id="new_sheet_group_label"
-                label="Group Label Name *"
-                required
-                placeholder="e.g. CN, MP, Mum, Chen"
-                value={newSheetGroupLabel}
-                onChange={setNewSheetGroupLabel}
-              />
+                >
+                  <option value="">
+                    {newSheetOrganizationId ? "Select a branch…" : "Select an organization first"}
+                  </option>
+                  {(organizations.items.find((o) => o.id === newSheetOrganizationId)?.branches || []).map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.name}
+                    </option>
+                  ))}
+                </SelectField>
+              </div>
+              <div style={{ marginTop: 12 }}>
+                <TextField
+                  id="new_sheet_group_label"
+                  label="Group Label Name *"
+                  required
+                  placeholder="e.g. CN, MP, Mum, Chen"
+                  value={newSheetGroupLabel}
+                  onChange={setNewSheetGroupLabel}
+                />
+              </div>
               <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
                 <button type="button" className="btn btn-secondary" onClick={() => setAddSheetOpen(false)}>
                   Cancel
                 </button>
-                <button type="submit" className="btn btn-primary">
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={!newSheetGroupLabel.trim() || !newSheetOrganizationId || !newSheetBranchId}
+                >
                   Create Sheet
                 </button>
               </div>
@@ -3321,6 +3441,8 @@ function ColumnHeader({
   stickyLeft,
   isFiltered,
   onOpenFilter,
+  width,
+  onResize,
 }: {
   column: PlanningColumn;
   canManage: boolean;
@@ -3332,17 +3454,63 @@ function ColumnHeader({
   stickyLeft: number | undefined;
   isFiltered?: boolean;
   onOpenFilter?: (anchor: HTMLElement) => void;
+  /** This column's effective width (computed from its header label, or manually resized). Falls back to CELL_MIN_WIDTH if omitted. */
+  width?: number;
+  /** Called with the final width (px) once the user releases a drag-resize. Omit to disable resizing (e.g. the ITEM column, which has its own header component). */
+  onResize?: (widthPx: number) => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(column.name);
   const [hovered, setHovered] = useState(false);
   const [descAnchor, setDescAnchor] = useState<HTMLElement | null>(null);
+  const [resizing, setResizing] = useState(false);
   const hasDescription = !!column.description;
+  const colWidth = width ?? CELL_MIN_WIDTH;
 
   function commit() {
     setEditing(false);
     if (draft.trim() && draft.trim() !== column.name) onRename(draft.trim());
     else setDraft(column.name);
+  }
+
+  /**
+   * Excel-style drag-to-resize: track the pointer's raw movement (not
+   * its absolute position, which would jump if the sheet itself is
+   * mid-scroll) relative to the width at drag-start, live-updating a
+   * local CSS variable on the <th> for zero-re-render dragging feedback,
+   * then committing the final width via onResize only once on release
+   * (drag-resize would otherwise fire a network request on every pixel
+   * of mouse movement).
+   */
+  function handleResizeStart(e: React.MouseEvent<HTMLDivElement>) {
+    if (!onResize) return;
+    const resizeCallback = onResize;
+    e.preventDefault();
+    e.stopPropagation();
+    const th = e.currentTarget.closest("th") as HTMLTableCellElement | null;
+    const startX = e.clientX;
+    const startWidth = colWidth;
+    setResizing(true);
+
+    function handleMouseMove(moveEvent: MouseEvent) {
+      const delta = moveEvent.clientX - startX;
+      const next = Math.max(CELL_MIN_WIDTH, Math.min(CELL_MAX_WIDTH, startWidth + delta));
+      if (th) {
+        th.style.width = `${next}px`;
+        th.style.minWidth = `${next}px`;
+        th.style.maxWidth = `${next}px`;
+      }
+    }
+    function handleMouseUp(upEvent: MouseEvent) {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+      setResizing(false);
+      const delta = upEvent.clientX - startX;
+      const next = Math.max(CELL_MIN_WIDTH, Math.min(CELL_MAX_WIDTH, startWidth + delta));
+      if (next !== startWidth) resizeCallback(next);
+    }
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
   }
 
   const sourceBadge =
@@ -3361,9 +3529,9 @@ function ColumnHeader({
       style={{
         padding: "5px 8px",
         textAlign: "center",
-        minWidth: CELL_MIN_WIDTH,
-        width: CELL_MIN_WIDTH,
-        maxWidth: CELL_MIN_WIDTH,
+        minWidth: colWidth,
+        width: colWidth,
+        maxWidth: colWidth,
         boxSizing: "border-box",
         borderBottom: "1px solid #E2E8F0",
         borderRight: isFrozen && isLastFrozen ? "2px solid #CBD5E1" : "1px solid #E2E8F0",
@@ -3506,6 +3674,22 @@ function ColumnHeader({
           initialValue={column.description ?? ""}
           onSave={(text) => onSaveDescription(text || null)}
           onClose={() => setDescAnchor(null)}
+        />
+      )}
+      {onResize && (
+        <div
+          onMouseDown={handleResizeStart}
+          title="Drag to resize column"
+          style={{
+            position: "absolute",
+            top: 0,
+            right: -2,
+            bottom: 0,
+            width: 5,
+            cursor: "col-resize",
+            zIndex: 13,
+            background: resizing ? "#2563EB" : "transparent",
+          }}
         />
       )}
     </th>

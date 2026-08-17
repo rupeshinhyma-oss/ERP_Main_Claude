@@ -47,15 +47,17 @@ async def _record_org_action(
     request.state.audit_logged = True
 
 
+from app.auth.dependencies import get_current_user
 from app.rbac.dependencies import require_super_admin
+
 
 @router.get("", summary="Get the organization profile")
 async def get_organization(
     request: Request,
     organization_service: OrganizationService = Depends(get_organization_service),
-    _current_user: CurrentUser = Depends(require_super_admin()),
+    _current_user: CurrentUser = Depends(get_current_user),
 ) -> dict:
-    """Fetch the single company profile. Only accessible by Super Administrators."""
+    """Fetch the single company profile. Accessible by all authenticated users for branding."""
     organization = await organization_service.get_or_raise()
     data = OrganizationRead.model_validate(organization).model_dump(mode="json")
     return build_success_response(data=data, request_id=request.state.request_id)

@@ -32,6 +32,7 @@ from app.core.exceptions import BadRequestException, ConflictException, NotFound
 from app.masters.countries.repository import CountryRepository
 from app.masters.product_categories.repository import ProductCategoryRepository
 from app.masters.product_sub_categories.repository import ProductSubCategoryRepository
+from app.planning.ws_manager import notify_source_record_changed, refresh_planning_cells_for_record
 
 DROPDOWN_CACHE_NAME = "buyers"
 
@@ -327,6 +328,11 @@ class BuyerService:
                 )
 
         await self._invalidate_cache()
+        # Same store-on-write hook as Products/Suppliers -- Buyers is a
+        # registered Shipment Planning source module too (see
+        # app.planning.source_registry's buyer module).
+        await notify_source_record_changed("buyer", buyer_id)
+        await refresh_planning_cells_for_record(self.repository.session, "buyer", buyer_id)
         return await self.get_by_id_or_raise(buyer_id)
 
     async def update_grade(self, buyer_id: uuid.UUID, buyer_grade: Any) -> Buyer:
@@ -334,6 +340,10 @@ class BuyerService:
         buyer = await self.get_by_id_or_raise(buyer_id)
         await self.repository.update(buyer, buyer_grade=buyer_grade)
         await self._invalidate_cache()
+        # Bypasses update() above, but buyer_grade is itself a registered
+        # Planning source field -- needs the same refresh hook.
+        await notify_source_record_changed("buyer", buyer_id)
+        await refresh_planning_cells_for_record(self.repository.session, "buyer", buyer_id)
         return buyer
 
     async def update_potential(self, buyer_id: uuid.UUID, potential: Any) -> Buyer:
@@ -409,3 +419,134 @@ class BuyerService:
                 "directly -- edit it via the buyer's own contact fields instead."
             )
         await self.contact_repository.delete(contact)
+
+    # ------------------------------------------------------------------
+    # Import / Export
+    # ------------------------------------------------------------------
+
+    async def export_file(self, file_format: str) -> bytes:
+        """Export buyers to CSV or XLSX with clean human-readable business headers matching UI table sequence."""
+        from app.buyers.constants import EXPORT_HEADERS
+        from app.masters.import_export import build_csv_export, build_excel_export
+
+        buyers = await self.repository.list_all()
+
+        countries = {c.id: c.name for c in await self.country_repository.list_all()}
+        categories = {c.id: c.name for c in await self.category_repository.list_all()}
+        sub_categories = {sc.id: sc.name for sc in await self.sub_category_repository.list_all()}
+
+        rows = []
+        for b in buyers:
+            emails = [e.email for e in b.emails]
+            cat_names = [categories.get(link.category_id, "") for link in b.category_links if link.category_id in categories]
+            sub_cat_names = [sub_categories.get(link.sub_category_id, "") for link in b.sub_category_links if link.sub_category_id in sub_categories]
+
+            buyer_type_str = b.buyer_type.value.upper() if hasattr(b.buyer_type, "value") else str(b.buyer_type or "").upper()
+            curr_status_str = b.current_status.value.upper() if hasattr(b.current_status, "value") else str(b.current_status or "").upper()
+            potential_str = b.potential.value.upper() if hasattr(b.potential, "value") else str(b.potential or "").upper()
+            grade_str = f"Grade {b.buyer_grade.value.upper()}" if hasattr(b.buyer_grade, "value") else (f"Grade {b.buyer_grade}" if b.buyer_grade else "")
+
+            rows.append(
+                {
+                    "Company Name": b.company_name,
+                    "Buyer Type": buyer_type_str,
+                    "Product Categories": ", ".join(filter(None, cat_names)),
+                    "Product Sub Categories": ", ".join(filter(None, sub_cat_names)),
+                    "Country": countries.get(b.country_id, ""),
+                    "City": b.city or "",
+                    "Address": b.address or "",
+                    "Contact Salutation": b.contact_salutation or "",
+                    "Contact Person Name": b.contact_full_name or "",
+                    "Designation": b.contact_designation or "",
+                    "Calling Number": b.contact_calling_number or "",
+                    "WhatsApp Number": b.contact_whatsapp_number or "",
+                    "Emails": ", ".join(emails),
+                    "Tax ID / GST Number": b.tax_id_number or "",
+                    "Website": b.website or "",
+                    "Current Status": curr_status_str,
+                    "Buyer Grade": grade_str,
+                    "Potential": potential_str,
+                    "Potential Reason": b.potential_reason or "",
+                    "Product Range": b.product_range or "",
+                    "Currently Buying From": b.currently_buying_from or "",
+                    "Overall Remarks": b.overall_remarks or "",
+                    "Status": "active" if b.is_active else "inactive",
+                }
+            )
+        if file_format == "csv":
+            return build_csv_export(EXPORT_HEADERS, rows)
+        return build_excel_export(EXPORT_HEADERS, rows, sheet_title="Buyers")
+
+    async def import_file(self, filename: str, raw_bytes: bytes) -> Any:
+        """Validate and import buyers from an uploaded CSV/XLSX file with 3-way duplicate detection."""
+        from app.buyers.validators import validate_buyer_row
+        from app.masters.import_export import parse_rows_from_file, run_import
+
+        rows = parse_rows_from_file(filename, raw_bytes)
+
+        all_countries = await self.country_repository.list_all()
+        all_cats = await self.category_repository.list_all()
+        all_sub_cats = await self.sub_category_repository.list_all()
+
+        seen_in_batch = set()
+
+        async def _create(field_values: dict[str, Any]) -> Buyer:
+            company_name = field_values["company_name"].strip()
+            calling_num = field_values.get("contact_calling_number")
+            wa_num = field_values.get("contact_whatsapp_number")
+            country_raw = field_values.pop("country_raw", "").strip()
+            cat_names_raw = field_values.pop("category_names_raw", None)
+            sub_cat_names_raw = field_values.pop("sub_category_names_raw", None)
+
+            # In-batch duplicate check
+            batch_key = company_name.lower()
+            if batch_key in seen_in_batch:
+                raise ConflictException(f"Buyer '{company_name}' appears multiple times in the import file (duplicate).")
+
+            # DB 3-Way duplicate check
+            dup = await self.repository.find_duplicate(
+                company_name=company_name,
+                calling_number=calling_num,
+                whatsapp_number=wa_num,
+            )
+            if dup is not None:
+                raise ConflictException(f"Buyer '{company_name}' already exists (duplicate check: Company Name / Calling / WhatsApp Number).")
+
+            # Resolve Country
+            country = next(
+                (c for c in all_countries if c.code.upper() == country_raw.upper() or c.name.lower() == country_raw.lower()),
+                None
+            )
+            if country is None:
+                country = all_countries[0] if all_countries else None
+                if not country:
+                    raise ValueError(f"Country '{country_raw}' does not exist.")
+            field_values["country_id"] = country.id
+
+            # Resolve Category IDs if provided
+            category_ids = []
+            if cat_names_raw:
+                for cn in cat_names_raw.split(","):
+                    cn_clean = cn.strip().lower()
+                    matched_cat = next((c for c in all_cats if c.name.lower() == cn_clean), None)
+                    if matched_cat:
+                        category_ids.append(matched_cat.id)
+            field_values["category_ids"] = category_ids
+
+            # Resolve Sub-Category IDs if provided
+            sub_category_ids = []
+            if sub_cat_names_raw:
+                for scn in sub_cat_names_raw.split(","):
+                    scn_clean = scn.strip().lower()
+                    matched_sc = next((sc for sc in all_sub_cats if sc.name.lower() == scn_clean), None)
+                    if matched_sc:
+                        sub_category_ids.append(matched_sc.id)
+            field_values["sub_category_ids"] = sub_category_ids
+
+            buyer = await self.create(**field_values)
+            seen_in_batch.add(batch_key)
+            return buyer
+
+        summary = await run_import(rows, row_validator=validate_buyer_row, row_creator=_create)
+        await self._invalidate_cache()
+        return summary

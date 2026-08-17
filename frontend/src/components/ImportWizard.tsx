@@ -35,10 +35,11 @@ import type {
   ImportDuplicate,
   ImportHeader,
   ImportSummary,
+  InFileDuplicate,
   SheetRow,
 } from "@/types";
 
-export type { ColumnMapping, ImportDuplicate, ImportHeader, ImportSummary, SheetRow };
+export type { ColumnMapping, ImportDuplicate, ImportHeader, ImportSummary, InFileDuplicate, SheetRow };
 
 /* ------------------------------------------------------------------ */
 /* Header name normalization + fuzzy auto-match                        */
@@ -204,21 +205,29 @@ async function uploadChunk(
 function mergeSummaries(
   target: ImportSummary,
   chunkSummary: ImportSummary,
-  rowOffset: number
+  /**
+   * Maps a row's 1-indexed position *within this chunk's uploaded CSV*
+   * (2 = first data row, matching the backend's convention where row 1 is
+   * the header) to its true 1-indexed row number in the *original uploaded
+   * file*. Needed because deduping removes rows before chunking, so chunk
+   * position no longer lines up with original file position via a simple
+   * offset.
+   */
+  chunkRowToOriginalRow: (chunkRow: number) => number
 ): void {
   target.total_rows += chunkSummary.total_rows || 0;
   target.created += chunkSummary.created || 0;
   target.failed += chunkSummary.failed || 0;
   target.duplicate_count += chunkSummary.duplicate_count || 0;
   // Row numbers inside each chunk's summary are 1-indexed *within that chunk's
-  // own CSV* (row 1 = header, row 2 = first data row) -- offset them back to
-  // the row's true position in the original uploaded file so error/duplicate
+  // own CSV* (row 1 = header, row 2 = first data row) -- map them back to the
+  // row's true position in the original uploaded file so error/duplicate
   // messages point at the right row.
   for (const err of chunkSummary.errors || []) {
-    target.errors.push({ ...err, row: err.row + rowOffset });
+    target.errors.push({ ...err, row: chunkRowToOriginalRow(err.row) });
   }
   for (const dup of chunkSummary.duplicates || []) {
-    target.duplicates.push({ ...dup, row: dup.row + rowOffset });
+    target.duplicates.push({ ...dup, row: chunkRowToOriginalRow(dup.row) });
   }
 }
 
@@ -263,6 +272,116 @@ function idLabelForRow(rowData?: Record<string, unknown> | null): string | null 
     if (rowData[key]) return String(rowData[key]);
   }
   return null;
+}
+
+/* ------------------------------------------------------------------ */
+/* In-file duplicate detection (client-side, pre-chunking)             */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Candidate identity fields, in priority order, used to decide whether two
+ * rows in the *same uploaded file* represent the same record. Composite keys
+ * (e.g. a city's name + country + state) are built from every candidate that
+ * is both a target field the current module accepts (present in
+ * `importHeaders`) and actually mapped to a source column -- so this stays
+ * generic across every master page without per-module configuration here.
+ *
+ * Order matters: a code-like field alone is usually enough to identify a
+ * record, so it's checked first; name-like fields are combined with whatever
+ * "scoping" fields (country/state/category) are present so that e.g. two
+ * different countries' "Central" state don't collide.
+ */
+const IDENTITY_FIELD_GROUPS: string[][] = [
+  ["product_code"],
+  ["code", "category_code"], // sub-categories: code is only unique within a category
+  ["code"],
+  ["company_name", "country_code", "state_name", "city_name"], // suppliers
+  ["name", "country_code", "state_name"], // cities
+  ["name", "country_code"], // states
+  ["name"],
+];
+
+/**
+ * Pick the best identity field group for this module: the first group in
+ * priority order where every field is both a valid target header and mapped
+ * to a source column. Falls back to null (no in-file dedup) if nothing
+ * usable is found, rather than guessing with partial/unmapped fields.
+ */
+function pickIdentityFields(importHeaders: ImportHeader[], mapping: ColumnMapping): string[] | null {
+  const validKeys = new Set(importHeaders.map((h) => h.key));
+  for (const group of IDENTITY_FIELD_GROUPS) {
+    if (group.every((k) => validKeys.has(k) && !!mapping[k])) {
+      return group;
+    }
+  }
+  return null;
+}
+
+/** Normalize a cell value for duplicate comparison: trim + case-insensitive. */
+function normalizeKeyValue(value: unknown): string {
+  return String(value ?? "").trim().toLowerCase();
+}
+
+interface DedupeResult {
+  keptRows: SheetRow[];
+  /** Parallel to `keptRows`: the original index (in the pre-dedupe row list) of each kept row. */
+  keptOriginalIndexes: number[];
+  duplicates: InFileDuplicate[];
+}
+
+/**
+ * Scan every parsed row (before chunking) and drop rows whose identity
+ * (per `pickIdentityFields`) matches an earlier row already kept. Rows
+ * missing any identity field value are never deduped -- they pass through
+ * untouched, same as the backend's behavior for consistency.
+ *
+ * This has to run client-side, before the file is split into upload chunks:
+ * large files are uploaded in separate requests (see `CHUNK_SIZE` below), so
+ * two duplicate rows could otherwise land in different chunks and both get
+ * created, since each chunk is validated independently on the server.
+ */
+function dedupeRowsInFile(
+  rows: SheetRow[],
+  mapping: ColumnMapping,
+  identityFields: string[] | null
+): DedupeResult {
+  if (!identityFields) {
+    return { keptRows: rows, keptOriginalIndexes: rows.map((_, i) => i), duplicates: [] };
+  }
+
+  const seen = new Map<string, number>(); // composite key -> 1-indexed file row of first occurrence (header = row 1)
+  const keptRows: SheetRow[] = [];
+  const keptOriginalIndexes: number[] = [];
+  const duplicates: InFileDuplicate[] = [];
+
+  rows.forEach((row, index) => {
+    const fileRow = index + 2; // row 1 is the header
+    const values = identityFields.map((field) => {
+      const sourceCol = mapping[field];
+      return sourceCol ? normalizeKeyValue(row[sourceCol]) : "";
+    });
+
+    if (values.some((v) => v === "")) {
+      // Missing an identity field -- don't dedupe this row, let normal
+      // validation catch it (it may be a genuine validation error, or a
+      // module where the field is optional).
+      keptRows.push(row);
+      keptOriginalIndexes.push(index);
+      return;
+    }
+
+    const key = values.join("\u0001");
+    const firstRow = seen.get(key);
+    if (firstRow !== undefined) {
+      duplicates.push({ row: fileRow, row_data: row, matchedRow: firstRow });
+      return;
+    }
+    seen.set(key, fileRow);
+    keptRows.push(row);
+    keptOriginalIndexes.push(index);
+  });
+
+  return { keptRows, keptOriginalIndexes, duplicates };
 }
 
 interface DiffRow {
@@ -407,6 +526,7 @@ export function ImportSummaryPanel({
   if (!summary) return null;
 
   const duplicates = summary.duplicates || [];
+  const inFileDuplicates = summary.in_file_duplicates || [];
   const errors = summary.errors || [];
 
   return (
@@ -431,7 +551,40 @@ export function ImportSummaryPanel({
               <span className="muted">Duplicates</span>
             </div>
           ) : null}
+          {inFileDuplicates.length > 0 ? (
+            <div className="import-stat">
+              <b style={{ color: "var(--color-warning)" }}>{inFileDuplicates.length}</b>
+              <span className="muted">Duplicate rows in file</span>
+            </div>
+          ) : null}
         </div>
+
+        {/* Rows that duplicate an earlier row in the *same uploaded file* --
+            distinct from `duplicates` above (which collided with a record
+            already in the database). These were never sent to the server at
+            all, so they're a warning about the file itself, not a rejection. */}
+        {inFileDuplicates.length > 0 && (
+          <div className="import-duplicates-banner import-infile-duplicates-banner">
+            <div className="import-duplicates-header">
+              ⚠ {inFileDuplicates.length} row{inFileDuplicates.length > 1 ? "s" : ""} in your file
+              duplicated an earlier row in the same file, so{" "}
+              {inFileDuplicates.length > 1 ? "they were" : "it was"} ignored and not imported.
+            </div>
+            <div className="import-duplicates-list">
+              {inFileDuplicates.map((dup, index) => (
+                <div className="iw-dup-chip iw-dup-chip-static" key={`infile-${dup.row}-${index}`}>
+                  <span className="iw-dup-name">
+                    {labelForRow(dup.row_data) || `Row ${dup.row}`}
+                  </span>
+                  <span className="iw-dup-hint">
+                    Row {dup.row}
+                    {dup.matchedRow ? ` \u00b7 same as row ${dup.matchedRow}` : ""}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Generic validation failures stay plain text lines; duplicates get
             their own red banner with per-row compare buttons, since "this row
@@ -545,34 +698,71 @@ function WizardModal({
    * request). Returns one aggregated summary identical in shape to what a
    * single-shot import would have returned -- duplicates/errors from every
    * chunk are preserved with corrected row numbers.
+   *
+   * Before chunking, rows are deduped against each other using whatever
+   * identity fields this module has mapped (see `pickIdentityFields`): a
+   * later row that exactly matches an earlier row already seen in this file
+   * is skipped and reported as an in-file duplicate rather than uploaded.
+   * This has to happen before the file is split into chunks -- two
+   * duplicate rows landing in different chunks would otherwise both be
+   * validated (and created) independently by the server, since each chunk
+   * request is unaware of the others.
    */
   const runChunkedImport = useCallback(
     async (signal: AbortSignal): Promise<ImportSummary> => {
-      const total = rows.length;
+      const identityFields = pickIdentityFields(importHeaders, mapping);
+      const { keptRows, keptOriginalIndexes, duplicates: inFileDuplicates } = dedupeRowsInFile(
+        rows,
+        mapping,
+        identityFields
+      );
+
       const aggregated: ImportSummary = {
-        total_rows: 0,
+        total_rows: rows.length,
         created: 0,
-        failed: 0,
+        failed: inFileDuplicates.length,
         duplicate_count: 0,
         errors: [],
         duplicates: [],
+        in_file_duplicate_count: inFileDuplicates.length,
+        in_file_duplicates: inFileDuplicates,
       };
+
+      const total = keptRows.length;
+      if (total === 0) {
+        setProgressPercent(100);
+        setProgressText("Done!");
+        return aggregated;
+      }
+
+      // Maps a chunk-local row number (2 = first data row in that chunk's
+      // CSV) back to the true row number in the original uploaded file, via
+      // the kept row's original index (offset by the chunk's start position
+      // in the deduped array, then looked up in keptOriginalIndexes).
+      function makeRowMapper(chunkStart: number) {
+        return (chunkRow: number): number => {
+          const keptIndex = chunkStart + (chunkRow - 2); // chunkRow 2 -> first row of this chunk
+          const originalIndex = keptOriginalIndexes[keptIndex];
+          // originalIndex is 0-indexed into `rows`; file row numbers start at 2 (row 1 = header).
+          return originalIndex !== undefined ? originalIndex + 2 : chunkRow;
+        };
+      }
 
       if (total <= CHUNK_SIZE) {
         setProgressText(`Uploading ${total} row${total === 1 ? "" : "s"}...`);
         setProgressPercent(40);
-        const chunkSummary = await uploadChunk(rows, mapping, apiBase, importHeaders, signal);
+        const chunkSummary = await uploadChunk(keptRows, mapping, apiBase, importHeaders, signal);
         setProgressPercent(100);
         setProgressText(`Imported ${total} of ${total} row${total === 1 ? "" : "s"}`);
-        mergeSummaries(aggregated, chunkSummary, 0);
+        mergeSummaries(aggregated, chunkSummary, makeRowMapper(0));
         return aggregated;
       }
 
       let uploaded = 0;
       for (let start = 0; start < total; start += CHUNK_SIZE) {
-        const chunk = rows.slice(start, start + CHUNK_SIZE);
+        const chunk = keptRows.slice(start, start + CHUNK_SIZE);
         const chunkSummary = await uploadChunk(chunk, mapping, apiBase, importHeaders, signal);
-        mergeSummaries(aggregated, chunkSummary, start);
+        mergeSummaries(aggregated, chunkSummary, makeRowMapper(start));
         uploaded += chunk.length;
 
         const percent = Math.round((uploaded / total) * 100);

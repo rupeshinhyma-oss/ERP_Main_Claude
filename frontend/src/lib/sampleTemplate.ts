@@ -124,19 +124,34 @@ const REALISTIC_SAMPLES: Record<string, string> = {
   "visited_factory_office": "true",
   "Visit Remarks": "Visited factory in October 2025; excellent quality control lines.",
   "visit_remarks": "Visited factory in October 2025; excellent quality control lines.",
-  "Overall Remarks": "Top-tier supplier for sealing equipment.",
-  "overall_remarks": "Top-tier supplier for sealing equipment.",
+  "Buyer Type": "Manufacturer",
+  "buyer_type": "Manufacturer",
+  "Contact Salutation": "Mr.",
+  "contact_salutation": "Mr.",
+  "Contact Person Name": "Rajesh Sharma",
+  "contact_person_name": "Rajesh Sharma",
+  "Buyer Grade": "Grade A",
+  "buyer_grade": "A",
+  "Product Range": "Industrial packaging machinery",
+  "product_range": "Industrial packaging machinery",
+  "Currently Buying From": "Local distributors",
+  "currently_buying_from": "Local distributors",
+  "Website": "https://www.acmepack.com",
+  "website": "https://www.acmepack.com",
 };
 
 /** Lookup realistic sample value or deduce clean fallback. */
 function sampleValueFor(header: ImportHeader): string {
-  const key = header.key || header.label || "";
-  if (REALISTIC_SAMPLES[key]) return REALISTIC_SAMPLES[key];
-  if (header.label && REALISTIC_SAMPLES[header.label]) return REALISTIC_SAMPLES[header.label];
+  const key = header.key || "";
+  const label = header.label || "";
 
-  const k = key.toLowerCase();
+  if (REALISTIC_SAMPLES[label]) return REALISTIC_SAMPLES[label];
+  if (REALISTIC_SAMPLES[key]) return REALISTIC_SAMPLES[key];
+
+  const k = (label || key).toLowerCase();
   if (k.includes("code")) return "SAMPLE-001";
-  if (k.includes("name")) return "Sample Name";
+  if (k.includes("person") || k.includes("contact")) return "Rajesh Sharma";
+  if (k.includes("name")) return "Acme Industrial Packaging Ltd.";
   if (k.includes("status")) return "active";
   if (k.includes("quantity") || k.includes("qty")) return "1";
   if (k.includes("weight")) return "10.0";
@@ -151,7 +166,7 @@ function csvEscape(value: string): string {
 }
 
 export function downloadSampleTemplate(importHeaders: ImportHeader[], entityName: string): void {
-  const headerLine = importHeaders.map((h) => csvEscape(h.key)).join(",");
+  const headerLine = importHeaders.map((h) => csvEscape(h.label || h.key)).join(",");
   const sampleLine = importHeaders.map((h) => csvEscape(sampleValueFor(h))).join(",");
   const csvContent = `${headerLine}\n${sampleLine}\n`;
 

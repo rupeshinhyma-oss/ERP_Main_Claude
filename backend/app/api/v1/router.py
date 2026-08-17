@@ -36,6 +36,7 @@ from app.organizations.routes import router as organizations_router
 from app.planning.routes import router as planning_router
 from app.queue.routes import router as queue_router
 from app.rbac.routes import router as rbac_router
+from app.search.routes import router as search_router
 from app.suppliers.routes import router as suppliers_router
 from app.trash.routes import router as trash_router
 from app.users.routes import router as users_router
@@ -50,6 +51,14 @@ api_router.include_router(queue_router)
 api_router.include_router(cache_router)
 api_router.include_router(audit_router)
 api_router.include_router(trash_router)
+
+# Universal Search (topbar): searches across every major entity type in
+# one call. Restored 2026-08-14 after being accidentally deleted in a
+# frontend-migration commit -- see app/search/service.py's module
+# docstring for the full history, including the 2026-08-17 update
+# removing Departments/Designations from its search scope after that
+# module was removed from the app entirely.
+api_router.include_router(search_router)
 
 # Phase 6: Core Organization & User Management.
 api_router.include_router(organizations_router)
@@ -94,4 +103,3 @@ async def get_public_org_info(request: Request) -> dict:
         data={"id": "default", "name": "Yinglima ERP", "logo_url": None},
         request_id=getattr(request.state, "request_id", "-"),
     )
-

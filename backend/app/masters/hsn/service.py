@@ -121,7 +121,7 @@ class HsnService:
                 )
             return await self.repository.create(**field_values)
 
-        summary = await run_import(rows, row_validator=validate_hsn_row, row_creator=_create)
+        summary = await run_import(rows, row_validator=validate_hsn_row, row_creator=_create, dedupe_keys=("code",))
         await self._invalidate_cache()
         return summary
 

@@ -86,6 +86,12 @@ class ImportSummary:
     duplicate_count: int = 0
     errors: list[dict[str, Any]] = field(default_factory=list)
     duplicates: list[dict[str, Any]] = field(default_factory=list)
+    # Rows skipped because an *earlier row in this same file* already had the
+    # same identity (per `dedupe_keys`) -- distinct from `duplicates`, which are
+    # rows that collided with a record already in the database. These rows are
+    # never sent to `row_creator` at all, so they don't count toward `failed`.
+    in_file_duplicate_count: int = 0
+    in_file_duplicates: list[dict[str, Any]] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
         """Return a JSON-serializable summary dict."""
@@ -96,6 +102,8 @@ class ImportSummary:
             "duplicate_count": self.duplicate_count,
             "errors": self.errors,
             "duplicates": self.duplicates,
+            "in_file_duplicate_count": self.in_file_duplicate_count,
+            "in_file_duplicates": self.in_file_duplicates,
         }
 
 
@@ -139,6 +147,7 @@ async def run_import(
     *,
     row_validator: Callable[[dict[str, str], int], dict[str, Any]],
     row_creator: Callable[[dict[str, Any]], Any],
+    dedupe_keys: tuple[str, ...] | None = None,
 ) -> ImportSummary:
     """
     Validate and create every row, collecting a summary instead of failing the whole batch.
@@ -164,11 +173,42 @@ async def run_import(
             :class:`~app.core.exceptions.ValidationException` /
             :class:`~app.core.exceptions.ConflictException` on invalid data.
         row_creator: Given validated field kwargs, creates and persists the record.
+        dedupe_keys: Field names (from the *validated* ``field_values`` dict) that
+            together identify a row. When given, if a later row's values for these
+            fields exactly match an earlier row already seen in this same file, the
+            later row is skipped (never passed to ``row_creator``, so it never
+            touches the database) and recorded under ``in_file_duplicates`` with a
+            warning -- rather than being created as a second record or failing with
+            a database conflict. Rows missing any key field are not deduped (they
+            still go through normal validation/creation). If omitted, no in-file
+            duplicate detection is performed (only DB-level duplicates via
+            ``ConflictException`` are caught, as before).
     """
     summary = ImportSummary(total_rows=len(rows))
+    seen_keys: set[tuple[Any, ...]] = set()
     for index, raw_row in enumerate(rows, start=2):  # row 1 is the header
         try:
             field_values = row_validator(raw_row, index)
+
+            if dedupe_keys:
+                key_values = tuple(field_values.get(k) for k in dedupe_keys)
+                if all(v not in (None, "") for v in key_values):
+                    if key_values in seen_keys:
+                        summary.failed += 1
+                        summary.in_file_duplicate_count += 1
+                        summary.in_file_duplicates.append(
+                            {
+                                "row": index,
+                                "error": (
+                                    "Duplicate of an earlier row in this file "
+                                    f"({', '.join(dedupe_keys)}={key_values}); skipped."
+                                ),
+                                "row_data": dict(raw_row),
+                            }
+                        )
+                        continue
+                    seen_keys.add(key_values)
+
             await row_creator(field_values)
             summary.created += 1
         except ConflictException as exc:

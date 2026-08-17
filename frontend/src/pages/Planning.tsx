@@ -2091,16 +2091,26 @@ export function PlanningPage() {
       // (explicit backend flag, not a string-comparison guess) ensures
       // this only ever overrides a backend-computed date, NEVER a value
       // someone actually typed into the Approval Date cell themselves.
-      if (approvalDateColumnId && row.mum_approval_dates) {
+      if (approvalDateColumnId) {
         const existingCell = map.get(`${row.id}:${approvalDateColumnId}`);
-        const isAutoFilled = existingCell?.is_auto_approval_date ?? (!existingCell && Object.keys(row.mum_approval_dates).length > 0);
+        const isAutoFilled = existingCell?.is_auto_approval_date ?? (!existingCell || !existingCell.value);
         if (isAutoFilled) {
-          const visibleGroupNums = Object.keys(row.mum_approval_dates)
-            .map((k) => parseInt(k, 10))
-            .filter((n) => !Number.isNaN(n) && visibleMumGroupNumbers.has(n));
-          const effectiveDate = visibleGroupNums.length > 0 ? row.mum_approval_dates[Math.min(...visibleGroupNums)] : null;
+          const visibleGroupNums = row.mum_approval_dates
+            ? Object.keys(row.mum_approval_dates)
+                .map((k) => parseInt(k, 10))
+                .filter((n) => !Number.isNaN(n) && visibleMumGroupNumbers.has(n))
+            : [];
+          const effectiveDate =
+            visibleGroupNums.length > 0 && row.mum_approval_dates
+              ? row.mum_approval_dates[Math.min(...visibleGroupNums)]
+              : null;
           if (existingCell) {
-            map.set(`${row.id}:${approvalDateColumnId}`, { ...existingCell, value: effectiveDate, display_value: effectiveDate, is_auto_approval_date: true });
+            map.set(`${row.id}:${approvalDateColumnId}`, {
+              ...existingCell,
+              value: effectiveDate,
+              display_value: effectiveDate,
+              is_auto_approval_date: true,
+            });
           } else if (effectiveDate) {
             map.set(`${row.id}:${approvalDateColumnId}`, {
               id: null,
@@ -2495,6 +2505,7 @@ export function PlanningPage() {
     // whether the network call below has even started yet.
     setGrid((prev) => {
       if (!prev) return prev;
+      const approvalDateCol = prev.columns.find((c) => isApprovalDateColumn(c.name));
       return {
         ...prev,
         rows: prev.rows.map((r) => {
@@ -2522,9 +2533,25 @@ export function PlanningPage() {
               cell.column_id === remarksColId ? { ...cell, value: "", display_value: "" } : cell
             );
           }
+          let nextMumDates = r.mum_approval_dates ? { ...r.mum_approval_dates } : undefined;
+          if (isZeroOrBlank && mumNum !== null && nextMumDates) {
+            delete nextMumDates[mumNum];
+          }
+          const hasOtherActiveMum = updatedCells.some((c) => {
+            const col = prev.columns.find((cl) => cl.id === c.column_id);
+            if (!col || !isPureMumColumn(col.name, mumLabel)) return false;
+            const v = (c.value ?? "").trim();
+            return v !== "" && v !== "0" && !isNaN(Number(v)) && Number(v) > 0;
+          });
+          if (!hasOtherActiveMum && approvalDateCol) {
+            updatedCells = updatedCells.map((cell) =>
+              cell.column_id === approvalDateCol.id ? { ...cell, value: "", display_value: "" } : cell
+            );
+          }
           return {
             ...r,
             cells: updatedCells,
+            mum_approval_dates: nextMumDates,
           };
         }),
       };
@@ -2591,8 +2618,8 @@ export function PlanningPage() {
               updatedCells = updatedCells.map((c) => {
                 if (!Object.prototype.hasOwnProperty.call(derived, c.column_id)) return c;
                 const nextDisplayValue = derived[c.column_id];
-                if (c.column_id === approvalDateColumnId && (c.is_auto_approval_date || !c.value)) {
-                  return { ...c, display_value: nextDisplayValue, value: nextDisplayValue, is_auto_approval_date: true };
+                if (c.column_id === approvalDateColumnId && (c.is_auto_approval_date || !c.value || nextDisplayValue === null || nextDisplayValue === "")) {
+                  return { ...c, display_value: nextDisplayValue ?? "", value: nextDisplayValue ?? "", is_auto_approval_date: true };
                 }
                 return { ...c, display_value: nextDisplayValue, value: nextDisplayValue !== undefined ? nextDisplayValue : c.value };
               });

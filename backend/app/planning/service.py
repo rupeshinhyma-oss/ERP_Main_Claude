@@ -2868,7 +2868,7 @@ class PlanningService:
             cell = cells_by_column_id.get(column.id)
             if is_remarks:
                 result[str(column.id)] = cell.value if cell else None
-            elif is_approval_date and (cell is None or not cell.value):
+            elif is_approval_date:
                 result[str(column.id)] = (
                     mum_approval_dates[min(mum_approval_dates.keys())] if mum_approval_dates else None
                 )
@@ -3113,8 +3113,8 @@ class PlanningService:
                     except BadRequestException:
                         pass
                     mum_num = mum_num_from_column_name(column.name, label=mum_label)
+                    sibling_columns = await self.column_repository.list_for_sheet(sheet_id)
                     if mum_num is not None:
-                        sibling_columns = await self.column_repository.list_for_sheet(sheet_id)
                         remarks_col = next(
                             (
                                 c
@@ -3127,6 +3127,15 @@ class PlanningService:
                             remarks_cell = await self.cell_repository.get_by_row_and_column(row_id, remarks_col.id)
                             if remarks_cell and remarks_cell.value:
                                 await self.cell_repository.update(remarks_cell, value=None, updated_by=user_id)
+
+                    # Check if any Mum group has an active number remaining on this row; if none, clear auto Approval Date
+                    remaining_mum_dates = await self.get_mum_group_approval_dates_for_row(sheet_id, row_id)
+                    if not remaining_mum_dates:
+                        approval_col = next((c for c in sibling_columns if c.name.strip().lower() == "approval date"), None)
+                        if approval_col:
+                            appr_cell = await self.cell_repository.get_by_row_and_column(row_id, approval_col.id)
+                            if appr_cell and appr_cell.value:
+                                await self.cell_repository.update(appr_cell, value=None, updated_by=user_id)
                 elif value is not None and value.strip():
                     if not cell.status_color:
                         try:
@@ -3537,39 +3546,35 @@ class PlanningService:
 
         result: dict[uuid.UUID, dict[int, str]] = {}
         for row in rows:
-            # row.cells is already eagerly loaded by row_repository.list_for_sheet
-            # (selectinload) -- no additional query needed per cell here,
-            # unlike the old per-row version's cell_repository.get_by_row_and_column.
             cells_by_column_id = {cell.column_id: cell for cell in row.cells}
             row_result: dict[int, str] = {}
             for num, col_id in mum_cols:
+                cell = cells_by_column_id.get(col_id)
+                if not cell or not cell.value or not cell.value.strip():
+                    continue
+                try:
+                    if float(cell.value.strip()) <= 0:
+                        continue
+                except ValueError:
+                    pass
+
                 blue_at = blue_by_row_and_col.get((row.id, col_id))
                 if blue_at is not None:
                     row_result[num] = _format_date_dd_mm_yyyy(blue_at)
                     continue
-                cell = cells_by_column_id.get(col_id)
-                if cell and cell.value and cell.value.strip():
-                    ts = cell.updated_at or cell.created_at
-                    if ts:
-                        row_result[num] = _format_date_dd_mm_yyyy(ts)
+                ts = cell.updated_at or cell.created_at
+                if ts:
+                    row_result[num] = _format_date_dd_mm_yyyy(ts)
             result[row.id] = row_result
         return result
 
     async def get_mum_group_approval_dates_for_row(self, sheet_id: uuid.UUID, row_id: uuid.UUID) -> dict[int, str]:
         """
         Return {mum_group_number: iso_date_string} for every Mum group on
-        this row that has turned blue or has a value -- one entry per
+        this row that has an active number (> 0) -- one entry per
         group number, keyed by the same number used everywhere else
         (frontend's ``mumGroupNumber``, the eye popover, delete/hide
         cascade).
-
-        This is the data source both ``get_latest_mum_approval_date_for_row``
-        (below) and the frontend build on: "hidden" is a per-user,
-        browser-local view preference the backend has no concept of, so
-        the backend cannot itself decide to "skip hidden Mum 3" -- instead
-        it hands back every group's date, and the frontend (which DOES
-        know which groups are hidden) picks the first non-hidden one,
-        exactly mirroring how the eye popover already filters its list.
         """
         columns = await self.column_repository.list_for_sheet(sheet_id)
         mum_label = await self._get_mum_group_label(sheet_id)
@@ -3595,15 +3600,22 @@ class PlanningService:
 
         result: dict[int, str] = {}
         for num, col_id in mum_cols:
+            cell = await self.cell_repository.get_by_row_and_column(row_id, col_id)
+            if not cell or not cell.value or not cell.value.strip():
+                continue
+            try:
+                if float(cell.value.strip()) <= 0:
+                    continue
+            except ValueError:
+                pass
+
             if col_id in blue_by_col:
                 changed_at = blue_by_col[col_id]
                 result[num] = _format_date_dd_mm_yyyy(changed_at)
                 continue
-            cell = await self.cell_repository.get_by_row_and_column(row_id, col_id)
-            if cell and cell.value and cell.value.strip():
-                ts = cell.updated_at or cell.created_at
-                if ts:
-                    result[num] = _format_date_dd_mm_yyyy(ts)
+            ts = cell.updated_at or cell.created_at
+            if ts:
+                result[num] = _format_date_dd_mm_yyyy(ts)
         return result
 
     async def get_latest_mum_approval_date_for_row(self, sheet_id: uuid.UUID, row_id: uuid.UUID) -> str | None:

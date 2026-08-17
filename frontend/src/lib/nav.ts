@@ -32,20 +32,20 @@ export const NAV_SECTIONS: NavSection[] = [
   {
     label: "CONTACT",
     items: [
-      { key: "suppliers", label: "Suppliers", path: "/suppliers", icon: "users", permission: "supplier.view" },
-      { key: "buyers", label: "Buyers", path: "/buyers", icon: "user", permission: "buyer.view" },
+      { key: "suppliers", label: "Suppliers", path: "/suppliers", icon: "factory", permission: "supplier.view" },
+      { key: "buyers", label: "Buyers", path: "/buyers", icon: "shoppingBag", permission: "buyer.view" },
     ],
   },
   {
     label: "INVENTORY",
     items: [
       { key: "masters-products", label: "Product Master", path: "/masters/products", icon: "box", permission: "product.view" },
-      { key: "product-gallery", label: "Product Gallery", path: "/product-gallery", icon: "grid", permission: "product.view" },
-      { key: "masters-categories", label: "Categories", path: "/masters/categories", icon: "folder", permission: "category.view" },
-      { key: "masters-subcategories", label: "Sub Categories", path: "/masters/subcategories", icon: "folder", permission: "subcategory.view" },
-      { key: "masters-brands", label: "Brands", path: "/masters/brands", icon: "tag", permission: "brand.view" },
-      { key: "masters-supplier-types", label: "Supplier Types", path: "/masters/supplier-types", icon: "tag", permission: "supplier.view" },
-      { key: "masters-buyer-types", label: "Buyer Types", path: "/masters/buyer-types", icon: "tag", permission: "buyer.view" },
+      { key: "product-gallery", label: "Product Gallery", path: "/product-gallery", icon: "image", permission: "product.view" },
+      { key: "masters-categories", label: "Categories", path: "/masters/categories", icon: "layers", permission: "category.view" },
+      { key: "masters-subcategories", label: "Sub Categories", path: "/masters/subcategories", icon: "folderTree", permission: "subcategory.view" },
+      { key: "masters-brands", label: "Brands", path: "/masters/brands", icon: "award", permission: "brand.view" },
+      { key: "masters-supplier-types", label: "Supplier Types", path: "/masters/supplier-types", icon: "network", permission: "supplier.view" },
+      { key: "masters-buyer-types", label: "Buyer Types", path: "/masters/buyer-types", icon: "idCard", permission: "buyer.view" },
     ],
   },
 
@@ -58,7 +58,7 @@ export const NAV_SECTIONS: NavSection[] = [
   {
     label: "PLANNING",
     items: [
-      { key: "planning", label: "Shipment Planning", path: "/planning", icon: "grid", permission: "planning.read" },
+      { key: "planning", label: "Shipment Planning", path: "/planning", icon: "truck", permission: "planning.read" },
     ],
   },
   {
@@ -71,13 +71,13 @@ export const NAV_SECTIONS: NavSection[] = [
   {
     label: "CONFIGURATIONS",
     items: [
-      { key: "masters-hsn", label: "HSN Codes", path: "/masters/hsn", icon: "tag", permission: "hsn.view" },
+      { key: "masters-hsn", label: "HSN Codes", path: "/masters/hsn", icon: "barcode", permission: "hsn.view" },
       { key: "masters-countries", label: "Countries", path: "/masters/countries", icon: "globe", permission: "country.view" },
       { key: "masters-states", label: "Provinces", path: "/masters/states", icon: "map", permission: "state.view" },
       { key: "masters-cities", label: "City", path: "/masters/cities", icon: "pin", permission: "city.view" },
       { key: "masters-currencies", label: "Currencies", path: "/masters/currencies", icon: "coins", permission: "currency.view" },
       { key: "masters-uom", label: "Units of Measurement", path: "/masters/uom", icon: "ruler", permission: "uom.view" },
-      { key: "organization", label: "Organization Settings", path: "/organization", icon: "building", permission: "organization.manage", superAdminOnly: true },
+      { key: "organization", label: "Organization Settings", path: "/organization", icon: "settings", permission: "organization.manage", superAdminOnly: true },
       { key: "masters-company-list", label: "Organization List", path: "/masters/company-list", icon: "building", permission: "company.view" },
       { key: "audit", label: "Audit Log", path: "/audit", icon: "clock", permission: "audit.view" },
       { key: "trash", label: "Trash", path: "/trash", icon: "trash" },

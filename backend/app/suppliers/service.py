@@ -28,6 +28,7 @@ from app.masters.product_categories.repository import ProductCategoryRepository
 from app.masters.product_sub_categories.repository import ProductSubCategoryRepository
 from app.masters.products.repository import ProductRepository
 from app.masters.states.repository import StateRepository
+from app.planning.ws_manager import notify_source_record_changed, refresh_planning_cells_for_record
 from app.suppliers.constants import EXPORT_HEADERS
 from app.suppliers.models import Supplier, SupplierContact, SupplierCurrentStatus
 from app.suppliers.repository import SupplierContactRepository, SupplierRepository
@@ -399,6 +400,13 @@ class SupplierService:
                 )
 
         await self._invalidate_cache()
+        # Same store-on-write hook as Products.update -- Suppliers is a
+        # registered Shipment Planning source module too (see
+        # app.planning.source_registry's supplier module), so any
+        # LINKED_LOOKUP/AGGREGATE cell pulling from this supplier needs
+        # its stored value refreshed after an edit.
+        await notify_source_record_changed("supplier", supplier_id)
+        await refresh_planning_cells_for_record(self.repository.session, "supplier", supplier_id)
         return await self.get_by_id_or_raise(supplier_id)
 
     async def update_grade(self, supplier_id: uuid.UUID, supplier_grade: Any) -> Supplier:
@@ -406,6 +414,11 @@ class SupplierService:
         supplier = await self.get_by_id_or_raise(supplier_id)
         await self.repository.update(supplier, supplier_grade=supplier_grade)
         await self._invalidate_cache()
+        # Bypasses update() above, but supplier_grade is itself a
+        # registered Planning source field (see source_registry's
+        # supplier module) -- needs the same refresh hook.
+        await notify_source_record_changed("supplier", supplier_id)
+        await refresh_planning_cells_for_record(self.repository.session, "supplier", supplier_id)
         return supplier
 
     async def update_potential(self, supplier_id: uuid.UUID, potential: Any) -> Supplier:
@@ -558,7 +571,9 @@ class SupplierService:
                 )
             return supplier
 
-        summary = await run_import(rows, row_validator=validate_supplier_row, row_creator=_create)
+        summary = await run_import(
+            rows, row_validator=validate_supplier_row, row_creator=_create, dedupe_keys=("company_name",)
+        )
         await self._invalidate_cache()
         return summary
 

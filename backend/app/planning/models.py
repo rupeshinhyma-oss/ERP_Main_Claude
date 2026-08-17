@@ -157,6 +157,30 @@ class PlanningSheet(UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin, SoftDelet
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
+    # --- Real link to Product Master's organization/branch list ---
+    # A sheet's "branch" used to be nothing more than whatever the admin
+    # typed into `name` (e.g. "Mumbai Branch") -- there was no actual
+    # connection to Product Master's structured organization/branch data
+    # (app.masters.company_list.models.MasterCompany, whose `branches`
+    # JSON column is the real source of truth for what branches exist
+    # per organization). Every sheet now REQUIRES both of these at
+    # creation time (see PlanningService.create_sheet) so the sheet
+    # itself knows, unambiguously, which real branch it represents --
+    # existing sheets created before this field existed are grandfathered
+    # in as NULL/unlinked rather than retroactively guessed.
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("master_companies.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    branch_id: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+        doc="The id of one entry in organization_id's MasterCompany.branches JSON list "
+        "(e.g. 'inm-001') -- NOT a foreign key, since branches aren't a real table (see "
+        "MasterCompany.branches' own docstring). Validated at the application layer "
+        "(PlanningService.create_sheet checks it against the chosen organization's actual "
+        "branches list), not via a database constraint.",
+    )
+
     # --- ITEM column data source (mirrors PlanningColumn's dynamic-source feature) ---
     # The first "ITEM" column of every sheet is not a row in planning_columns
     # (it doubles as the row's own label/identity), so it needs its own home
@@ -354,6 +378,16 @@ class PlanningColumn(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Base)
         doc="Opt-in per column: when False (the default for every column, including existing "
         "ones as of this field's introduction), cells in this column cannot carry a CRM-style "
         "status color and the status-dot button is hidden entirely -- set True to allow it.",
+    )
+    width_px: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+        doc="Column width in pixels, shared across every user viewing this sheet (unlike "
+        "Hide/Freeze, which are per-user local display preferences). NULL means "
+        "'not manually set yet' -- the frontend falls back to auto-computing a width from "
+        "the column's header label length (see CELL_MIN_WIDTH/computeHeaderWidth in "
+        "Planning.tsx) until a user drags the column's resize handle, which persists their "
+        "chosen width here via PATCH /planning/sheets/{sheet_id}/columns/{column_id}/width.",
     )
 
     created_by: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("users.id"), nullable=False)

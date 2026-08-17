@@ -10,8 +10,9 @@ insert/delete/move, and reading recent change-log history).
 from __future__ import annotations
 
 import uuid
+from dataclasses import dataclass
 
-from sqlalchemy import func, select, update
+from sqlalchemy import and_, exists, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -21,6 +22,7 @@ from app.planning.models import (
     PlanningChangeLog,
     PlanningColumn,
     PlanningColumnRoleLock,
+    PlanningColumnSourceType,
     PlanningRow,
     PlanningSheet,
     PlanningStatusTag,
@@ -56,6 +58,24 @@ class PlanningSheetRepository(BaseRepository[PlanningSheet]):
         return (max((s.position for s in sheets), default=-1)) + 1
 
 
+@dataclass
+class ColumnSearchFilter:
+    """
+    One column's search/filter condition, server-side equivalent of the
+    frontend's per-column Excel-style filter state (see
+    `activeColumnFilters` in Planning.tsx).
+
+    ``column_id`` is ``None`` for the ITEM column (which has no
+    ``PlanningColumn``/``PlanningCell`` of its own -- see
+    ``_apply_search_column_filters`` for how that special case is
+    matched against ``PlanningRow.label`` instead).
+    """
+
+    column_id: uuid.UUID | None
+    text_query: str | None = None
+    selected_values: list[str] | None = None
+
+
 class PlanningRowRepository(BaseRepository[PlanningRow]):
     """Repository for ``planning_rows`` (item lines within a sheet)."""
 
@@ -76,9 +96,67 @@ class PlanningRowRepository(BaseRepository[PlanningRow]):
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
-    async def _linked_record_ids_for_organization(self, organization_id: uuid.UUID) -> set[uuid.UUID] | None:
+    async def list_linked_to_record(self, record_id: uuid.UUID) -> list[PlanningRow]:
         """
-        Resolve which Product Master IDs belong to ``organization_id``.
+        Every row (across every sheet) whose own ITEM link
+        (``linked_record_id``) points at ``record_id`` -- distinct from a
+        per-cell 🔗 link (see PlanningCellRepository.list_linked_to_record
+        for that case). A LINKED_LOOKUP column with no explicit link of
+        its own falls back to the row's ITEM link (see
+        compute_cell_display_value's row_linked_record_id docstring), so
+        these rows also need their non-MANUAL cells recomputed when
+        ``record_id`` changes, even though no PlanningCell row explicitly
+        names it.
+        """
+        stmt = select(PlanningRow).where(
+            PlanningRow.linked_record_id == record_id, PlanningRow.deleted_at.is_(None)
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def soft_delete_linked_to_record(self, record_id: uuid.UUID) -> int:
+        """Soft-delete all PlanningRow records whose linked_record_id equals record_id."""
+        from datetime import datetime, timezone
+        stmt = (
+            update(PlanningRow)
+            .where(PlanningRow.linked_record_id == record_id, PlanningRow.deleted_at.is_(None))
+            .values(deleted_at=datetime.now(timezone.utc))
+        )
+        result = await self.session.execute(stmt)
+        await self.session.flush()
+        return result.rowcount
+
+    async def cleanup_orphaned_product_rows(self, sheet_id: uuid.UUID | None = None) -> int:
+        """
+        Soft-delete any planning rows whose linked_record_id points to a
+        product that does not exist or has deleted_at IS NOT NULL.
+        """
+        from datetime import datetime, timezone
+        from app.masters.products.models import Product
+
+        active_product_ids = select(Product.id).where(Product.deleted_at.is_(None))
+        conditions = [
+            PlanningRow.deleted_at.is_(None),
+            PlanningRow.linked_record_id.is_not(None),
+            PlanningRow.linked_record_id.not_in(active_product_ids),
+        ]
+        if sheet_id is not None:
+            conditions.append(PlanningRow.sheet_id == sheet_id)
+        stmt = (
+            update(PlanningRow)
+            .where(*conditions)
+            .values(deleted_at=datetime.now(timezone.utc))
+        )
+        result = await self.session.execute(stmt)
+        await self.session.flush()
+        return result.rowcount
+
+    async def _linked_record_ids_for_organization(
+        self, organization_id: uuid.UUID, *, branch_id: str | None = None
+    ) -> set[uuid.UUID] | None:
+        """
+        Resolve which Product Master IDs belong to ``organization_id``,
+        optionally further restricted to ``branch_id``.
 
         The Organization filter (see ``list_page_for_sheet``/``count_for_sheet``)
         is never a real column on ``planning_rows`` -- it's read straight off
@@ -93,20 +171,31 @@ class PlanningRowRepository(BaseRepository[PlanningRow]):
         (see ``app.database.base``'s dual-dialect ``GUID`` type for the same
         portability concern elsewhere in this codebase).
 
+        ``branch_id`` (optional) further restricts to products whose
+        ``branch_ids`` (also JSON, see ``Product.branch_ids``) contains that
+        exact branch id -- this is what a sheet LINKED to a specific branch
+        (``PlanningSheet.branch_id``) uses for its row auto-population, per
+        the "only load products in this exact branch" requirement (stricter
+        than the old organization-only filter, which matched any product in
+        ANY branch of that organization).
+
         Returns ``None`` (meaning "no organization filter") only if
         ``organization_id`` wasn't actually passed by the caller -- callers
         that DO pass one always get a concrete (possibly empty) set back,
-        since "no products belong to this org" should filter every row out,
-        not disable the filter.
+        since "no products belong to this org/branch" should filter every
+        row out, not disable the filter.
         """
-        ids = await self._all_product_ids_for_organization(organization_id)
+        ids = await self._all_product_ids_for_organization(organization_id, branch_id=branch_id)
         return set(ids)
 
-    async def _all_product_ids_for_organization(self, organization_id: uuid.UUID | None) -> list[uuid.UUID]:
+    async def _all_product_ids_for_organization(
+        self, organization_id: uuid.UUID | None, *, branch_id: str | None = None
+    ) -> list[uuid.UUID]:
         """
         Return every live Product Master ID, in stable ``created_at`` order,
         optionally restricted to those whose ``organization_ids`` contains
-        ``organization_id``.
+        ``organization_id`` AND (if given) whose ``branch_ids`` contains
+        ``branch_id``.
 
         This is the SAME ordering ``ProductRepository.list()`` /
         ``BaseRepository._base_select()`` falls back to, so results here
@@ -120,19 +209,118 @@ class PlanningRowRepository(BaseRepository[PlanningRow]):
         from app.masters.products.models import Product
 
         stmt = (
-            select(Product.id, Product.organization_ids)
+            select(Product.id, Product.organization_ids, Product.branch_ids)
             .where(Product.deleted_at.is_(None))
             .order_by(Product.created_at, Product.id)
         )
         result = await self.session.execute(stmt)
+        rows = result.all()
         if organization_id is None:
-            return [row[0] for row in result.all()]
+            return [row[0] for row in rows]
         org_str = str(organization_id)
-        return [
-            product_id
-            for product_id, organization_ids in result.all()
+        matching = [
+            (product_id, branch_ids)
+            for product_id, organization_ids, branch_ids in rows
             if organization_ids and org_str in [str(x) for x in organization_ids]
         ]
+        if branch_id is None:
+            return [product_id for product_id, _ in matching]
+        return [
+            product_id
+            for product_id, branch_ids in matching
+            if branch_ids and branch_id in [str(x) for x in branch_ids]
+        ]
+
+    def _apply_search_column_filters(
+        self, stmt, sheet_id: uuid.UUID, search_column_filters: list["ColumnSearchFilter"] | None
+    ):
+        """
+        AND together one SQL condition per entry in ``search_column_filters``
+        onto ``stmt`` (a query already selecting/filtering ``PlanningRow``),
+        mirroring the frontend's client-side ``filteredRows`` logic (see
+        Planning.tsx) exactly -- same per-column combination of substring
+        `text_query` and/or exact-match `selected_values` -- but running
+        server-side against every row on the sheet via ``PlanningCell.value``
+        (now always the current, already-computed value -- see
+        ``PlanningService.recompute_and_store_cell`` and every write path
+        that keeps it fresh), not just whichever page the browser has
+        already fetched.
+
+        Each filter becomes its own ``EXISTS`` subquery (ITEM's own column
+        is matched against ``PlanningRow.label`` directly instead, since it
+        has no ``PlanningCell`` of its own) -- one EXISTS per filtered
+        column, ANDed together, so a row must satisfy EVERY active column
+        filter simultaneously, exactly like the old client-side version's
+        `for ... if not match: return False` loop.
+        """
+        if not search_column_filters:
+            return stmt
+        for filt in search_column_filters:
+            text_query = (filt.text_query or "").strip()
+            selected_values = filt.selected_values or []
+            if not text_query and not selected_values:
+                continue
+
+            if filt.column_id is None:
+                # ITEM column -- matched directly against PlanningRow.label,
+                # no PlanningCell involved.
+                conditions = []
+                if text_query:
+                    conditions.append(PlanningRow.label.ilike(f"%{text_query}%"))
+                if selected_values:
+                    # "(Blanks)" is the frontend's sentinel for "empty" --
+                    # match it against a null/empty label, exactly like the
+                    # client-side version's `val = row.label || "(Blanks)"`.
+                    real_values = [v for v in selected_values if v != "(Blanks)"]
+                    value_conditions = []
+                    if real_values:
+                        value_conditions.append(PlanningRow.label.in_(real_values))
+                    if "(Blanks)" in selected_values:
+                        value_conditions.append(
+                            (PlanningRow.label.is_(None)) | (PlanningRow.label == "")
+                        )
+                    if value_conditions:
+                        combined_values = value_conditions[0]
+                        for extra in value_conditions[1:]:
+                            combined_values = combined_values | extra
+                        conditions.append(combined_values)
+                if conditions:
+                    combined = conditions[0]
+                    for c in conditions[1:]:
+                        combined = combined & c
+                    stmt = stmt.where(combined)
+                continue
+
+            # Ordinary column -- matched via an EXISTS subquery against
+            # PlanningCell (row_id = outer row's id, column_id = this
+            # filter's column, value matching the same rules as above).
+            cell_conditions = [
+                PlanningCell.row_id == PlanningRow.id,
+                PlanningCell.column_id == filt.column_id,
+            ]
+            value_match_conditions = []
+            if text_query:
+                value_match_conditions.append(PlanningCell.value.ilike(f"%{text_query}%"))
+            if selected_values:
+                real_values = [v for v in selected_values if v != "(Blanks)"]
+                sub_conditions = []
+                if real_values:
+                    sub_conditions.append(PlanningCell.value.in_(real_values))
+                if "(Blanks)" in selected_values:
+                    sub_conditions.append((PlanningCell.value.is_(None)) | (PlanningCell.value == ""))
+                if sub_conditions:
+                    combined_sub = sub_conditions[0]
+                    for c in sub_conditions[1:]:
+                        combined_sub = combined_sub | c
+                    value_match_conditions.append(combined_sub)
+            if not value_match_conditions:
+                continue
+            combined_value_match = value_match_conditions[0]
+            for c in value_match_conditions[1:]:
+                combined_value_match = combined_value_match & c
+            cell_conditions.append(combined_value_match)
+            stmt = stmt.where(exists(select(PlanningCell.id).where(*cell_conditions)))
+        return stmt
 
     async def list_page_for_sheet(
         self,
@@ -141,6 +329,8 @@ class PlanningRowRepository(BaseRepository[PlanningRow]):
         offset: int = 0,
         limit: int | None = 50,
         organization_id: uuid.UUID | None = None,
+        branch_id: str | None = None,
+        search_column_filters: list["ColumnSearchFilter"] | None = None,
     ) -> list[PlanningRow]:
         """
         Same ordering/eager-loading as ``list_for_sheet``, but only one page.
@@ -155,10 +345,22 @@ class PlanningRowRepository(BaseRepository[PlanningRow]):
 
         ``organization_id`` (optional) restricts the page to rows whose
         linked Product Master record belongs to that organization -- see
-        ``_linked_record_ids_for_organization``. Applied server-side (not
-        left to the frontend to filter the already-loaded page) so the
-        filter searches the WHOLE sheet, not just whichever page happens
-        to be loaded already.
+        ``_linked_record_ids_for_organization``. ``branch_id`` (optional,
+        only meaningful together with ``organization_id``) further
+        restricts to that organization's specific branch -- this is what a
+        sheet LINKED to a branch (``PlanningSheet.branch_id``) always
+        passes. Applied server-side (not left to the frontend to filter
+        the already-loaded page) so the filter searches the WHOLE sheet,
+        not just whichever page happens to be loaded already.
+
+        ``search_column_filters`` (optional) is the server-side equivalent
+        of the frontend's per-column Excel-style filter panel -- see
+        ``_apply_search_column_filters`` for how each filter is applied.
+        Unlike the client-side version (which only ever searched whatever
+        page of rows the browser had already fetched), this searches EVERY
+        row on the sheet, matching the requirement that searching should
+        surface matches from the whole dataset, not just what's currently
+        scrolled into view.
         """
         stmt = (
             select(PlanningRow)
@@ -166,33 +368,46 @@ class PlanningRowRepository(BaseRepository[PlanningRow]):
             .options(selectinload(PlanningRow.cells))
         )
         if organization_id is not None:
-            matching_ids = await self._linked_record_ids_for_organization(organization_id)
+            matching_ids = await self._linked_record_ids_for_organization(organization_id, branch_id=branch_id)
             if not matching_ids:
                 return []
             stmt = stmt.where(PlanningRow.linked_record_id.in_(matching_ids))
+        stmt = self._apply_search_column_filters(stmt, sheet_id, search_column_filters)
         stmt = stmt.order_by(PlanningRow.position, PlanningRow.created_at).offset(offset)
         if limit is not None:
             stmt = stmt.limit(limit)
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
-    async def count_for_sheet(self, sheet_id: uuid.UUID, *, organization_id: uuid.UUID | None = None) -> int:
+    async def count_for_sheet(
+        self,
+        sheet_id: uuid.UUID,
+        *,
+        organization_id: uuid.UUID | None = None,
+        branch_id: str | None = None,
+        search_column_filters: list[ColumnSearchFilter] | None = None,
+    ) -> int:
         """
         Total live row count for a sheet, used for the grid's pagination footer.
 
-        ``organization_id`` (optional) mirrors ``list_page_for_sheet`` -- when
-        set, only rows whose linked Product Master belongs to that
-        organization are counted, so "Showing X-Y of N" stays accurate while
-        the Organization filter is active.
+        ``organization_id``/``branch_id`` (optional) mirror
+        ``list_page_for_sheet`` -- when set, only rows whose linked Product
+        Master belongs to that organization (and, if given, that specific
+        branch) are counted, so "Showing X-Y of N" stays accurate for a
+        branch-linked sheet. ``search_column_filters`` (optional) mirrors
+        the same parameter on ``list_page_for_sheet`` -- with a search
+        active, this becomes "how many rows MATCH the search", not the
+        sheet's total row count.
         """
         stmt = select(func.count(PlanningRow.id)).where(
             PlanningRow.sheet_id == sheet_id, PlanningRow.deleted_at.is_(None)
         )
         if organization_id is not None:
-            matching_ids = await self._linked_record_ids_for_organization(organization_id)
+            matching_ids = await self._linked_record_ids_for_organization(organization_id, branch_id=branch_id)
             if not matching_ids:
                 return 0
             stmt = stmt.where(PlanningRow.linked_record_id.in_(matching_ids))
+        stmt = self._apply_search_column_filters(stmt, sheet_id, search_column_filters)
         result = await self.session.execute(stmt)
         return int(result.scalar_one())
 
@@ -237,6 +452,28 @@ class PlanningColumnRepository(BaseRepository[PlanningColumn]):
         )
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
+
+    async def list_aggregate_columns_for_module(self, source_module_key: str) -> list[PlanningColumn]:
+        """
+        Every AGGREGATE column (across every sheet) pulling from
+        ``source_module_key`` -- e.g. every "count of active products in
+        category X" style column, regardless of which sheet it's on.
+
+        Used by
+        PlanningService.recompute_and_store_cells_referencing_record: an
+        aggregate summarizes across many records in its source module, so
+        it must recompute whenever ANY record in that module changes, not
+        just one specific linked record (confirmed as the intended
+        behavior, unlike LINKED_LOOKUP which only cares about ITS OWN
+        linked record).
+        """
+        stmt = select(PlanningColumn).where(
+            PlanningColumn.source_type == PlanningColumnSourceType.AGGREGATE,
+            PlanningColumn.source_module == source_module_key,
+            PlanningColumn.deleted_at.is_(None),
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
 
     async def next_position(self, sheet_id: uuid.UUID) -> int:
         columns = await self.list_for_sheet(sheet_id)
@@ -310,6 +547,33 @@ class PlanningCellRepository(BaseRepository[PlanningCell]):
         stmt = select(PlanningCell).where(PlanningCell.row_id.in_(row_ids))
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
+
+    async def list_linked_to_record(self, record_id: uuid.UUID) -> list[PlanningCell]:
+        """
+        Every cell (across every sheet) explicitly linked to ``record_id``
+        via its own ``linked_record_id`` (the per-cell 🔗 link, distinct
+        from a row's own ITEM link -- see PlanningRowRepository's
+        equivalent method for that case).
+
+        Used by PlanningService.recompute_and_store_cells_referencing_record
+        to find exactly which LINKED_LOOKUP cells need recomputing after a
+        source-module record (e.g. a Product) is edited, rather than
+        rescanning every cell on every sheet.
+        """
+        stmt = select(PlanningCell).where(PlanningCell.linked_record_id == record_id)
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def unlink_or_clear_record(self, record_id: uuid.UUID) -> int:
+        """Clear linked_record_id and value on any PlanningCell pointing to record_id."""
+        stmt = (
+            update(PlanningCell)
+            .where(PlanningCell.linked_record_id == record_id)
+            .values(linked_record_id=None, value=None)
+        )
+        result = await self.session.execute(stmt)
+        await self.session.flush()
+        return result.rowcount
 
 
 class PlanningStatusTagRepository(BaseRepository[PlanningStatusTag]):

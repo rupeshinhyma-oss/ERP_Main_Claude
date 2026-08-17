@@ -20,9 +20,21 @@ from app.planning.models import (
 
 
 class PlanningSheetCreate(BaseModel):
-    """Payload to create a new sheet (branch tab)."""
+    """
+    Payload to create a new sheet (branch tab).
+
+    organization_id and branch_id are now REQUIRED -- every sheet must be
+    explicitly linked to one real branch from Product Master's
+    organization list (app.masters.company_list.models.MasterCompany),
+    rather than the old "branch" being nothing more than whatever text
+    happened to be in the sheet's name. See PlanningService.create_sheet
+    for how branch_id is validated against organization_id's actual
+    branches list.
+    """
 
     name: str = Field(..., min_length=1, max_length=150, description="e.g. 'Mum Branch'.")
+    organization_id: uuid.UUID = Field(..., description="The Product Master organization (MasterCompany) this sheet's branch belongs to.")
+    branch_id: str = Field(..., min_length=1, max_length=100, description="One of organization_id's branch ids (from MasterCompany.branches).")
     mum_group_label: str = Field(default="Mum", min_length=1, max_length=50, description="Group label name (e.g. 'Mum', 'CN', 'MP').")
     description: str | None = Field(default=None)
 
@@ -60,6 +72,12 @@ class PlanningSheetRead(BaseModel):
         "'NO. OF PKG MUM1', or 'Chen' in 'Chen 1' / 'NO. OF PKG CHEN1'. Set once at sheet "
         "creation/duplication; every fixed-formula, approval-date, and status-history "
         "feature reads this instead of assuming the literal word 'Mum'.",
+    )
+    organization_id: uuid.UUID | None = Field(
+        default=None, description="The Product Master organization (MasterCompany) this sheet's branch belongs to. NULL for sheets created before this link existed."
+    )
+    branch_id: str | None = Field(
+        default=None, description="This sheet's linked branch id (from organization_id's MasterCompany.branches). NULL for sheets created before this link existed."
     )
     created_by: uuid.UUID
     created_at: datetime
@@ -170,6 +188,19 @@ class PlanningColumnMove(BaseModel):
     position: int = Field(..., ge=0)
 
 
+class PlanningColumnWidthUpdate(BaseModel):
+    """
+    Set a column's server-persisted display width (drag-to-resize).
+
+    ``width_px: null`` clears a manual override, reverting the column to
+    the frontend's auto-computed width based on its header label length
+    (see computeHeaderWidth in Planning.tsx) -- lets a user "reset" a
+    column back to automatic sizing without deleting/recreating it.
+    """
+
+    width_px: int | None = Field(default=None, ge=40, le=800)
+
+
 class PlanningColumnRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -190,6 +221,7 @@ class PlanningColumnRead(BaseModel):
     auto_populate_enabled: bool = False
     auto_populate_limit: int | None = None
     enable_status_color: bool = False
+    width_px: int | None = None
     created_by: uuid.UUID
     updated_by: uuid.UUID | None = None
     created_at: datetime

@@ -1429,6 +1429,28 @@ td .cell-secondary {
   max-width: 760px;
 }
 
+/* In-file duplicate banner: same layout as the DB-duplicate banner above,
+   but warning-toned (amber) instead of danger-toned (red) -- these rows were
+   never sent to the server at all, so it's a heads-up about the uploaded
+   file, not a rejection. */
+.import-infile-duplicates-banner {
+  border-color: var(--color-warning);
+  background: var(--color-warning-soft);
+}
+
+.import-infile-duplicates-banner .import-duplicates-header {
+  color: var(--color-warning);
+}
+
+.import-infile-duplicates-banner .iw-dup-chip-static {
+  border-color: var(--color-warning);
+  cursor: default;
+}
+
+.import-infile-duplicates-banner .iw-dup-hint {
+  color: var(--color-warning);
+}
+
 .iw-compare-match-note {
   background: var(--color-bg);
   border: 1px solid var(--color-border);

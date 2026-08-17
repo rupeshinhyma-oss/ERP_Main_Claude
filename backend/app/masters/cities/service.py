@@ -169,7 +169,12 @@ class CityService:
                 )
             return await self.repository.create(**field_values)
 
-        summary = await run_import(rows, row_validator=validate_city_row, row_creator=_create)
+        summary = await run_import(
+            rows,
+            row_validator=validate_city_row,
+            row_creator=_create,
+            dedupe_keys=("name", "country_code", "state_name"),
+        )
         await self._invalidate_cache()
         return summary
 

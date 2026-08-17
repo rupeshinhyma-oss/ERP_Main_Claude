@@ -53,6 +53,10 @@ export interface PlanningSheet {
    * Defaults to "Mum" for every sheet created before this field existed.
    */
   mum_group_label?: string;
+  /** The Product Master organization (MasterCompany) this sheet's branch belongs to. null only for sheets created before this link existed. */
+  organization_id?: string | null;
+  /** This sheet's linked branch id (one of organization_id's MasterCompany.branches entries). null only for sheets created before this link existed. */
+  branch_id?: string | null;
   created_by: string;
   created_at: string;
   updated_at: string;
@@ -81,6 +85,8 @@ export interface PlanningColumn {
   auto_populate_limit?: number | null;
   /** Opt-in: cells in this column can only carry a CRM-style status color when this is true. Off by default. */
   enable_status_color?: boolean;
+  /** Server-persisted display width in px, shared across every user viewing the sheet. null = not manually resized yet (frontend auto-computes from the header label length). */
+  width_px?: number | null;
   created_by: string;
   updated_by?: string | null;
   created_at: string;
@@ -197,8 +203,12 @@ export interface SourceModuleInfo {
 export interface MumColumnStatusHistoryEntry {
   column_id: string;
   column_name: string;
+  /** "status": old_status/new_status are set. "value": old_value/new_value are set. Defaults to "status" for older cached responses. */
+  entry_type?: "status" | "value";
   old_status?: string | null;
   new_status?: string | null;
+  old_value?: string | null;
+  new_value?: string | null;
   changed_at: string;
   changed_by_username: string;
 }

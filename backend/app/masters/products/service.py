@@ -34,7 +34,7 @@ from app.masters.products.models import Product
 from app.masters.products.repository import ProductRepository
 from app.masters.products.validators import validate_product_row
 from app.masters.uom.repository import UomRepository
-from app.planning.ws_manager import notify_source_record_changed
+from app.planning.ws_manager import notify_source_record_changed, refresh_planning_cells_for_record
 
 
 class ProductService:
@@ -207,6 +207,14 @@ class ProductService:
         # AGGREGATE column) is linked to this exact product to refresh it
         # live, instead of only picking up the change on next reload.
         await notify_source_record_changed("product", product.id)
+        # Persist the actual recomputed values into every affected
+        # Planning cell's stored value (not just notify already-open
+        # tabs) -- this is what lets a grid load stay a plain read with
+        # zero computation, per the store-on-write architecture (see
+        # PlanningService.recompute_and_store_cells_referencing_record).
+        # Uses THIS request's own session so the cell refresh commits
+        # together with the product edit itself.
+        await refresh_planning_cells_for_record(self.repository.session, "product", product.id)
         return product
 
     async def activate(self, product_id: uuid.UUID) -> Product:
@@ -231,6 +239,13 @@ class ProductService:
             raise ConflictException("This product cannot be deleted because it is referenced elsewhere.")
         await self.repository.delete(product)
         await self._invalidate_cache()
+        # A deleted product can still affect Planning: any AGGREGATE
+        # column filtering on status (e.g. "count of active products in
+        # category X") may need its stored count/sum to drop, and any
+        # cell still explicitly linked to this now-deleted product should
+        # reflect that it's gone rather than keep showing stale data.
+        await notify_source_record_changed("product", product_id)
+        await refresh_planning_cells_for_record(self.repository.session, "product", product_id)
 
     # ------------------------------------------------------------------
     # Import / Export
@@ -316,7 +331,9 @@ class ProductService:
 
             return await self.repository.create(**field_values)
 
-        summary = await run_import(rows, row_validator=validate_product_row, row_creator=_create)
+        summary = await run_import(
+            rows, row_validator=validate_product_row, row_creator=_create, dedupe_keys=("product_code",)
+        )
         await self._invalidate_cache()
         return summary
 

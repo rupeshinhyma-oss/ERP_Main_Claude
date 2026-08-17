@@ -32,6 +32,7 @@ from app.core.exceptions import BadRequestException, ConflictException, NotFound
 from app.masters.countries.repository import CountryRepository
 from app.masters.product_categories.repository import ProductCategoryRepository
 from app.masters.product_sub_categories.repository import ProductSubCategoryRepository
+from app.planning.ws_manager import notify_source_record_changed, refresh_planning_cells_for_record
 
 DROPDOWN_CACHE_NAME = "buyers"
 
@@ -327,6 +328,11 @@ class BuyerService:
                 )
 
         await self._invalidate_cache()
+        # Same store-on-write hook as Products/Suppliers -- Buyers is a
+        # registered Shipment Planning source module too (see
+        # app.planning.source_registry's buyer module).
+        await notify_source_record_changed("buyer", buyer_id)
+        await refresh_planning_cells_for_record(self.repository.session, "buyer", buyer_id)
         return await self.get_by_id_or_raise(buyer_id)
 
     async def update_grade(self, buyer_id: uuid.UUID, buyer_grade: Any) -> Buyer:
@@ -334,6 +340,10 @@ class BuyerService:
         buyer = await self.get_by_id_or_raise(buyer_id)
         await self.repository.update(buyer, buyer_grade=buyer_grade)
         await self._invalidate_cache()
+        # Bypasses update() above, but buyer_grade is itself a registered
+        # Planning source field -- needs the same refresh hook.
+        await notify_source_record_changed("buyer", buyer_id)
+        await refresh_planning_cells_for_record(self.repository.session, "buyer", buyer_id)
         return buyer
 
     async def update_potential(self, buyer_id: uuid.UUID, potential: Any) -> Buyer:

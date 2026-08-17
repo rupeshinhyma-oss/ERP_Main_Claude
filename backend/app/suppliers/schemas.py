@@ -323,3 +323,5 @@ class ImportSummaryRead(BaseModel):
     duplicate_count: int = 0
     errors: list[dict]
     duplicates: list[dict] = []
+    in_file_duplicate_count: int = 0
+    in_file_duplicates: list[dict] = []

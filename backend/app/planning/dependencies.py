@@ -19,6 +19,7 @@ from app.planning.repository import (
 )
 from app.planning.service import PlanningService
 from app.rbac.repository import UserRoleRepository
+from app.masters.company_list.repository import CompanyRepository
 
 
 def get_planning_service(
@@ -36,4 +37,5 @@ def get_planning_service(
         audit_service,
         PlanningColumnRoleLockRepository(db),
         user_role_repository=UserRoleRepository(db),
+        company_repository=CompanyRepository(db),
     )

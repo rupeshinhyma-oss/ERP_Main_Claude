@@ -27,6 +27,7 @@ import { apiDelete, apiGet, apiPatch, apiPost, apiPut, API_BASE, ApiError, toQue
 import { Auth } from "@/lib/auth";
 import { useAuth } from "@/lib/hooks";
 import { useLookup } from "@/lib/lookups";
+import { useToast } from "@/lib/toast";
 import { useLiveList } from "@/lib/live/useLiveList";
 import type { Role } from "@/types";
 import type {
@@ -179,6 +180,16 @@ function mumGroupNumber(columnName: string, label?: string): number | null {
   const effectiveLabel = label || "Mum";
   const escapedLabel = effectiveLabel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const regex = new RegExp(`${escapedLabel}\\s*(\\d+)`, "i");
+  const match = str.match(regex);
+  if (!match) return null;
+  const num = parseInt(match[1], 10);
+  return Number.isNaN(num) ? null : num;
+}
+
+function mumRemarksGroupNumber(columnName: string, label?: string): number | null {
+  const str = (columnName || "").trim();
+  const effectiveLabel = (label || "Mum").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const regex = new RegExp(`^${effectiveLabel}\\s*(\\d+)\\s*remarks$`, "i");
   const match = str.match(regex);
   if (!match) return null;
   const num = parseInt(match[1], 10);
@@ -771,6 +782,8 @@ function GridCell({
   isLastFrozen,
   stickyLeft,
   width,
+  disabledReason,
+  onDisabledClick,
 }: {
   value: string | null | undefined;
   displayValue: string | null | undefined;
@@ -795,6 +808,9 @@ function GridCell({
   stickyLeft?: number;
   /** This column's effective width (computed from its header label, or manually resized). Falls back to CELL_MIN_WIDTH if omitted. */
   width?: number;
+  /** If provided, prevents editing and displays as disabled with tooltip/toast. */
+  disabledReason?: string;
+  onDisabledClick?: () => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value ?? "");
@@ -805,6 +821,8 @@ function GridCell({
   const rawShownValue = isManual ? (value ?? displayValue) : (displayValue ?? value);
   const shownValue = showMumHistory ? formatDaysMonthYear(rawShownValue) : rawShownValue;
   const colWidth = width ?? CELL_MIN_WIDTH;
+  const isBlocked = !!disabledReason;
+  const isActuallyEditable = canEdit && isManual && !isBlocked;
 
   useEffect(() => {
     if (editing) inputRef.current?.focus();
@@ -815,7 +833,19 @@ function GridCell({
     if (draft !== (value ?? "")) onSave(draft);
   }
 
-  const bg = isFrozen ? (!isManual ? "#F8FAFC" : "#fff") : !isManual ? "#F8FAFC" : "#fff";
+  function handleCellClick() {
+    if (isBlocked) {
+      if (onDisabledClick) onDisabledClick();
+      return;
+    }
+    if (isActuallyEditable) {
+      setEditing(true);
+    }
+  }
+
+  const bg = isFrozen
+    ? (!isManual || isBlocked ? "#F8FAFC" : "#fff")
+    : (!isManual || isBlocked ? "#F8FAFC" : "#fff");
 
   return (
     <td
@@ -840,7 +870,7 @@ function GridCell({
       className="planning-cell"
     >
       <div style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "center", minHeight: 26, padding: "3px 5px" }}>
-        {editing && isManual ? (
+        {editing && isActuallyEditable ? (
           <input
             ref={inputRef}
             value={draft}
@@ -866,24 +896,27 @@ function GridCell({
           />
         ) : (
           <span
-            onClick={() => canEdit && isManual && setEditing(true)}
+            onClick={handleCellClick}
             title={
-              !isManual
+              disabledReason
+                ? disabledReason
+                : !isManual
                 ? `Computed (${sourceType}) — not directly editable`
                 : statusColor
-                  ? statusLabel(statusColor, customStatusTagId, customTags)
-                  : undefined
+                ? statusLabel(statusColor, customStatusTagId, customTags)
+                : undefined
             }
             style={{
               width: "100%",
-              cursor: canEdit && isManual ? "text" : "default",
+              cursor: isBlocked ? "not-allowed" : isActuallyEditable ? "text" : "default",
               fontSize: 13,
               minHeight: 18,
               display: "block",
               textAlign: "center",
               fontStyle: !isManual ? "italic" : undefined,
-              color: swatch || (!isManual ? "#475569" : undefined),
+              color: isBlocked ? "#94A3B8" : swatch || (!isManual ? "#475569" : undefined),
               fontWeight: swatch ? 600 : undefined,
+              opacity: isBlocked ? 0.7 : 1,
             }}
           >
             {shownValue || ""}
@@ -1150,6 +1183,7 @@ function HistoryDrawer({
 
 export function PlanningPage() {
   const { hasPermission } = useAuth();
+  const showToast = useToast();
   const canManageColumns = hasPermission("planning.column.manage");
   const canEditCells = hasPermission("planning.cell.edit");
 
@@ -1358,21 +1392,6 @@ export function PlanningPage() {
     if (matched) setActiveOrganizationId(matched.id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [organizations.loaded, organizations.items]);
-
-  /**
-   * Change the Organization filter: updates state and re-syncs the URL
-   * (preserving `?sheet=`). Reloading the grid itself is NOT done here --
-   * the `useEffect` below that calls `loadGrid(activeSheetId)` depends on
-   * `loadGrid`, which is itself recreated whenever `activeOrganizationId`
-   * changes, so updating that state alone is what triggers the reload
-   * (always from page 1, since the previously-loaded page may no longer
-   * be page 1 of the filtered result set).
-   */
-  function handleChangeOrganizationFilter(orgId: string | null) {
-    setActiveOrganizationId(orgId);
-    const orgName = orgId ? organizations.items.find((o) => o.id === orgId)?.name ?? null : null;
-    if (activeSheet) setSheetUrlParam(activeSheet.name, orgName);
-  }
 
   const loadSheets = useCallback(async () => {
     try {
@@ -2072,16 +2091,26 @@ export function PlanningPage() {
       // (explicit backend flag, not a string-comparison guess) ensures
       // this only ever overrides a backend-computed date, NEVER a value
       // someone actually typed into the Approval Date cell themselves.
-      if (approvalDateColumnId && row.mum_approval_dates) {
+      if (approvalDateColumnId) {
         const existingCell = map.get(`${row.id}:${approvalDateColumnId}`);
-        const isAutoFilled = existingCell?.is_auto_approval_date ?? (!existingCell && Object.keys(row.mum_approval_dates).length > 0);
+        const isAutoFilled = existingCell?.is_auto_approval_date ?? (!existingCell || !existingCell.value);
         if (isAutoFilled) {
-          const visibleGroupNums = Object.keys(row.mum_approval_dates)
-            .map((k) => parseInt(k, 10))
-            .filter((n) => !Number.isNaN(n) && visibleMumGroupNumbers.has(n));
-          const effectiveDate = visibleGroupNums.length > 0 ? row.mum_approval_dates[Math.min(...visibleGroupNums)] : null;
+          const visibleGroupNums = row.mum_approval_dates
+            ? Object.keys(row.mum_approval_dates)
+                .map((k) => parseInt(k, 10))
+                .filter((n) => !Number.isNaN(n) && visibleMumGroupNumbers.has(n))
+            : [];
+          const effectiveDate =
+            visibleGroupNums.length > 0 && row.mum_approval_dates
+              ? row.mum_approval_dates[Math.min(...visibleGroupNums)]
+              : null;
           if (existingCell) {
-            map.set(`${row.id}:${approvalDateColumnId}`, { ...existingCell, value: effectiveDate, display_value: effectiveDate, is_auto_approval_date: true });
+            map.set(`${row.id}:${approvalDateColumnId}`, {
+              ...existingCell,
+              value: effectiveDate,
+              display_value: effectiveDate,
+              is_auto_approval_date: true,
+            });
           } else if (effectiveDate) {
             map.set(`${row.id}:${approvalDateColumnId}`, {
               id: null,
@@ -2461,33 +2490,68 @@ export function PlanningPage() {
     cellSaveGenerationRef.current[key] = myGeneration;
     const isStillLatest = () => cellSaveGenerationRef.current[key] === myGeneration;
 
+    const targetCol = grid?.columns.find((c) => c.id === columnId);
+    const mumLabel = grid?.sheet?.mum_group_label || "Mum";
+    const isMumCol = targetCol ? isPureMumColumn(targetCol.name, mumLabel) : false;
+    const isZeroOrBlank = isMumCol && (value.trim() === "" || value.trim() === "0" || (!isNaN(Number(value)) && Number(value) === 0));
+    const effectiveVal = isZeroOrBlank ? "" : value;
+    const mumNum = targetCol ? mumGroupNumber(targetCol.name, mumLabel) : null;
+    const remarksColId = (isZeroOrBlank && mumNum !== null)
+      ? grid?.columns.find((c) => mumRemarksGroupNumber(c.name, mumLabel) === mumNum)?.id
+      : undefined;
+
     // 1. Apply optimistically, right away -- the person's typed value is
     // the source of truth in the UI from this point on, independent of
     // whether the network call below has even started yet.
     setGrid((prev) => {
       if (!prev) return prev;
+      const approvalDateCol = prev.columns.find((c) => isApprovalDateColumn(c.name));
       return {
         ...prev,
         rows: prev.rows.map((r) => {
           if (r.id !== rowId) return r;
           const exists = r.cells.some((cell) => cell.column_id === columnId);
-          const optimisticCell = { value, display_value: value };
-          return {
-            ...r,
-            cells: exists
-              ? r.cells.map((cell) => (cell.column_id === columnId ? { ...cell, ...optimisticCell } : cell))
-              : [
+          const optimisticCell = isZeroOrBlank
+            ? { value: "", display_value: "", status_color: null, custom_status_tag_id: null }
+            : { value: effectiveVal, display_value: effectiveVal };
+          let updatedCells = exists
+            ? r.cells.map((cell) => (cell.column_id === columnId ? { ...cell, ...optimisticCell } : cell))
+            : [
                 ...r.cells,
                 {
                   id: null,
                   row_id: rowId,
                   column_id: columnId,
-                  value,
-                  display_value: value,
+                  value: isZeroOrBlank ? "" : effectiveVal,
+                  display_value: isZeroOrBlank ? "" : effectiveVal,
                   status_color: null,
                   custom_status_tag_id: null,
                 } as PlanningCell,
-              ],
+              ];
+          if (remarksColId) {
+            updatedCells = updatedCells.map((cell) =>
+              cell.column_id === remarksColId ? { ...cell, value: "", display_value: "" } : cell
+            );
+          }
+          let nextMumDates = r.mum_approval_dates ? { ...r.mum_approval_dates } : undefined;
+          if (isZeroOrBlank && mumNum !== null && nextMumDates) {
+            delete nextMumDates[mumNum];
+          }
+          const hasOtherActiveMum = updatedCells.some((c) => {
+            const col = prev.columns.find((cl) => cl.id === c.column_id);
+            if (!col || !isPureMumColumn(col.name, mumLabel)) return false;
+            const v = (c.value ?? "").trim();
+            return v !== "" && v !== "0" && !isNaN(Number(v)) && Number(v) > 0;
+          });
+          if (!hasOtherActiveMum && approvalDateCol) {
+            updatedCells = updatedCells.map((cell) =>
+              cell.column_id === approvalDateCol.id ? { ...cell, value: "", display_value: "" } : cell
+            );
+          }
+          return {
+            ...r,
+            cells: updatedCells,
+            mum_approval_dates: nextMumDates,
           };
         }),
       };
@@ -2500,7 +2564,7 @@ export function PlanningPage() {
       try {
         const { data } = await apiPut<{ cell: PlanningCell; derived_values: Record<string, string | null | Record<string, string>> }>(
           `/planning/sheets/${sheetId}/rows/${rowId}/columns/${columnId}/value`,
-          { value }
+          { value: isZeroOrBlank ? null : value }
         );
         // A newer edit to this SAME cell started while this request was
         // in flight -- that newer save already applied its own optimistic
@@ -2532,14 +2596,19 @@ export function PlanningPage() {
                 id: null,
                 row_id: rowId,
                 column_id: columnId,
-                value,
-                display_value: value,
+                value: isZeroOrBlank ? "" : value,
+                display_value: isZeroOrBlank ? "" : value,
                 status_color: null,
                 custom_status_tag_id: null,
               };
               let updatedCells = exists
                 ? r.cells.map((cell) => (cell.column_id === columnId ? { ...cell, ...patched } : cell))
                 : [...r.cells, patched];
+              if (remarksColId) {
+                updatedCells = updatedCells.map((cell) =>
+                  cell.column_id === remarksColId ? { ...cell, value: "", display_value: "" } : cell
+                );
+              }
               // Also patch every derived column (formula totals, and the
               // Approval Date auto-date) for THIS SAME tab -- the acting
               // user doesn't receive their own WebSocket broadcast (see
@@ -2549,10 +2618,10 @@ export function PlanningPage() {
               updatedCells = updatedCells.map((c) => {
                 if (!Object.prototype.hasOwnProperty.call(derived, c.column_id)) return c;
                 const nextDisplayValue = derived[c.column_id];
-                if (c.column_id === approvalDateColumnId && (c.is_auto_approval_date || !c.value)) {
-                  return { ...c, display_value: nextDisplayValue, value: nextDisplayValue, is_auto_approval_date: true };
+                if (c.column_id === approvalDateColumnId && (c.is_auto_approval_date || !c.value || nextDisplayValue === null || nextDisplayValue === "")) {
+                  return { ...c, display_value: nextDisplayValue ?? "", value: nextDisplayValue ?? "", is_auto_approval_date: true };
                 }
-                return { ...c, display_value: nextDisplayValue };
+                return { ...c, display_value: nextDisplayValue, value: nextDisplayValue !== undefined ? nextDisplayValue : c.value };
               });
               const presentColumnIds = new Set(updatedCells.map((c) => c.column_id));
               for (const [derivedColumnId, displayValue] of Object.entries(derived)) {
@@ -2596,21 +2665,15 @@ export function PlanningPage() {
         const isRetryable = status === undefined || status >= 500 || status === 408 || status === 429;
         const isLastAttempt = attempt === maxAttempts - 1;
         if (!isRetryable || isLastAttempt) {
-          // Every retry failed (or this failure isn't worth retrying at
-          // all) -- the typed value STAYS on screen (never reverted;
-          // reverting what someone just typed is more disruptive than a
-          // quiet "error" indicator they can retry from), but the small
-          // per-cell marker now shows it hasn't actually reached the
-          // server yet.
           setCellSaveStatus((prev) => ({ ...prev, [key]: "error" }));
-          // No banner for a single-cell save failure -- see this
-          // function's docstring for why that would be disruptive while
-          // actively editing a sheet. Logged for diagnosis instead.
+          if (status && status < 500 && status !== 408 && status !== 429) {
+            showToast(err instanceof Error ? err.message : "Cannot save cell", "error");
+          }
           console.error("Failed to save cell value:", err);
           return;
         }
         await new Promise((resolve) => setTimeout(resolve, backoffMs[attempt]));
-        if (!isStillLatest()) return; // superseded while waiting to retry -- stop, don't fire a stale request
+        if (!isStillLatest()) return;
       }
     }
   }
@@ -2732,79 +2795,6 @@ export function PlanningPage() {
             )}
           </h1>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            {/*
-              Once a sheet has a REAL organization+branch link
-              (grid?.sheet?.organization_id/branch_id -- required for
-              every sheet created going forward, see
-              PlanningService.create_sheet), the backend always filters
-              to that exact branch regardless of any request-time
-              override (see PlanningService.get_grid's docstring) -- so
-              showing an editable "All Organizations" dropdown here would
-              be misleading for a linked sheet; it show a locked badge
-              instead. Only a LEGACY sheet (organization_id is null --
-              created before this feature existed) still shows the old
-              editable dropdown, unchanged.
-            */}
-            {grid?.sheet?.organization_id ? (
-              <span
-                title="This sheet is linked to one specific branch and always shows only that branch's products."
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 6,
-                  border: "1px solid #CBD5E1",
-                  borderRadius: 6,
-                  padding: "6px 10px",
-                  fontSize: 13,
-                  color: "#2563EB",
-                  background: "#EFF6FF",
-                }}
-              >
-                🔒{" "}
-                {organizations.items.find((o) => o.id === grid.sheet.organization_id)?.name ?? "Organization"}
-                {" — "}
-                {(organizations.items.find((o) => o.id === grid.sheet.organization_id)?.branches || []).find(
-                  (b) => b.id === grid.sheet.branch_id
-                )?.name ?? "Branch"}
-              </span>
-            ) : (
-              /*
-                Organization filter -- NOT a real column stored anywhere on
-                this sheet. Membership is read live off each row's linked
-                Product Master record (Product.organization_ids) by the
-                backend on every grid load (see
-                PlanningRowRepository._linked_record_ids_for_organization),
-                the same "extract from Product Master, never a stale copy"
-                rule every other Shipment Planning lookup column already
-                follows. Selecting a value here only changes what's shown
-                for the currently-open sheet -- it can never add/edit/
-                delete anything; that still only happens via Product Master.
-                Only shown for LEGACY sheets (see the branch above) --
-                every sheet created going forward is always linked.
-              */
-              <select
-                value={activeOrganizationId ?? ""}
-                onChange={(e) => handleChangeOrganizationFilter(e.target.value || null)}
-                disabled={!activeSheetId}
-                title="Filter this sheet by Organization (from Product Master)"
-                style={{
-                  border: "1px solid #CBD5E1",
-                  borderRadius: 6,
-                  padding: "6px 10px",
-                  fontSize: 13,
-                  color: activeOrganizationId ? "#2563EB" : "#334155",
-                  background: activeOrganizationId ? "#EFF6FF" : "#FFFFFF",
-                  cursor: activeSheetId ? "pointer" : "not-allowed",
-                }}
-              >
-                <option value="">All Organizations</option>
-                {organizations.items.map((org) => (
-                  <option key={org.id} value={org.id}>
-                    {org.name}
-                  </option>
-                ))}
-              </select>
-            )}
             <button type="button" className="btn btn-secondary" onClick={handleOpenHistory} disabled={!activeSheetId}>
               History
             </button>
@@ -3044,6 +3034,23 @@ export function PlanningPage() {
                         {orderedColumns.map((col) => {
                           const cell = cellByRowColumn.get(`${row.id}:${col.id}`);
                           const saveKey = cellStatusKey(row.id, col.id);
+                          const mumLabel = grid?.sheet?.mum_group_label || "Mum";
+                          const remarksGroupNum = mumRemarksGroupNumber(col.name, mumLabel);
+                          let remarksDisabledReason: string | undefined = undefined;
+
+                          if (remarksGroupNum !== null) {
+                            const mumMainCol = orderedColumns.find(
+                              (c) => isPureMumColumn(c.name, mumLabel) && mumGroupNumber(c.name, mumLabel) === remarksGroupNum
+                            );
+                            const mumMainCell = mumMainCol ? cellByRowColumn.get(`${row.id}:${mumMainCol.id}`) : undefined;
+                            const mumVal = (mumMainCell?.value ?? "").trim();
+                            const num = Number(mumVal);
+                            const hasActiveMumNumber = mumVal !== "" && mumVal !== "0" && !isNaN(num) && num > 0;
+                            if (!hasActiveMumNumber) {
+                              remarksDisabledReason = `Enter a quantity in ${mumMainCol?.name || `${mumLabel} ${remarksGroupNum}`} first before adding remarks.`;
+                            }
+                          }
+
                           return (
                             <GridCell
                               key={col.id}
@@ -3066,6 +3073,8 @@ export function PlanningPage() {
                               isLastFrozen={col.id === lastFrozenColumnId}
                               stickyLeft={stickyLeftByColumnId.get(col.id)}
                               width={effectiveColumnWidth(col)}
+                              disabledReason={remarksDisabledReason}
+                              onDisabledClick={() => remarksDisabledReason && showToast(remarksDisabledReason, "warning")}
                             />
                           );
                         })}

@@ -349,6 +349,29 @@ async def suspend_user(
     return build_success_response(data=data, request_id=request.state.request_id)
 
 
+@router.post("/{user_id}/unsuspend", summary="Unsuspend a user")
+async def unsuspend_user(
+    user_id: uuid.UUID,
+    request: Request,
+    user_service: UserService = Depends(get_user_service),
+    current_user: CurrentUser = Depends(require_permission("user.update")),
+    audit_service: AuditService = Depends(get_audit_service),
+) -> dict:
+    """Unsuspend a suspended user account and restore Active status."""
+    user = await user_service.activate_user(user_id, updated_by=current_user.id)
+    await _record_user_action(
+        audit_service=audit_service,
+        request=request,
+        action=AuditAction.USER_ACTIVATED,
+        actor=current_user,
+        target_user_id=user_id,
+        description=f"Unsuspended user {user.username!r}; account restored to active.",
+        new_values={"status": user.status.value, "is_active": True},
+    )
+    data = UserRead.model_validate(user).model_dump(mode="json")
+    return build_success_response(data=data, request_id=request.state.request_id)
+
+
 @router.post("/{user_id}/unlock", summary="Unlock a locked-out user")
 async def unlock_user(
     user_id: uuid.UUID,

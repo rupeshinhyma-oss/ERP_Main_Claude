@@ -2,31 +2,26 @@
  * Role & Permission Management.
  *
  * Provides:
- * 1. System & Custom Roles list table matching ERP UI screenshots.
+ * 1. System & Custom Roles list table.
  * 2. Merged View/Edit Permission screen (with role renaming, select-all permissions,
  *    module group cards, and direct in-role user management to add/remove users).
- * 3. Individual user permission overrides & effective permission breakdown.
+ * 3. Clone Role Permissions.
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { ActionDropdown, type ActionDropdownEntry } from "@/components/ActionDropdown";
 import { Banner, Can, Modal } from "@/components/ui";
 import { TextField } from "@/components/fields";
-import { apiDelete, apiGet, apiPatch, apiPost, apiPut } from "@/lib/api";
+import { apiDelete, apiGet, apiPatch, apiPost } from "@/lib/api";
 import { useAuth, usePendingGuard } from "@/lib/hooks";
 import { useToast } from "@/lib/toast";
-import { sourceBadgeClass } from "./EffectivePermissions";
 import type {
-  BulkPermissionOverrideItem,
-  EffectivePermissionsBreakdown,
   ItemsPage,
   Permission,
   Role,
   User,
-  UserPermissionOverride,
 } from "@/types";
 
 import {
@@ -35,15 +30,11 @@ import {
   MODULE_NAMES,
 } from "@/lib/permissionLabels";
 
-type TabId = "tab-roles" | "tab-users" | "tab-effective";
-
 export function RbacPage() {
-  const [params] = useSearchParams();
   const { hasPermission, isSuperAdmin } = useAuth();
   const showToast = useToast();
   const canManage = hasPermission("settings.manage");
 
-  const [activeTab, setActiveTab] = useState<TabId>("tab-roles");
   const [allPermissions, setAllPermissions] = useState<Permission[]>([]);
   const [allRoles, setAllRoles] = useState<Role[]>([]);
   const [allUsers, setAllUsers] = useState<User[]>([]);
@@ -53,7 +44,7 @@ export function RbacPage() {
   const [selectedRoleIds, setSelectedRoleIds] = useState<string[]>([]);
   const [rolePageSize, setRolePageSize] = useState(50);
 
-  /* Viewing & Editing a single Role (Screenshot 4 view) */
+  /* Viewing & Editing a single Role */
   const [viewingRole, setViewingRole] = useState<Role | null>(null);
   const [roleName, setRoleName] = useState("");
   const [roleDescription, setRoleDescription] = useState("");
@@ -69,21 +60,6 @@ export function RbacPage() {
   const { guard: guardRowAction } = usePendingGuard<string>();
   const [roleSaving, setRoleSaving] = useState(false);
   const [cloneSubmitting, setCloneSubmitting] = useState(false);
-
-  /* Users tab */
-  const [selectedUserId, setSelectedUserId] = useState("");
-  const [userBreakdown, setUserBreakdown] = useState<EffectivePermissionsBreakdown | null>(null);
-  const [userTabStatus, setUserTabStatus] = useState<"idle" | "loading" | "ready">("idle");
-  const [checkedUserCodes, setCheckedUserCodes] = useState<Set<string>>(new Set());
-  const [savingUserOverrides, setSavingUserOverrides] = useState(false);
-
-  /* Effective tab */
-  const [effectiveUserId, setEffectiveUserId] = useState("");
-  const [effectiveBreakdown, setEffectiveBreakdown] =
-    useState<EffectivePermissionsBreakdown | null>(null);
-  const [effectiveStatus, setEffectiveStatus] = useState<"idle" | "loading" | "ready">("idle");
-  const [tableSearch, setTableSearch] = useState("");
-  const [sourceFilter, setSourceFilter] = useState("");
 
   const loadRoles = useCallback(async () => {
     setRolesLoading(true);
@@ -113,24 +89,11 @@ export function RbacPage() {
         const permsRes = await apiGet<Permission[]>("/rbac/permissions");
         setAllPermissions(permsRes.data || []);
         await Promise.all([loadRoles(), loadUsers()]);
-
-        const tabParam = params.get("tab");
-        if (tabParam === "tab-effective" || tabParam === "effective") setActiveTab("tab-effective");
-        else if (tabParam === "tab-users" || tabParam === "users") setActiveTab("tab-users");
-
-        const userParam = params.get("user_id");
-        if (userParam) {
-          if (tabParam === "tab-effective" || tabParam === "effective") {
-            setEffectiveUserId(userParam);
-          } else {
-            setSelectedUserId(userParam);
-          }
-        }
       } catch (err) {
         setError(err);
       }
     })();
-  }, [loadRoles, loadUsers, params]);
+  }, [loadRoles, loadUsers]);
 
   const codeToId = useMemo(() => {
     const map: Record<string, string> = {};
@@ -203,31 +166,23 @@ export function RbacPage() {
     }
   }
 
-  /* --- Users in this Role --- */
-  const assignedUsersInRole = useMemo(() => {
-    if (!viewingRole || !viewingRole.id) return [];
-    return allUsers.filter((u) => {
-      const uRoles = u.roles || [];
-      return (
-        uRoles.includes(viewingRole.name) ||
-        uRoles.includes(viewingRole.id) ||
-        (viewingRole.name === "admin" && uRoles.includes("super_admin"))
-      );
-    });
-  }, [viewingRole, allUsers]);
+  /* Users currently assigned to viewingRole */
+  const assignedUsers = useMemo(() => {
+    if (!viewingRole || !viewingRole.name) return [];
+    return allUsers.filter((u) => (u.roles || []).includes(viewingRole.name));
+  }, [allUsers, viewingRole]);
 
-  const availableUsersToAdd = useMemo(() => {
-    if (!viewingRole || !viewingRole.id) return [];
-    const assignedIds = new Set(assignedUsersInRole.map((u) => u.id));
-    return allUsers.filter((u) => !assignedIds.has(u.id));
-  }, [viewingRole, assignedUsersInRole, allUsers]);
+  const unassignedUsers = useMemo(() => {
+    if (!viewingRole || !viewingRole.name) return allUsers;
+    return allUsers.filter((u) => !(u.roles || []).includes(viewingRole.name));
+  }, [allUsers, viewingRole]);
 
   async function handleAddUserToRole() {
-    if (!viewingRole?.id || !selectedUserToAdd) return;
+    if (!selectedUserToAdd || !viewingRole?.id) return;
     setUserActionLoading(true);
     try {
       await apiPost(`/users/${selectedUserToAdd}/roles`, { role_id: viewingRole.id });
-      showToast("User added to role successfully!", "success");
+      showToast("User added to role.", "success");
       setSelectedUserToAdd("");
       await loadUsers();
     } catch (err) {
@@ -237,13 +192,12 @@ export function RbacPage() {
     }
   }
 
-  async function handleRemoveUserFromRole(userId: string, username: string) {
+  async function handleRemoveUserFromRole(userId: string) {
     if (!viewingRole?.id) return;
-    if (!confirm(`Remove user '${username}' from '${viewingRole.name}' role?`)) return;
     setUserActionLoading(true);
     try {
       await apiDelete(`/users/${userId}/roles/${viewingRole.id}`);
-      showToast("User removed from role successfully!", "success");
+      showToast("User removed from role.", "success");
       await loadUsers();
     } catch (err) {
       setError(err);
@@ -252,19 +206,15 @@ export function RbacPage() {
     }
   }
 
-  /* --- Save Role Name & Permissions --- */
-  async function handleSaveRolePermissions(e?: React.FormEvent) {
-    if (e) e.preventDefault();
-    if (roleSaving) return;
+  async function handleSaveRoleView() {
     if (!roleName.trim()) {
-      showToast("Role name is required.", "warning");
+      showToast("Role name cannot be empty", "error");
       return;
     }
-    setError(null);
     setRoleSaving(true);
     try {
       const name = roleName.trim();
-      const description = roleDescription.trim() || null;
+      const description = roleDescription.trim() || undefined;
       const desiredCodes = checkedCodes;
 
       let roleId = viewingRole?.id || "";
@@ -321,115 +271,22 @@ export function RbacPage() {
 
   async function handleClone(e: React.FormEvent) {
     e.preventDefault();
-    if (cloneSubmitting) return;
+    if (!cloneSourceId || !cloneTargetId) return;
     setCloneSubmitting(true);
     try {
-      const res = await apiPost<{ cloned_count: number }>("/rbac/clone-permissions", {
+      await apiPost("/rbac/clone-permissions", {
         source_type: "role",
         source_id: cloneSourceId,
         target_type: "role",
         target_id: cloneTargetId,
       });
-      showToast(`Successfully cloned ${res.data.cloned_count} permission(s).`, "success");
+      showToast("Permissions cloned successfully!", "success");
       setCloneOpen(false);
-      void loadRoles();
+      await loadRoles();
     } catch (err) {
       setError(err);
     } finally {
       setCloneSubmitting(false);
-    }
-  }
-
-  /* --- Users tab loader & save --- */
-  const refreshUserTab = useCallback(
-    async (userId: string) => {
-      if (!userId) {
-        setUserBreakdown(null);
-        setCheckedUserCodes(new Set());
-        setUserTabStatus("idle");
-        return;
-      }
-      setUserTabStatus("loading");
-      try {
-        const [effRes, userPermsRes] = await Promise.all([
-          apiGet<EffectivePermissionsBreakdown>(`/rbac/users/${userId}/effective-permissions`),
-          apiGet<UserPermissionOverride[]>(`/rbac/users/${userId}/permissions`),
-        ]);
-        setUserBreakdown(effRes.data);
-        const overrides = userPermsRes.data || [];
-
-        const overrideMap = new Map(overrides.map((o) => [o.code, o.is_granted]));
-        const roleGranted = new Set(effRes.data.role_permissions || []);
-        const initialChecked = new Set<string>();
-        for (const code of new Set([...overrideMap.keys(), ...roleGranted])) {
-          const override = overrideMap.get(code);
-          const checked = override === true || (override === undefined && roleGranted.has(code));
-          if (checked) initialChecked.add(code);
-        }
-        setCheckedUserCodes(initialChecked);
-        setUserTabStatus("ready");
-      } catch (err) {
-        setError(err);
-        setUserTabStatus("idle");
-      }
-    },
-    []
-  );
-
-  useEffect(() => {
-    void refreshUserTab(selectedUserId);
-  }, [selectedUserId, refreshUserTab]);
-
-  /* --- Effective tab loader --- */
-  useEffect(() => {
-    if (!effectiveUserId) {
-      setEffectiveBreakdown(null);
-      setEffectiveStatus("idle");
-      return;
-    }
-    let cancelled = false;
-    setEffectiveStatus("loading");
-    (async () => {
-      try {
-        const res = await apiGet<EffectivePermissionsBreakdown>(
-          `/rbac/users/${effectiveUserId}/effective-permissions`
-        );
-        if (cancelled) return;
-        setEffectiveBreakdown(res.data);
-        setEffectiveStatus("ready");
-      } catch (err) {
-        if (cancelled) return;
-        setError(err);
-        setEffectiveStatus("idle");
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [effectiveUserId]);
-
-  async function handleSaveUserOverrides() {
-    if (!selectedUserId || !userBreakdown) return;
-    setSavingUserOverrides(true);
-    try {
-      const roleGranted = new Set(userBreakdown.role_permissions || []);
-      const overrides: BulkPermissionOverrideItem[] = [];
-      for (const p of allPermissions) {
-        const checked = checkedUserCodes.has(p.code);
-        const isRoleGranted = roleGranted.has(p.code);
-        if (checked && !isRoleGranted) {
-          overrides.push({ permission_id: p.id, is_granted: true });
-        } else if (!checked && isRoleGranted) {
-          overrides.push({ permission_id: p.id, is_granted: false });
-        }
-      }
-      await apiPut(`/rbac/users/${selectedUserId}/permissions/bulk`, { overrides });
-      showToast("Permissions updated for user.", "success");
-      await refreshUserTab(selectedUserId);
-    } catch (err) {
-      setError(err);
-    } finally {
-      setSavingUserOverrides(false);
     }
   }
 
@@ -441,311 +298,248 @@ export function RbacPage() {
     );
   }, [allRoles, roleSearch]);
 
-  const userOptions = allUsers.map((u) => (
-    <option key={u.id} value={u.id}>
-      {`${u.display_name || u.username} (${u.email || u.username}) - Status: ${u.status || "ACTIVE"}`}
-    </option>
-  ));
-
-  const effectiveSources = effectiveBreakdown?.permission_sources || [];
-  const filteredEffectiveSources = useMemo(() => {
-    const q = tableSearch.toLowerCase();
-    return effectiveSources.filter((item) => {
-      const matchesQ =
-        item.code.toLowerCase().includes(q) || item.module.toLowerCase().includes(q);
-      const matchesSource = !sourceFilter || item.source === sourceFilter;
-      return matchesQ && matchesSource;
-    });
-  }, [effectiveSources, tableSearch, sourceFilter]);
-
   return (
-    <AppShell activeKey="rbac" pageClassName="page-rbac">
-      <main className="page">
-        <Breadcrumb trail={["Roles & Permissions"]} />
+    <AppShell activeKey="rbac">
+      <main className="page-rbac">
+        <Breadcrumb trail={["Dashboard", "Roles & Permissions"]} />
 
-        {/* View / Edit Permission Screen (Matching Screenshot 4) */}
         {viewingRole ? (
-          <div className="permission-edit-view">
-            <div className="permission-edit-topbar">
-              <div>
-                <h1>Edit Permission</h1>
-                <div className="role-title-heading">
-                  Role: {roleName ? roleName.toUpperCase() : "NEW ROLE"}
+          /* Merged View / Edit Role Screen */
+          <div className="view-edit-role-container">
+            <div className="page-header" style={{ marginBottom: "16px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={closeRoleView}
+                  style={{ padding: "6px 12px" }}
+                >
+                  ← Back to Roles
+                </button>
+                <div>
+                  <h1 style={{ fontSize: "20px", fontWeight: 700, margin: 0 }}>
+                    {viewingRole.id ? `Role: ${viewingRole.name}` : "Create New Role"}
+                  </h1>
+                  <p className="muted" style={{ margin: "2px 0 0", fontSize: "13px" }}>
+                    Configure role details, assigned permissions, and user memberships.
+                  </p>
                 </div>
               </div>
-              <button
-                type="button"
-                className="btn-back"
-                onClick={closeRoleView}
-              >
-                ← BACK
-              </button>
+              <div style={{ display: "flex", gap: "8px" }}>
+                <button type="button" className="btn btn-secondary" onClick={closeRoleView}>
+                  Cancel
+                </button>
+                {canManage && (
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    disabled={roleSaving}
+                    onClick={handleSaveRoleView}
+                  >
+                    {roleSaving ? "Saving..." : "Save Role"}
+                  </button>
+                )}
+              </div>
             </div>
 
             <Banner error={error} />
 
-            {/* 1. Role Info & Name Change Card */}
-            <div className="role-info-card">
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
-                <h3 style={{ margin: 0, fontSize: "16px", color: "#1e293b", fontWeight: 700 }}>
-                  Role Details
-                </h3>
-                {viewingRole.is_system && (
-                  <span className="badge badge-neutral" style={{ background: "#e2e8f0", color: "#475569" }}>
-                    System Role
-                  </span>
-                )}
-              </div>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "16px" }}>
-                <TextField
-                  id="roleNameInput"
-                  label="Role Name *"
-                  required
-                  placeholder="e.g. Sales Executive, Manager"
-                  value={roleName}
-                  readOnly={Boolean(viewingRole.is_system && !isSuperAdmin)}
-                  onChange={(v) => setRoleName(v)}
-                />
-                <TextField
-                  id="roleDescInput"
-                  label="Description (optional)"
-                  placeholder="Brief description of role responsibilities"
-                  value={roleDescription}
-                  onChange={(v) => setRoleDescription(v)}
-                />
-              </div>
-            </div>
-
-            {/* 2. Permissions Matrix Card (Matching Screenshot 4) */}
-            <div className="permission-modules-container">
-              <div className="permission-modules-header">
-                <div>
-                  <h3 style={{ margin: 0, fontSize: "16px", color: "#1e293b", fontWeight: 700 }}>
-                    Module Permissions
-                  </h3>
-                  <div className="muted" style={{ fontSize: "13px", marginTop: "2px" }}>
-                    Configure access privileges for users assigned to this role.
+            <div style={{ display: "grid", gridTemplateColumns: "minmax(300px, 360px) 1fr", gap: "20px", alignItems: "start" }}>
+              {/* Left Column: Role Details & Users */}
+              <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+                <div className="card" style={{ padding: "20px" }}>
+                  <h3 style={{ fontSize: "15px", fontWeight: 600, margin: "0 0 16px" }}>Role Details</h3>
+                  <div className="field" style={{ marginBottom: "14px" }}>
+                    <TextField
+                      id="role-name-input"
+                      label="Role Name *"
+                      value={roleName}
+                      onChange={setRoleName}
+                      readOnly={!canManage || viewingRole.is_system}
+                    />
+                    {viewingRole.is_system && (
+                      <span className="muted" style={{ fontSize: "12px", marginTop: "4px", display: "block" }}>
+                        System role names cannot be renamed.
+                      </span>
+                    )}
+                  </div>
+                  <div className="field">
+                    <TextField
+                      id="role-desc-input"
+                      label="Description"
+                      value={roleDescription}
+                      onChange={setRoleDescription}
+                      readOnly={!canManage}
+                    />
                   </div>
                 </div>
-                <label className="select-all-permission-label">
-                  <input
-                    type="checkbox"
-                    checked={allPermissions.length > 0 && checkedCodes.size === allPermissions.length}
-                    onChange={toggleSelectAllPermissions}
-                    style={{ width: "18px", height: "18px", accentColor: "#0061f2", cursor: "pointer" }}
-                  />
-                  <span>Select All Permissions</span>
-                </label>
-              </div>
 
-              {Object.keys(permissionGroups)
-                .sort()
-                .map((modKey) => {
-                  const items = permissionGroups[modKey];
-                  const allCheckedInMod = items.every((p) => checkedCodes.has(p.code));
+                {viewingRole.id && (
+                  <div className="card" style={{ padding: "20px" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px" }}>
+                      <h3 style={{ fontSize: "15px", fontWeight: 600, margin: 0 }}>
+                        Users in this Role ({assignedUsers.length})
+                      </h3>
+                    </div>
 
-                  return (
-                    <div className="permission-module-card" key={modKey}>
-                      <div className="permission-module-title-row">
-                        <div className="permission-module-title">
-                          {MODULE_NAMES[modKey] || modKey.toUpperCase()}
-                        </div>
+                    {canManage && (
+                      <div style={{ display: "flex", gap: "8px", marginBottom: "14px" }}>
+                        <select
+                          value={selectedUserToAdd}
+                          onChange={(e) => setSelectedUserToAdd(e.target.value)}
+                          style={{ flex: 1, padding: "6px 10px", borderRadius: "4px", border: "1px solid #cbd5e1", fontSize: "13px" }}
+                        >
+                          <option value="">-- Add user to this role --</option>
+                          {unassignedUsers.map((u) => (
+                            <option key={u.id} value={u.id}>
+                              {u.display_name || u.username} ({u.email || u.username})
+                            </option>
+                          ))}
+                        </select>
                         <button
                           type="button"
-                          className="toggle-btn"
-                          onClick={() => toggleModule(modKey)}
-                          style={{
-                            background: "transparent",
-                            border: "none",
-                            color: "#0061f2",
-                            fontSize: "12.5px",
-                            fontWeight: 600,
-                            cursor: "pointer",
-                            padding: "2px 6px",
-                          }}
+                          className="btn btn-secondary btn-small"
+                          disabled={!selectedUserToAdd || userActionLoading}
+                          onClick={handleAddUserToRole}
                         >
-                          {allCheckedInMod ? "Deselect Group" : "Select Group"}
+                          Add
                         </button>
                       </div>
+                    )}
 
-                      <div className="permission-card-grid">
-                        {items.map((p) => {
-                          const isChecked = checkedCodes.has(p.code);
-                          return (
-                            <label key={p.code} className="permission-checkbox-item">
-                              <input
-                                type="checkbox"
-                                checked={isChecked}
-                                onChange={() => toggleCode(p.code)}
-                              />
-                              <span>
-                                {MODULE_NAMES[modKey] ? `${MODULE_NAMES[modKey]} ${friendlyPermissionLabel(p.code)}` : friendlyPermissionLabel(p.code)}
-                              </span>
-                            </label>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  );
-                })}
-            </div>
-
-            {/* 3. In-Role User Management Section (Add / Remove Users in this Role) */}
-            {viewingRole.id && (
-              <div className="role-users-section">
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", flexWrap: "wrap", gap: "12px" }}>
-                  <div>
-                    <h3 style={{ margin: 0, fontSize: "16px", color: "#1e293b", fontWeight: 700 }}>
-                      👥 Users in this Role ({assignedUsersInRole.length})
-                    </h3>
-                    <div className="muted" style={{ fontSize: "13px", marginTop: "2px" }}>
-                      Directly add or remove individual users to/from this role.
+                    <div style={{ maxHeight: "280px", overflowY: "auto", border: "1px solid #e2e8f0", borderRadius: "6px" }}>
+                      {assignedUsers.length ? (
+                        <table style={{ width: "100%", fontSize: "13px" }}>
+                          <tbody>
+                            {assignedUsers.map((u) => (
+                              <tr key={u.id} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                                <td style={{ padding: "8px 12px" }}>
+                                  <div style={{ fontWeight: 600, color: "#1e293b" }}>{u.display_name || u.username}</div>
+                                  <div style={{ fontSize: "11.5px", color: "#64748b" }}>{u.email || u.username}</div>
+                                </td>
+                                {canManage && (
+                                  <td style={{ textAlign: "right", padding: "8px 12px" }}>
+                                    <button
+                                      type="button"
+                                      className="btn btn-small"
+                                      style={{ color: "#ef4444", background: "none", border: "none", cursor: "pointer", fontSize: "12px", padding: "2px 6px" }}
+                                      disabled={userActionLoading}
+                                      onClick={() => handleRemoveUserFromRole(u.id)}
+                                      title="Remove user from this role"
+                                    >
+                                      Remove
+                                    </button>
+                                  </td>
+                                )}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      ) : (
+                        <div className="muted" style={{ textAlign: "center", padding: "20px", fontSize: "13px" }}>
+                          No users currently assigned.
+                        </div>
+                      )}
                     </div>
                   </div>
+                )}
+              </div>
 
+              {/* Right Column: Permission Matrix / Checkboxes */}
+              <div className="card" style={{ padding: "20px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", flexWrap: "wrap", gap: "8px" }}>
+                  <div>
+                    <h3 style={{ fontSize: "15px", fontWeight: 600, margin: 0 }}>
+                      Assigned Permissions ({checkedCodes.size} / {allPermissions.length})
+                    </h3>
+                    <span className="muted" style={{ fontSize: "12.5px" }}>
+                      Toggle permissions granted to anyone holding this role.
+                    </span>
+                  </div>
                   {canManage && (
-                    <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-                      <select
-                        value={selectedUserToAdd}
-                        onChange={(e) => setSelectedUserToAdd(e.target.value)}
-                        style={{
-                          padding: "7px 12px",
-                          borderRadius: "6px",
-                          border: "1px solid #cbd5e1",
-                          fontSize: "13px",
-                          minWidth: "220px",
-                        }}
-                      >
-                        <option value="">-- Select User to Add --</option>
-                        {availableUsersToAdd.map((u) => (
-                          <option key={u.id} value={u.id}>
-                            {u.display_name || u.username} ({u.email || u.username})
-                          </option>
-                        ))}
-                      </select>
-                      <button
-                        type="button"
-                        className="btn btn-primary"
-                        style={{ padding: "7px 14px", fontSize: "13px" }}
-                        disabled={!selectedUserToAdd || userActionLoading}
-                        onClick={handleAddUserToRole}
-                      >
-                        {userActionLoading ? "Adding…" : "+ Add to Role"}
-                      </button>
-                    </div>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-small"
+                      onClick={toggleSelectAllPermissions}
+                    >
+                      {checkedCodes.size === allPermissions.length ? "Deselect All" : "Select All"}
+                    </button>
                   )}
                 </div>
 
-                {assignedUsersInRole.length === 0 ? (
-                  <p className="muted" style={{ padding: "16px 0", margin: 0 }}>
-                    No users currently assigned to this role.
-                  </p>
-                ) : (
-                  <div style={{ overflowX: "auto" }}>
-                    <table className="role-users-table">
-                      <thead>
-                        <tr>
-                          <th>User</th>
-                          <th>Username</th>
-                          <th>Email</th>
-                          <th>Mobile</th>
-                          <th>Status</th>
-                          <th style={{ textAlign: "right" }}>Action</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {assignedUsersInRole.map((u) => (
-                          <tr key={u.id}>
-                            <td>
-                              <strong>{u.full_name || u.display_name || u.username}</strong>
-                            </td>
-                            <td style={{ color: "#0061f2", fontWeight: 600 }}>{u.username}</td>
-                            <td>{u.email || "—"}</td>
-                            <td>{u.phone || "—"}</td>
-                            <td>
-                              <span
-                                className={`badge ${
-                                  (u.status || "").toUpperCase() === "ACTIVE"
-                                    ? "badge-active"
-                                    : "badge-inactive"
-                                }`}
-                              >
-                                {u.status || "ACTIVE"}
-                              </span>
-                            </td>
-                            <td style={{ textAlign: "right" }}>
-                              {canManage && (
-                                <button
-                                  type="button"
-                                  className="btn btn-small"
-                                  style={{
-                                    background: "#fee2e2",
-                                    color: "#991b1b",
-                                    border: "1px solid #fca5a5",
-                                    padding: "3px 10px",
-                                    fontSize: "12px",
-                                    fontWeight: 600,
-                                    borderRadius: "4px",
-                                  }}
-                                  disabled={userActionLoading}
-                                  onClick={() => handleRemoveUserFromRole(u.id, u.username)}
-                                  title="Remove user from this role"
-                                >
-                                  ❌ Remove
-                                </button>
-                              )}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-            )}
+                <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+                  {Object.keys(permissionGroups)
+                    .sort()
+                    .map((modKey) => {
+                      const items = permissionGroups[modKey];
+                      const allCheckedInMod = items.every((p) => checkedCodes.has(p.code));
+                      const checkedCountInMod = items.filter((p) => checkedCodes.has(p.code)).length;
 
-            {/* Bottom Save Action Bar */}
-            <div className="role-save-bar">
-              <button
-                type="button"
-                className="btn"
-                onClick={closeRoleView}
-                disabled={roleSaving}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="btn btn-primary"
-                style={{ minWidth: "140px" }}
-                disabled={roleSaving}
-                onClick={() => handleSaveRolePermissions()}
-              >
-                {roleSaving ? "Saving…" : "Save Changes"}
-              </button>
+                      return (
+                        <div className="permission-group" key={modKey}>
+                          <div className="permission-group-header">
+                            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                              <span className="permission-group-title">
+                                {MODULE_NAMES[modKey] || modKey.toUpperCase()}
+                              </span>
+                              <span style={{ fontSize: 11, background: "#e2e8f0", color: "#475569", padding: "1px 6px", borderRadius: 10, fontWeight: 600 }}>
+                                {checkedCountInMod} / {items.length} active
+                              </span>
+                            </div>
+                            {canManage && (
+                              <button
+                                type="button"
+                                className="toggle-btn"
+                                onClick={() => toggleModule(modKey)}
+                              >
+                                {allCheckedInMod ? "Deselect Group" : "Select Group"}
+                              </button>
+                            )}
+                          </div>
+                          <div className="permission-checks">
+                            {items.map((p) => (
+                              <label key={p.code}>
+                                <input
+                                  type="checkbox"
+                                  checked={checkedCodes.has(p.code)}
+                                  disabled={!canManage}
+                                  onChange={() => toggleCode(p.code)}
+                                />
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                  <div style={{ fontSize: 13, fontWeight: 600, color: "#1e293b" }}>
+                                    {friendlyPermissionLabel(p.code)}
+                                  </div>
+                                  <div style={{ fontSize: 11, color: "#64748b", fontFamily: "monospace", marginTop: 2 }}>
+                                    {p.code}
+                                  </div>
+                                </div>
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
+                </div>
+              </div>
             </div>
           </div>
         ) : (
-          /* Main Roles Table Screen (Matching Screenshots 2 & 3) */
+          /* Roles List Table View */
           <>
             <div className="page-header">
               <div>
                 <h1>Roles &amp; Permissions</h1>
-                <div className="page-subtitle">
-                  Configure user access roles, system privileges, and permissions.
-                </div>
+                <p className="muted">Configure user access roles, system privileges, and permissions.</p>
               </div>
-              <div className="page-header-actions" style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+              <div style={{ display: "flex", gap: "10px" }}>
                 <Can permission="settings.manage">
                   <button
                     className="btn btn-primary"
-                    style={{ background: "#0061f2", color: "#ffffff", padding: "8px 16px", borderRadius: "4px", fontWeight: 600 }}
+                    style={{ padding: "8px 16px", borderRadius: "4px", fontWeight: 600 }}
                     onClick={() => openRoleView(null)}
                   >
                     + ADD NEW
                   </button>
-                </Can>
-                <Can permission="settings.manage">
                   <button
                     className="btn"
                     style={{ background: "#10b981", color: "#ffffff", padding: "8px 16px", borderRadius: "4px", fontWeight: 600, border: "none" }}
@@ -770,8 +564,6 @@ export function RbacPage() {
                   >
                     DELETE
                   </button>
-                </Can>
-                <Can permission="settings.manage">
                   <button
                     className="btn btn-secondary"
                     onClick={() => {
@@ -787,469 +579,131 @@ export function RbacPage() {
             </div>
             <Banner error={error} />
 
-            <div className="card">
-              <div className="tabs-nav" style={{ padding: "14px 20px 0", borderBottom: "1px solid #e2e8f0" }}>
-                <button
-                  className={`tab-btn ${activeTab === "tab-roles" ? "active" : ""}`}
-                  onClick={() => setActiveTab("tab-roles")}
-                >
-                  Roles &amp; Permissions
-                </button>
-                <button
-                  className={`tab-btn ${activeTab === "tab-users" ? "active" : ""}`}
-                  onClick={() => setActiveTab("tab-users")}
-                >
-                  Individual User Overrides
-                </button>
-                <button
-                  className={`tab-btn ${activeTab === "tab-effective" ? "active" : ""}`}
-                  onClick={() => setActiveTab("tab-effective")}
-                >
-                  Effective Permissions
-                </button>
-              </div>
-
-              {/* Tab 1: System & Custom Roles Table View (Matching Screenshot 2 & 3) */}
-              <div className={`tab-content ${activeTab === "tab-roles" ? "active" : ""}`} style={{ padding: "0" }}>
-                <div className="toolbar" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 20px" }}>
-                  <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                    <select
-                      value={rolePageSize}
-                      onChange={(e) => setRolePageSize(Number(e.target.value))}
-                      style={{ padding: "6px 12px", borderRadius: "4px", border: "1px solid #cbd5e1", width: "90px" }}
-                    >
-                      <option value={10}>10</option>
-                      <option value={50}>50</option>
-                      <option value={100}>100</option>
-                    </select>
-                    <span style={{ fontSize: "12px", color: "#64748b", fontWeight: 500 }}>Items/Page</span>
-                  </div>
-                  <div>
-                    <input
-                      type="text"
-                      placeholder="Search..."
-                      value={roleSearch}
-                      onChange={(e) => setRoleSearch(e.target.value)}
-                      style={{ padding: "8px 14px", borderRadius: "4px", border: "1px solid #cbd5e1", width: "240px", fontSize: "13.5px" }}
-                    />
-                  </div>
-                </div>
-
-                <div className="table-scroll">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th style={{ width: "40px", textAlign: "center" }}>
-                          <input
-                            type="checkbox"
-                            checked={filteredRoles.length > 0 && selectedRoleIds.length === filteredRoles.length}
-                            onChange={(e) => {
-                              if (e.target.checked) {
-                                setSelectedRoleIds(filteredRoles.map((r) => r.id));
-                              } else {
-                                setSelectedRoleIds([]);
-                              }
-                            }}
-                          />
-                        </th>
-                        <th style={{ width: "80px" }}>
-                          Sr. No. <span style={{ fontSize: "10px" }}>▾</span>
-                        </th>
-                        <th>Name</th>
-                        <th>Created</th>
-                        <th style={{ textAlign: "center", width: "80px" }}>Action</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {rolesLoading ? (
-                        <tr>
-                          <td colSpan={5} style={{ textAlign: "center", padding: "24px" }} className="muted">
-                            Loading system roles...
-                          </td>
-                        </tr>
-                      ) : filteredRoles.length ? (
-                        filteredRoles.slice(0, rolePageSize).map((role, idx) => {
-                          const isSelected = selectedRoleIds.includes(role.id);
-                          const isSystem = Boolean(role.is_system);
-                          const canDeleteThisRole = canManage && !isSystem && isSuperAdmin;
-                          const formattedCreated = (role as unknown as Record<string, unknown>).created_at
-                            ? new Date(String((role as unknown as Record<string, unknown>).created_at)).toLocaleString("en-GB", {
-                              day: "2-digit",
-                              month: "2-digit",
-                              year: "numeric",
-                              hour: "2-digit",
-                              minute: "2-digit",
-                              hour12: true,
-                            })
-                            : "29-06-2026 06:34 PM";
-
-                          const rowActions: ActionDropdownEntry[] = [
-                            {
-                              key: "view",
-                              label: "📝 View",
-                              onClick: () => openRoleView(role),
-                            },
-                          ];
-
-                          if (canDeleteThisRole) {
-                            rowActions.push({
-                              key: "delete",
-                              label: "🗑️ Delete",
-                              danger: true,
-                              onClick: () => handleDeleteRole(role.id, role.name),
-                            });
-                          }
-
-                          return (
-                            <tr key={role.id}>
-                              <td style={{ textAlign: "center" }}>
-                                <input
-                                  type="checkbox"
-                                  checked={isSelected}
-                                  onChange={(e) => {
-                                    if (e.target.checked) {
-                                      setSelectedRoleIds((prev) => [...prev, role.id]);
-                                    } else {
-                                      setSelectedRoleIds((prev) => prev.filter((id) => id !== role.id));
-                                    }
-                                  }}
-                                />
-                              </td>
-                              <td style={{ color: "#64748b" }}>{filteredRoles.length - idx}</td>
-                              <td style={{ fontWeight: 600, color: "#1e293b" }}>
-                                {role.name}
-                              </td>
-                              <td style={{ color: "#64748b", fontSize: "13px" }}>{formattedCreated}</td>
-                              <td style={{ textAlign: "center" }}>
-                                <ActionDropdown items={rowActions} iconOnly={true} />
-                              </td>
-                            </tr>
-                          );
-                        })
-                      ) : (
-                        <tr>
-                          <td colSpan={5} style={{ textAlign: "center", padding: "24px" }} className="muted">
-                            No roles found.
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-              {/* Tab 2: Individual User Permissions */}
-              <div className={`tab-content ${activeTab === "tab-users" ? "active" : ""}`}>
-                <div className="toolbar-row">
-                  <div className="search-filter-box" style={{ maxWidth: "600px" }}>
-                    <select
-                      style={{ flex: 1 }}
-                      value={selectedUserId}
-                      onChange={(e) => setSelectedUserId(e.target.value)}
-                    >
-                      <option value="">Select User to inspect &amp; override permissions...</option>
-                      {userOptions}
-                    </select>
-                  </div>
+            <div className="card" style={{ padding: "0" }}>
+              <div className="toolbar" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 20px" }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                  <select
+                    value={rolePageSize}
+                    onChange={(e) => setRolePageSize(Number(e.target.value))}
+                    style={{ padding: "6px 12px", borderRadius: "4px", border: "1px solid #cbd5e1", width: "90px" }}
+                  >
+                    <option value={10}>10</option>
+                    <option value={50}>50</option>
+                    <option value={100}>100</option>
+                  </select>
+                  <span style={{ fontSize: "12px", color: "#64748b", fontWeight: 500 }}>Items/Page</span>
                 </div>
                 <div>
-                  {userTabStatus === "idle" && (
-                    <p className="muted">
-                      Select a user above to view effective permissions and manage direct overrides.
-                    </p>
-                  )}
-                  {userTabStatus === "loading" && (
-                    <p className="muted">Calculating effective permissions...</p>
-                  )}
-                  {userTabStatus === "ready" && userBreakdown && (
-                    <>
-                      <div className="item-card" style={{ borderLeft: "4px solid #3182ce" }}>
-                        <div className="item-card-header">
-                          <h3>Individual Permission Overrides</h3>
-                          {canManage && !userBreakdown.is_super_admin && (
-                            <button
-                              type="button"
-                              className="btn btn-small btn-primary"
-                              disabled={savingUserOverrides}
-                              onClick={() => void handleSaveUserOverrides()}
-                            >
-                              {savingUserOverrides ? "Saving..." : "Save Changes"}
-                            </button>
-                          )}
-                        </div>
-                        <div className="muted" style={{ fontSize: "13px", marginBottom: 0 }}>
-                          {userBreakdown.is_super_admin
-                            ? "This user is a Super Administrator and always has every permission — individual overrides do not apply."
-                            : "Tick or untick permissions below to grant or revoke direct access for this user. Checked-but-greyed items are inherited from the user's assigned roles. Click Save Changes to apply immediately."}
-                        </div>
-                      </div>
-
-                      {!userBreakdown.is_super_admin && (
-                        <div className="item-card">
-                          {Object.keys(permissionGroups)
-                            .sort()
-                            .map((modKey) => {
-                              const items = permissionGroups[modKey];
-                              const roleGranted = new Set(userBreakdown.role_permissions || []);
-                              const allCheckedInMod = items.every((p) => checkedUserCodes.has(p.code));
-                              return (
-                                <div className="permission-group" key={modKey}>
-                                  <div className="permission-group-header">
-                                    <div className="permission-group-title">
-                                      {MODULE_NAMES[modKey] || modKey.toUpperCase()}
-                                    </div>
-                                    {canManage && (
-                                      <button
-                                        type="button"
-                                        className="toggle-btn"
-                                        onClick={() => {
-                                          setCheckedUserCodes((prev) => {
-                                            const next = new Set(prev);
-                                            items.forEach((p) => {
-                                              if (allCheckedInMod) next.delete(p.code);
-                                              else next.add(p.code);
-                                            });
-                                            return next;
-                                          });
-                                        }}
-                                      >
-                                        {allCheckedInMod ? "Deselect Group" : "Select Group"}
-                                      </button>
-                                    )}
-                                  </div>
-                                  <div className="permission-checks">
-                                    {items.map((p) => {
-                                      const checked = checkedUserCodes.has(p.code);
-                                      const isRoleGranted = roleGranted.has(p.code);
-                                      return (
-                                        <label key={p.code}>
-                                          <input
-                                            type="checkbox"
-                                            checked={checked}
-                                            disabled={!canManage}
-                                            onChange={() => {
-                                              setCheckedUserCodes((prev) => {
-                                                const next = new Set(prev);
-                                                if (next.has(p.code)) next.delete(p.code);
-                                                else next.add(p.code);
-                                                return next;
-                                              });
-                                            }}
-                                          />
-                                          <span>
-                                            {friendlyPermissionLabel(p.code)}
-                                            {checked && !isRoleGranted && (
-                                              <span
-                                                className="chip chip-grant"
-                                                style={{ marginLeft: "6px", fontSize: "10px", padding: "1px 6px" }}
-                                              >
-                                                DIRECT GRANT
-                                              </span>
-                                            )}
-                                            {!checked && isRoleGranted && (
-                                              <span
-                                                className="chip chip-deny"
-                                                style={{ marginLeft: "6px", fontSize: "10px", padding: "1px 6px" }}
-                                              >
-                                                DIRECT DENY
-                                              </span>
-                                            )}
-                                            {checked && isRoleGranted && (
-                                              <span
-                                                className="chip"
-                                                style={{
-                                                  marginLeft: "6px",
-                                                  fontSize: "10px",
-                                                  padding: "1px 6px",
-                                                  background: "#e2e8f0",
-                                                  color: "#334155",
-                                                }}
-                                              >
-                                                FROM ROLE
-                                              </span>
-                                            )}
-                                          </span>
-                                        </label>
-                                      );
-                                    })}
-                                  </div>
-                                </div>
-                              );
-                            })}
-                        </div>
-                      )}
-                    </>
-                  )}
+                  <input
+                    type="text"
+                    placeholder="Search..."
+                    value={roleSearch}
+                    onChange={(e) => setRoleSearch(e.target.value)}
+                    style={{ padding: "8px 14px", borderRadius: "4px", border: "1px solid #cbd5e1", width: "240px", fontSize: "13.5px" }}
+                  />
                 </div>
               </div>
 
-              {/* Tab 3: Effective Permissions Breakdown */}
-              <div className={`tab-content ${activeTab === "tab-effective" ? "active" : ""}`}>
-                <div className="toolbar-row">
-                  <div className="search-filter-box" style={{ maxWidth: "600px" }}>
-                    <select
-                      style={{ flex: 1 }}
-                      value={effectiveUserId}
-                      onChange={(e) => setEffectiveUserId(e.target.value)}
-                    >
-                      <option value="">Select User to calculate effective permissions...</option>
-                      {userOptions}
-                    </select>
-                  </div>
-                </div>
-
-                {effectiveStatus === "idle" && (
-                  <p className="muted">
-                    Select a user above to compute their effective permissions and source resolution trace.
-                  </p>
-                )}
-                {effectiveStatus === "loading" && (
-                  <p className="muted">Calculating effective permissions...</p>
-                )}
-                {effectiveStatus === "ready" && effectiveBreakdown && (
-                  <div>
-                    {effectiveBreakdown.is_super_admin && (
-                      <div className="item-card" style={{ borderLeft: "4px solid #10b981", background: "#f0fdf4" }}>
-                        <strong style={{ color: "#166534" }}>Super Administrator Account</strong>
-                        <div style={{ fontSize: "13px", color: "#15803d", marginTop: "4px" }}>
-                          This user is a Super Administrator and automatically has full access to every module and action in the system.
-                        </div>
-                      </div>
-                    )}
-
-                    {effectiveBreakdown.user_info && (
-                      <div className="item-card">
-                        <div
-                          style={{
-                            fontWeight: 600,
-                            color: "var(--color-primary)",
-                            marginBottom: "8px",
+              <div className="table-scroll">
+                <table>
+                  <thead>
+                    <tr>
+                      <th style={{ width: "40px", textAlign: "center" }}>
+                        <input
+                          type="checkbox"
+                          checked={filteredRoles.length > 0 && selectedRoleIds.length === filteredRoles.length}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setSelectedRoleIds(filteredRoles.map((r) => r.id));
+                            } else {
+                              setSelectedRoleIds([]);
+                            }
                           }}
-                        >
-                          User Information
-                        </div>
-                        <div className="info-grid">
-                          <div>
-                            <div className="info-label">Employee Name</div>
-                            <div className="info-value">
-                              {effectiveBreakdown.user_info.employee_name}
-                            </div>
-                          </div>
-                          <div>
-                            <div className="info-label">Username</div>
-                            <div className="info-value">{effectiveBreakdown.user_info.username}</div>
-                          </div>
-                          <div>
-                            <div className="info-label">Assigned Roles</div>
-                            <div className="info-value">
-                              {(effectiveBreakdown.user_info.system_roles || []).join(", ") || "User"}
-                            </div>
-                          </div>
-                          <div>
-                            <div className="info-label">Account Status</div>
-                            <div className="info-value">
-                              <span
-                                className={`badge ${
-                                  effectiveBreakdown.user_info.status === "ACTIVE"
-                                    ? "badge-success"
-                                    : "badge-warning"
-                                }`}
-                              >
-                                {effectiveBreakdown.user_info.status}
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
+                        />
+                      </th>
+                      <th style={{ width: "80px" }}>
+                        Sr. No. <span style={{ fontSize: "10px" }}>▾</span>
+                      </th>
+                      <th>Name</th>
+                      <th>Created</th>
+                      <th style={{ textAlign: "center", width: "80px" }}>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rolesLoading ? (
+                      <tr>
+                        <td colSpan={5} style={{ textAlign: "center", padding: "24px" }} className="muted">
+                          Loading system roles...
+                        </td>
+                      </tr>
+                    ) : filteredRoles.length ? (
+                      filteredRoles.slice(0, rolePageSize).map((role, idx) => {
+                        const isSelected = selectedRoleIds.includes(role.id);
+                        const isSystem = Boolean(role.is_system);
+                        const canDeleteThisRole = canManage && !isSystem && isSuperAdmin;
+                        const formattedCreated = (role as unknown as Record<string, unknown>).created_at
+                          ? new Date(String((role as unknown as Record<string, unknown>).created_at)).toLocaleString("en-GB", {
+                            day: "2-digit",
+                            month: "2-digit",
+                            year: "numeric",
+                            hour: "2-digit",
+                            minute: "2-digit",
+                            hour12: true,
+                          })
+                          : "29-06-2026 06:34 PM";
+
+                        const rowActions: ActionDropdownEntry[] = [
+                          {
+                            key: "view",
+                            label: "📝 View",
+                            onClick: () => openRoleView(role),
+                          },
+                        ];
+
+                        if (canDeleteThisRole) {
+                          rowActions.push({
+                            key: "delete",
+                            label: "🗑️ Delete",
+                            danger: true,
+                            onClick: () => handleDeleteRole(role.id, role.name),
+                          });
+                        }
+
+                        return (
+                          <tr key={role.id}>
+                            <td style={{ textAlign: "center" }}>
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    setSelectedRoleIds((prev) => [...prev, role.id]);
+                                  } else {
+                                    setSelectedRoleIds((prev) => prev.filter((id) => id !== role.id));
+                                  }
+                                }}
+                              />
+                            </td>
+                            <td style={{ color: "#64748b" }}>{filteredRoles.length - idx}</td>
+                            <td style={{ fontWeight: 600, color: "#1e293b" }}>
+                              {role.name}
+                            </td>
+                            <td style={{ color: "#64748b", fontSize: "13px" }}>{formattedCreated}</td>
+                            <td style={{ textAlign: "center" }}>
+                              <ActionDropdown items={rowActions} iconOnly={true} />
+                            </td>
+                          </tr>
+                        );
+                      })
+                    ) : (
+                      <tr>
+                        <td colSpan={5} style={{ textAlign: "center", padding: "24px" }} className="muted">
+                          No roles found.
+                        </td>
+                      </tr>
                     )}
-
-                    <div className="item-card">
-                      <div
-                        style={{
-                          display: "flex",
-                          justifyContent: "space-between",
-                          alignItems: "center",
-                          marginBottom: "12px",
-                          gap: "8px",
-                          flexWrap: "wrap",
-                        }}
-                      >
-                        <h3 style={{ margin: 0 }}>
-                          Resolved Permission Sources ({filteredEffectiveSources.length})
-                        </h3>
-                        <div style={{ display: "flex", gap: "8px" }}>
-                          <input
-                            type="text"
-                            placeholder="Filter permissions..."
-                            value={tableSearch}
-                            onChange={(e) => setTableSearch(e.target.value)}
-                            style={{
-                              padding: "4px 8px",
-                              fontSize: "13px",
-                              border: "1px solid #cbd5e0",
-                              borderRadius: "4px",
-                            }}
-                          />
-                          <select
-                            value={sourceFilter}
-                            onChange={(e) => setSourceFilter(e.target.value)}
-                            style={{
-                              padding: "4px 8px",
-                              fontSize: "13px",
-                              border: "1px solid #cbd5e0",
-                              borderRadius: "4px",
-                            }}
-                          >
-                            <option value="">All Sources</option>
-                            <option value="System Role">System Role</option>
-                            <option value="Individual User">Individual User Override</option>
-                          </select>
-                        </div>
-                      </div>
-
-                      <div className="table-scroll">
-                        <table>
-                          <thead>
-                            <tr>
-                              <th>Permission Code</th>
-                              <th>Module</th>
-                              <th>Resolution Source</th>
-                              <th>Granting Roles / Details</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {filteredEffectiveSources.length ? (
-                              filteredEffectiveSources.map((item) => (
-                                <tr key={item.code}>
-                                  <td>
-                                    <code style={{ fontWeight: 600 }}>{item.code}</code>
-                                  </td>
-                                  <td>{MODULE_NAMES[item.module] || item.module}</td>
-                                  <td>
-                                    <span className={`badge ${sourceBadgeClass(item.source)}`}>
-                                      {item.source}
-                                    </span>
-                                  </td>
-                                  <td className="muted" style={{ fontSize: "12px" }}>
-                                    {item.role_names && item.role_names.length
-                                      ? item.role_names.join(", ")
-                                      : item.override_type || "Direct Assignment"}
-                                  </td>
-                                </tr>
-                              ))
-                            ) : (
-                              <tr>
-                                <td colSpan={4} className="muted" style={{ textAlign: "center", padding: "16px" }}>
-                                  No permission codes match filter criteria.
-                                </td>
-                              </tr>
-                            )}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  </div>
-                )}
+                  </tbody>
+                </table>
               </div>
             </div>
           </>

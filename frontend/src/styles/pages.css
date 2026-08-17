@@ -493,66 +493,100 @@
   border-color: #bae6fd;
 }
 
-.page-rbac .permission-group {
+.permission-group {
   background: var(--color-surface-hover, #f8fafc);
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--color-border, #e2e8f0);
   border-radius: 8px;
-  padding: 12px 14px;
+  padding: 14px;
   margin-bottom: 14px;
 }
 
-.page-rbac .permission-group-header {
+.permission-group-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 10px;
-  border-bottom: 1px solid var(--color-border);
-  padding-bottom: 6px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--color-border, #e2e8f0);
+  padding-bottom: 8px;
 }
 
-.page-rbac .permission-group-title {
+.permission-group-title {
   font-weight: 700;
-  font-size: 13px;
+  font-size: 13.5px;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  color: var(--color-primary, #3182ce);
+  color: var(--color-primary, #2563eb);
 }
 
-.page-rbac .permission-checks {
+.permission-checks {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
 }
 
-.page-rbac .permission-checks label {
+.permission-checks label {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
   user-select: none;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  transition: all 0.15s ease;
 }
 
-.page-rbac .permission-checks input[type="checkbox"] {
+.permission-checks label:hover {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+}
+
+.permission-checks input[type="checkbox"] {
   width: 16px;
   height: 16px;
-  accent-color: var(--color-primary);
+  margin-top: 2px;
+  accent-color: var(--color-primary, #2563eb);
+  cursor: pointer;
 }
 
-.page-rbac .toggle-btn {
+.toggle-btn {
   background: none;
-  border: none;
+  border: 1px solid #cbd5e1;
   font-size: 12px;
   font-weight: 600;
-  color: var(--color-primary, #3182ce);
+  color: var(--color-primary, #2563eb);
   cursor: pointer;
-  padding: 2px 6px;
+  padding: 3px 8px;
   border-radius: 4px;
+  transition: background 0.15s;
 }
 
-.page-rbac .toggle-btn:hover {
-  background: var(--color-border);
+.toggle-btn:hover {
+  background: #e2e8f0;
+}
+
+.chip-grant {
+  background: #dcfce7;
+  color: #15803d;
+  font-weight: 700;
+  border: 1px solid #bbf7d0;
+}
+
+.chip-deny {
+  background: #fee2e2;
+  color: #b91c1c;
+  font-weight: 700;
+  border: 1px solid #fecaca;
+}
+
+.chip-role {
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-weight: 600;
+  border: 1px solid #bfdbfe;
 }
 
 .page-rbac .item-card {
@@ -1750,15 +1784,15 @@
 }
 
 .action-dropdown-menu {
-  position: absolute;
-  right: 0;
-  top: calc(100% + 4px);
+  position: fixed;
   background: #ffffff;
   border: 1px solid #cbd5e1;
   border-radius: 8px;
-  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.15), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.18), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
   min-width: 175px;
-  z-index: 1000;
+  width: max-content;
+  max-width: 220px;
+  z-index: 99999;
   display: none;
   flex-direction: column;
   padding: 5px;

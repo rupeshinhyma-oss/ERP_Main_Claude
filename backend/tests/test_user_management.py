@@ -68,3 +68,51 @@ def test_user_model_representation():
     assert "johndoe" in rep
     assert "ACTIVE" in rep
     assert "supersecret123" not in rep
+
+
+@pytest.mark.asyncio
+async def test_suspend_and_unsuspend_service():
+    """Verify suspend_user sets SUSPENDED and activate_user restores ACTIVE."""
+    from unittest.mock import AsyncMock
+    import uuid
+    from app.users.service import UserService
+
+    mock_user_repo = AsyncMock()
+    mock_auth_service = AsyncMock()
+    user_id = uuid.uuid4()
+    admin_id = uuid.uuid4()
+
+    dummy_user = User(
+        id=user_id,
+        username="suspendee",
+        email="suspendee@example.com",
+        password_hash="hash",
+        status=UserStatus.ACTIVE,
+        is_active=True,
+    )
+    mock_user_repo.get_by_id.return_value = dummy_user
+
+    async def mock_update(user, **kwargs):
+        for k, v in kwargs.items():
+            setattr(user, k, v)
+        return user
+    mock_user_repo.update.side_effect = mock_update
+
+    service = UserService(
+        user_repository=mock_user_repo,
+        auth_service=mock_auth_service,
+        user_role_repository=AsyncMock(),
+        rbac_service=AsyncMock(),
+    )
+
+    # Test suspend
+    suspended = await service.suspend_user(user_id, updated_by=admin_id)
+    assert suspended.status == UserStatus.SUSPENDED
+    assert suspended.is_active is False
+    mock_auth_service.force_logout_user.assert_awaited_once_with(user_id, reason="account_suspended")
+
+    # Test unsuspend / activate
+    activated = await service.activate_user(user_id, updated_by=admin_id)
+    assert activated.status == UserStatus.ACTIVE
+    assert activated.is_active is True
+

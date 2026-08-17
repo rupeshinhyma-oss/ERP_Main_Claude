@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -322,3 +322,22 @@ class UserPermissionRepository(BaseRepository[UserPermission]):
         await self.session.delete(link)
         await self.session.flush()
         return True
+
+    async def set_user_permissions_bulk(
+        self,
+        user_id: uuid.UUID,
+        overrides: list[tuple[uuid.UUID, bool]],
+        granted_by: uuid.UUID | None = None,
+    ) -> None:
+        """Replace all direct permission overrides for a user with the provided list."""
+        stmt_del = delete(UserPermission).where(UserPermission.user_id == user_id)
+        await self.session.execute(stmt_del)
+        for perm_id, is_granted in overrides:
+            link = UserPermission(
+                user_id=user_id,
+                permission_id=perm_id,
+                is_granted=is_granted,
+                granted_by=granted_by,
+            )
+            self.session.add(link)
+        await self.session.flush()

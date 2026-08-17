@@ -169,6 +169,21 @@ class RBACService:
             raise NotFoundException("The user does not have that permission override.")
         await self.invalidate_user_permissions_cache(user_id)
 
+    async def set_user_permissions_bulk(
+        self,
+        user_id: uuid.UUID,
+        overrides: list[tuple[uuid.UUID, bool]],
+        granted_by: uuid.UUID | None = None,
+    ) -> int:
+        """Replace all direct permission overrides for a user with the provided list."""
+        for perm_id, _ in overrides:
+            await self.get_permission_or_raise(perm_id)
+        await self.user_permission_repository.set_user_permissions_bulk(
+            user_id, overrides=overrides, granted_by=granted_by
+        )
+        await self.invalidate_user_permissions_cache(user_id)
+        return len(overrides)
+
     # --- Effective Permissions & Breakdown -----------------------------------------
     async def get_user_effective_permissions(self, user_id: uuid.UUID) -> dict:
         return await self.role_repository.get_effective_permissions_breakdown_for_user(user_id)

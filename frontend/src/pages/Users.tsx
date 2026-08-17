@@ -604,7 +604,17 @@ export function UsersPage() {
                           onClick: () => runAction(`/users/${u.id}/activate`),
                         });
                       }
-                      if (statusUpper !== "SUSPENDED") {
+                      if (statusUpper === "SUSPENDED") {
+                        actions.push({
+                          key: "unsuspend",
+                          label: "⚡ Unsuspend Account",
+                          onClick: () =>
+                            runAction(
+                              `/users/${u.id}/unsuspend`,
+                              `Unsuspend account for user '${u.username}'? This will restore active login status.`
+                            ),
+                        });
+                      } else {
                         actions.push({
                           key: "suspend",
                           label: "⚡ Suspend Account",
@@ -949,7 +959,7 @@ export function UsersPage() {
         open={Boolean(overridesUserId)}
         title={`🔑 Manage Permission Overrides — ${overridesUsername}`}
         onClose={() => setOverridesUserId(null)}
-        cardStyle={{ maxWidth: "920px", width: "92vw", maxHeight: "90vh" }}
+        cardStyle={{ maxWidth: "960px", width: "94vw", maxHeight: "92vh" }}
       >
         {overridesLoading || !overridesBreakdown ? (
           <div className="muted" style={{ textAlign: "center", padding: "40px" }}>
@@ -962,6 +972,36 @@ export function UsersPage() {
           </div>
         ) : (
           <>
+            {/* User Info & Assigned Roles Summary Banner */}
+            <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "12px 16px", marginBottom: 16 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+                <div>
+                  <span style={{ fontWeight: 600, color: "#0f172a", fontSize: 14 }}>User: {overridesUsername}</span>
+                  {overridesBreakdown.user_info?.employee_name && (
+                    <span style={{ color: "#64748b", fontSize: 13, marginLeft: 8 }}>
+                      ({overridesBreakdown.user_info.employee_name})
+                    </span>
+                  )}
+                </div>
+                <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 12, color: "#64748b", fontWeight: 500 }}>Assigned Roles:</span>
+                  {(overridesBreakdown.user_info?.system_roles || []).length > 0 ? (
+                    (overridesBreakdown.user_info?.system_roles || []).map((r) => (
+                      <span key={r} className="badge" style={{ background: "#dbeafe", color: "#1d4ed8", fontWeight: 600, fontSize: 11, padding: "2px 8px" }}>
+                        {r}
+                      </span>
+                    ))
+                  ) : (
+                    <span className="badge" style={{ background: "#f1f5f9", color: "#64748b", fontSize: 11 }}>No Roles</span>
+                  )}
+                </div>
+              </div>
+              <div style={{ fontSize: 12.5, color: "#475569", marginTop: 8, lineHeight: 1.4 }}>
+                💡 Permissions marked <span className="chip-role" style={{ fontSize: 10, padding: "1px 6px", borderRadius: 4 }}>FROM ROLE</span> are inherited from assigned roles. Check extra permissions to grant direct overrides (<span className="chip-grant" style={{ fontSize: 10, padding: "1px 6px", borderRadius: 4 }}>+ EXTRA GRANTED</span>). Uncheck role permissions to deny them (<span className="chip-deny" style={{ fontSize: 10, padding: "1px 6px", borderRadius: 4 }}>✕ DIRECT DENIED</span>).
+              </div>
+            </div>
+
+            {/* Search & Bulk Action Toolbar */}
             <div
               style={{
                 display: "flex",
@@ -972,20 +1012,40 @@ export function UsersPage() {
                 marginBottom: "16px",
               }}
             >
-              <input
-                type="text"
-                placeholder="🔍 Search permission code or description..."
-                style={{
-                  flex: 1,
-                  minWidth: "250px",
-                  padding: "8px 12px",
-                  border: "1px solid #cbd5e1",
-                  borderRadius: "6px",
-                  fontSize: "13.5px",
-                }}
-                value={overridesSearch}
-                onChange={(e) => setOverridesSearch(e.target.value)}
-              />
+              <div style={{ position: "relative", flex: 1, minWidth: "260px" }}>
+                <input
+                  type="text"
+                  placeholder="🔍 Search permission code or description..."
+                  style={{
+                    width: "100%",
+                    padding: "8px 30px 8px 12px",
+                    border: "1px solid #cbd5e1",
+                    borderRadius: "6px",
+                    fontSize: "13.5px",
+                  }}
+                  value={overridesSearch}
+                  onChange={(e) => setOverridesSearch(e.target.value)}
+                />
+                {overridesSearch && (
+                  <button
+                    type="button"
+                    onClick={() => setOverridesSearch("")}
+                    style={{
+                      position: "absolute",
+                      right: 8,
+                      top: "50%",
+                      transform: "translateY(-50%)",
+                      background: "none",
+                      border: "none",
+                      color: "#94a3b8",
+                      cursor: "pointer",
+                      fontSize: 14,
+                    }}
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
               <div style={{ display: "flex", gap: "8px" }}>
                 <button
                   type="button"
@@ -1008,17 +1068,16 @@ export function UsersPage() {
                   className="btn btn-small"
                   style={{ background: "#f1f5f9", color: "#475569", border: "1px solid #cbd5e1", fontWeight: 600 }}
                   onClick={() => {
-                    // Reset to exactly what the assigned roles grant, discarding
-                    // every direct override.
                     setOverridesChecked(new Set(overridesBreakdown.role_permissions || []));
                   }}
                 >
-                  🔄 Reset Defaults
+                  🔄 Reset to Roles
                 </button>
               </div>
             </div>
 
-            <div style={{ maxHeight: "52vh", overflowY: "auto", paddingRight: "6px" }}>
+            {/* Permission Module Cards Container */}
+            <div style={{ maxHeight: "54vh", overflowY: "auto", paddingRight: "6px" }}>
               {(() => {
                 const groups = groupPermissionsByModule(allPermissions);
                 const q = overridesSearch.trim().toLowerCase();
@@ -1054,12 +1113,18 @@ export function UsersPage() {
                     )
                     : groups[modKey];
                   const allCheckedInMod = items.every((p) => overridesChecked.has(p.code));
+                  const checkedCountInMod = items.filter((p) => overridesChecked.has(p.code)).length;
 
                   return (
                     <div className="permission-group" key={modKey}>
                       <div className="permission-group-header">
-                        <div className="permission-group-title">
-                          {MODULE_NAMES[modKey] || modKey.toUpperCase()}
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <span className="permission-group-title">
+                            {MODULE_NAMES[modKey] || modKey.toUpperCase()}
+                          </span>
+                          <span style={{ fontSize: 11, background: "#e2e8f0", color: "#475569", padding: "1px 6px", borderRadius: 10, fontWeight: 600 }}>
+                            {checkedCountInMod} / {items.length} active
+                          </span>
                         </div>
                         <button
                           type="button"
@@ -1083,7 +1148,25 @@ export function UsersPage() {
                           const checked = overridesChecked.has(p.code);
                           const isRoleGranted = roleGranted.has(p.code);
                           return (
-                            <label key={p.code}>
+                            <label
+                              key={p.code}
+                              style={{
+                                border: checked
+                                  ? isRoleGranted
+                                    ? "1px solid #bfdbfe"
+                                    : "1px solid #86efac"
+                                  : isRoleGranted
+                                  ? "1px solid #fca5a5"
+                                  : "1px solid #e2e8f0",
+                                background: checked
+                                  ? isRoleGranted
+                                    ? "#eff6ff"
+                                    : "#f0fdf4"
+                                  : isRoleGranted
+                                  ? "#fef2f2"
+                                  : "#ffffff",
+                              }}
+                            >
                               <input
                                 type="checkbox"
                                 checked={checked}
@@ -1096,39 +1179,31 @@ export function UsersPage() {
                                   });
                                 }}
                               />
-                              <span>
-                                {friendlyPermissionLabel(p.code)}
-                                {checked && !isRoleGranted && (
-                                  <span
-                                    className="chip chip-grant"
-                                    style={{ marginLeft: "6px", fontSize: "10px", padding: "1px 6px" }}
-                                  >
-                                    DIRECT GRANT
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, flexWrap: "wrap" }}>
+                                  <span style={{ fontSize: 13, fontWeight: 600, color: "#1e293b" }}>
+                                    {friendlyPermissionLabel(p.code)}
                                   </span>
-                                )}
-                                {!checked && isRoleGranted && (
-                                  <span
-                                    className="chip chip-deny"
-                                    style={{ marginLeft: "6px", fontSize: "10px", padding: "1px 6px" }}
-                                  >
-                                    DIRECT DENY
-                                  </span>
-                                )}
-                                {checked && isRoleGranted && (
-                                  <span
-                                    className="chip"
-                                    style={{
-                                      marginLeft: "6px",
-                                      fontSize: "10px",
-                                      padding: "1px 6px",
-                                      background: "#e2e8f0",
-                                      color: "#334155",
-                                    }}
-                                  >
-                                    FROM ROLE
-                                  </span>
-                                )}
-                              </span>
+                                  {checked && !isRoleGranted && (
+                                    <span className="chip-grant" style={{ fontSize: 10, padding: "1px 6px", borderRadius: 4 }}>
+                                      + EXTRA GRANTED
+                                    </span>
+                                  )}
+                                  {!checked && isRoleGranted && (
+                                    <span className="chip-deny" style={{ fontSize: 10, padding: "1px 6px", borderRadius: 4 }}>
+                                      ✕ DIRECT DENIED
+                                    </span>
+                                  )}
+                                  {checked && isRoleGranted && (
+                                    <span className="chip-role" style={{ fontSize: 10, padding: "1px 6px", borderRadius: 4 }}>
+                                      FROM ROLE
+                                    </span>
+                                  )}
+                                </div>
+                                <div style={{ fontSize: 11, color: "#64748b", fontFamily: "monospace", marginTop: 2 }}>
+                                  {p.code}
+                                </div>
+                              </div>
                             </label>
                           );
                         })}
@@ -1139,33 +1214,69 @@ export function UsersPage() {
               })()}
             </div>
 
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                marginTop: "16px",
-                paddingTop: "16px",
-                borderTop: "1px solid #e2e8f0",
-              }}
-            >
-              <div style={{ fontSize: "13px", color: "#64748b", fontWeight: 500 }}>
-                {overridesChecked.size} permission{overridesChecked.size === 1 ? "" : "s"} selected
-              </div>
-              <div style={{ display: "flex", gap: "12px" }}>
-                <button type="button" className="btn" onClick={() => setOverridesUserId(null)}>
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  disabled={overridesSaving}
-                  onClick={() => void handleSaveUserOverrides()}
+            {/* Footer with Summary Counters and Actions */}
+            {(() => {
+              const roleGranted = new Set(overridesBreakdown.role_permissions || []);
+              let extraGrants = 0;
+              let roleInherited = 0;
+              let directDenies = 0;
+              for (const code of overridesChecked) {
+                if (roleGranted.has(code)) roleInherited++;
+                else extraGrants++;
+              }
+              for (const code of roleGranted) {
+                if (!overridesChecked.has(code)) directDenies++;
+              }
+
+              return (
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    marginTop: "16px",
+                    paddingTop: "16px",
+                    borderTop: "1px solid #e2e8f0",
+                    flexWrap: "wrap",
+                    gap: 12,
+                  }}
                 >
-                  {overridesSaving ? "Saving..." : "Save Permission Overrides"}
-                </button>
-              </div>
-            </div>
+                  <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", fontSize: "12.5px" }}>
+                    <span style={{ fontWeight: 600, color: "#0f172a" }}>
+                      {overridesChecked.size} active permission{overridesChecked.size === 1 ? "" : "s"}
+                    </span>
+                    {extraGrants > 0 && (
+                      <span className="chip-grant" style={{ fontSize: 11, padding: "1px 7px", borderRadius: 4 }}>
+                        +{extraGrants} extra direct grant{extraGrants === 1 ? "" : "s"}
+                      </span>
+                    )}
+                    {roleInherited > 0 && (
+                      <span className="chip-role" style={{ fontSize: 11, padding: "1px 7px", borderRadius: 4 }}>
+                        {roleInherited} from role
+                      </span>
+                    )}
+                    {directDenies > 0 && (
+                      <span className="chip-deny" style={{ fontSize: 11, padding: "1px 7px", borderRadius: 4 }}>
+                        -{directDenies} denied
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ display: "flex", gap: "12px" }}>
+                    <button type="button" className="btn" onClick={() => setOverridesUserId(null)}>
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      disabled={overridesSaving}
+                      onClick={() => void handleSaveUserOverrides()}
+                    >
+                      {overridesSaving ? "Saving..." : "Save Permission Overrides"}
+                    </button>
+                  </div>
+                </div>
+              );
+            })()}
           </>
         )}
       </Modal>

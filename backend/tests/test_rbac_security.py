@@ -132,3 +132,35 @@ def test_user_override_audit_actions():
     assert AuditAction.USER_OVERRIDE_ADDED == "USER_OVERRIDE_ADDED"
     assert AuditAction.USER_OVERRIDE_REMOVED == "USER_OVERRIDE_REMOVED"
 
+
+@pytest.mark.asyncio
+async def test_set_user_permissions_bulk_service():
+    """Verify bulk user permission overrides updates repository and invalidates cache."""
+    from unittest.mock import AsyncMock, MagicMock
+    from app.rbac.service import RBACService
+
+    user_id = uuid.uuid4()
+    p1 = uuid.uuid4()
+    p2 = uuid.uuid4()
+
+    mock_perm_repo = AsyncMock()
+    mock_perm_repo.get_by_id.return_value = MagicMock(id=p1)
+    mock_user_perm_repo = AsyncMock()
+
+    service = RBACService(
+        role_repository=AsyncMock(),
+        permission_repository=mock_perm_repo,
+        user_permission_repository=mock_user_perm_repo,
+        user_role_repository=AsyncMock(),
+    )
+
+    count = await service.set_user_permissions_bulk(
+        user_id,
+        overrides=[(p1, True), (p2, False)],
+        granted_by=uuid.uuid4(),
+    )
+
+    assert count == 2
+    mock_user_perm_repo.set_user_permissions_bulk.assert_awaited_once()
+
+

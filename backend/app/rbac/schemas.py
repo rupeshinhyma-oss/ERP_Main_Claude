@@ -65,6 +65,19 @@ class GrantPermissionRequest(BaseModel):
     permission_id: uuid.UUID
 
 
+class BulkPermissionOverrideItem(BaseModel):
+    """A single permission override item in a bulk update."""
+
+    permission_id: uuid.UUID
+    is_granted: bool = Field(default=True, description="True to grant, False to deny.")
+
+
+class BulkUserPermissionsRequest(BaseModel):
+    """Payload to replace all direct permission overrides for a user."""
+
+    overrides: list[BulkPermissionOverrideItem] = Field(default_factory=list)
+
+
 class AssignUserPermissionRequest(BaseModel):
     """Payload to grant or revoke an individual user permission."""
 

@@ -21,7 +21,6 @@ import { AuditPage } from "@/pages/Audit";
 import { UsersPage } from "@/pages/Users";
 import { ProfilePage } from "@/pages/Profile";
 import { RbacPage } from "@/pages/Rbac";
-import { EffectivePermissionsPage } from "@/pages/EffectivePermissions";
 import { SuppliersPage } from "@/pages/Suppliers";
 import { BuyersPage } from "@/pages/Buyers";
 import { InquiriesPage } from "@/pages/Inquiries";
@@ -72,7 +71,6 @@ export function App() {
         <Route path="/profile" element={<ProfilePage />} />
         <Route path="/users" element={<UsersPage />} />
         <Route path="/rbac" element={<RbacPage />} />
-        <Route path="/effective-permissions" element={<EffectivePermissionsPage />} />
         <Route path="/suppliers" element={<SuppliersPage />} />
         <Route path="/buyers" element={<BuyersPage />} />
         <Route path="/inquiries" element={<InquiriesPage />} />

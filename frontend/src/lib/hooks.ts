@@ -220,3 +220,44 @@ export function usePendingGuard<K extends string = string>(): {
 
   return { isPending, guard };
 }
+
+/**
+ * Syncs browser back-button with a modal / drawer's open state.
+ *
+ * When `isOpen` becomes true a dummy history entry is pushed so the browser
+ * has something to "go back" to.  If the user presses the browser's Back
+ * arrow the `popstate` handler calls `onClose` and the page stays put.
+ * If the modal closes normally (save / cancel / X click) the dummy entry is
+ * removed automatically via `window.history.back()`.
+ *
+ * Usage:
+ *   useModalHistorySync(modalOpen, () => setModalOpen(false));
+ */
+export function useModalHistorySync(isOpen: boolean, onClose: () => void): void {
+  const isPopStateRef = useRef(false);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    window.history.pushState({ modalHistorySync: true }, "");
+
+    const handlePopState = () => {
+      isPopStateRef.current = true;
+      onClose();
+    };
+
+    window.addEventListener("popstate", handlePopState);
+    return () => {
+      window.removeEventListener("popstate", handlePopState);
+      // If the modal was closed by user action (not back button), clean up
+      // the dummy history entry we pushed.
+      if (!isPopStateRef.current) {
+        window.history.back();
+      }
+      isPopStateRef.current = false;
+    };
+  // onClose is intentionally NOT in deps — it could be a new arrow function
+  // every render; we only care about the isOpen flip.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen]);
+}

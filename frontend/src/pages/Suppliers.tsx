@@ -38,7 +38,7 @@ import {
   toQueryString,
 } from "@/lib/api";
 import { createNameResolver } from "@/lib/nameResolver";
-import { useAuth, useSrNoJump, isSrNoQuery, usePendingGuard } from "@/lib/hooks";
+import { useAuth, useSrNoJump, isSrNoQuery, usePendingGuard, useModalHistorySync } from "@/lib/hooks";
 import { useLiveConnectionStatus } from "@/lib/live/useLive";
 import { useLiveList } from "@/lib/live/useLiveList";
 import type {
@@ -358,6 +358,11 @@ export function SuppliersPage() {
 
   /* Modal state */
   const [modalOpen, setModalOpen] = useState(false);
+
+  // Sync browser back arrow with modal & drawer so it closes them instead of
+  // navigating back to Dashboard.
+  useModalHistorySync(modalOpen, () => setModalOpen(false));
+  useModalHistorySync(Boolean(drawerSupplier), () => setDrawerSupplier(null));
   const [modalMode, setModalMode] = useState<"quick" | "full">("full");
   const [modalTab, setModalTab] = useState<ModalTab>("first");
   const [currentSupplierId, setCurrentSupplierId] = useState<string | null>(null);

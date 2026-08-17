@@ -29,7 +29,7 @@ import { SideDrawer, DetailFieldGrid } from "@/components/SideDrawer";
 import { ImpExpDropdown, BulkActionsDropdown, ImportSummaryPanel } from "@/components/ImportWizard";
 import { apiDelete, apiGet, apiPatch, apiPost, downloadExport, toQueryString } from "@/lib/api";
 import { useLookup } from "@/lib/lookups";
-import { usePendingGuard } from "@/lib/hooks";
+import { usePendingGuard, useModalHistorySync } from "@/lib/hooks";
 import { useLiveConnectionStatus } from "@/lib/live/useLive";
 import { useLiveList } from "@/lib/live/useLiveList";
 import type { Country, ImportHeader, ImportSummary, ProductCategory, ProductSubCategory } from "@/types";
@@ -251,6 +251,11 @@ export function BuyersPage() {
 
   /* Form & Tabs State */
   const [modalMode, setModalMode] = useState<ModalMode>(null);
+
+  // Sync browser back arrow with modal & drawer: close them instead of
+  // navigating back to Dashboard.
+  useModalHistorySync(Boolean(modalMode), () => setModalMode(null));
+  useModalHistorySync(Boolean(detailBuyer), () => setDetailBuyer(null));
   const [editTab, setEditTab] = useState<"profile" | "contacts">("profile");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState(EMPTY_BUYER_FORM);

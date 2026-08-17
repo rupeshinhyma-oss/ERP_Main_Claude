@@ -35,7 +35,7 @@ import {
   downloadExport,
   toQueryString,
 } from "@/lib/api";
-import { useAuth, useSrNoJump } from "@/lib/hooks";
+import { useAuth, useSrNoJump, useModalHistorySync } from "@/lib/hooks";
 import { useLiveList } from "@/lib/live/useLiveList";
 import type { ImportHeader, ImportSummary, MasterRecord, PaginationMeta } from "@/types";
 
@@ -211,31 +211,10 @@ export function MasterPage<T extends MasterRecord>({
 
   const [drawerItem, setDrawerItem] = useState<T | null>(null);
 
-  const isPopStateRef = useRef(false);
-
-  // Sync browser back-navigation with open modal or side drawer
-  useEffect(() => {
-    const isAnyOpen = modalOpen || Boolean(drawerItem);
-    if (!isAnyOpen) return;
-
-    // Push dummy history entry
-    window.history.pushState({ masterModalOrDrawerOpen: true }, "");
-
-    const handlePopState = () => {
-      isPopStateRef.current = true;
-      setModalOpen(false);
-      setDrawerItem(null);
-    };
-
-    window.addEventListener("popstate", handlePopState);
-    return () => {
-      window.removeEventListener("popstate", handlePopState);
-      if (!isPopStateRef.current) {
-        window.history.back();
-      }
-      isPopStateRef.current = false;
-    };
-  }, [modalOpen, drawerItem]);
+  // Sync browser back arrow with modal & drawer: close them instead of
+  // navigating back to Dashboard.
+  useModalHistorySync(modalOpen, () => setModalOpen(false));
+  useModalHistorySync(Boolean(drawerItem), () => setDrawerItem(null));
 
   const [importSummary, setImportSummary] = useState<ImportSummary | null>(null);
   const [importError, setImportError] = useState<string | null>(null);

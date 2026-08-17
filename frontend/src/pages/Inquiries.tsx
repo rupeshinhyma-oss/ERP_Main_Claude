@@ -11,7 +11,7 @@
  * continuous drill-down rather than distinct pages.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { Banner, Can, TableMessageRow } from "@/components/ui";
 import { SearchableDropdown, type DropdownOption, type FetchOptions } from "@/components/SearchableDropdown";
@@ -55,6 +55,53 @@ export function InquiriesPage() {
   const [error, setError] = useState<unknown>(null);
   const [quickAddOpen, setQuickAddOpen] = useState(false);
   const [quickAddInitialBuyerId, setQuickAddInitialBuyerId] = useState("");
+
+  const isPopStateRef = useRef(false);
+
+  // Sync quick add drawer opening with browser back button
+  useEffect(() => {
+    if (!quickAddOpen) return;
+
+    window.history.pushState({ quickAddOpen: true }, "");
+
+    const handlePopState = () => {
+      isPopStateRef.current = true;
+      setQuickAddOpen(false);
+    };
+
+    window.addEventListener("popstate", handlePopState);
+    return () => {
+      window.removeEventListener("popstate", handlePopState);
+      if (!isPopStateRef.current) {
+        window.history.back();
+      }
+      isPopStateRef.current = false;
+    };
+  }, [quickAddOpen]);
+
+  // Handle browser back button for Layer 1/2/3 navigation
+  useEffect(() => {
+    const handlePopState = (e: PopStateEvent) => {
+      if (e.state && e.state.inquiryView) {
+        setView(e.state.inquiryView);
+      } else {
+        setView({ layer: "companies" });
+      }
+    };
+    window.addEventListener("popstate", handlePopState);
+    return () => {
+      window.removeEventListener("popstate", handlePopState);
+    };
+  }, []);
+
+  const navigateToView = useCallback((nextView: View) => {
+    setView(nextView);
+    if (nextView.layer === "consignments") {
+      window.history.pushState({ inquiryView: nextView }, "");
+    } else if (nextView.layer === "items") {
+      window.history.pushState({ inquiryView: nextView }, "");
+    }
+  }, []);
 
   // Name caches, resolved lazily as ids appear (bounded to what's on screen).
   const [buyerNames, setBuyerNames] = useState<Record<string, string>>({});
@@ -376,7 +423,7 @@ export function InquiriesPage() {
 
         {view.layer === "companies" && (
           <CompaniesView
-            onOpenCompany={(buyerId) => { setView({ layer: "consignments", buyerId }); void resolveBuyerName(buyerId); }}
+            onOpenCompany={(buyerId) => { navigateToView({ layer: "consignments", buyerId }); void resolveBuyerName(buyerId); }}
             resolveBuyerName={resolveBuyerName}
             buyerNames={buyerNames}
             onError={setError}
@@ -388,8 +435,8 @@ export function InquiriesPage() {
           <ConsignmentsView
             buyerId={view.buyerId}
             buyerName={buyerNames[view.buyerId]}
-            onBack={() => setView({ layer: "companies" })}
-            onOpenConsignment={(inquiryId) => setView({ layer: "items", inquiryId, buyerId: view.buyerId })}
+            onBack={() => window.history.back()}
+            onOpenConsignment={(inquiryId) => navigateToView({ layer: "items", inquiryId, buyerId: view.buyerId })}
             resolveCodeName={resolveCodeName}
             codeNames={codeNames}
             onError={setError}
@@ -400,7 +447,7 @@ export function InquiriesPage() {
             inquiryId={view.inquiryId}
             buyerId={view.buyerId}
             buyerName={buyerNames[view.buyerId]}
-            onBack={() => setView({ layer: "consignments", buyerId: view.buyerId })}
+            onBack={() => window.history.back()}
             resolveProductAndUom={resolveProductAndUom}
             productNames={productNames}
             uomNames={uomNames}
@@ -2035,6 +2082,16 @@ function QuickInquiryDrawer({
   );
 }
 
-const thStyle: React.CSSProperties = { padding: "10px 12px", textAlign: "left", borderBottom: "2px solid #CBD5E1", background: "#F8FAFC", color: "#334155", fontWeight: 600 };
+const thStyle: React.CSSProperties = {
+  padding: "11px 12px",
+  textAlign: "left",
+  borderBottom: "2px solid #CBD5E1",
+  background: "#F8FAFC",
+  color: "#0F172A",
+  fontWeight: 700,
+  fontSize: "12px",
+  textTransform: "uppercase",
+  letterSpacing: "0.04em",
+};
 const tdStyle: React.CSSProperties = { padding: "10px 12px", borderBottom: "1px solid #E2E8F0", verticalAlign: "middle" };
 const labelStyle: React.CSSProperties = { display: "block", fontSize: 13, fontWeight: 600, color: "#334155", marginBottom: 6 };

@@ -211,6 +211,32 @@ export function MasterPage<T extends MasterRecord>({
 
   const [drawerItem, setDrawerItem] = useState<T | null>(null);
 
+  const isPopStateRef = useRef(false);
+
+  // Sync browser back-navigation with open modal or side drawer
+  useEffect(() => {
+    const isAnyOpen = modalOpen || Boolean(drawerItem);
+    if (!isAnyOpen) return;
+
+    // Push dummy history entry
+    window.history.pushState({ masterModalOrDrawerOpen: true }, "");
+
+    const handlePopState = () => {
+      isPopStateRef.current = true;
+      setModalOpen(false);
+      setDrawerItem(null);
+    };
+
+    window.addEventListener("popstate", handlePopState);
+    return () => {
+      window.removeEventListener("popstate", handlePopState);
+      if (!isPopStateRef.current) {
+        window.history.back();
+      }
+      isPopStateRef.current = false;
+    };
+  }, [modalOpen, drawerItem]);
+
   const [importSummary, setImportSummary] = useState<ImportSummary | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);

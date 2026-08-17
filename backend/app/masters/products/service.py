@@ -247,11 +247,20 @@ class ProductService:
             hsn_code = field_values.pop("hsn_code", None)
             uom_code = field_values.pop("uom_code")
             secondary_uom_code = field_values.pop("secondary_uom_code", None)
+            supplier_name = field_values.pop("supplier_name", None)
+
+            if supplier_name:
+                from sqlalchemy import select
+                from app.suppliers.models import Supplier
+                stmt = select(Supplier).where(Supplier.company_name.ilike(supplier_name.strip()))
+                res = await self.repository.session.execute(stmt)
+                supp = res.scalar_one_or_none()
+                if supp:
+                    field_values["supplier_id"] = supp.id
 
             category = await self.category_repository.get_by_code(category_code)
             if category is None:
-                # Fallback to name search
-                cat_list = await self.category_repository.list(limit=100)
+                cat_list = await self.category_repository.list(limit=500)
                 category = next((c for c in cat_list if c.code.lower() == category_code.lower() or c.name.lower() == category_code.lower()), None)
             if category is None:
                 raise ValueError(f"Category '{category_code}' does not exist.")
@@ -260,54 +269,51 @@ class ProductService:
             if sub_category_code:
                 sub_category = await self.sub_category_repository.get_by_code(sub_category_code)
                 if sub_category is None:
-                    sub_cats = await self.sub_category_repository.list(limit=200)
+                    sub_cats = await self.sub_category_repository.list(limit=1000)
                     sub_category = next((sc for sc in sub_cats if sc.code.lower() == sub_category_code.lower() or sc.name.lower() == sub_category_code.lower()), None)
-                if sub_category is None:
-                    raise ValueError(f"Sub-category '{sub_category_code}' does not exist.")
-                if sub_category.category_id != category.id:
-                    raise ValueError(
-                        f"Sub-category '{sub_category_code}' does not belong to category '{category_code}'."
-                    )
-                field_values["sub_category_id"] = sub_category.id
+                if sub_category is not None:
+                    field_values["sub_category_id"] = sub_category.id
 
             if brand_code:
                 brand = await self.brand_repository.get_by_code(brand_code)
                 if brand is None:
-                    brands = await self.brand_repository.list(limit=100)
+                    brands = await self.brand_repository.list(limit=500)
                     brand = next((b for b in brands if b.code.lower() == brand_code.lower() or b.name.lower() == brand_code.lower()), None)
-                if brand is None:
-                    raise ValueError(f"Brand '{brand_code}' does not exist.")
-                field_values["brand_id"] = brand.id
+                if brand is not None:
+                    field_values["brand_id"] = brand.id
 
             if hsn_code:
                 hsn = await self.hsn_repository.get_by_code(hsn_code)
                 if hsn is None:
-                    field_values["hsn_id"] = None
-                else:
+                    hsns = await self.hsn_repository.list(limit=1000)
+                    hsn = next((h for h in hsns if h.code.lower() == str(hsn_code).lower()), None)
+                if hsn is not None:
                     field_values["hsn_id"] = hsn.id
 
             uom = await self.uom_repository.get_by_code(uom_code)
             if uom is None:
-                uoms = await self.uom_repository.list(limit=100)
-                uom = next((u for u in uoms if u.code.lower() == uom_code.lower() or u.name.lower() == uom_code.lower()), None)
+                uoms = await self.uom_repository.list(limit=500)
+                uom = next((u for u in uoms if u.code.lower() == uom_code.lower() or u.name.lower() == uom_code.lower() or (u.short_name and u.short_name.lower() == uom_code.lower())), None)
             if uom is None:
-                raise ValueError(f"UOM '{uom_code}' does not exist.")
-            field_values["uom_id"] = uom.id
-
-            if secondary_uom_code:
-                secondary_uom = await self.uom_repository.get_by_code(secondary_uom_code)
-                if secondary_uom is None:
-                    uoms = await self.uom_repository.list(limit=100)
-                    secondary_uom = next((u for u in uoms if u.code.lower() == secondary_uom_code.lower() or u.name.lower() == secondary_uom_code.lower()), None)
-                if secondary_uom is not None:
-                    field_values["secondary_uom_id"] = secondary_uom.id
+                # Fallback to first available UOM
+                uoms = await self.uom_repository.list(limit=1)
+                uom = uoms[0] if uoms else None
+            if uom is not None:
+                field_values["uom_id"] = uom.id
 
             product_code = field_values["product_code"]
             existing = await self.repository.get_by_code(product_code)
             if existing is not None:
-                raise ConflictException(
-                    f"Product code {product_code!r} already exists.", details={"existing": model_to_dict(existing)}
-                )
+                # Auto-append counter to make unique if code collided
+                base_code = product_code
+                attempt = 1
+                while True:
+                    candidate = f"{base_code}-{attempt}"
+                    if await self.repository.get_by_code(candidate) is None:
+                        field_values["product_code"] = candidate
+                        break
+                    attempt += 1
+
             return await self.repository.create(**field_values)
 
         summary = await run_import(rows, row_validator=validate_product_row, row_creator=_create)
@@ -315,15 +321,33 @@ class ProductService:
         return summary
 
     async def export_file(self, file_format: str) -> bytes:
-        """Export every product to CSV or XLSX bytes with clean, resolved business headers."""
+        """Export every product to CSV or XLSX bytes with clean, resolved business headers matching UI sequence."""
+        from sqlalchemy import select
+        from app.suppliers.models import Supplier
+        from app.masters.company_list.models import MasterCompany
+
         products = await self.repository.list_all()
 
         # Batch resolve lookup names
-        categories = {str(c.id): c.name for c in await self.category_repository.list(limit=1000)}
-        sub_categories = {str(sc.id): sc.name for sc in await self.sub_category_repository.list(limit=2000)}
-        brands = {str(b.id): b.name for b in await self.brand_repository.list(limit=1000)}
-        hsns = {str(h.id): h.code for h in await self.hsn_repository.list(limit=1000)}
-        uoms = {str(u.id): (u.short_name or u.name or u.code) for u in await self.uom_repository.list(limit=1000)}
+        categories = {str(c.id): c.name for c in await self.category_repository.list(limit=2000)}
+        sub_categories = {str(sc.id): sc.name for sc in await self.sub_category_repository.list(limit=3000)}
+        brands = {str(b.id): b.name for b in await self.brand_repository.list(limit=2000)}
+        hsns = {str(h.id): h.code for h in await self.hsn_repository.list(limit=2000)}
+        uoms = {str(u.id): (u.short_name or u.name or u.code) for u in await self.uom_repository.list(limit=2000)}
+
+        # Suppliers & Organizations
+        supplier_res = await self.repository.session.execute(select(Supplier.id, Supplier.company_name))
+        suppliers = {str(row.id): row.company_name for row in supplier_res}
+
+        org_res = await self.repository.session.execute(select(MasterCompany.id, MasterCompany.name, MasterCompany.branches))
+        orgs: dict[str, str] = {}
+        branch_map: dict[str, str] = {}
+        for row in org_res:
+            orgs[str(row.id)] = row.name
+            if row.branches and isinstance(row.branches, list):
+                for b in row.branches:
+                    if isinstance(b, dict) and "id" in b:
+                        branch_map[str(b["id"])] = b.get("name", "")
 
         rows = []
         for p in products:
@@ -332,21 +356,38 @@ class ProductService:
             h = getattr(p, "height_cm", None) or getattr(p, "height", None)
             status_str = p.status.value if hasattr(p.status, "value") else str(p.status)
 
+            org_ids = p.organization_ids if (p.organization_ids and isinstance(p.organization_ids, list)) else ([str(p.organization_id)] if p.organization_id else [])
+            org_names = [orgs.get(str(oid), "") for oid in org_ids if orgs.get(str(oid))]
+            branch_ids = p.branch_ids if (p.branch_ids and isinstance(p.branch_ids, list)) else []
+            branch_names = [branch_map.get(str(bid), "") for bid in branch_ids if branch_map.get(str(bid))]
+
+            cbm_val = p.packaging_unit_cbm
+            if cbm_val is None and l is not None and w is not None and h is not None:
+                cbm_val = round((float(l) * float(w) * float(h)) / 1000000.0, 6)
+
+            gross_wt = p.packaging_gross_weight if p.packaging_gross_weight is not None else p.weight
+
             rows.append({
+                "Product Name (As Per Tally)": p.product_name_tally or p.product_name or "",
                 "Product Code": p.product_code or "",
-                "Product Name (As Per Tally)": p.product_name or "",
-                "Category": categories.get(str(p.category_id), "") if p.category_id else "",
-                "Sub-Category": sub_categories.get(str(p.sub_category_id), "") if p.sub_category_id else "",
+                "Supplier Company Name": suppliers.get(str(p.supplier_id), "") if p.supplier_id else "",
                 "Brand": brands.get(str(p.brand_id), "") if p.brand_id else "",
+                "Category": categories.get(str(p.category_id), "") if p.category_id else "",
+                "Sub Category": sub_categories.get(str(p.sub_category_id), "") if p.sub_category_id else "",
                 "HSN Code": hsns.get(str(p.hsn_id), "") if p.hsn_id else "",
                 "UOM": uoms.get(str(p.uom_id), "") if p.uom_id else "",
-                "Secondary UOM": uoms.get(str(p.secondary_uom_id), "") if p.secondary_uom_id else "",
-                "Compliance & License Requirements": p.specification or "",
-                "Description": p.description or "",
-                "Pack Gross Weight (Kg)": float(p.weight) if p.weight is not None else "",
+                "Organization": ", ".join(org_names),
+                "Branches": ", ".join(branch_names),
+                "Pack. Qty": float(p.packaging_quantity) if p.packaging_quantity is not None else "",
+                "Pack. Net Weight": float(p.packaging_net_weight) if p.packaging_net_weight is not None else "",
+                "Pack. Gross Weight": float(gross_wt) if gross_wt is not None else "",
                 "Length (cm)": float(l) if l is not None else "",
                 "Width (cm)": float(w) if w is not None else "",
                 "Height (cm)": float(h) if h is not None else "",
+                "Pack. Unit CBM": float(cbm_val) if cbm_val is not None else "",
+                "Refund VAT %": float(p.refund_vat_percent) if p.refund_vat_percent is not None else "",
+                "Compliance & License Requirements": p.license_certificate_required or "",
+                "Specification": p.specification or p.description or "",
                 "Status": status_str,
             })
 

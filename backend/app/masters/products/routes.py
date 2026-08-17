@@ -178,7 +178,9 @@ async def export_products(
         description=f"Exported products as {file_format}.",
     )
     media_type = "text/csv" if file_format == "csv" else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    filename = f"products.{file_format}"
+    from datetime import datetime, timezone
+    today_str = datetime.now(timezone.utc).strftime("%d-%m-%Y")
+    filename = f"Product_{today_str}.{file_format}"
     return Response(content=content, media_type=media_type, headers={"Content-Disposition": f"attachment; filename={filename}"})
 
 

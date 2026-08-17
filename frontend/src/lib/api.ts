@@ -601,7 +601,18 @@ export async function downloadExport(
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `${fileBaseName.replace(/\s+/g, "_")}.${format}`;
+
+  // Format current date as DD-MM-YYYY (e.g. Product_17-08-2026.xlsx)
+  const now = new Date();
+  const day = String(now.getDate()).padStart(2, "0");
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const year = now.getFullYear();
+  const dateStr = `${day}-${month}-${year}`;
+
+  const cleanName = fileBaseName.replace(/\s+/g, "_");
+  const capName = cleanName.charAt(0).toUpperCase() + cleanName.slice(1);
+  a.download = `${capName}_${dateStr}.${format}`;
+
   document.body.appendChild(a);
   a.click();
   a.remove();

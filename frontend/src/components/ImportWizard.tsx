@@ -629,8 +629,19 @@ function WizardModal({
         if (e.target === e.currentTarget && !importing) onClose();
       }}
     >
-      <div className="modal-card import-wizard-card">
-        <div className="modal-header">
+      <div
+        className="modal-card import-wizard-card"
+        style={{
+          maxWidth: "880px",
+          width: "90vw",
+          display: "flex",
+          flexDirection: "column",
+          height: "100vh",
+          maxHeight: "100vh",
+          overflow: "hidden",
+        }}
+      >
+        <div className="modal-header" style={{ flexShrink: 0 }}>
           <h2>Import {entityName} &mdash; Map Columns</h2>
           <button
             type="button"
@@ -644,108 +655,135 @@ function WizardModal({
           </button>
         </div>
 
-        <div className="iw-file-info">
-          <span className="iw-file-name">📄 {file.name}</span>
-          <span className="muted">{rowLabel} detected</span>
-        </div>
-
-        <div className="iw-mapping-section">
-          <div className="section-title">Match your columns</div>
-          <div className="muted" style={{ marginBottom: "var(--space-2)" }}>
-            We've auto-matched what we could recognize. Review each field below and adjust any
-            dropdown that isn't right.
+        {/* Scrollable Center Body */}
+        <div
+          className="iw-modal-body"
+          style={{
+            flex: 1,
+            overflowY: "auto",
+            padding: "20px 24px",
+            minHeight: 0,
+            display: "flex",
+            flexDirection: "column",
+            gap: "16px",
+          }}
+        >
+          <div className="iw-file-info" style={{ margin: 0 }}>
+            <span className="iw-file-name">📄 {file.name}</span>
+            <span className="muted">{rowLabel} detected</span>
           </div>
-          <div className="iw-mapping-table">
-            {importHeaders.map((h) => (
-              <div className="iw-mapping-row" key={h.key}>
-                <div className="iw-target-field">
-                  <span className="iw-target-label">{h.label}</span>
-                  {h.required && <span className="iw-required">*</span>}
-                  <span className="iw-target-key">{h.key}</span>
+
+          <div className="iw-mapping-section" style={{ margin: 0 }}>
+            <div className="section-title">Match your columns</div>
+            <div className="muted" style={{ marginBottom: "var(--space-2)" }}>
+              We've auto-matched what we could recognize. Review each field below and adjust any
+              dropdown that isn't right.
+            </div>
+            <div className="iw-mapping-table">
+              {importHeaders.map((h) => (
+                <div className="iw-mapping-row" key={h.key}>
+                  <div className="iw-target-field">
+                    <span className="iw-target-label">{h.label}</span>
+                    {h.required && <span className="iw-required">*</span>}
+                    <span className="iw-target-key">{h.key}</span>
+                  </div>
+                  <div className="iw-arrow">→</div>
+                  <select
+                    className="iw-source-select"
+                    value={mapping[h.key] || ""}
+                    disabled={importing}
+                    onChange={(e) =>
+                      setMapping((prev) => ({ ...prev, [h.key]: e.target.value || null }))
+                    }
+                  >
+                    <option value="">— Don't import —</option>
+                    {sheetColumns.map((col) => (
+                      <option key={col} value={col}>
+                        {col}
+                      </option>
+                    ))}
+                  </select>
+                  <span
+                    className={`iw-match-badge ${
+                      mapping[h.key] ? "iw-match-auto" : "iw-match-none"
+                    }`}
+                  >
+                    {mapping[h.key] ? "Matched" : h.required ? "Required" : "Optional"}
+                  </span>
                 </div>
-                <div className="iw-arrow">→</div>
-                <select
-                  className="iw-source-select"
-                  value={mapping[h.key] || ""}
-                  disabled={importing}
-                  onChange={(e) =>
-                    setMapping((prev) => ({ ...prev, [h.key]: e.target.value || null }))
-                  }
-                >
-                  <option value="">— Don't import —</option>
-                  {sheetColumns.map((col) => (
-                    <option key={col} value={col}>
-                      {col}
-                    </option>
-                  ))}
-                </select>
-                <span
-                  className={`iw-match-badge ${
-                    mapping[h.key] ? "iw-match-auto" : "iw-match-none"
-                  }`}
-                >
-                  {mapping[h.key] ? "Matched" : h.required ? "Required" : "Optional"}
-                </span>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
-        </div>
 
-        <div className="iw-preview-section">
-          <div className="section-title">Preview (first 5 rows)</div>
-          <div className="table-scroll iw-preview-scroll">
-            <table className="iw-preview-table">
-              <thead>
-                <tr>
-                  {importHeaders.map((h) => (
-                    <th key={h.key}>{h.label}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {previewRows.length === 0 ? (
+          <div className="iw-preview-section" style={{ margin: 0 }}>
+            <div className="section-title">Preview (first 5 rows)</div>
+            <div className="table-scroll iw-preview-scroll">
+              <table className="iw-preview-table">
+                <thead>
                   <tr>
-                    <td colSpan={importHeaders.length} className="muted">
-                      No rows to preview.
-                    </td>
+                    {importHeaders.map((h) => (
+                      <th key={h.key}>{h.label}</th>
+                    ))}
                   </tr>
-                ) : (
-                  previewRows.map((row, i) => (
-                    <tr key={i}>
-                      {importHeaders.map((h) => {
-                        const sourceCol = mapping[h.key];
-                        const val = sourceCol ? row[sourceCol] : "";
-                        return (
-                          <td key={h.key}>
-                            {val === undefined || val === null || val === "" ? (
-                              <span className="muted">—</span>
-                            ) : (
-                              String(val)
-                            )}
-                          </td>
-                        );
-                      })}
+                </thead>
+                <tbody>
+                  {previewRows.length === 0 ? (
+                    <tr>
+                      <td colSpan={importHeaders.length} className="muted">
+                        No rows to preview.
+                      </td>
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
+                  ) : (
+                    previewRows.map((row, i) => (
+                      <tr key={i}>
+                        {importHeaders.map((h) => {
+                          const sourceCol = mapping[h.key];
+                          const val = sourceCol ? row[sourceCol] : "";
+                          return (
+                            <td key={h.key}>
+                              {val === undefined || val === null || val === "" ? (
+                                <span className="muted">—</span>
+                              ) : (
+                                String(val)
+                              )}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
+
+          {importing && (
+            <div className="iw-progress" style={{ display: "flex" }}>
+              <div className="iw-progress-row">
+                <div className="iw-spinner" />
+                <span>{progressText}</span>
+              </div>
+              <div className="iw-progress-track">
+                <div className="iw-progress-bar" style={{ width: `${progressPercent}%` }} />
+              </div>
+            </div>
+          )}
         </div>
 
-        {importing && (
-          <div className="iw-progress" style={{ display: "flex" }}>
-            <div className="iw-progress-row">
-              <div className="iw-spinner" />
-              <span>{progressText}</span>
-            </div>
-            <div className="iw-progress-track">
-              <div className="iw-progress-bar" style={{ width: `${progressPercent}%` }} />
-            </div>
-          </div>
-        )}
-
-        <div className="form-actions iw-actions">
+        {/* Fixed Sticky Footer */}
+        <div
+          className="form-actions iw-actions"
+          style={{
+            flexShrink: 0,
+            padding: "16px 24px",
+            background: "#ffffff",
+            borderTop: "1px solid #e2e8f0",
+            display: "flex",
+            alignItems: "center",
+            gap: "12px",
+            margin: 0,
+          }}
+        >
           <span className="muted">
             {missingRequired.length > 0 && (
               <span style={{ color: "var(--color-danger)" }}>
@@ -865,32 +903,83 @@ export interface ImpExpDropdownProps {
   onExportCsv: () => void;
 }
 
-function downloadSampleCsv(entityName: string, headers: ImportHeader[]) {
-  const headerKeys = headers.map((h) => h.key);
-  const sampleValues: Record<string, string> = {
-    product_code: "PROD-SAMPLE-001",
-    product_name: "Sample Commercial Item",
-    category_code: "CAT-01",
-    sub_category_code: "SUBCAT-01",
-    brand_code: "BRAND-01",
-    hsn_code: "84223000",
-    uom_code: "KGS",
-    secondary_uom_code: "PCS",
-    specification: "Food Grade / Standard Specification",
-    description: "Sample description for import reference",
-    weight: "25.0",
-    length: "50",
-    width: "40",
-    height: "30",
-    status: "active",
-    company_name: "Sample Supplier Co Ltd",
-    country: "China",
-    province: "Shanghai",
-    city: "Shanghai",
-  };
+const REALISTIC_SAMPLES: Record<string, string> = {
+  "Product Name (As Per Tally)": "FR900 Continuous Band Sealer",
+  "product_name": "FR900 Continuous Band Sealer",
+  "Product Code": "INH-00101",
+  "product_code": "INH-00101",
+  "Supplier Company Name": "Inhyma",
+  "supplier_name": "Inhyma",
+  "Brand": "Yinglima",
+  "brand_code": "Yinglima",
+  "brand_name": "Yinglima",
+  "Category": "Machines",
+  "category_code": "Machines",
+  "category_name": "Machines",
+  "Sub Category": "Band Sealer",
+  "Sub-Category": "Band Sealer",
+  "sub_category_code": "Band Sealer",
+  "sub_category_name": "Band Sealer",
+  "HSN Code": "84229090",
+  "hsn_code": "84229090",
+  "UOM": "PCS",
+  "uom_code": "PCS",
+  "uom_name": "PCS",
+  "Pack. Qty": "1",
+  "Packaging Quantity": "1",
+  "packaging_quantity": "1",
+  "Pack. Net Weight": "25.5",
+  "Packaging Net Weight (kg)": "25.5",
+  "packaging_net_weight": "25.5",
+  "Pack. Gross Weight": "28.0",
+  "Packaging Gross Weight (kg)": "28.0",
+  "packaging_gross_weight": "28.0",
+  "weight": "28.0",
+  "Length (cm)": "85",
+  "length_cm": "85",
+  "length": "85",
+  "Width (cm)": "42",
+  "width_cm": "42",
+  "width": "42",
+  "Height (cm)": "36",
+  "height_cm": "36",
+  "height": "36",
+  "Pack. Unit CBM": "0.128520",
+  "Packaging Unit CBM": "0.128520",
+  "packaging_unit_cbm": "0.128520",
+  "Refund VAT %": "13",
+  "refund_vat_percent": "13",
+  "Compliance & License Requirements": "Import Certificate",
+  "license_certificate_required": "Import Certificate",
+  "Specification": "Standard 220V Motor, 50Hz, Teflon Sealing Belt",
+  "specification": "Standard 220V Motor, 50Hz, Teflon Sealing Belt",
+  "Description": "High speed continuous band sealer",
+  "description": "High speed continuous band sealer",
+  "Status": "active",
+  "Status (active/inactive)": "active",
+  "status": "active",
+  "Company Name": "Yinglima Packaging Machinery Co., Ltd.",
+  "company_name": "Yinglima Packaging Machinery Co., Ltd.",
+  "Country": "China",
+  "State": "Zhejiang",
+  "City": "Wenzhou",
+};
 
-  const sampleRow = headerKeys.map((k) => {
-    const val = sampleValues[k] || `Sample ${k}`;
+function downloadSampleCsv(entityName: string, headers: ImportHeader[]) {
+  const headerKeys = headers.map((h) => h.key || h.label);
+  const sampleRow = headers.map((h) => {
+    const key = h.key || h.label || "";
+    let val = REALISTIC_SAMPLES[key] || (h.label ? REALISTIC_SAMPLES[h.label] : "");
+    if (!val) {
+      const k = key.toLowerCase();
+      if (k.includes("code")) val = "SAMPLE-001";
+      else if (k.includes("name")) val = "Sample Name";
+      else if (k.includes("status")) val = "active";
+      else if (k.includes("quantity") || k.includes("qty")) val = "1";
+      else if (k.includes("weight")) val = "10.0";
+      else if (k.includes("price") || k.includes("cost")) val = "100.00";
+      else val = "Sample Value";
+    }
     return `"${val.replace(/"/g, '""')}"`;
   });
 
@@ -899,7 +988,8 @@ function downloadSampleCsv(entityName: string, headers: ImportHeader[]) {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.setAttribute("href", url);
-  link.setAttribute("download", `${entityName.toLowerCase().replace(/\s+/g, "_")}_sample_template.csv`);
+  const capEntity = entityName.charAt(0).toUpperCase() + entityName.slice(1);
+  link.setAttribute("download", `Sample_${capEntity.replace(/\s+/g, "_")}_Template.csv`);
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);

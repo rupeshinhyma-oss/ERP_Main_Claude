@@ -2859,12 +2859,16 @@ class PlanningService:
         # correctly, a confusing inconsistency between the two paths.
         row = await self._get_row_or_raise(sheet_id, row_id)
         sheet = await self.get_sheet_or_raise(sheet_id)
+        mum_label = await self._get_mum_group_label(sheet_id)
         for column in columns:
             is_approval_date = column.name.strip().lower() == "approval date"
-            if column.source_type == PlanningColumnSourceType.MANUAL and not is_approval_date:
+            is_remarks = bool(re.match(rf"^{re.escape(mum_label)}\s*\d+\s*remarks$", column.name.strip(), re.IGNORECASE))
+            if column.source_type == PlanningColumnSourceType.MANUAL and not is_approval_date and not is_remarks:
                 continue
             cell = cells_by_column_id.get(column.id)
-            if is_approval_date and (cell is None or not cell.value):
+            if is_remarks:
+                result[str(column.id)] = cell.value if cell else None
+            elif is_approval_date and (cell is None or not cell.value):
                 result[str(column.id)] = (
                     mum_approval_dates[min(mum_approval_dates.keys())] if mum_approval_dates else None
                 )
@@ -3023,6 +3027,32 @@ class PlanningService:
         if column.is_locked:
             raise ForbiddenException(f"Column '{column.name}' is locked and cannot be edited directly.")
 
+        mum_label = await self._get_mum_group_label(sheet_id)
+
+        # Remarks column check: only accept remarks if corresponding Mum main column has an active number (> 0)
+        remarks_match = re.match(rf"^{re.escape(mum_label)}\s*(\d+)\s*remarks$", column.name.strip(), re.IGNORECASE)
+        if remarks_match:
+            group_num = int(remarks_match.group(1))
+            sibling_columns = await self.column_repository.list_for_sheet(sheet_id)
+            mum_main_col = next(
+                (c for c in sibling_columns if mum_num_from_column_name(c.name, label=mum_label) == group_num),
+                None,
+            )
+            if mum_main_col is not None:
+                mum_main_cell = await self.cell_repository.get_by_row_and_column(row_id, mum_main_col.id)
+                mum_has_number = False
+                if mum_main_cell and mum_main_cell.value is not None and mum_main_cell.value.strip():
+                    try:
+                        num_val = float(mum_main_cell.value.strip())
+                        if num_val > 0:
+                            mum_has_number = True
+                    except ValueError:
+                        mum_has_number = True
+                if not mum_has_number and value is not None and value.strip():
+                    raise BadRequestException(
+                        f"Cannot add remarks for '{column.name}' because '{mum_main_col.name}' has no active number."
+                    )
+
         cell = await self.cell_repository.get_by_row_and_column(row_id, column_id)
         col_name_cleaned = column.name.strip().lower()
         if col_name_cleaned.startswith("test") and "y/n" in col_name_cleaned:
@@ -3031,6 +3061,22 @@ class PlanningService:
                 if val_upper not in ("Y", "N"):
                     raise BadRequestException("Only 'Y' or 'N' is allowed for TEST(Y/N).")
                 value = val_upper
+
+        is_mum_col = _is_pure_mum_column(column.name, label=mum_label)
+        is_zero_or_blank = False
+        if is_mum_col:
+            if value is None or not value.strip():
+                is_zero_or_blank = True
+                value = None
+            else:
+                try:
+                    if float(value.strip()) == 0:
+                        is_zero_or_blank = True
+                        value = None
+                    else:
+                        value = value.strip()
+                except ValueError:
+                    value = value.strip()
 
         old_value = cell.value if cell else None
         if cell is None:
@@ -3051,11 +3097,9 @@ class PlanningService:
                 new_value=value,
                 description=f"Changed '{row.label}' / '{column.name}' from {old_value!r} to {value!r}.",
             )
-            # Document: "When in Mum N Column if written 0 Clear the status itself. No color show only 0."
-            mum_label = await self._get_mum_group_label(sheet_id)
-            is_mum_col = _is_pure_mum_column(column.name, label=mum_label)
+            # If written 0 or removed number: clear status, store blank, and clear any group remarks
             if is_mum_col:
-                if value is not None and value.strip() == "0":
+                if is_zero_or_blank:
                     try:
                         cell = await self.set_cell_status(
                             sheet_id,
@@ -3068,20 +3112,36 @@ class PlanningService:
                         )
                     except BadRequestException:
                         pass
-                elif value is not None and value.strip():
-                    try:
-                        cell = await self.set_cell_status(
-                            sheet_id,
-                            row_id,
-                            column_id,
-                            status_color=PlanningCellStatusColor.BLUE_ORDERED,
-                            custom_status_tag_id=None,
-                            user_id=user_id,
-                            username=username,
+                    mum_num = mum_num_from_column_name(column.name, label=mum_label)
+                    if mum_num is not None:
+                        sibling_columns = await self.column_repository.list_for_sheet(sheet_id)
+                        remarks_col = next(
+                            (
+                                c
+                                for c in sibling_columns
+                                if re.match(rf"^{re.escape(mum_label)}\s*{mum_num}\s*remarks$", c.name.strip(), re.IGNORECASE)
+                            ),
+                            None,
                         )
-                    except BadRequestException:
-                        pass
-            elif value is not None and value.strip() and column.enable_status_color:
+                        if remarks_col:
+                            remarks_cell = await self.cell_repository.get_by_row_and_column(row_id, remarks_col.id)
+                            if remarks_cell and remarks_cell.value:
+                                await self.cell_repository.update(remarks_cell, value=None, updated_by=user_id)
+                elif value is not None and value.strip():
+                    if not cell.status_color:
+                        try:
+                            cell = await self.set_cell_status(
+                                sheet_id,
+                                row_id,
+                                column_id,
+                                status_color=PlanningCellStatusColor.BLUE_ORDERED,
+                                custom_status_tag_id=None,
+                                user_id=user_id,
+                                username=username,
+                            )
+                        except BadRequestException:
+                            pass
+            elif value is not None and value.strip() and column.enable_status_color and not cell.status_color:
                 try:
                     cell = await self.set_cell_status(
                         sheet_id,
@@ -3094,15 +3154,7 @@ class PlanningService:
                     )
                 except BadRequestException:
                     pass
-            # This cell's own new value is already stored above (it's
-            # MANUAL). But a FORMULA column elsewhere on this same row may
-            # reference THIS column by name -- recompute every other
-            # non-MANUAL column on the row so any such formula's stored
-            # result reflects the value that was just typed in, rather
-            # than going stale until something else happens to trigger a
-            # recompute. recompute_and_store_row already skips MANUAL
-            # columns (including this one), so this cell's own stored
-            # value is left untouched.
+
             await self.recompute_and_store_row(sheet_id, row_id)
         return cell
 
@@ -3362,18 +3414,36 @@ class PlanningService:
         recorded_col_ids = set()
 
         for entry in entries:
-            if entry.action == PlanningChangeAction.CELL_STATUS_CHANGED and entry.column_id in mum_column_names:
+            if entry.column_id in mum_column_names:
                 recorded_col_ids.add(entry.column_id)
-                results.append(
-                    {
-                        "column_id": str(entry.column_id),
-                        "column_name": mum_column_names[entry.column_id],
-                        "old_status": entry.old_value,
-                        "new_status": entry.new_value,
-                        "changed_at": entry.created_at.isoformat() if hasattr(entry.created_at, "isoformat") else str(entry.created_at),
-                        "changed_by_username": entry.changed_by_username_snapshot,
-                    }
-                )
+                if entry.action == PlanningChangeAction.CELL_STATUS_CHANGED:
+                    results.append(
+                        {
+                            "column_id": str(entry.column_id),
+                            "column_name": mum_column_names[entry.column_id],
+                            "entry_type": "status",
+                            "old_status": entry.old_value,
+                            "new_status": entry.new_value,
+                            "old_value": None,
+                            "new_value": None,
+                            "changed_at": entry.created_at.isoformat() if hasattr(entry.created_at, "isoformat") else str(entry.created_at),
+                            "changed_by_username": entry.changed_by_username_snapshot,
+                        }
+                    )
+                elif entry.action == PlanningChangeAction.CELL_VALUE_CHANGED:
+                    results.append(
+                        {
+                            "column_id": str(entry.column_id),
+                            "column_name": mum_column_names[entry.column_id],
+                            "entry_type": "value",
+                            "old_status": None,
+                            "new_status": None,
+                            "old_value": entry.old_value,
+                            "new_value": entry.new_value,
+                            "changed_at": entry.created_at.isoformat() if hasattr(entry.created_at, "isoformat") else str(entry.created_at),
+                            "changed_by_username": entry.changed_by_username_snapshot,
+                        }
+                    )
 
         # Fallback for existing cells that have Mum values (e.g. 9, 7, 5) but no change_log status entry yet
         for col_id, col_name in mum_column_names.items():
@@ -3382,17 +3452,35 @@ class PlanningService:
                 if cell and cell.value and cell.value.strip():
                     status = cell.status_color.value if cell.status_color else PlanningCellStatusColor.BLUE_ORDERED.value
                     ts = cell.updated_at or cell.created_at
+                    ts_str = ts.isoformat() if hasattr(ts, "isoformat") else str(ts)
                     results.append(
                         {
                             "column_id": str(col_id),
                             "column_name": col_name,
+                            "entry_type": "value",
+                            "old_status": None,
+                            "new_status": None,
+                            "old_value": None,
+                            "new_value": cell.value,
+                            "changed_at": ts_str,
+                            "changed_by_username": "system",
+                        }
+                    )
+                    results.append(
+                        {
+                            "column_id": str(col_id),
+                            "column_name": col_name,
+                            "entry_type": "status",
                             "old_status": None,
                             "new_status": status,
-                            "changed_at": ts.isoformat() if hasattr(ts, "isoformat") else str(ts),
+                            "old_value": None,
+                            "new_value": None,
+                            "changed_at": ts_str,
                             "changed_by_username": "system",
                         }
                     )
 
+        results.sort(key=lambda x: x["changed_at"], reverse=True)
         return results
 
     async def get_mum_group_approval_dates_for_all_rows(

@@ -476,11 +476,14 @@ class PlanningChangeLogRead(BaseModel):
 
 
 class MumColumnStatusHistoryEntry(BaseModel):
-    """One status-color change on a Mum-series column, for the Approval Date hover feed."""
+    """One status-color or value change on a Mum-series column, for the Approval Date hover feed."""
 
     column_id: uuid.UUID
     column_name: str
+    entry_type: str = "status"
     old_status: str | None = None
     new_status: str | None = None
+    old_value: str | None = None
+    new_value: str | None = None
     changed_at: datetime
     changed_by_username: str

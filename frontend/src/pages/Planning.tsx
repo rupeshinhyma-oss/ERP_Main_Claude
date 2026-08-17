@@ -27,6 +27,7 @@ import { apiDelete, apiGet, apiPatch, apiPost, apiPut, API_BASE, ApiError, toQue
 import { Auth } from "@/lib/auth";
 import { useAuth } from "@/lib/hooks";
 import { useLookup } from "@/lib/lookups";
+import { useToast } from "@/lib/toast";
 import { useLiveList } from "@/lib/live/useLiveList";
 import type { Role } from "@/types";
 import type {
@@ -179,6 +180,16 @@ function mumGroupNumber(columnName: string, label?: string): number | null {
   const effectiveLabel = label || "Mum";
   const escapedLabel = effectiveLabel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const regex = new RegExp(`${escapedLabel}\\s*(\\d+)`, "i");
+  const match = str.match(regex);
+  if (!match) return null;
+  const num = parseInt(match[1], 10);
+  return Number.isNaN(num) ? null : num;
+}
+
+function mumRemarksGroupNumber(columnName: string, label?: string): number | null {
+  const str = (columnName || "").trim();
+  const effectiveLabel = (label || "Mum").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const regex = new RegExp(`^${effectiveLabel}\\s*(\\d+)\\s*remarks$`, "i");
   const match = str.match(regex);
   if (!match) return null;
   const num = parseInt(match[1], 10);
@@ -771,6 +782,8 @@ function GridCell({
   isLastFrozen,
   stickyLeft,
   width,
+  disabledReason,
+  onDisabledClick,
 }: {
   value: string | null | undefined;
   displayValue: string | null | undefined;
@@ -795,6 +808,9 @@ function GridCell({
   stickyLeft?: number;
   /** This column's effective width (computed from its header label, or manually resized). Falls back to CELL_MIN_WIDTH if omitted. */
   width?: number;
+  /** If provided, prevents editing and displays as disabled with tooltip/toast. */
+  disabledReason?: string;
+  onDisabledClick?: () => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value ?? "");
@@ -805,6 +821,8 @@ function GridCell({
   const rawShownValue = isManual ? (value ?? displayValue) : (displayValue ?? value);
   const shownValue = showMumHistory ? formatDaysMonthYear(rawShownValue) : rawShownValue;
   const colWidth = width ?? CELL_MIN_WIDTH;
+  const isBlocked = !!disabledReason;
+  const isActuallyEditable = canEdit && isManual && !isBlocked;
 
   useEffect(() => {
     if (editing) inputRef.current?.focus();
@@ -815,7 +833,19 @@ function GridCell({
     if (draft !== (value ?? "")) onSave(draft);
   }
 
-  const bg = isFrozen ? (!isManual ? "#F8FAFC" : "#fff") : !isManual ? "#F8FAFC" : "#fff";
+  function handleCellClick() {
+    if (isBlocked) {
+      if (onDisabledClick) onDisabledClick();
+      return;
+    }
+    if (isActuallyEditable) {
+      setEditing(true);
+    }
+  }
+
+  const bg = isFrozen
+    ? (!isManual || isBlocked ? "#F8FAFC" : "#fff")
+    : (!isManual || isBlocked ? "#F8FAFC" : "#fff");
 
   return (
     <td
@@ -840,7 +870,7 @@ function GridCell({
       className="planning-cell"
     >
       <div style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "center", minHeight: 26, padding: "3px 5px" }}>
-        {editing && isManual ? (
+        {editing && isActuallyEditable ? (
           <input
             ref={inputRef}
             value={draft}
@@ -866,24 +896,27 @@ function GridCell({
           />
         ) : (
           <span
-            onClick={() => canEdit && isManual && setEditing(true)}
+            onClick={handleCellClick}
             title={
-              !isManual
+              disabledReason
+                ? disabledReason
+                : !isManual
                 ? `Computed (${sourceType}) — not directly editable`
                 : statusColor
-                  ? statusLabel(statusColor, customStatusTagId, customTags)
-                  : undefined
+                ? statusLabel(statusColor, customStatusTagId, customTags)
+                : undefined
             }
             style={{
               width: "100%",
-              cursor: canEdit && isManual ? "text" : "default",
+              cursor: isBlocked ? "not-allowed" : isActuallyEditable ? "text" : "default",
               fontSize: 13,
               minHeight: 18,
               display: "block",
               textAlign: "center",
               fontStyle: !isManual ? "italic" : undefined,
-              color: swatch || (!isManual ? "#475569" : undefined),
+              color: isBlocked ? "#94A3B8" : swatch || (!isManual ? "#475569" : undefined),
               fontWeight: swatch ? 600 : undefined,
+              opacity: isBlocked ? 0.7 : 1,
             }}
           >
             {shownValue || ""}
@@ -1150,6 +1183,7 @@ function HistoryDrawer({
 
 export function PlanningPage() {
   const { hasPermission } = useAuth();
+  const showToast = useToast();
   const canManageColumns = hasPermission("planning.column.manage");
   const canEditCells = hasPermission("planning.cell.edit");
 
@@ -2461,6 +2495,16 @@ export function PlanningPage() {
     cellSaveGenerationRef.current[key] = myGeneration;
     const isStillLatest = () => cellSaveGenerationRef.current[key] === myGeneration;
 
+    const targetCol = grid?.columns.find((c) => c.id === columnId);
+    const mumLabel = grid?.sheet?.mum_group_label || "Mum";
+    const isMumCol = targetCol ? isPureMumColumn(targetCol.name, mumLabel) : false;
+    const isZeroOrBlank = isMumCol && (value.trim() === "" || value.trim() === "0" || (!isNaN(Number(value)) && Number(value) === 0));
+    const effectiveVal = isZeroOrBlank ? "" : value;
+    const mumNum = targetCol ? mumGroupNumber(targetCol.name, mumLabel) : null;
+    const remarksColId = (isZeroOrBlank && mumNum !== null)
+      ? grid?.columns.find((c) => mumRemarksGroupNumber(c.name, mumLabel) === mumNum)?.id
+      : undefined;
+
     // 1. Apply optimistically, right away -- the person's typed value is
     // the source of truth in the UI from this point on, independent of
     // whether the network call below has even started yet.
@@ -2471,23 +2515,31 @@ export function PlanningPage() {
         rows: prev.rows.map((r) => {
           if (r.id !== rowId) return r;
           const exists = r.cells.some((cell) => cell.column_id === columnId);
-          const optimisticCell = { value, display_value: value };
-          return {
-            ...r,
-            cells: exists
-              ? r.cells.map((cell) => (cell.column_id === columnId ? { ...cell, ...optimisticCell } : cell))
-              : [
+          const optimisticCell = isZeroOrBlank
+            ? { value: "", display_value: "", status_color: null, custom_status_tag_id: null }
+            : { value: effectiveVal, display_value: effectiveVal };
+          let updatedCells = exists
+            ? r.cells.map((cell) => (cell.column_id === columnId ? { ...cell, ...optimisticCell } : cell))
+            : [
                 ...r.cells,
                 {
                   id: null,
                   row_id: rowId,
                   column_id: columnId,
-                  value,
-                  display_value: value,
+                  value: isZeroOrBlank ? "" : effectiveVal,
+                  display_value: isZeroOrBlank ? "" : effectiveVal,
                   status_color: null,
                   custom_status_tag_id: null,
                 } as PlanningCell,
-              ],
+              ];
+          if (remarksColId) {
+            updatedCells = updatedCells.map((cell) =>
+              cell.column_id === remarksColId ? { ...cell, value: "", display_value: "" } : cell
+            );
+          }
+          return {
+            ...r,
+            cells: updatedCells,
           };
         }),
       };
@@ -2500,7 +2552,7 @@ export function PlanningPage() {
       try {
         const { data } = await apiPut<{ cell: PlanningCell; derived_values: Record<string, string | null | Record<string, string>> }>(
           `/planning/sheets/${sheetId}/rows/${rowId}/columns/${columnId}/value`,
-          { value }
+          { value: isZeroOrBlank ? null : value }
         );
         // A newer edit to this SAME cell started while this request was
         // in flight -- that newer save already applied its own optimistic
@@ -2532,14 +2584,19 @@ export function PlanningPage() {
                 id: null,
                 row_id: rowId,
                 column_id: columnId,
-                value,
-                display_value: value,
+                value: isZeroOrBlank ? "" : value,
+                display_value: isZeroOrBlank ? "" : value,
                 status_color: null,
                 custom_status_tag_id: null,
               };
               let updatedCells = exists
                 ? r.cells.map((cell) => (cell.column_id === columnId ? { ...cell, ...patched } : cell))
                 : [...r.cells, patched];
+              if (remarksColId) {
+                updatedCells = updatedCells.map((cell) =>
+                  cell.column_id === remarksColId ? { ...cell, value: "", display_value: "" } : cell
+                );
+              }
               // Also patch every derived column (formula totals, and the
               // Approval Date auto-date) for THIS SAME tab -- the acting
               // user doesn't receive their own WebSocket broadcast (see
@@ -2552,7 +2609,7 @@ export function PlanningPage() {
                 if (c.column_id === approvalDateColumnId && (c.is_auto_approval_date || !c.value)) {
                   return { ...c, display_value: nextDisplayValue, value: nextDisplayValue, is_auto_approval_date: true };
                 }
-                return { ...c, display_value: nextDisplayValue };
+                return { ...c, display_value: nextDisplayValue, value: nextDisplayValue !== undefined ? nextDisplayValue : c.value };
               });
               const presentColumnIds = new Set(updatedCells.map((c) => c.column_id));
               for (const [derivedColumnId, displayValue] of Object.entries(derived)) {
@@ -2596,21 +2653,15 @@ export function PlanningPage() {
         const isRetryable = status === undefined || status >= 500 || status === 408 || status === 429;
         const isLastAttempt = attempt === maxAttempts - 1;
         if (!isRetryable || isLastAttempt) {
-          // Every retry failed (or this failure isn't worth retrying at
-          // all) -- the typed value STAYS on screen (never reverted;
-          // reverting what someone just typed is more disruptive than a
-          // quiet "error" indicator they can retry from), but the small
-          // per-cell marker now shows it hasn't actually reached the
-          // server yet.
           setCellSaveStatus((prev) => ({ ...prev, [key]: "error" }));
-          // No banner for a single-cell save failure -- see this
-          // function's docstring for why that would be disruptive while
-          // actively editing a sheet. Logged for diagnosis instead.
+          if (status && status < 500 && status !== 408 && status !== 429) {
+            showToast(err instanceof Error ? err.message : "Cannot save cell", "error");
+          }
           console.error("Failed to save cell value:", err);
           return;
         }
         await new Promise((resolve) => setTimeout(resolve, backoffMs[attempt]));
-        if (!isStillLatest()) return; // superseded while waiting to retry -- stop, don't fire a stale request
+        if (!isStillLatest()) return;
       }
     }
   }
@@ -3044,6 +3095,23 @@ export function PlanningPage() {
                         {orderedColumns.map((col) => {
                           const cell = cellByRowColumn.get(`${row.id}:${col.id}`);
                           const saveKey = cellStatusKey(row.id, col.id);
+                          const mumLabel = grid?.sheet?.mum_group_label || "Mum";
+                          const remarksGroupNum = mumRemarksGroupNumber(col.name, mumLabel);
+                          let remarksDisabledReason: string | undefined = undefined;
+
+                          if (remarksGroupNum !== null) {
+                            const mumMainCol = orderedColumns.find(
+                              (c) => isPureMumColumn(c.name, mumLabel) && mumGroupNumber(c.name, mumLabel) === remarksGroupNum
+                            );
+                            const mumMainCell = mumMainCol ? cellByRowColumn.get(`${row.id}:${mumMainCol.id}`) : undefined;
+                            const mumVal = (mumMainCell?.value ?? "").trim();
+                            const num = Number(mumVal);
+                            const hasActiveMumNumber = mumVal !== "" && mumVal !== "0" && !isNaN(num) && num > 0;
+                            if (!hasActiveMumNumber) {
+                              remarksDisabledReason = `Enter a quantity in ${mumMainCol?.name || `${mumLabel} ${remarksGroupNum}`} first before adding remarks.`;
+                            }
+                          }
+
                           return (
                             <GridCell
                               key={col.id}
@@ -3066,6 +3134,8 @@ export function PlanningPage() {
                               isLastFrozen={col.id === lastFrozenColumnId}
                               stickyLeft={stickyLeftByColumnId.get(col.id)}
                               width={effectiveColumnWidth(col)}
+                              disabledReason={remarksDisabledReason}
+                              onDisabledClick={() => remarksDisabledReason && showToast(remarksDisabledReason, "warning")}
                             />
                           );
                         })}

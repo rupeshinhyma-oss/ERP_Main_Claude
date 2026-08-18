@@ -419,3 +419,34 @@ class UserService:
         """Force-logout a user by revoking every one of their active sessions."""
         await self.get_by_id_or_raise(user_id)
         return await self.auth_service.force_logout_user(user_id, reason="admin_force_logout")
+
+    # --- Admin: Delete User -----------------------------------------------------------
+    async def delete_user(self, user_id: uuid.UUID, *, deleted_by: uuid.UUID) -> None:
+        """Soft-delete a user account, terminating all active sessions and cleaning up role assignments."""
+        user = await self.get_by_id_or_raise(user_id)
+
+        # 1. Guard: Bootstrap admin account can never be deleted
+        if self._is_bootstrap_admin_username(user.username):
+            raise ForbiddenException("The system bootstrap administrator account cannot be deleted.")
+
+        # 2. Guard: Cannot delete own account
+        if user.id == deleted_by:
+            raise ForbiddenException("You cannot delete your own account.")
+
+        # 3. Guard: Cannot delete the last active Super Administrator
+        if await self.is_super_admin(user.id):
+            await self._ensure_not_last_super_admin(user.id)
+
+        # 4. Force logout from all active login sessions
+        await self.force_logout_user(user.id)
+
+        # 5. Remove any role assignments
+        user_roles = await self.user_role_repository.list_for_user(user.id)
+        for ur in user_roles:
+            await self.user_role_repository.delete(ur)
+
+        # 6. Invalidate permissions cache
+        await self.rbac_service.invalidate_user_permissions_cache(user.id)
+
+        # 7. Soft-delete the user record
+        await self.user_repository.delete(user)

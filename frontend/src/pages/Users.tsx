@@ -250,6 +250,27 @@ export function UsersPage() {
     });
   }
 
+  async function handleDeleteUser(userId: string, username: string, email: string) {
+    if (
+      !confirm(
+        `Are you sure you want to delete user '${username}' (${email || "no email"})?\n\nThis will remove the user account, terminate active sessions, and unassign roles.`
+      )
+    )
+      return;
+    await guardRowAction(`delete:${userId}`, async () => {
+      try {
+        await apiDelete(`/users/${userId}`);
+        showToast(`User '${username}' was deleted successfully.`, "success");
+        setRows((prev) => prev.filter((u) => u.id !== userId));
+        setPagination((prev) =>
+          prev ? { ...prev, total_records: Math.max(0, (prev.total_records || 0) - 1) } : prev
+        );
+      } catch (err) {
+        setError(err);
+      }
+    });
+  }
+
   async function openViewUser(userId: string) {
     setViewLoading(true);
     setViewUser(null);
@@ -472,9 +493,10 @@ export function UsersPage() {
     }
   }
 
-  const canViewUser = hasPermission("user.view");
-  const canUpdateUser = hasPermission("user.update");
-  const canManage = hasPermission("settings.manage");
+  const canViewUser = hasPermission("user.view") || hasPermission("user.read") || isSuperAdmin;
+  const canUpdateUser = hasPermission("user.update") || isSuperAdmin;
+  const canDeleteUser = hasPermission("user.delete") || isSuperAdmin;
+  const canManage = hasPermission("settings.manage") || isSuperAdmin;
 
   return (
     <AppShell activeKey="users" pageClassName="page-users">
@@ -668,6 +690,16 @@ export function UsersPage() {
                         danger: true,
                         onClick: () => handleForceLogout(u.id, u.username),
                       });
+                      if (canDeleteUser && !isTargetSuperAdmin) {
+                        actions.push({
+                          key: "delete-user",
+                          label: isRowActionPending(`delete:${u.id}`)
+                            ? "🗑️ Deleting..."
+                            : "🗑️ Delete User",
+                          danger: true,
+                          onClick: () => handleDeleteUser(u.id, u.username, u.email),
+                        });
+                      }
                     }
 
                     return (

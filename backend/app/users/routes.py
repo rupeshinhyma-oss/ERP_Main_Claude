@@ -482,3 +482,28 @@ async def force_logout(
     return build_success_response(
         data={"revoked_sessions": revoked_count}, request_id=request.state.request_id
     )
+
+
+@router.delete("/{user_id}", summary="Delete a user (admin)")
+async def delete_user(
+    user_id: uuid.UUID,
+    request: Request,
+    user_service: UserService = Depends(get_user_service),
+    current_user: CurrentUser = Depends(require_permission("user.delete")),
+    audit_service: AuditService = Depends(get_audit_service),
+) -> dict:
+    """Delete (soft-delete) a user account, revoking active sessions and role assignments."""
+    target_user = await user_service.get_by_id_or_raise(user_id)
+    target_username = target_user.username
+    await user_service.delete_user(user_id, deleted_by=current_user.id)
+    await _record_user_action(
+        audit_service=audit_service,
+        request=request,
+        action=AuditAction.DELETE,
+        actor=current_user,
+        target_user_id=user_id,
+        description=f"Deleted user {target_username!r}.",
+    )
+    return build_success_response(
+        data={"deleted": True, "id": str(user_id)}, request_id=request.state.request_id
+    )

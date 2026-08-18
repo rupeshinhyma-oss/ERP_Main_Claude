@@ -8,9 +8,11 @@ mirroring :mod:`app.suppliers.routes`.
 
 from __future__ import annotations
 
+from datetime import datetime
 import uuid
 
-from fastapi import APIRouter, Depends, Request, status
+from fastapi import APIRouter, Depends, File, Request, UploadFile, status
+from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.constants import AuditAction
@@ -245,6 +247,60 @@ async def list_buyers(
     meta = PageMeta.build(page=query.page.page, page_size=query.page.page_size, total_records=total).as_meta_dict()
     data = [_to_list_item(b) for b in buyers]
     return build_success_response(data=data, request_id=request.state.request_id, meta=meta)
+
+
+@router.get("/export", summary="Export buyers to CSV/Excel")
+async def export_buyers(
+    request: Request,
+    format: str = "csv",
+    service: BuyerService = Depends(get_buyer_service),
+    current_user: CurrentUser = Depends(require_permission("buyer.read")),
+    audit_service: AuditService = Depends(get_audit_service),
+) -> Response:
+    """Export every buyer as a CSV or XLSX file."""
+    file_format = format.lower()
+    if file_format not in ("csv", "xlsx"):
+        file_format = "csv"
+    content = await service.export_file(file_format)
+    await _record_action(
+        audit_service=audit_service,
+        request=request,
+        action=AuditAction.EXPORT,
+        actor=current_user,
+        entity_id="bulk",
+        description=f"Exported buyers as {file_format}.",
+    )
+    media_type = "text/csv" if file_format == "csv" else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    today_str = datetime.now().strftime("%d-%m-%Y")
+    filename = f"Buyer_{today_str}.{file_format}"
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
+@router.post("/import", summary="Import buyers from CSV/Excel")
+async def import_buyers(
+    request: Request,
+    file: UploadFile = File(...),
+    service: BuyerService = Depends(get_buyer_service),
+    current_user: CurrentUser = Depends(require_permission("buyer.create")),
+    audit_service: AuditService = Depends(get_audit_service),
+) -> dict:
+    """Import buyers from an uploaded CSV/XLSX file, validating every row with 3-way duplicate detection."""
+    raw_bytes = await file.read()
+    summary = await service.import_file(file.filename or "import.csv", raw_bytes)
+    await _record_action(
+        audit_service=audit_service,
+        request=request,
+        action=AuditAction.IMPORT,
+        actor=current_user,
+        entity_id="bulk",
+        description=f"Imported buyers: {summary.created} created, {summary.failed} failed, {summary.duplicate_count} duplicates.",
+        new_values=summary.as_dict(),
+    )
+    return build_success_response(data=summary.as_dict(), request_id=request.state.request_id)
 
 
 @router.get("/{buyer_id}", summary="Get a buyer")

@@ -76,20 +76,82 @@ const REALISTIC_SAMPLES: Record<string, string> = {
   "status": "active",
   "Company Name": "Yinglima Packaging Machinery Co., Ltd.",
   "company_name": "Yinglima Packaging Machinery Co., Ltd.",
+  "Product Categories": "Machines",
+  "Key Strength Sub-Categories": "Band Sealer",
+  "Products Supplied": "FR900 Continuous Band Sealer",
+  "Secondary Products": "Vacuum packaging machines, sealing spare parts",
   "Country": "China",
-  "State": "Zhejiang",
+  "country_code": "China",
+  "State / Province": "Zhejiang",
+  "state_name": "Zhejiang",
   "City": "Wenzhou",
+  "city_name": "Wenzhou",
+  "Brand Description": "Manufacturer of industrial packaging and sealing machinery",
+  "brand_description": "Manufacturer of industrial packaging and sealing machinery",
+  "Supplier Type": "Manufacturer",
+  "supplier_type": "manufacturer",
+  "Current Status": "Existing",
+  "current_status": "existing",
+  "Supplier Grade": "Grade A",
+  "supplier_grade": "A",
+  "Potential": "Yes",
+  "potential": "yes",
+  "Potential Reason": "Direct factory pricing and rapid spare parts availability",
+  "potential_reason": "Direct factory pricing and rapid spare parts availability",
+  "Contact Person": "Zhang Wei",
+  "contact_full_name": "Zhang Wei",
+  "Designation": "Sales Director",
+  "contact_designation": "Sales Director",
+  "Calling Number": "+86 577 8888 1234",
+  "contact_calling_number": "+86 577 8888 1234",
+  "WhatsApp Number": "+86 138 0000 1234",
+  "contact_whatsapp_number": "+86 138 0000 1234",
+  "WeChat Number": "yinglima_sales",
+  "contact_wechat_number": "yinglima_sales",
+  "Emails": "sales@yinglima.com",
+  "email": "sales@yinglima.com",
+  "Tax ID / GST Number": "91330300MA2XXXXX",
+  "tax_id_number": "91330300MA2XXXXX",
+  "Address": "No. 88 Industrial Avenue, Ouhai District",
+  "address": "No. 88 Industrial Avenue, Ouhai District",
+  "Town": "Ouhai",
+  "town": "Ouhai",
+  "Primary Website": "https://www.yinglima.com",
+  "primary_website": "https://www.yinglima.com",
+  "Secondary Website": "https://yinglima.en.alibaba.com",
+  "secondary_website": "https://yinglima.en.alibaba.com",
+  "Visited Factory/Office": "Yes",
+  "visited_factory_office": "true",
+  "Visit Remarks": "Visited factory in October 2025; excellent quality control lines.",
+  "visit_remarks": "Visited factory in October 2025; excellent quality control lines.",
+  "Buyer Type": "Manufacturer",
+  "buyer_type": "Manufacturer",
+  "Contact Salutation": "Mr.",
+  "contact_salutation": "Mr.",
+  "Contact Person Name": "Rajesh Sharma",
+  "contact_person_name": "Rajesh Sharma",
+  "Buyer Grade": "Grade A",
+  "buyer_grade": "A",
+  "Product Range": "Industrial packaging machinery",
+  "product_range": "Industrial packaging machinery",
+  "Currently Buying From": "Local distributors",
+  "currently_buying_from": "Local distributors",
+  "Website": "https://www.acmepack.com",
+  "website": "https://www.acmepack.com",
 };
 
 /** Lookup realistic sample value or deduce clean fallback. */
 function sampleValueFor(header: ImportHeader): string {
-  const key = header.key || header.label || "";
-  if (REALISTIC_SAMPLES[key]) return REALISTIC_SAMPLES[key];
-  if (header.label && REALISTIC_SAMPLES[header.label]) return REALISTIC_SAMPLES[header.label];
+  const key = header.key || "";
+  const label = header.label || "";
 
-  const k = key.toLowerCase();
+  if (REALISTIC_SAMPLES[label]) return REALISTIC_SAMPLES[label];
+  if (REALISTIC_SAMPLES[key]) return REALISTIC_SAMPLES[key];
+
+  const k = (label || key).toLowerCase();
   if (k.includes("code")) return "SAMPLE-001";
-  if (k.includes("name")) return "Sample Name";
+  if (k.includes("person") || k.includes("contact")) return "Rajesh Sharma";
+  if (k.includes("name")) return "Acme Industrial Packaging Ltd.";
   if (k.includes("status")) return "active";
   if (k.includes("quantity") || k.includes("qty")) return "1";
   if (k.includes("weight")) return "10.0";
@@ -104,7 +166,7 @@ function csvEscape(value: string): string {
 }
 
 export function downloadSampleTemplate(importHeaders: ImportHeader[], entityName: string): void {
-  const headerLine = importHeaders.map((h) => csvEscape(h.key)).join(",");
+  const headerLine = importHeaders.map((h) => csvEscape(h.label || h.key)).join(",");
   const sampleLine = importHeaders.map((h) => csvEscape(sampleValueFor(h))).join(",");
   const csvContent = `${headerLine}\n${sampleLine}\n`;
 

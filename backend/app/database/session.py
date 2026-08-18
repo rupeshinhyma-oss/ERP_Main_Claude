@@ -51,7 +51,7 @@ async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
             await session.rollback()
         except Exception:
             pass
-        if not isinstance(exc, (asyncio.CancelledError, KeyboardInterrupt)):
+        if not isinstance(exc, (asyncio.CancelledError, KeyboardInterrupt, GeneratorExit)):
             logger.exception("Session rolled back due to an unhandled exception.")
         raise
     finally:

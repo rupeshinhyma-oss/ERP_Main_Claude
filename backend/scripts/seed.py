@@ -329,5 +329,23 @@ async def seed() -> None:
     )
 
 
+async def _run_seed_with_retry(max_retries: int = 5, delay: float = 2.0) -> None:
+    last_exc = None
+    for attempt in range(1, max_retries + 1):
+        try:
+            await seed()
+            return
+        except Exception as exc:
+            last_exc = exc
+            if attempt < max_retries:
+                logger.warning(
+                    f"Seed connection attempt {attempt}/{max_retries} failed: {exc}. Retrying in {delay:.1f}s..."
+                )
+                await asyncio.sleep(delay)
+                delay *= 1.5
+            else:
+                raise last_exc
+
+
 if __name__ == "__main__":
-    asyncio.run(seed())
+    asyncio.run(_run_seed_with_retry())

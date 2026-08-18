@@ -13,6 +13,7 @@ the identical pattern already established by app.buyers.routes.
 
 from __future__ import annotations
 
+from datetime import datetime
 import uuid
 
 from fastapi import APIRouter, Depends, File, Request, UploadFile, status
@@ -261,8 +262,13 @@ async def export_suppliers(
         description=f"Exported suppliers as {file_format}.",
     )
     media_type = "text/csv" if file_format == "csv" else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    filename = f"suppliers.{file_format}"
-    return Response(content=content, media_type=media_type, headers={"Content-Disposition": f"attachment; filename={filename}"})
+    today_str = datetime.now().strftime("%d-%m-%Y")
+    filename = f"Supplier_{today_str}.{file_format}"
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
 
 
 @router.post("/import", summary="Import suppliers from CSV/Excel")

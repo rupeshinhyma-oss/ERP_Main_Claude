@@ -38,15 +38,27 @@ import type { Buyer, BuyerContact } from "@/types/buyers";
 const BUYER_IMPORT_HEADERS: ImportHeader[] = [
   { key: "company_name", label: "Company Name", required: true },
   { key: "buyer_type", label: "Buyer Type", required: false },
+  { key: "category_names", label: "Product Categories", required: false },
+  { key: "sub_category_names", label: "Product Sub Categories", required: false },
   { key: "country", label: "Country", required: true },
   { key: "city", label: "City", required: false },
   { key: "address", label: "Address", required: false },
+  { key: "contact_salutation", label: "Contact Salutation", required: false },
   { key: "contact_full_name", label: "Contact Person Name", required: false },
+  { key: "contact_designation", label: "Designation", required: false },
   { key: "contact_calling_number", label: "Calling Number", required: false },
   { key: "contact_whatsapp_number", label: "WhatsApp Number", required: false },
   { key: "emails", label: "Emails", required: false },
-  { key: "tax_id_number", label: "Tax ID Number", required: false },
+  { key: "tax_id_number", label: "Tax ID / GST Number", required: false },
   { key: "website", label: "Website", required: false },
+  { key: "current_status", label: "Current Status", required: false },
+  { key: "buyer_grade", label: "Buyer Grade", required: false },
+  { key: "potential", label: "Potential", required: false },
+  { key: "potential_reason", label: "Potential Reason", required: false },
+  { key: "product_range", label: "Product Range", required: false },
+  { key: "currently_buying_from", label: "Currently Buying From", required: false },
+  { key: "overall_remarks", label: "Overall Remarks", required: false },
+  { key: "status", label: "Status", required: false },
 ];
 
 const EMPTY_BUYER_FORM = {

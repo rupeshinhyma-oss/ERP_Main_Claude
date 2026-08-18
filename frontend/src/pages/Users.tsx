@@ -639,11 +639,11 @@ export function UsersPage() {
                       if (statusUpper === "ACTIVE") {
                         actions.push({
                           key: "deactivate",
-                          label: "⏸️ Deactivate",
+                          label: "⏸️ Inactive",
                           onClick: () =>
                             runAction(
                               `/users/${u.id}/deactivate`,
-                              `Deactivate user '${u.username}'? This will block their login and revoke all active sessions.`
+                              `Set user '${u.username}' to Inactive? This will block their login and revoke all active sessions.`
                             ),
                         });
                       }

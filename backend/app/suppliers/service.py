@@ -684,7 +684,7 @@ class SupplierService:
                     "State / Province": states.get(s.state_id, ""),
                     "City": cities.get(s.city_id, ""),
                     "Brand Description": s.brand_description or "",
-                    "Supplier Type": s.supplier_type.value.capitalize() if s.supplier_type else "",
+                    "Supplier Type": str(s.supplier_type) if s.supplier_type else "",
                     "Current Status": s.current_status.value.capitalize() if s.current_status else "",
                     "Supplier Grade": f"Grade {s.supplier_grade.value.upper()}" if s.supplier_grade else "",
                     "Potential": s.potential.value.capitalize() if s.potential else "",

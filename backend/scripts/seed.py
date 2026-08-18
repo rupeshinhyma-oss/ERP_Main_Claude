@@ -259,7 +259,7 @@ async def seed() -> None:
         # "user" (the default role every other new account gets). Both are
         # marked is_system=True so they can't be deleted or renamed from the
         # Roles & Permissions screen.
-        role = await role_repo.get_by_name(SUPER_ADMIN_ROLE_NAME)
+        role = await role_repo.get_by_name(SUPER_ADMIN_ROLE_NAME, include_deleted=True)
         if role is None:
             role = await role_repo.create(
                 name=SUPER_ADMIN_ROLE_NAME,
@@ -275,6 +275,9 @@ async def seed() -> None:
                 session.add(RolePermission(role_id=role.id, permission_id=permission.id))
             await session.flush()
         else:
+            if role.deleted_at is not None:
+                role.deleted_at = None
+                await session.flush()
             # Idempotent top-up: make sure any newly-added bootstrap permission
             # (e.g. organization.manage) is granted even if this role already existed.
             existing_codes = {link.permission.code for link in role.permission_links}
@@ -282,7 +285,7 @@ async def seed() -> None:
                 if permission.code not in existing_codes:
                     await role_repo.add_permission(role, permission)
 
-        user_role = await role_repo.get_by_name(USER_ROLE_NAME)
+        user_role = await role_repo.get_by_name(USER_ROLE_NAME, include_deleted=True)
         if user_role is None:
             user_role = await role_repo.create(
                 name=USER_ROLE_NAME,
@@ -298,6 +301,9 @@ async def seed() -> None:
                 permission = await permission_repo.get_by_code(code)
                 if permission:
                     session.add(RolePermission(role_id=user_role.id, permission_id=permission.id))
+            await session.flush()
+        elif user_role.deleted_at is not None:
+            user_role.deleted_at = None
             await session.flush()
 
         # --- 3. Bootstrap admin user ----------------------------------------------------
@@ -321,6 +327,10 @@ async def seed() -> None:
             logger.info("Seeded bootstrap admin user.", extra={"username": settings.BOOTSTRAP_ADMIN_USERNAME})
         else:
             logger.info("Bootstrap admin user already exists; skipping.")
+
+        # Seed China provinces and major cities
+        from scripts.seed_china_geo import seed_china
+        await seed_china(session)
 
         await session.commit()
 

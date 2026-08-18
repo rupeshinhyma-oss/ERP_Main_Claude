@@ -38,7 +38,7 @@ from __future__ import annotations
 import uuid
 from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
-from sqlalchemy import Select, String, Text, func, or_, select
+from sqlalchemy import Boolean, Select, String, Text, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import BadRequestException, ConflictException
@@ -266,7 +266,17 @@ class BaseRepository(Generic[ModelT]):
             except (NotImplementedError, AttributeError):
                 is_uuid_col = False
 
-            if isinstance(value, str) and isinstance(column.type, (String, Text)):
+            is_bool_col = False
+            try:
+                if isinstance(column.type, Boolean) or (hasattr(column.type, "python_type") and column.type.python_type is bool):
+                    is_bool_col = True
+            except (NotImplementedError, AttributeError):
+                is_bool_col = False
+
+            if is_bool_col:
+                bool_val = value.lower() in ("true", "1", "t", "yes") if isinstance(value, str) else bool(value)
+                stmt = stmt.where(column == bool_val)
+            elif isinstance(value, str) and isinstance(column.type, (String, Text)):
                 stmt = stmt.where(func.lower(column) == value.lower())
             elif isinstance(value, str) and is_uuid_col:
                 try:

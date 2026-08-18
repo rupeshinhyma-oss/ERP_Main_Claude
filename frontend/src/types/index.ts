@@ -411,6 +411,7 @@ export interface Supplier {
   contact_wechat_number?: string | null;
   emails?: string[];
   tax_id_number?: string | null;
+  address?: string | null;
   town?: string | null;
   primary_website?: string | null;
   secondary_website?: string | null;

@@ -81,17 +81,8 @@ def validate_supplier_row(raw_row: dict[str, Any], row_number: int) -> dict[str,
     if not city_name:
         raise BadRequestException(f"Row {row_number}: 'City' is required.")
 
-    supplier_type_raw = _get_field(raw_row, "Supplier Type", "supplier_type").lower()
-    supplier_type = None
-    if supplier_type_raw:
-        try:
-            supplier_type = SupplierType(supplier_type_raw)
-        except ValueError:
-            # Tolerant match
-            for st in SupplierType:
-                if st.value in supplier_type_raw or supplier_type_raw in st.value:
-                    supplier_type = st
-                    break
+    supplier_type_raw = _get_field(raw_row, "Supplier Type", "supplier_type")
+    supplier_type = supplier_type_raw or None
 
     grade_raw = _get_field(raw_row, "Supplier Grade", "Grade", "supplier_grade").upper()
     if grade_raw.startswith("GRADE "):

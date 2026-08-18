@@ -100,7 +100,7 @@ class SupplierCreate(BaseModel):
     # --- First data form ---
     company_name: str = Field(..., min_length=1, max_length=255)
     category_ids: list[uuid.UUID] = Field(default_factory=list, description="Product Category (multiple).")
-    supplier_type: SupplierType | None = None
+    supplier_type: str | None = None
     brand_description: str | None = None
     country_id: uuid.UUID
     state_id: uuid.UUID
@@ -149,7 +149,7 @@ class SupplierCreate(BaseModel):
                 if grade_letter in ("A", "B", "C"):
                     return grade_letter
             lower_v = cleaned.lower()
-            if lower_v in ("new", "existing", "yes", "no", "manufacturer", "trader"):
+            if lower_v in ("new", "existing", "yes", "no"):
                 return lower_v
             if cleaned.upper() in ("A", "B", "C"):
                 return cleaned.upper()
@@ -166,7 +166,7 @@ class SupplierUpdate(BaseModel):
 
     company_name: str | None = Field(default=None, min_length=1, max_length=255)
     category_ids: list[uuid.UUID] | None = None
-    supplier_type: SupplierType | None = None
+    supplier_type: str | None = None
     brand_description: str | None = None
     country_id: uuid.UUID | None = None
     state_id: uuid.UUID | None = None
@@ -210,7 +210,7 @@ class SupplierUpdate(BaseModel):
                 if grade_letter in ("A", "B", "C"):
                     return grade_letter
             lower_v = cleaned.lower()
-            if lower_v in ("new", "existing", "yes", "no", "manufacturer", "trader"):
+            if lower_v in ("new", "existing", "yes", "no"):
                 return lower_v
             if cleaned.upper() in ("A", "B", "C"):
                 return cleaned.upper()
@@ -234,14 +234,19 @@ class SupplierPotentialUpdate(BaseModel):
     potential: SupplierPotential | None = None
 
 
+# ---------------------------------------------------------------------------
+# Responses
+# ---------------------------------------------------------------------------
+
+
 class SupplierRead(BaseModel):
-    """A supplier profile, as returned by the API (detail view)."""
+    """A supplier, as returned by the API (full detail view)."""
 
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
     company_name: str
-    supplier_type: SupplierType | None
+    supplier_type: str | None
     brand_description: str | None
     country_id: uuid.UUID
     state_id: uuid.UUID
@@ -292,7 +297,7 @@ class SupplierListItemRead(BaseModel):
     state_id: uuid.UUID
     city_id: uuid.UUID
     brand_description: str | None
-    supplier_type: SupplierType | None
+    supplier_type: str | None
     current_status: SupplierCurrentStatus | None
     supplier_grade: SupplierGrade | None
     potential: SupplierPotential | None

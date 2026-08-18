@@ -44,6 +44,9 @@ export interface SearchableDropdownProps extends SharedProps {
   onChange: (value: string | null, label: string) => void;
   allowCustomText?: boolean;
   onTextChange?: (text: string) => void;
+  id?: string;
+  hasError?: boolean;
+  disabled?: boolean;
 }
 
 export function SearchableDropdown({
@@ -54,6 +57,9 @@ export function SearchableDropdown({
   fetchLabelForValue,
   allowCustomText = false,
   onTextChange,
+  id,
+  hasError = false,
+  disabled = false,
 }: SearchableDropdownProps) {
   const [inputValue, setInputValue] = useState("");
   const [label, setLabel] = useState("");
@@ -63,10 +69,15 @@ export function SearchableDropdown({
   const search = useSearchController();
   const blurTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const resolvedFor = useRef<string | null>(null);
+  const isUserTyping = useRef(false);
+  const fetchLabelRef = useRef(fetchLabelForValue);
+  fetchLabelRef.current = fetchLabelForValue;
 
   // Resolve the display label whenever the selected id changes from outside
   // (opening an edit form, or a parent clearing this field).
   useEffect(() => {
+    if (isUserTyping.current) return;
+
     if (!value) {
       resolvedFor.current = null;
       setLabel("");
@@ -75,16 +86,20 @@ export function SearchableDropdown({
       }
       return;
     }
-    if (resolvedFor.current === value && label) return;
+    if (resolvedFor.current === value && label) {
+      setInputValue(label);
+      return;
+    }
     resolvedFor.current = value;
 
     let cancelled = false;
-    if (!fetchLabelForValue) {
+    const fetchFn = fetchLabelRef.current;
+    if (!fetchFn) {
       setLabel(value);
       setInputValue(value);
       return;
     }
-    fetchLabelForValue(value)
+    fetchFn(value)
       .then((resolved) => {
         if (cancelled) return;
         setLabel(resolved || value);
@@ -96,7 +111,7 @@ export function SearchableDropdown({
     return () => {
       cancelled = true;
     };
-  }, [value, fetchLabelForValue, allowCustomText]);
+  }, [value, allowCustomText]);
 
   useEffect(
     () => () => {
@@ -112,15 +127,17 @@ export function SearchableDropdown({
   }, []);
 
   function selectOption(opt: DropdownOption) {
+    isUserTyping.current = false;
     resolvedFor.current = opt.value;
     setLabel(opt.label);
     setInputValue(opt.label);
     closeResults();
     onChange(opt.value, opt.label);
-    if (onTextChange) onTextChange(opt.label);
   }
 
   function handleInput(raw: string) {
+    if (disabled) return;
+    isUserTyping.current = true;
     const next = allowCustomText ? autoTitleCase(raw) : raw;
     setInputValue(next);
     const term = next.trim();
@@ -142,6 +159,7 @@ export function SearchableDropdown({
   }
 
   function handleFocus() {
+    if (disabled) return;
     void search.run(async (signal) => {
       const found = await fetchOptions(inputValue.trim(), signal);
       setOptions(found || []);
@@ -151,6 +169,7 @@ export function SearchableDropdown({
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (disabled) return;
     if (e.key === "Enter" && allowCustomText && activeIndex < 0 && inputValue.trim()) {
       e.preventDefault();
       closeResults();
@@ -173,14 +192,16 @@ export function SearchableDropdown({
   }
 
   function handleBlur() {
+    if (disabled) return;
     // Slight delay so a mousedown-selection in the list can complete first.
     blurTimer.current = setTimeout(() => {
       closeResults();
-      if (allowCustomText) {
+      if (isUserTyping.current && allowCustomText) {
         if (onTextChange) onTextChange(inputValue);
-      } else {
+      } else if (!allowCustomText) {
         setInputValue(value === null ? "" : label);
       }
+      isUserTyping.current = false;
     }, 150);
   }
 
@@ -193,7 +214,22 @@ export function SearchableDropdown({
     <div className="sd-wrap">
       <input
         type="text"
-        className="sd-input"
+        id={id}
+        disabled={disabled}
+        className={`sd-input ${hasError ? "input-error" : ""}`.trim()}
+        style={{
+          border: hasError ? "1.5px solid #ef4444" : undefined,
+          boxShadow: hasError ? "0 0 0 3px rgba(239, 68, 68, 0.15)" : undefined,
+          ...(disabled
+            ? {
+                background: "#f8fafc",
+                cursor: "not-allowed",
+                opacity: 0.75,
+                color: "#94a3b8",
+                borderColor: "#e2e8f0",
+              }
+            : {}),
+        }}
         placeholder={placeholder || "Search..."}
         autoComplete="off"
         value={inputValue}

@@ -129,6 +129,7 @@ const EMPTY_SUPPLIER_FORM = {
   visited_factory_office: "false",
   visit_remarks: "",
   visit_media_input: "",
+  visit_video_url: "",
   overall_remarks: "",
   is_active: "true",
 };
@@ -555,7 +556,18 @@ export function SuppliersPage() {
   }, [contactCountryId]);
 
   const setField = (id: keyof typeof EMPTY_SUPPLIER_FORM, value: string) => {
-    const formatted = autoTitleCase(value, id as string);
+    const rawFields = new Set([
+      "visited_factory_office",
+      "is_active",
+      "current_status",
+      "potential",
+      "supplier_grade",
+      "primary_website",
+      "secondary_website",
+      "visit_video_url",
+      "visit_media_input",
+    ]);
+    const formatted = rawFields.has(id as string) ? value : autoTitleCase(value, id as string);
     setForm((prev) => ({ ...prev, [id]: formatted }));
     if (validationErrors[id as string]) {
       setValidationErrors((prev) => ({ ...prev, [id as string]: "" }));
@@ -995,7 +1007,8 @@ export function SuppliersPage() {
         secondary_products_description: supplier.secondary_products_description || "",
         visited_factory_office: String(supplier.visited_factory_office),
         visit_remarks: supplier.visit_remarks || "",
-        visit_media_input: supplier.visit_media ? supplier.visit_media.join(", ") : "",
+        visit_media_input: (supplier.visit_media || []).filter((u) => !u.startsWith("http") || u.match(/\.(jpg|jpeg|png|webp|gif|svg)(\?.*)?$/i) || u.includes("/storage/v1/object/public/")).join(", "),
+        visit_video_url: (supplier.visit_media || []).find((u) => u.startsWith("http") && !u.match(/\.(jpg|jpeg|png|webp|gif|svg)(\?.*)?$/i) && !u.includes("/storage/v1/object/public/")) || "",
         overall_remarks: supplier.overall_remarks || "",
         is_active: String(supplier.is_active),
       });
@@ -1050,10 +1063,15 @@ export function SuppliersPage() {
 
   function buildPayload() {
     const emails = form.emails || [];
-    const visitMedia = form.visit_media_input
-      .split(",")
-      .map((v) => v.trim())
-      .filter(Boolean);
+    const isVisited = form.visited_factory_office === "true";
+    const visitPhotos = isVisited
+      ? form.visit_media_input
+          .split(",")
+          .map((v) => v.trim())
+          .filter(Boolean)
+      : [];
+    const visitVideo = isVisited && form.visit_video_url ? form.visit_video_url.trim() : "";
+    const visitMedia = visitVideo ? [...visitPhotos, visitVideo] : visitPhotos;
 
     return {
       company_name: form.company_name.trim(),
@@ -1083,8 +1101,8 @@ export function SuppliersPage() {
       potential: form.potential || null,
       potential_reason: form.potential_reason.trim() || null,
       secondary_products_description: form.secondary_products_description.trim() || null,
-      visited_factory_office: form.visited_factory_office === "true",
-      visit_remarks: form.visit_remarks.trim() || null,
+      visited_factory_office: isVisited,
+      visit_remarks: isVisited ? form.visit_remarks.trim() || null : null,
       visit_media: visitMedia.length ? visitMedia : null,
       overall_remarks: form.overall_remarks.trim() || null,
       is_active: form.is_active === "true",
@@ -2004,89 +2022,81 @@ export function SuppliersPage() {
                       />
                     </div>
 
-                    <div style={{ display: "grid", gridTemplateColumns: form.visited_factory_office === "true" ? "repeat(2, 1fr)" : "1fr", gap: "18px", marginBottom: "18px" }}>
-                      <SelectField id="visited_factory_office" label="Visited Factory / Office?" value={form.visited_factory_office} onChange={(v) => setField("visited_factory_office", v)}>
+                    <div style={{ marginBottom: "18px" }}>
+                      <SelectField id="visited_factory_office" label="Visited Factory / Office?" value={String(form.visited_factory_office).toLowerCase() === "true" ? "true" : "false"} onChange={(v) => setField("visited_factory_office", v)}>
                         <option value="false">No</option>
                         <option value="true">Yes</option>
                       </SelectField>
-                      {form.visited_factory_office === "true" && (
-                        <TextField id="visit_remarks" label="Visit Remarks / Summary" placeholder="Key observations..." value={form.visit_remarks} onChange={(v) => setField("visit_remarks", v)} />
-                      )}
                     </div>
 
-                    <div style={{ marginBottom: "18px" }}>
-                      <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "6px", display: "block" }}>
-                        Visit Photos &amp; Videos (Supabase Storage)
-                      </label>
-                      <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "10px" }}>
-                        <label
-                          className="btn btn-small"
-                          style={{
-                            background: "#0061f2",
-                            color: "#ffffff",
-                            border: "none",
-                            borderRadius: "6px",
-                            padding: "7px 14px",
-                            fontWeight: 600,
-                            fontSize: "12.5px",
-                            cursor: uploadingMedia ? "not-allowed" : "pointer",
-                            display: "inline-flex",
-                            alignItems: "center",
-                            gap: "6px",
-                          }}
-                        >
-                          📁 {uploadingMedia ? "Uploading..." : "Select Photos / Videos"}
-                          <input
-                            type="file"
-                            multiple
-                            accept="image/*,video/*"
-                            onChange={(e) => void handleMediaFileUpload(e.target.files)}
-                            disabled={uploadingMedia}
-                            style={{ display: "none" }}
+                    {String(form.visited_factory_office).toLowerCase() === "true" && (
+                      <div style={{ background: "#f8fafc", padding: "16px", borderRadius: "8px", border: "1px solid #e2e8f0", marginBottom: "18px" }}>
+                        <div style={{ marginBottom: "16px" }}>
+                          <TextField
+                            id="visit_remarks"
+                            label="Visit Remarks / Summary"
+                            placeholder="Key observations from factory/office visit..."
+                            value={form.visit_remarks}
+                            onChange={(v) => setField("visit_remarks", v)}
                           />
-                        </label>
-                        {uploadingMedia && (
-                          <span style={{ fontSize: "12px", color: "#64748b" }}>
-                            Uploading media, please wait...
-                          </span>
-                        )}
-                      </div>
+                        </div>
 
-                      {mediaList.length > 0 && (
-                        <div style={{ display: "flex", gap: "12px", flexWrap: "wrap", marginBottom: "12px" }}>
-                          {mediaList.map((url, idx) => {
-                            const isVideo = url.match(/\.(mp4|webm|ogg|mov)$/i);
-                            return (
-                              <div
-                                key={idx}
-                                style={{
-                                  position: "relative",
-                                  width: "100px",
-                                  height: "80px",
-                                  borderRadius: "6px",
-                                  overflow: "hidden",
-                                  border: "1px solid #cbd5e1",
-                                  background: "#f8fafc",
-                                }}
-                              >
-                                {isVideo ? (
-                                  <div
-                                    style={{
-                                      width: "100%",
-                                      height: "100%",
-                                      background: "#0f172a",
-                                      display: "flex",
-                                      alignItems: "center",
-                                      justifyContent: "center",
-                                      color: "#ffffff",
-                                    }}
-                                  >
-                                    🎬
-                                  </div>
-                                ) : (
+                        <div style={{ marginBottom: "16px" }}>
+                          <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "6px", display: "block" }}>
+                            Visit Photos (Factory / Office)
+                          </label>
+                          <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "10px" }}>
+                            <label
+                              className="btn btn-small"
+                              style={{
+                                background: "#0061f2",
+                                color: "#ffffff",
+                                border: "none",
+                                borderRadius: "6px",
+                                padding: "7px 14px",
+                                fontWeight: 600,
+                                fontSize: "12.5px",
+                                cursor: uploadingMedia ? "not-allowed" : "pointer",
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: "6px",
+                              }}
+                            >
+                              📁 {uploadingMedia ? "Uploading..." : "Select Photos"}
+                              <input
+                                type="file"
+                                multiple
+                                accept="image/*"
+                                onChange={(e) => void handleMediaFileUpload(e.target.files)}
+                                disabled={uploadingMedia}
+                                style={{ display: "none" }}
+                              />
+                            </label>
+                            {uploadingMedia && (
+                              <span style={{ fontSize: "12px", color: "#64748b" }}>
+                                Uploading photos, please wait...
+                              </span>
+                            )}
+                          </div>
+
+                          {mediaList.length > 0 && (
+                            <div style={{ display: "flex", gap: "12px", flexWrap: "wrap", marginBottom: "8px" }}>
+                              {mediaList.map((url, idx) => (
+                                <div
+                                  key={idx}
+                                  style={{
+                                    position: "relative",
+                                    width: "100px",
+                                    height: "80px",
+                                    borderRadius: "6px",
+                                    overflow: "hidden",
+                                    border: "1px solid #cbd5e1",
+                                    background: "#ffffff",
+                                  }}
+                                >
                                   <img
                                     src={resolveImageUrl(url)}
-                                    alt={`Media ${idx + 1}`}
+                                    alt={`Visit photo ${idx + 1}`}
                                     style={{ width: "100%", height: "100%", objectFit: "cover" }}
                                     onError={(e) => {
                                       if (!url.startsWith("http") && !url.startsWith("data:")) {
@@ -2094,45 +2104,48 @@ export function SuppliersPage() {
                                       }
                                     }}
                                   />
-                                )}
-                                <button
-                                  type="button"
-                                  onClick={() => removeMediaUrl(url)}
-                                  style={{
-                                    position: "absolute",
-                                    top: "4px",
-                                    right: "4px",
-                                    width: "22px",
-                                    height: "22px",
-                                    borderRadius: "50%",
-                                    background: "rgba(239, 68, 68, 0.9)",
-                                    color: "#ffffff",
-                                    border: "none",
-                                    cursor: "pointer",
-                                    fontSize: "12px",
-                                    fontWeight: 700,
-                                    display: "flex",
-                                    alignItems: "center",
-                                    justifyContent: "center",
-                                    boxShadow: "0 1px 3px rgba(0,0,0,0.2)",
-                                  }}
-                                >
-                                  ✕
-                                </button>
-                              </div>
-                            );
-                          })}
+                                  <button
+                                    type="button"
+                                    onClick={() => removeMediaUrl(url)}
+                                    title="Remove photo"
+                                    style={{
+                                      position: "absolute",
+                                      top: "4px",
+                                      right: "4px",
+                                      width: "22px",
+                                      height: "22px",
+                                      borderRadius: "50%",
+                                      background: "rgba(239, 68, 68, 0.9)",
+                                      color: "#ffffff",
+                                      border: "none",
+                                      cursor: "pointer",
+                                      fontSize: "12px",
+                                      fontWeight: 700,
+                                      display: "flex",
+                                      alignItems: "center",
+                                      justifyContent: "center",
+                                      boxShadow: "0 1px 3px rgba(0,0,0,0.2)",
+                                    }}
+                                  >
+                                    ✕
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
                         </div>
-                      )}
 
-                      <TextField
-                        id="visit_media_input"
-                        label="Media URLs (comma-separated URLs)"
-                        placeholder="https://... (Auto-filled on upload or paste manually)"
-                        value={form.visit_media_input}
-                        onChange={(v) => setField("visit_media_input", v)}
-                      />
-                    </div>
+                        <div>
+                          <TextField
+                            id="visit_video_url"
+                            label="Factory Video / Inspection Folder Link (Optional)"
+                            placeholder="https://... (e.g. OneDrive, SharePoint, Google Drive, or Video URL)"
+                            value={form.visit_video_url}
+                            onChange={(v) => setField("visit_video_url", v)}
+                          />
+                        </div>
+                      </div>
+                    )}
 
                     <div style={{ marginBottom: "16px" }}>
                       <TextAreaField id="overall_remarks" label="Overall Remarks / Key Strengths" rows={2} value={form.overall_remarks} onChange={(v) => setField("overall_remarks", v)} />

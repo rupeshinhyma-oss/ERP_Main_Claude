@@ -23,10 +23,12 @@ from app.rbac.schemas import (
     AssignUserPermissionRequest,
     BulkUserPermissionsRequest,
     ClonePermissionSetRequest,
+    DeleteRoleRequest,
     EffectivePermissionsBreakdown,
     GrantPermissionRequest,
     PermissionRead,
     RoleCreate,
+    RoleDeletionImpact,
     RoleRead,
     RoleUpdate,
     RoleWithPermissions,
@@ -145,6 +147,23 @@ async def update_role(
     return build_success_response(data=data, request_id=request.state.request_id)
 
 
+@router.get("/roles/{role_id}/deletion-impact", summary="Preview what deleting a role would affect (admin)")
+async def get_role_deletion_impact(
+    role_id: uuid.UUID,
+    request: Request,
+    rbac_service: RBACService = Depends(get_rbac_service),
+    _current_user: CurrentUser = Depends(require_permission("settings.manage")),
+) -> dict:
+    """
+    Show how many users are currently assigned to a role, and who they are,
+    before actually deleting it -- the frontend uses this to render a
+    confirmation dialog offering to reassign them (defaulting to the "user"
+    role) instead of silently leaving them with no role at all.
+    """
+    impact = await rbac_service.get_role_deletion_impact(role_id)
+    return build_success_response(data=impact, request_id=request.state.request_id)
+
+
 @router.delete("/roles/{role_id}", summary="Delete a role (admin)")
 async def delete_role(
     role_id: uuid.UUID,
@@ -153,9 +172,14 @@ async def delete_role(
     current_user: CurrentUser = Depends(require_permission("settings.manage")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
-    """Delete a role. System roles cannot be deleted."""
+    """
+    Delete a role that has no users currently assigned to it. System roles
+    cannot be deleted. If the role still has users assigned, this is
+    rejected -- use POST /roles/{role_id}/delete-with-reassignment instead,
+    which moves them to another role first.
+    """
     role = await rbac_service.get_role_or_raise(role_id)
-    await rbac_service.delete_role(role_id)
+    reassigned_count = await rbac_service.delete_role(role_id, reassigned_by=current_user.id)
     await audit_service.record(
         action=AuditAction.DELETE,
         module="rbac",
@@ -172,7 +196,58 @@ async def delete_role(
         description=f"Deleted role {role.name!r}.",
     )
     request.state.audit_logged = True
-    return build_success_response(data={"deleted": True}, request_id=request.state.request_id)
+    return build_success_response(
+        data={"deleted": True, "reassigned_user_count": reassigned_count},
+        request_id=request.state.request_id,
+    )
+
+
+@router.post(
+    "/roles/{role_id}/delete-with-reassignment",
+    summary="Delete a role, moving its users to another role first (admin)",
+)
+async def delete_role_with_reassignment(
+    role_id: uuid.UUID,
+    payload: DeleteRoleRequest,
+    request: Request,
+    rbac_service: RBACService = Depends(get_rbac_service),
+    current_user: CurrentUser = Depends(require_permission("settings.manage")),
+    audit_service: AuditService = Depends(get_audit_service),
+) -> dict:
+    """
+    Delete a role that still has users assigned to it, first moving every
+    one of those users to ``reassign_to_role_id`` (the frontend defaults
+    this to the "user" role) so nobody is silently left with no role and no
+    permissions once the role they were on disappears.
+    """
+    role = await rbac_service.get_role_or_raise(role_id)
+    reassigned_count = await rbac_service.delete_role(
+        role_id, reassign_to_role_id=payload.reassign_to_role_id, reassigned_by=current_user.id
+    )
+    await audit_service.record(
+        action=AuditAction.DELETE,
+        module="rbac",
+        user_id=current_user.id,
+        username_snapshot=current_user.username,
+        entity_type="Role",
+        entity_id=str(role_id),
+        new_values={
+            "reassigned_user_count": reassigned_count,
+            "reassigned_to_role_id": str(payload.reassign_to_role_id) if payload.reassign_to_role_id else None,
+        },
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+        request_id=request.state.request_id,
+        http_method=request.method,
+        endpoint=request.url.path,
+        response_status=status.HTTP_200_OK,
+        description=f"Deleted role {role.name!r}; reassigned {reassigned_count} user(s).",
+    )
+    request.state.audit_logged = True
+    return build_success_response(
+        data={"deleted": True, "reassigned_user_count": reassigned_count},
+        request_id=request.state.request_id,
+    )
 
 
 @router.post("/roles/{role_id}/permissions", summary="Grant a permission to a role (admin)")
@@ -233,11 +308,6 @@ async def revoke_permission(
         response_status=status.HTTP_200_OK,
         description=f"Revoked permission {permission_id} from role.",
     )
-    request.state.audit_logged = True
-    return build_success_response(data={"revoked": True}, request_id=request.state.request_id)
-
-
-# --- Individual User Permissions ---------------------------------------------
     request.state.audit_logged = True
     return build_success_response(data={"revoked": True}, request_id=request.state.request_id)
 

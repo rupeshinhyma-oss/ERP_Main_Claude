@@ -66,6 +66,8 @@ export interface ModalProps {
   title?: ReactNode;
   onClose: () => void;
   children: ReactNode;
+  /** "drawer" (right slide-over panel, default) or "center" (centered dialog modal) */
+  variant?: "drawer" | "center";
   /** Extra classes for the .modal-card element (e.g. import-wizard-card). */
   cardClassName?: string;
   /** Inline overrides some pages applied, e.g. max-width: 820px. */
@@ -79,18 +81,15 @@ export interface ModalProps {
 }
 
 /**
- * The `.modal-backdrop > .modal-card` shell used by every Master Data page,
- * Suppliers, Audit Log and Roles & Permissions.
- *
- * Body scroll is locked while open and the card is mounted fresh each time, so
- * it always opens scrolled to the top rather than inheriting the page's
- * scroll offset.
+ * The `.modal-backdrop > .modal-card` shell used by pages.
+ * Supports both right offcanvas drawers ("drawer") and centered dialog popups ("center").
  */
 export function Modal({
   open,
   title,
   onClose,
   children,
+  variant = "drawer",
   cardClassName = "",
   cardStyle,
   showHeader = true,
@@ -101,15 +100,19 @@ export function Modal({
 
   if (!open) return null;
 
+  const isCenter = variant === "center";
+  const finalBackdropClass = `modal-backdrop ${isCenter ? "modal-centered-backdrop" : ""} ${backdropClassName}`.trim();
+  const finalCardClass = `modal-card ${isCenter ? "modal-dialog-card" : ""} ${cardClassName}`.trim();
+
   return (
     <div
-      className={`modal-backdrop ${backdropClassName}`.trim()}
-      style={{ display: "flex" }}
+      className={finalBackdropClass}
+      style={isCenter ? { display: "flex", justifyContent: "center", alignItems: "center", padding: "20px" } : { display: "flex" }}
       onClick={(e) => {
         if (e.target === e.currentTarget && !locked) onClose();
       }}
     >
-      <div className={`modal-card ${cardClassName}`.trim()} style={cardStyle}>
+      <div className={finalCardClass} style={cardStyle}>
         {showHeader && (
           <div className="modal-header">
             <h2>{title}</h2>

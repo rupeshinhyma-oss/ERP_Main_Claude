@@ -88,11 +88,12 @@ export const Auth = {
   },
 
   /**
-   * Permission check with the backend's alias fallbacks. Super admins pass
-   * everything; otherwise a code matches if it is granted directly or via one
-   * of the documented aliases (view<->read, export/import fallbacks, the
-   * employee<->user module pair, or a hierarchical short form such as
-   * masters.brand.create -> brand.create).
+   * Permission check with the backend's alias fallbacks. The Admin
+   * (super_admin) role passes everything; otherwise a code matches if it is
+   * granted directly or via one of the documented aliases (view<->read,
+   * export/import fallbacks, the legacy employee<->user module pair kept
+   * for backward compatibility with older data, or a hierarchical short
+   * form such as masters.brand.create -> brand.create).
    */
   hasPermission(code?: string | null): boolean {
     if (!code) return true;
@@ -153,13 +154,20 @@ export function initials(name?: string | null): string {
   return name.trim().slice(0, 2).toUpperCase();
 }
 
-/** Human-readable role label shown under the username in the sidebar. */
+/**
+ * Human-readable role label shown under the username in the sidebar.
+ *
+ * "super_admin" is the system's internal name for the single hardcoded
+ * bootstrap admin account's role, but it's shown to users simply as
+ * "Admin" everywhere in the UI (see the matching `roleDisplayName()`
+ * helpers in Rbac.tsx / Users.tsx). The separate "admin" role name is only
+ * checked here for backward compatibility with a database that hasn't yet
+ * run `scripts/migrate_retire_business_roles.py`.
+ */
 export function roleLabel(profile: Profile | null): string {
-  if (profile && Array.isArray(profile.roles) && profile.roles.includes("super_admin")) {
-    return "Super Administrator";
-  }
-  if (profile && Array.isArray(profile.roles) && profile.roles.includes("admin")) {
-    return "Administrator";
+  if (!profile || !Array.isArray(profile.roles)) return "User";
+  if (profile.roles.includes("super_admin") || profile.roles.includes("admin")) {
+    return "Admin";
   }
   return "User";
 }

@@ -858,6 +858,42 @@ svg {
   background: var(--color-border);
 }
 
+/* Centered Dialog Modal variant */
+.modal-centered-backdrop {
+  justify-content: center !important;
+  align-items: center !important;
+  padding: 20px !important;
+}
+
+.modal-dialog-card {
+  background: #ffffff !important;
+  border-radius: 12px !important;
+  height: auto !important;
+  max-height: 90vh !important;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25) !important;
+  border: 1px solid #e2e8f0 !important;
+  animation: modalScaleIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards !important;
+  overflow: hidden !important;
+}
+
+.modal-dialog-card .modal-header {
+  padding: 16px 22px;
+  background: #ffffff;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.modal-dialog-card .modal-header h2 {
+  font-size: 16px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.modal-dialog-card form {
+  height: auto;
+  max-height: calc(90vh - 60px);
+  overflow-y: auto;
+}
+
 /* ==========================================================================
    Tables
    ========================================================================== */

@@ -102,3 +102,41 @@ class EffectivePermissionsBreakdown(BaseModel):
     user_grants: list[str] = Field(default_factory=list)
     user_denies: list[str] = Field(default_factory=list)
     effective_permissions: list[str] = Field(default_factory=list)
+
+
+class RoleDeletionAffectedUser(BaseModel):
+    """One user who would be affected by deleting a role."""
+
+    id: uuid.UUID
+    username: str
+    display_name: str
+
+
+class RoleDeletionImpact(BaseModel):
+    """
+    Preview of what deleting a role would affect, shown to the admin before
+    they confirm -- lets the UI ask "N users are on this role, reassign
+    them to:" instead of silently orphaning their access.
+    """
+
+    role_id: uuid.UUID
+    role_name: str
+    is_system: bool
+    affected_user_count: int
+    affected_users: list[RoleDeletionAffectedUser] = Field(default_factory=list)
+
+
+class DeleteRoleRequest(BaseModel):
+    """
+    Optional payload for deleting a role that still has users assigned.
+
+    If the role has zero assigned users, this can be omitted entirely. If
+    it has one or more, ``reassign_to_role_id`` is required -- the delete
+    is rejected with a clear error otherwise, rather than silently
+    orphaning those users' access.
+    """
+
+    reassign_to_role_id: uuid.UUID | None = Field(
+        default=None,
+        description="Role to move affected users to before deleting this role. Required if any users are assigned.",
+    )

@@ -17,11 +17,21 @@ from datetime import datetime, timezone
 
 from app.auth.security import hash_password
 from app.auth.service import AuthService
-from app.core.exceptions import ConflictException, NotFoundException
+from app.core.config import settings
+from app.core.exceptions import ConflictException, ForbiddenException, NotFoundException
 from app.rbac.repository import UserRoleRepository
 from app.rbac.service import RBACService
 from app.users.models import User, UserStatus
 from app.users.repository import UserRepository
+
+# The one and only role name that grants full administrator access. Reserved
+# exclusively for the hardcoded bootstrap admin account (see scripts/seed.py);
+# no one else may ever be assigned this role, regardless of who is asking.
+SUPER_ADMIN_ROLE_NAME = "super_admin"
+
+# The role every newly-created account gets by default when the caller
+# doesn't specify any role_ids explicitly.
+DEFAULT_USER_ROLE_NAME = "user"
 
 
 class UserService:
@@ -99,7 +109,20 @@ class UserService:
     async def is_super_admin(self, user_id: uuid.UUID) -> bool:
         """Return True if the user has the super_admin role."""
         roles = await self.rbac_service.list_roles_for_user(user_id)
-        return any(r.name == "super_admin" for r in roles)
+        return any(r.name == SUPER_ADMIN_ROLE_NAME for r in roles)
+
+    @staticmethod
+    def _is_bootstrap_admin_username(username: str | None) -> bool:
+        """
+        Return True if ``username`` matches the single hardcoded bootstrap
+        admin account (``settings.BOOTSTRAP_ADMIN_USERNAME``).
+
+        This is the only account ever allowed to hold the super_admin
+        ("Admin") role -- see ``assign_role`` below.
+        """
+        if not username:
+            return False
+        return username.strip().lower() == settings.BOOTSTRAP_ADMIN_USERNAME.strip().lower()
 
     async def _ensure_not_last_super_admin(
         self, user_id: uuid.UUID, role_id_to_remove: uuid.UUID | None = None
@@ -114,7 +137,6 @@ class UserService:
             all_assignments = await self.user_role_repository.list_for_role(super_admin_role.id)
             active_super_admins = [link for link in all_assignments if link.user and link.user.is_active]
             if len(active_super_admins) <= 1:
-                from app.core.exceptions import ForbiddenException
                 raise ForbiddenException("Cannot modify or deactivate the last active Super Administrator.")
 
     # --- Admin: Create User -------------------------------------------------------
@@ -216,8 +238,24 @@ class UserService:
             updated_by=created_by,
         )
 
-        for role_id in (role_ids or []):
-            await self.assign_role(user.id, role_id, assigned_by=created_by)
+        resolved_role_ids = list(role_ids or [])
+
+        if not resolved_role_ids:
+            # No role explicitly requested: fall back to the default "user"
+            # role so every new account can actually log in and see
+            # something, rather than landing with zero permissions.
+            default_role = await self.rbac_service.role_repository.get_by_name(DEFAULT_USER_ROLE_NAME)
+            if default_role is not None:
+                resolved_role_ids = [default_role.id]
+
+        for role_id in resolved_role_ids:
+            try:
+                await self.assign_role(user.id, role_id, assigned_by=created_by)
+            except ConflictException:
+                # Role already assigned (e.g. duplicate id in the payload,
+                # or the default role happened to also be requested
+                # explicitly) -- not a real error, just a no-op.
+                pass
 
         for perm_id in (individual_permission_ids or []):
             await self.rbac_service.assign_user_permission(user.id, perm_id, is_granted=True, granted_by=created_by)
@@ -228,7 +266,6 @@ class UserService:
         """Update a user's profile fields, ignoring unset (None) values."""
         user = await self.get_by_id_or_raise(user_id)
         if await self.is_super_admin(user_id) and not await self.is_super_admin(updated_by):
-            from app.core.exceptions import ForbiddenException
             raise ForbiddenException("Only Super Administrators can modify Super Administrator accounts.")
 
         email = fields.get("email")
@@ -256,7 +293,6 @@ class UserService:
         """Set a custom password or generate a new temporary password for a user, revoking active sessions."""
         user = await self.get_by_id_or_raise(user_id)
         if reset_by and await self.is_super_admin(user_id) and not await self.is_super_admin(reset_by):
-            from app.core.exceptions import ForbiddenException
             raise ForbiddenException("Only Super Administrators can modify Super Administrator accounts.")
         if custom_password and custom_password.strip():
             password_to_set = custom_password.strip()
@@ -271,7 +307,6 @@ class UserService:
         """Activate a pending or inactive user account."""
         user = await self.get_by_id_or_raise(user_id)
         if await self.is_super_admin(user_id) and not await self.is_super_admin(updated_by):
-            from app.core.exceptions import ForbiddenException
             raise ForbiddenException("Only Super Administrators can modify Super Administrator accounts.")
         await self.user_repository.update(
             user, status=UserStatus.ACTIVE, is_active=True, updated_by=updated_by
@@ -282,7 +317,6 @@ class UserService:
         """Deactivate a user account and force-logout all of their active sessions."""
         user = await self.get_by_id_or_raise(user_id)
         if await self.is_super_admin(user_id) and not await self.is_super_admin(updated_by):
-            from app.core.exceptions import ForbiddenException
             raise ForbiddenException("Only Super Administrators can modify Super Administrator accounts.")
         await self._ensure_not_last_super_admin(user_id)
         await self.user_repository.update(
@@ -295,7 +329,6 @@ class UserService:
         """Suspend a user account and force-logout all of their active sessions."""
         user = await self.get_by_id_or_raise(user_id)
         if await self.is_super_admin(user_id) and not await self.is_super_admin(updated_by):
-            from app.core.exceptions import ForbiddenException
             raise ForbiddenException("Only Super Administrators can modify Super Administrator accounts.")
         await self._ensure_not_last_super_admin(user_id)
         await self.user_repository.update(
@@ -308,7 +341,6 @@ class UserService:
         """Clear a user's failed-login lockout state."""
         user = await self.get_by_id_or_raise(user_id)
         if await self.is_super_admin(user_id) and not await self.is_super_admin(updated_by):
-            from app.core.exceptions import ForbiddenException
             raise ForbiddenException("Only Super Administrators can modify Super Administrator accounts.")
         new_status = UserStatus.ACTIVE if user.status == UserStatus.LOCKED else user.status
         await self.user_repository.update(
@@ -318,16 +350,31 @@ class UserService:
 
     # --- Admin: Role assignment ------------------------------------------------------
     async def assign_role(self, user_id: uuid.UUID, role_id: uuid.UUID, *, assigned_by: uuid.UUID) -> None:
-        """Assign a role to a user, if not already assigned."""
-        await self.get_by_id_or_raise(user_id)  # 404s cleanly if the user doesn't exist
+        """Assign a role to a user, replacing any existing role so each user holds at most one role."""
+        user = await self.get_by_id_or_raise(user_id)  # 404s cleanly if the user doesn't exist
         role = await self.rbac_service.get_role_or_raise(role_id)  # 404s cleanly if the role doesn't exist
 
-        if role.name == "super_admin" and not await self.is_super_admin(assigned_by):
-            from app.core.exceptions import ForbiddenException
-            raise ForbiddenException("Only Super Administrators can promote a user to Super Administrator.")
+        if role.name == SUPER_ADMIN_ROLE_NAME:
+            # The Admin (super_admin) role is reserved exclusively for the
+            # single hardcoded bootstrap admin account -- not even another
+            # existing Super Administrator may hand it to a different user.
+            if not self._is_bootstrap_admin_username(user.username):
+                raise ForbiddenException(
+                    "The Admin role can only ever be held by the system's bootstrap "
+                    "admin account and cannot be assigned to any other user."
+                )
 
-        existing = await self.user_role_repository.get(user_id, role_id)
-        if existing is not None:
+        existing_links = await self.user_role_repository.list_for_user(user_id)
+        already_has_this_role = False
+        for link in existing_links:
+            if link.role_id == role_id:
+                already_has_this_role = True
+            else:
+                if link.role and link.role.name == SUPER_ADMIN_ROLE_NAME:
+                    await self._ensure_not_last_super_admin(user_id, link.role_id)
+                await self.user_role_repository.delete(link)
+
+        if already_has_this_role:
             raise ConflictException("The user already has that role.")
 
         await self.user_role_repository.create(
@@ -336,18 +383,31 @@ class UserService:
             assigned_at=datetime.now(timezone.utc),
             assigned_by=assigned_by,
         )
+        await self.rbac_service.invalidate_user_permissions_cache(user_id)
 
     async def remove_role(self, user_id: uuid.UUID, role_id: uuid.UUID, *, removed_by: uuid.UUID | None = None) -> None:
-        """Remove a role assignment from a user."""
+        """Remove a role assignment from a user, defaulting back to the 'user' role so they always have one role."""
         link = await self.user_role_repository.get(user_id, role_id)
         if link is None:
             raise NotFoundException("The user does not have that role.")
         role = await self.rbac_service.get_role_or_raise(role_id)
-        if role.name == "super_admin" and removed_by and not await self.is_super_admin(removed_by):
-            from app.core.exceptions import ForbiddenException
+        if role.name == SUPER_ADMIN_ROLE_NAME and removed_by and not await self.is_super_admin(removed_by):
             raise ForbiddenException("Only Super Administrators can remove Super Administrator rights.")
         await self._ensure_not_last_super_admin(user_id, role_id)
         await self.user_role_repository.delete(link)
+
+        # Fall back to default user role if no other role remains
+        remaining_links = await self.user_role_repository.list_for_user(user_id)
+        if not remaining_links:
+            default_role = await self.rbac_service.role_repository.get_by_name(DEFAULT_USER_ROLE_NAME)
+            if default_role and default_role.id != role_id:
+                await self.user_role_repository.create(
+                    user_id=user_id,
+                    role_id=default_role.id,
+                    assigned_at=datetime.now(timezone.utc),
+                    assigned_by=removed_by,
+                )
+        await self.rbac_service.invalidate_user_permissions_cache(user_id)
 
     # --- Admin: Sessions / Force logout -----------------------------------------------
     async def view_active_sessions(self, user_id: uuid.UUID):  # noqa: ANN201

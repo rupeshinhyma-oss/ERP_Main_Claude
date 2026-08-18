@@ -271,7 +271,7 @@ class UserRoleRepository(BaseRepository[UserRole]):
 
     async def list_for_role(self, role_id: uuid.UUID) -> list[UserRole]:
         """List every assignment for a role, with the user eagerly loaded."""
-        stmt = select(UserRole).where(Role.id == role_id).join(UserRole, UserRole.role_id == Role.id).options(selectinload(UserRole.user))
+        stmt = select(UserRole).where(UserRole.role_id == role_id).options(selectinload(UserRole.user))
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 

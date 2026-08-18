@@ -301,6 +301,20 @@ export interface Role {
   permissions?: string[];
 }
 
+export interface RoleDeletionAffectedUser {
+  id: string;
+  username: string;
+  display_name: string;
+}
+
+export interface RoleDeletionImpact {
+  role_id: string;
+  role_name: string;
+  is_system: boolean;
+  affected_user_count: number;
+  affected_users: RoleDeletionAffectedUser[];
+}
+
 export interface UserPermissionOverride {
   id: string;
   code: string;

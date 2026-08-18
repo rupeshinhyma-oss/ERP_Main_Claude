@@ -29,6 +29,7 @@ import { useAuth } from "@/lib/hooks";
 import { useLookup } from "@/lib/lookups";
 import { useToast } from "@/lib/toast";
 import { useLiveList } from "@/lib/live/useLiveList";
+import { roleDisplayName } from "@/lib/permissionLabels";
 import type { Role } from "@/types";
 import type {
   MumColumnStatusHistoryEntry,
@@ -901,10 +902,10 @@ function GridCell({
               disabledReason
                 ? disabledReason
                 : !isManual
-                ? `Computed (${sourceType}) — not directly editable`
-                : statusColor
-                ? statusLabel(statusColor, customStatusTagId, customTags)
-                : undefined
+                  ? `Computed (${sourceType}) — not directly editable`
+                  : statusColor
+                    ? statusLabel(statusColor, customStatusTagId, customTags)
+                    : undefined
             }
             style={{
               width: "100%",
@@ -2097,8 +2098,8 @@ export function PlanningPage() {
         if (isAutoFilled) {
           const visibleGroupNums = row.mum_approval_dates
             ? Object.keys(row.mum_approval_dates)
-                .map((k) => parseInt(k, 10))
-                .filter((n) => !Number.isNaN(n) && visibleMumGroupNumbers.has(n))
+              .map((k) => parseInt(k, 10))
+              .filter((n) => !Number.isNaN(n) && visibleMumGroupNumbers.has(n))
             : [];
           const effectiveDate =
             visibleGroupNums.length > 0 && row.mum_approval_dates
@@ -2517,17 +2518,17 @@ export function PlanningPage() {
           let updatedCells = exists
             ? r.cells.map((cell) => (cell.column_id === columnId ? { ...cell, ...optimisticCell } : cell))
             : [
-                ...r.cells,
-                {
-                  id: null,
-                  row_id: rowId,
-                  column_id: columnId,
-                  value: isZeroOrBlank ? "" : effectiveVal,
-                  display_value: isZeroOrBlank ? "" : effectiveVal,
-                  status_color: null,
-                  custom_status_tag_id: null,
-                } as PlanningCell,
-              ];
+              ...r.cells,
+              {
+                id: null,
+                row_id: rowId,
+                column_id: columnId,
+                value: isZeroOrBlank ? "" : effectiveVal,
+                display_value: isZeroOrBlank ? "" : effectiveVal,
+                status_color: null,
+                custom_status_tag_id: null,
+              } as PlanningCell,
+            ];
           if (remarksColId) {
             updatedCells = updatedCells.map((cell) =>
               cell.column_id === remarksColId ? { ...cell, value: "", display_value: "" } : cell
@@ -4357,33 +4358,36 @@ function ConfigureColumnModal({
         <div style={{ borderTop: "1px solid #E2E8F0", marginTop: 20, paddingTop: 16 }}>
           <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 4 }}>Restrict Editing to Roles (optional)</div>
           <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
-            Leave empty to allow anyone with the sheet's column-manage permission. Selecting roles restricts this
-            column to only those roles, on top of that permission.
+            Leave empty to allow anyone with edit access to this sheet. Selecting one or more roles restricts
+            this column's cells — including its value, status color/dot, and description — to only users holding
+            one of those roles. The Admin role can always edit every column regardless of this setting.
           </div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
-            {roles.map((role) => (
-              <label
-                key={role.id}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 4,
-                  fontSize: 12,
-                  border: "1px solid #E2E8F0",
-                  borderRadius: 6,
-                  padding: "4px 8px",
-                  cursor: "pointer",
-                  background: lockedRoleIds.includes(role.id) ? "#EDE9FE" : "#fff",
-                }}
-              >
-                <input
-                  type="checkbox"
-                  checked={lockedRoleIds.includes(role.id)}
-                  onChange={() => toggleRole(role.id)}
-                />
-                {role.name}
-              </label>
-            ))}
+            {roles
+              .filter((role) => role.name !== "super_admin")
+              .map((role) => (
+                <label
+                  key={role.id}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 4,
+                    fontSize: 12,
+                    border: "1px solid #E2E8F0",
+                    borderRadius: 6,
+                    padding: "4px 8px",
+                    cursor: "pointer",
+                    background: lockedRoleIds.includes(role.id) ? "#EDE9FE" : "#fff",
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={lockedRoleIds.includes(role.id)}
+                    onChange={() => toggleRole(role.id)}
+                  />
+                  {roleDisplayName(role.name)}
+                </label>
+              ))}
           </div>
           <button type="button" className="btn btn-secondary" onClick={handleSaveRoleLock} disabled={savingLock}>
             {savingLock ? "Saving…" : "Save Role Lock"}

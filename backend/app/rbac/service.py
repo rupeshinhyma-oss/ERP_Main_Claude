@@ -2,14 +2,22 @@
 RBAC Service.
 
 Business logic for role & permission management: creating/updating/deleting
-roles, department permissions, designation permissions, individual user permissions,
-and resolving a user's multi-source permissions. System roles (super_admin, admin, user)
-are protected from deletion and renaming.
+roles, individual user permissions, and resolving a user's multi-source
+permissions.
+
+Exactly two system roles exist and are protected from deletion, renaming,
+and re-creation under a different meaning: ``super_admin`` (shown to users
+as "Admin" -- reserved for the single bootstrap admin account only, see
+``app.users.service.UserService.assign_role``) and ``user`` (the default
+role every other new account gets). Everything else is a regular,
+fully-editable custom role.
 """
 
 from __future__ import annotations
 
 import uuid
+
+from sqlalchemy.exc import IntegrityError
 
 from app.cache.base import CacheBackend
 from app.core.exceptions import ConflictException, ForbiddenException, NotFoundException
@@ -20,6 +28,20 @@ from app.rbac.repository import (
     UserPermissionRepository,
     UserRoleRepository,
 )
+
+# Role names that are reserved for the system and can never be created,
+# renamed to, or deleted through the admin API -- "super_admin" (shown to
+# users as "Admin", reserved for the bootstrap admin account only) and
+# "user" (the default role auto-assigned to every new account).
+#
+# "admin" is ALSO reserved even though it isn't a real system role name --
+# a previous version of this app used to seed a duplicate "admin" role
+# alongside "super_admin", and without this entry someone could recreate a
+# same-named role through "+ ADD NEW" today, producing two confusingly
+# similar rows ("admin" and "Admin") in the Roles & Permissions list. The
+# comparison below is case-insensitive, so "Admin", "ADMIN", etc. are
+# blocked too.
+RESERVED_ROLE_NAMES = {"super_admin", "user", "admin"}
 
 
 class RBACService:
@@ -52,7 +74,13 @@ class RBACService:
                 key = CacheBackend.build_key("user_perms", str(user_id))
                 await self.cache.delete(key)
             else:
-                await self.cache.clear_pattern("user_perms:*")
+                # Every cached key for this namespace is named "user_perms:<id>"
+                # (see build_key above) -- delete_namespace() removes all of
+                # them at once. NOTE: this used to call a "clear_pattern"
+                # method that no CacheBackend implementation actually has;
+                # that was a bug that made every role create/update/delete
+                # crash with a raw 500 ("no attribute 'clear_pattern'").
+                await self.cache.delete_namespace("user_perms")
 
     # --- Lookups ------------------------------------------------------------------
     async def get_role_or_raise(self, role_id: uuid.UUID) -> Role:
@@ -92,40 +120,147 @@ class RBACService:
     # --- Role management ------------------------------------------------------------
     async def create_role(self, *, name: str, description: str | None, permission_codes: list[str]) -> Role:
         """Create a new role and grant it the given permission codes, by code."""
-        if await self.role_repository.get_by_name(name) is not None:
+        normalized_name = name.strip()
+        if not normalized_name:
+            raise ConflictException("Role name cannot be empty.")
+        if normalized_name.lower() in RESERVED_ROLE_NAMES:
+            raise ConflictException(
+                f"{normalized_name!r} is a reserved system role name and cannot be used for a new role."
+            )
+        if await self.role_repository.get_by_name(normalized_name) is not None:
             raise ConflictException("A role with that name already exists.")
 
-        role = await self.role_repository.create(name=name, description=description, is_system=False)
+        # Resolve every permission code up-front, before creating anything,
+        # so an unknown code fails fast without leaving a half-created role
+        # behind with only some of its intended permissions granted.
+        resolved_permissions: list[Permission] = []
         for code in permission_codes:
             permission = await self.permission_repository.get_by_code(code)
             if permission is None:
                 raise NotFoundException(f"Unknown permission code: {code!r}.")
-            await self.role_repository.add_permission(role, permission)
+            resolved_permissions.append(permission)
+
+        try:
+            role = await self.role_repository.create(
+                name=normalized_name, description=description, is_system=False
+            )
+            for permission in resolved_permissions:
+                await self.role_repository.add_permission(role, permission)
+        except IntegrityError as exc:
+            # Defense-in-depth against a race: two requests creating a role
+            # with the same name at nearly the same instant can both pass
+            # the get_by_name() check above before either commits. The
+            # database's unique constraint on roles.name is the real
+            # guarantee; translate its violation into the same friendly
+            # conflict error rather than letting it surface as a raw 500.
+            await self.role_repository.session.rollback()
+            raise ConflictException("A role with that name already exists.") from exc
+
         await self.invalidate_user_permissions_cache()
         return role
 
     async def update_role(self, role_id: uuid.UUID, *, name: str | None, description: str | None) -> Role:
         """Update a role's name/description. Rejects renaming a system role."""
         role = await self.get_role_or_raise(role_id)
-        if name is not None and name != role.name:
+        if name is not None and name.strip() != role.name:
             if role.is_system:
                 raise ForbiddenException("System roles cannot be renamed.")
-            if await self.role_repository.get_by_name(name) is not None:
+            normalized_name = name.strip()
+            if not normalized_name:
+                raise ConflictException("Role name cannot be empty.")
+            if normalized_name.lower() in RESERVED_ROLE_NAMES:
+                raise ConflictException(
+                    f"{normalized_name!r} is a reserved system role name and cannot be used."
+                )
+            if await self.role_repository.get_by_name(normalized_name) is not None:
                 raise ConflictException("A role with that name already exists.")
-            role.name = name
+            role.name = normalized_name
         if description is not None:
             role.description = description
-        await self.role_repository.session.flush()
+        try:
+            await self.role_repository.session.flush()
+        except IntegrityError as exc:
+            await self.role_repository.session.rollback()
+            raise ConflictException("A role with that name already exists.") from exc
         await self.invalidate_user_permissions_cache()
         return role
 
-    async def delete_role(self, role_id: uuid.UUID) -> None:
-        """Delete a role. Rejects deleting a system role."""
+    async def get_role_deletion_impact(self, role_id: uuid.UUID) -> dict:
+        """
+        Preview what deleting a role would affect: the role itself, plus
+        every user currently assigned to it. The frontend uses this to show
+        a confirmation dialog ("N users are on this role -- reassign them
+        to:") before actually calling delete_role().
+        """
+        role = await self.get_role_or_raise(role_id)
+        assignments = await self.user_role_repository.list_for_role(role_id)
+        affected_users = [
+            {
+                "id": str(link.user.id),
+                "username": link.user.username,
+                "display_name": link.user.display_name or link.user.full_name or link.user.username,
+            }
+            for link in assignments
+            if link.user is not None
+        ]
+        return {
+            "role_id": str(role.id),
+            "role_name": role.name,
+            "is_system": role.is_system,
+            "affected_user_count": len(affected_users),
+            "affected_users": affected_users,
+        }
+
+    async def delete_role(
+        self,
+        role_id: uuid.UUID,
+        *,
+        reassign_to_role_id: uuid.UUID | None = None,
+        reassigned_by: uuid.UUID | None = None,
+    ) -> int:
+        """
+        Delete a role. Rejects deleting a system role.
+
+        If any users are currently assigned to this role, ``reassign_to_role_id``
+        must name another role to move them to first (defaulting, in the
+        caller, to the "user" role) -- otherwise those users would silently
+        lose whatever access this role granted them the moment it's deleted,
+        with no record of what happened. Returns the number of users
+        reassigned.
+        """
         role = await self.get_role_or_raise(role_id)
         if role.is_system:
             raise ForbiddenException("System roles cannot be deleted.")
+
+        assignments = await self.user_role_repository.list_for_role(role_id)
+        reassigned_count = 0
+        if assignments:
+            if reassign_to_role_id is None:
+                raise ConflictException(
+                    f"{len(assignments)} user(s) are still assigned to this role. "
+                    "Specify a role to reassign them to before deleting it."
+                )
+            if reassign_to_role_id == role_id:
+                raise ConflictException("Cannot reassign users to the role being deleted.")
+            target_role = await self.get_role_or_raise(reassign_to_role_id)
+
+            for link in assignments:
+                # Skip a user who (unusually) already holds the target role
+                # too -- just drop the old link, nothing to add.
+                existing_target_link = await self.user_role_repository.get(link.user_id, target_role.id)
+                if existing_target_link is None:
+                    await self.user_role_repository.create(
+                        user_id=link.user_id,
+                        role_id=target_role.id,
+                        assigned_at=link.assigned_at,
+                        assigned_by=reassigned_by,
+                    )
+                await self.user_role_repository.delete(link)
+                reassigned_count += 1
+
         await self.role_repository.delete(role)
         await self.invalidate_user_permissions_cache()
+        return reassigned_count
 
     # --- Role Permission grants ------------------------------------------------------
     async def grant_permission(self, role_id: uuid.UUID, permission_id: uuid.UUID, *, actor_user_id: uuid.UUID | None = None) -> None:

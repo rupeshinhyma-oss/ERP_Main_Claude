@@ -38,6 +38,26 @@ const STATUS_OPTIONS: [string, string][] = [
   ["PASSWORD_CHANGE_REQUIRED", "Password Change Required"],
 ];
 
+/**
+ * Role names that are reserved by the system -- mirrors
+ * `app.rbac.service.RESERVED_ROLE_NAMES` on the backend. "super_admin" is
+ * the single hardcoded bootstrap admin account's role (shown to users as
+ * "Admin") and cannot be assigned to anyone else. "user" is the default
+ * role every other new account gets automatically. "admin" is blocked too,
+ * so a same-named duplicate role can't be recreated after being retired.
+ */
+const RESERVED_ROLE_NAMES = new Set(["super_admin", "user", "admin"]);
+
+/** Friendly display name for a role name coming back from the API. */
+function roleDisplayName(name: string): string {
+  if (name === "super_admin") return "Admin";
+  // "employee" was the old internal name for the default role in an
+  // earlier version of the seed script; "user" is the current one.
+  // Both are shown the same way in case an older database still has it.
+  if (name === "employee" || name === "user") return "User";
+  return name;
+}
+
 function StatusBadge({ status, isActive }: { status?: string; isActive?: boolean }) {
   const s = (status || "").toUpperCase();
   if (s === "ACTIVE") return <span className="badge badge-active">Active</span>;
@@ -352,36 +372,39 @@ export function UsersPage() {
     }
   }
 
-  /** Quick-toggle: grant/revoke the "admin" system role without opening the full Assign Role modal. */
-  async function setAdminRole(userId: string, username: string) {
-    if (!confirm(`Grant Administrator privileges to '${username}'?`)) return;
-    await guardRowAction(`admin-role:${userId}`, async () => {
-      try {
-        const { data: allRoles } = await apiGet<Role[]>("/rbac/roles");
-        const adminRole = allRoles.find((r) => r.name === "admin");
-        if (!adminRole) {
-          setError(new Error("Admin role not found in system."));
-          return;
-        }
-        await apiPost(`/users/${userId}/roles`, { role_id: adminRole.id });
-        reload();
-      } catch (err) {
-        setError(err);
-      }
-    });
-  }
-
+  /**
+   * Removes a legacy admin-style role assignment from a user.
+   *
+   * Note: there is no corresponding "grant admin" action anymore -- the
+   * Admin (super_admin) role can only ever be held by the single hardcoded
+   * bootstrap admin account (enforced server-side in
+   * app.users.service.UserService.assign_role), so offering to grant it to
+   * an arbitrary user here would just produce a confusing 403. This action
+   * exists purely to let an operator clean up a user who still holds the
+   * old duplicate "admin" role from before that role was retired.
+   */
   async function removeAdminRole(userId: string, username: string) {
     if (!confirm(`Revoke Administrator privileges from '${username}'?`)) return;
     await guardRowAction(`admin-role:${userId}`, async () => {
       try {
         const { data: allRoles } = await apiGet<Role[]>("/rbac/roles");
-        const adminRole = allRoles.find((r) => r.name === "admin");
-        if (!adminRole) {
-          setError(new Error("Admin role not found in system."));
+        const adminRoles = allRoles.filter((r) => r.name === "admin" || r.name === "super_admin");
+        if (!adminRoles.length) {
+          setError(new Error("No admin-style role found on this system to remove."));
           return;
         }
-        await apiDelete(`/users/${userId}/roles/${adminRole.id}`);
+        for (const role of adminRoles) {
+          try {
+            await apiDelete(`/users/${userId}/roles/${role.id}`);
+          } catch (err) {
+            // If the user simply doesn't have this particular role, that's
+            // fine -- keep trying the others. Any other failure (e.g. "last
+            // active Super Administrator") should still surface.
+            const status = (err as { status?: number })?.status;
+            if (status !== 404) throw err;
+          }
+        }
+        showToast(`Admin privileges revoked from '${username}'.`, "success");
         reload();
       } catch (err) {
         setError(err);
@@ -524,10 +547,14 @@ export function UsersPage() {
                 ) : (
                   rows.map((u) => {
                     const statusUpper = (u.status || "").toUpperCase();
-                    const isTargetSuperAdmin =
-                      u.username === "admin" || Boolean(u.roles?.includes("super_admin"));
-                    const hasAdminRole = Boolean(u.roles?.includes("admin"));
-                    // Only a super admin may act on another super admin.
+                    const isTargetSuperAdmin = Boolean(u.roles?.includes("super_admin"));
+                    // The old duplicate "admin" role no longer exists in a freshly
+                    // seeded system, but a not-yet-migrated database might still
+                    // have users on it -- treat it the same as "super_admin" for
+                    // the purposes of the row-level admin toggle so it still shows
+                    // correctly and doesn't offer to "Set Admin" on top of it.
+                    const hasAdminRole = Boolean(u.roles?.includes("super_admin") || u.roles?.includes("admin"));
+                    // Only the Admin (super_admin) account itself may act on another Admin account.
                     const canModifyTarget =
                       canUpdateUser && (!isTargetSuperAdmin || isSuperAdmin);
                     const displayName =
@@ -556,18 +583,19 @@ export function UsersPage() {
                         onClick: () => handleResetPassword(u.id, u.username),
                       });
                       const changingAdminRole = isRowActionPending(`admin-role:${u.id}`);
-                      if (hasAdminRole) {
+                      // The Admin (super_admin) role can now only ever belong to
+                      // the single hardcoded bootstrap admin account -- it is not
+                      // grantable to anyone else, so there is no "Set Admin"
+                      // action to offer here anymore. "Remove Admin" is kept only
+                      // as an escape hatch in case a not-yet-migrated database
+                      // still has the old duplicate "admin" role on some other
+                      // user; removing it downgrades them back to a normal role.
+                      if (hasAdminRole && !isTargetSuperAdmin) {
                         actions.push({
                           key: "remove-admin",
-                          label: changingAdminRole ? "🛡️ Removing..." : "🛡️ Remove Admin",
+                          label: changingAdminRole ? "🛡️ Removing..." : "🛡️ Remove Legacy Admin Role",
                           danger: true,
                           onClick: () => removeAdminRole(u.id, u.username),
-                        });
-                      } else {
-                        actions.push({
-                          key: "set-admin",
-                          label: changingAdminRole ? "⚡ Setting..." : "⚡ Set Admin",
-                          onClick: () => setAdminRole(u.id, u.username),
                         });
                       }
                       actions.push({
@@ -668,11 +696,7 @@ export function UsersPage() {
                         <td>{u.email}</td>
                         <td>
                           {u.roles && u.roles.length ? (
-                            // "employee" is the legacy internal name for the base role;
-                            // shown to admins as "user" everywhere else in the UI.
-                            Array.from(
-                              new Set(u.roles.map((r) => (r === "employee" ? "user" : r)))
-                            ).map((r) => (
+                            Array.from(new Set(u.roles.map((r) => roleDisplayName(r)))).map((r) => (
                               <span className="badge badge-neutral" key={r}>
                                 {r}
                               </span>
@@ -781,13 +805,19 @@ export function UsersPage() {
               onChange={(v) => setCreateForm((f) => ({ ...f, role_id: v }))}
               style={{ gridColumn: "span 2" }}
             >
-              <option value="">-- Select System Role --</option>
-              {roles.map((r) => (
-                <option key={r.id} value={r.id}>
-                  {r.name + (r.is_system ? " (System)" : "")}
-                </option>
-              ))}
+              <option value="">-- Default: User --</option>
+              {roles
+                .filter((r) => r.name !== "super_admin")
+                .map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {roleDisplayName(r.name) + (RESERVED_ROLE_NAMES.has(r.name) ? " (System)" : "")}
+                  </option>
+                ))}
             </SelectField>
+            <span className="muted" style={{ fontSize: "12px", gridColumn: "span 2", marginTop: "-8px" }}>
+              Leave unselected to assign the default "User" role automatically. The Admin
+              role is reserved for the system's bootstrap account and cannot be assigned here.
+            </span>
           </div>
           <div className="form-actions">
             <button type="submit" className="btn btn-primary" disabled={createSubmitting}>
@@ -881,7 +911,7 @@ export function UsersPage() {
                   {viewUser.roles && viewUser.roles.length
                     ? viewUser.roles.map((r) => (
                       <span className="badge badge-neutral" key={r}>
-                        {r}
+                        {roleDisplayName(r)}
                       </span>
                     ))
                     : "None"}
@@ -935,13 +965,18 @@ export function UsersPage() {
               value={assignRoleId}
               onChange={(e) => setAssignRoleId(e.target.value)}
             >
-              <option value="">-- Select System Role --</option>
-              {roles.map((r) => (
-                <option key={r.id} value={r.id}>
-                  {r.name + (r.is_system ? " (System)" : "")}
-                </option>
-              ))}
+              <option value="">-- Select Role --</option>
+              {roles
+                .filter((r) => r.name !== "super_admin")
+                .map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {roleDisplayName(r.name) + (RESERVED_ROLE_NAMES.has(r.name) ? " (System)" : "")}
+                  </option>
+                ))}
             </select>
+            <span className="muted" style={{ fontSize: "12px", marginTop: "4px", display: "block" }}>
+              The Admin role is reserved for the system's bootstrap account and cannot be assigned here.
+            </span>
           </div>
           <div className="form-actions">
             <button type="submit" className="btn btn-primary" disabled={assignRoleSubmitting}>
@@ -1156,15 +1191,15 @@ export function UsersPage() {
                                     ? "1px solid #bfdbfe"
                                     : "1px solid #86efac"
                                   : isRoleGranted
-                                  ? "1px solid #fca5a5"
-                                  : "1px solid #e2e8f0",
+                                    ? "1px solid #fca5a5"
+                                    : "1px solid #e2e8f0",
                                 background: checked
                                   ? isRoleGranted
                                     ? "#eff6ff"
                                     : "#f0fdf4"
                                   : isRoleGranted
-                                  ? "#fef2f2"
-                                  : "#ffffff",
+                                    ? "#fef2f2"
+                                    : "#ffffff",
                               }}
                             >
                               <input

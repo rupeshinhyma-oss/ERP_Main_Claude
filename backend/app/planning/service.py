@@ -3026,6 +3026,7 @@ class PlanningService:
         column = await self._get_column_or_raise(sheet_id, column_id)
         if column.is_locked:
             raise ForbiddenException(f"Column '{column.name}' is locked and cannot be edited directly.")
+        await self.check_column_role_lock(column_id, user_id=user_id)
 
         mum_label = await self._get_mum_group_label(sheet_id)
 
@@ -3187,6 +3188,7 @@ class PlanningService:
         """
         row = await self._get_row_or_raise(sheet_id, row_id)
         column = await self._get_column_or_raise(sheet_id, column_id)
+        await self.check_column_role_lock(column_id, user_id=user_id)
 
         mum_label = await self._get_mum_group_label(sheet_id)
         is_mum_col = _is_pure_mum_column(column.name, label=mum_label)
@@ -3260,6 +3262,7 @@ class PlanningService:
         """
         row = await self._get_row_or_raise(sheet_id, row_id)
         column = await self._get_column_or_raise(sheet_id, column_id)
+        await self.check_column_role_lock(column_id, user_id=user_id)
 
         cell = await self.cell_repository.get_by_row_and_column(row_id, column_id)
         old_description = cell.description if cell else None

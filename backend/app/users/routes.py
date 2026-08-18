@@ -26,6 +26,7 @@ from app.database.session import get_db_session
 from app.rbac.dependencies import get_rbac_service, require_permission
 from app.rbac.repository import UserRoleRepository
 from app.rbac.service import RBACService
+from app.users.models import User
 from app.users.repository import UserRepository
 from app.users.schemas import (
     AssignRoleRequest,

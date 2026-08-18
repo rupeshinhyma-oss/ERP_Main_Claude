@@ -84,5 +84,5 @@ async def test_promotion_restricted_to_super_admin():
     # Assigned_by is NOT a super admin (assigned_by has admin role only)
     mock_rbac_service.list_roles_for_user.return_value = [admin_role]
 
-    with pytest.raises(ForbiddenException, match="Only Super Administrators can promote a user to Super Administrator"):
+    with pytest.raises(ForbiddenException, match="The Admin role can only ever be held by the system's bootstrap admin account"):
         await service.assign_role(user_id, super_admin_role.id, assigned_by=assigned_by_id)

@@ -1,15 +1,31 @@
 """
-Phase 2 Bootstrap / Seed Script.
+Bootstrap / Seed Script.
 
 Populates the database with the minimum data needed to log in and start
 administering the system through the API itself:
 
-1. The example permission set from the Phase 2 spec (``user.create``,
-   ``employee.read``, etc.).
-2. A ``super_admin`` system role (protected from deletion/rename) granted
-   every permission.
+1. The full permission set (``user.create``, ``inventory.read``, etc.).
+2. Exactly two system roles:
+     - ``super_admin`` (displayed to users as "Admin") -- full access to
+       every permission in the system. This role is reserved for the single
+       hardcoded bootstrap admin account (``settings.BOOTSTRAP_ADMIN_USERNAME``)
+       and is protected from deletion/rename. No one else should ever be
+       assigned this role through the normal "assign role" API (see
+       ``app.rbac.service.RBACService`` / ``app.users.service.UserService``
+       for the enforcement of this rule).
+     - ``user`` -- the default, low-privilege role automatically assigned to
+       every other newly-created account, granting basic read access.
 3. A bootstrap admin user (credentials from ``settings.BOOTSTRAP_ADMIN_*``)
    assigned the ``super_admin`` role.
+
+The previous version of this script also seeded a duplicate, fully-
+privileged ``admin`` role plus a set of hardcoded per-department business
+roles (sales/purchase/hr/accounts/inventory/logistics). Those have been
+removed: they duplicated ``super_admin``'s access (in the case of
+``admin``) or encoded assumptions about the organization's department
+structure that don't belong in a generic seed script. Use the Roles &
+Permissions screen to create whatever custom roles your organization
+actually needs.
 
 Idempotent: safe to run multiple times. Existing permissions/roles/the
 admin user are left untouched (looked up by their unique code/name/username
@@ -163,30 +179,15 @@ BOOTSTRAP_PERMISSIONS: list[tuple[str, str, str, str, str, str]] = [
 ]
 
 SUPER_ADMIN_ROLE_NAME = "super_admin"
-EMPLOYEE_ROLE_NAME = "employee"
+SUPER_ADMIN_DISPLAY_NAME = "Admin"
+USER_ROLE_NAME = "user"
 
-DEFAULT_BUSINESS_ROLES = [
-    ("sales", "Sales Department Role for Managing Clients, Inquiries, and Suppliers.", [
-        "supplier.view", "supplier.create", "buyer.view", "buyer.create", "buyer.update", "inquiry.view", "inquiry.create", "inquiry.update", "inquiry.approve", "product.view", "brand.view", "category.view", "subcategory.view"
-    ]),
-    ("purchase", "Purchase Department Role for Supplier Management and Procurement.", [
-        "supplier.view", "supplier.create", "supplier.update", "supplier.export", "supplier.import", "product.view", "uom.view", "hsn.view"
-    ]),
-    ("hr", "Human Resources Department Role for Employee and Team Management.", [
-        "employee.view", "employee.create", "employee.update", "employee.export", "employee.import", "employee.approve", "department.view", "department.create", "department.update", "designation.view", "designation.create", "designation.update", "user.view"
-    ]),
-    ("accounts", "Accounts & Finance Role for Tax, Currencies, and Financial Reports.", [
-        "currency.view", "currency.create", "currency.update", "hsn.view", "hsn.create", "hsn.update", "supplier.view", "reports.view", "reports.export"
-    ]),
-    ("inventory", "Inventory & Warehouse Management Role.", [
-        "inventory.view", "inventory.create", "inventory.update", "inventory.approve", "inventory.export", "inventory.import", "product.view", "product.create", "product.update", "uom.view", "category.view", "subcategory.view"
-    ]),
-    ("logistics", "Logistics & Shipment Planning Role for Managing Branch Sheets, Rows, and Columns.", [
-        "planning.read", "planning.sheet.manage", "planning.column.manage", "planning.row.manage", "planning.cell.edit", "supplier.view"
-    ]),
-]
-
-EMPLOYEE_ROLE_PERMISSION_CODES: list[str] = [
+# The default role automatically assigned to every newly-created account
+# (see app.users.service.UserService.create_user). Grants read-only/basic
+# access to the modules any logged-in employee needs day to day; anything
+# more privileged is granted explicitly by an administrator via the Roles &
+# Permissions screen.
+USER_ROLE_PERMISSION_CODES: list[str] = [
     "user.read",
     "user.view",
     "country.read",
@@ -253,48 +254,51 @@ async def seed() -> None:
             logger.info("Seeded permission.", extra={"code": code})
 
         # --- 2. System roles -----------------------------------------------------------
+        # Exactly two system roles are seeded: "super_admin" (shown to users as
+        # "Admin" -- reserved for the single bootstrap admin account) and
+        # "user" (the default role every other new account gets). Both are
+        # marked is_system=True so they can't be deleted or renamed from the
+        # Roles & Permissions screen.
         role = await role_repo.get_by_name(SUPER_ADMIN_ROLE_NAME)
         if role is None:
             role = await role_repo.create(
                 name=SUPER_ADMIN_ROLE_NAME,
-                description="Full-access system administrator role. Cannot be deleted or renamed.",
+                description=(
+                    "Full-access system administrator role, reserved for the single "
+                    "hardcoded bootstrap admin account. Cannot be deleted, renamed, "
+                    "or assigned to any other user."
+                ),
                 is_system=True,
             )
             logger.info("Seeded role.", extra={"role_name": SUPER_ADMIN_ROLE_NAME})
             for permission in created_permissions:
                 session.add(RolePermission(role_id=role.id, permission_id=permission.id))
             await session.flush()
+        else:
+            # Idempotent top-up: make sure any newly-added bootstrap permission
+            # (e.g. organization.manage) is granted even if this role already existed.
+            existing_codes = {link.permission.code for link in role.permission_links}
+            for permission in created_permissions:
+                if permission.code not in existing_codes:
+                    await role_repo.add_permission(role, permission)
 
-        admin_role = await role_repo.get_by_name("admin")
-        if admin_role is None:
-            admin_role = await role_repo.create(
-                name="admin",
-                description="Administrator system role with full management privileges.",
+        user_role = await role_repo.get_by_name(USER_ROLE_NAME)
+        if user_role is None:
+            user_role = await role_repo.create(
+                name=USER_ROLE_NAME,
+                description=(
+                    "Default role automatically assigned to every new user account. "
+                    "Grants basic read access; additional permissions are granted "
+                    "explicitly by an administrator."
+                ),
                 is_system=True,
             )
-            logger.info("Seeded role.", extra={"role_name": "admin"})
-            for permission in created_permissions:
-                session.add(RolePermission(role_id=admin_role.id, permission_id=permission.id))
+            logger.info("Seeded role.", extra={"role_name": USER_ROLE_NAME})
+            for code in USER_ROLE_PERMISSION_CODES:
+                permission = await permission_repo.get_by_code(code)
+                if permission:
+                    session.add(RolePermission(role_id=user_role.id, permission_id=permission.id))
             await session.flush()
-        else:
-            org_perm = await permission_repo.get_by_code("organization.manage")
-            if org_perm:
-                await role_repo.add_permission(admin_role, org_perm)
-
-        for r_name, r_desc, r_perms in DEFAULT_BUSINESS_ROLES:
-            b_role = await role_repo.get_by_name(r_name)
-            if b_role is None:
-                b_role = await role_repo.create(
-                    name=r_name,
-                    description=r_desc,
-                    is_system=False,
-                )
-                logger.info("Seeded business role.", extra={"role_name": r_name})
-                for code in r_perms:
-                    permission = await permission_repo.get_by_code(code)
-                    if permission:
-                        session.add(RolePermission(role_id=b_role.id, permission_id=permission.id))
-                await session.flush()
 
         # --- 3. Bootstrap admin user ----------------------------------------------------
         admin = await user_repo.get_by_username(settings.BOOTSTRAP_ADMIN_USERNAME)

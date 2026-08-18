@@ -64,3 +64,26 @@ export function groupPermissionsByModule(permissions: Permission[]): Record<stri
   }
   return groups;
 }
+
+/**
+ * Role names that are reserved by the system -- mirrors
+ * `app.rbac.service.RESERVED_ROLE_NAMES` on the backend. "super_admin" is
+ * the single hardcoded bootstrap admin account's role (shown to users as
+ * "Admin") and cannot be assigned to anyone else. "user" is the default
+ * role every other new account gets automatically. "admin" is blocked too,
+ * so a same-named duplicate role can't be recreated after being retired.
+ */
+export const RESERVED_ROLE_NAMES = new Set(["super_admin", "user", "admin"]);
+
+/**
+ * Friendly display name for a role name coming back from the API.
+ * "super_admin" reads as "Admin" and "user" as "User" everywhere in the
+ * UI -- used by the Roles & Permissions page, the Users page, and the
+ * Shipment Planning column role-lock picker so a role name renders
+ * identically no matter where it's shown.
+ */
+export function roleDisplayName(name: string): string {
+  if (name === "super_admin") return "Admin";
+  if (name === "employee" || name === "user") return "User";
+  return name;
+}

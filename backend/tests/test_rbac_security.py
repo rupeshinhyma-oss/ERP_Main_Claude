@@ -164,3 +164,72 @@ async def test_set_user_permissions_bulk_service():
     mock_user_perm_repo.set_user_permissions_bulk.assert_awaited_once()
 
 
+@pytest.mark.asyncio
+async def test_role_deletion_impact_and_reassignment():
+    """Verify get_role_deletion_impact lists assigned users and delete_role reassigns them."""
+    from unittest.mock import AsyncMock, MagicMock
+    from app.rbac.service import RBACService
+    from app.core.exceptions import ConflictException, ForbiddenException
+
+    role_id = uuid.uuid4()
+    target_role_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+
+    mock_role_repo = AsyncMock()
+    mock_perm_repo = AsyncMock()
+    mock_user_perm_repo = AsyncMock()
+    mock_user_role_repo = AsyncMock()
+
+    custom_role = Role(name="Editor", is_system=False)
+    custom_role.id = role_id
+    target_role = Role(name="user", is_system=False)
+    target_role.id = target_role_id
+    system_role = Role(name="super_admin", is_system=True)
+    system_role.id = role_id
+
+    mock_user = MagicMock()
+    mock_user.id = user_id
+    mock_user.username = "alice"
+    mock_user.display_name = "Alice W"
+    mock_user.full_name = "Alice Wonderland"
+    mock_link = MagicMock(user_id=user_id, role_id=role_id, user=mock_user, assigned_at=None)
+
+    service = RBACService(
+        role_repository=mock_role_repo,
+        permission_repository=mock_perm_repo,
+        user_permission_repository=mock_user_perm_repo,
+        user_role_repository=mock_user_role_repo,
+    )
+
+    # 1. Test get_role_deletion_impact with assigned user
+    mock_role_repo.get_by_id.return_value = custom_role
+    mock_user_role_repo.list_for_role.return_value = [mock_link]
+
+    impact = await service.get_role_deletion_impact(role_id)
+    assert impact["role_id"] == str(role_id)
+    assert impact["role_name"] == "Editor"
+    assert impact["affected_user_count"] == 1
+    assert impact["affected_users"][0]["username"] == "alice"
+
+    # 2. Test delete_role fails if users attached and no reassignment target provided
+    with pytest.raises(ConflictException, match="user\\(s\\) are still assigned"):
+        await service.delete_role(role_id)
+
+    # 3. Test delete_role succeeds with reassignment
+    mock_role_repo.get_by_id.side_effect = lambda rid: custom_role if rid == role_id else target_role
+    mock_user_role_repo.get.return_value = None  # user doesn't already have target role
+
+    reassigned = await service.delete_role(role_id, reassign_to_role_id=target_role_id)
+    assert reassigned == 1
+    mock_user_role_repo.create.assert_awaited_once()
+    mock_user_role_repo.delete.assert_awaited_once_with(mock_link)
+    mock_role_repo.delete.assert_awaited_once_with(custom_role)
+
+    # 4. Test delete_role on system role raises ForbiddenException
+    mock_role_repo.get_by_id.side_effect = None
+    mock_role_repo.get_by_id.return_value = system_role
+    with pytest.raises(ForbiddenException, match="System roles cannot be deleted"):
+        await service.delete_role(role_id)
+
+
+

@@ -924,8 +924,24 @@ export function SuppliersPage() {
   function chipList(ids: string[] | undefined, tableKey: string, modalTitle = "Selected Items") {
     if (!ids || !ids.length) return <span className="muted">—</span>;
     const names = ids.map((id) => resolver.get(tableKey, id) || "…");
+    const hasUnresolved = names.some((n) => n === "…");
+    if (hasUnresolved) {
+      void resolver.resolve(tableKey, ids).then(() => setNamesVersion((n) => n + 1));
+    }
     const first = names[0];
     const remaining = names.length - 1;
+
+    const handleOpenModal = async () => {
+      if (hasUnresolved) {
+        await resolver.resolve(tableKey, ids);
+        const resolvedNames = ids.map((id) => resolver.get(tableKey, id) || id);
+        setAlertPopup({ title: modalTitle, message: "• " + resolvedNames.join("\n• ") });
+        setNamesVersion((n) => n + 1);
+      } else {
+        setAlertPopup({ title: modalTitle, message: "• " + names.join("\n• ") });
+      }
+    };
+
     return (
       <div className="chip-list" style={{ display: "inline-flex", flexWrap: "nowrap", gap: "4px", alignItems: "center", whiteSpace: "nowrap" }}>
         <span
@@ -947,7 +963,7 @@ export function SuppliersPage() {
             type="button"
             className="chip-more"
             title={names.join(", ")}
-            onClick={() => setAlertPopup({ title: modalTitle, message: "• " + names.join("\n• ") })}
+            onClick={() => void handleOpenModal()}
             style={{
               fontWeight: 600,
               fontSize: "11px",
@@ -1267,6 +1283,17 @@ export function SuppliersPage() {
       } else if (supplier) {
         setRows((prev) => [supplier, ...prev]);
         setPagination((prev) => (prev ? { ...prev, total_records: (prev.total_records || 0) + 1 } : prev));
+      }
+
+      if (supplier) {
+        void Promise.all([
+          resolver.resolve("countries", [supplier.country_id]),
+          resolver.resolve("states", [supplier.state_id]),
+          resolver.resolve("cities", [supplier.city_id]),
+          resolver.resolve("categories", supplier.category_ids || []),
+          resolver.resolve("subCategories", supplier.sub_category_ids || []),
+          resolver.resolve("products", supplier.product_ids || []),
+        ]).then(() => setNamesVersion((n) => n + 1));
       }
 
       if (nextAction === "exit") {

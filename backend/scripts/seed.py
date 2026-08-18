@@ -253,7 +253,7 @@ async def seed() -> None:
             logger.info("Seeded permission.", extra={"code": code})
 
         # --- 2. System roles -----------------------------------------------------------
-        role = await role_repo.get_by_name(SUPER_ADMIN_ROLE_NAME)
+        role = await role_repo.get_by_name(SUPER_ADMIN_ROLE_NAME, include_deleted=True)
         if role is None:
             role = await role_repo.create(
                 name=SUPER_ADMIN_ROLE_NAME,
@@ -264,8 +264,11 @@ async def seed() -> None:
             for permission in created_permissions:
                 session.add(RolePermission(role_id=role.id, permission_id=permission.id))
             await session.flush()
+        elif role.deleted_at is not None:
+            role.deleted_at = None
+            await session.flush()
 
-        admin_role = await role_repo.get_by_name("admin")
+        admin_role = await role_repo.get_by_name("admin", include_deleted=True)
         if admin_role is None:
             admin_role = await role_repo.create(
                 name="admin",
@@ -277,12 +280,15 @@ async def seed() -> None:
                 session.add(RolePermission(role_id=admin_role.id, permission_id=permission.id))
             await session.flush()
         else:
+            if admin_role.deleted_at is not None:
+                admin_role.deleted_at = None
+                await session.flush()
             org_perm = await permission_repo.get_by_code("organization.manage")
             if org_perm:
                 await role_repo.add_permission(admin_role, org_perm)
 
         for r_name, r_desc, r_perms in DEFAULT_BUSINESS_ROLES:
-            b_role = await role_repo.get_by_name(r_name)
+            b_role = await role_repo.get_by_name(r_name, include_deleted=True)
             if b_role is None:
                 b_role = await role_repo.create(
                     name=r_name,
@@ -294,6 +300,9 @@ async def seed() -> None:
                     permission = await permission_repo.get_by_code(code)
                     if permission:
                         session.add(RolePermission(role_id=b_role.id, permission_id=permission.id))
+                await session.flush()
+            elif b_role.deleted_at is not None:
+                b_role.deleted_at = None
                 await session.flush()
 
         # --- 3. Bootstrap admin user ----------------------------------------------------
@@ -317,6 +326,10 @@ async def seed() -> None:
             logger.info("Seeded bootstrap admin user.", extra={"username": settings.BOOTSTRAP_ADMIN_USERNAME})
         else:
             logger.info("Bootstrap admin user already exists; skipping.")
+
+        # Seed China provinces and major cities
+        from scripts.seed_china_geo import seed_china
+        await seed_china(session)
 
         await session.commit()
 

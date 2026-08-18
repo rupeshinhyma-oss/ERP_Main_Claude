@@ -2144,7 +2144,10 @@ export function BuyersPage() {
                       <th
                         key={colIdx}
                         style={{
-                          padding: "10px 14px",
+                          padding: colIdx === 0 || colIdx === 1 ? "10px 8px" : "10px 14px",
+                          width: colIdx === 0 ? "40px" : colIdx === 1 ? "65px" : undefined,
+                          minWidth: colIdx === 0 ? "40px" : colIdx === 1 ? "65px" : undefined,
+                          maxWidth: colIdx === 0 ? "45px" : colIdx === 1 ? "75px" : undefined,
                           textAlign: colIdx === 0 || colIdx === 1 ? "center" : "left",
                           fontWeight: 700,
                           color: "#475569",
@@ -2210,8 +2213,8 @@ export function BuyersPage() {
                             borderRadius: "12px",
                             fontSize: "11.5px",
                             fontWeight: 600,
-                            background: r.current_status === "existing" ? "#dcfce7" : "#f1f5f9",
-                            color: r.current_status === "existing" ? "#15803d" : "#475569",
+                            background: r.current_status === "existing" ? "#dcfce7" : "#fef9c3",
+                            color: r.current_status === "existing" ? "#15803d" : "#854d0e",
                           }}
                         >
                           {r.current_status ? r.current_status.toUpperCase() : "SELECT"}
@@ -2291,7 +2294,10 @@ export function BuyersPage() {
                           <td
                             key={colIdx}
                             style={{
-                              padding: "10px 14px",
+                              padding: colIdx === 0 || colIdx === 1 ? "10px 8px" : "10px 14px",
+                              width: colIdx === 0 ? "40px" : colIdx === 1 ? "65px" : undefined,
+                              minWidth: colIdx === 0 ? "40px" : colIdx === 1 ? "65px" : undefined,
+                              maxWidth: colIdx === 0 ? "45px" : colIdx === 1 ? "75px" : undefined,
                               textAlign: colIdx === 0 || colIdx === 1 ? "center" : "left",
                               whiteSpace: colIdx === 2 ? "normal" : "nowrap",
                               ...getFreezeStyle(colIdx, false),

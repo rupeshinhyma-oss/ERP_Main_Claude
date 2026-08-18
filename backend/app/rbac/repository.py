@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -52,9 +52,10 @@ class RoleRepository(BaseRepository[Role]):
         """Bind to a DB session, operating on the ``Role`` model."""
         super().__init__(session, Role)
 
-    async def get_by_name(self, name: str) -> Role | None:
-        """Fetch a role by its unique name (excludes soft-deleted roles)."""
-        stmt = self._base_select().where(Role.name == name)
+    async def get_by_name(self, name: str, *, include_deleted: bool = False) -> Role | None:
+        """Fetch a role by its unique name."""
+        base = select(Role) if include_deleted else self._base_select()
+        stmt = base.where(func.lower(Role.name) == name.lower())
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 

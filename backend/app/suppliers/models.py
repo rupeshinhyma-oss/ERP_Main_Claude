@@ -101,9 +101,7 @@ class Supplier(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin, SoftDele
 
     # --- First data form ---------------------------------------------------------------
     company_name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)  # "Name of Company*"
-    supplier_type: Mapped[SupplierType | None] = mapped_column(
-        SAEnum(SupplierType, name="supplier_type", native_enum=False, length=20), nullable=True
-    )
+    supplier_type: Mapped[str | None] = mapped_column(String(150), nullable=True)
     brand_description: Mapped[str | None] = mapped_column(
         Text, nullable=True
     )  # "Brand of Suppliers Products (description)" -- free text, not the Phase 7 Brand master

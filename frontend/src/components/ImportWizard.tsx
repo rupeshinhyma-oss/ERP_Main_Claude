@@ -1485,7 +1485,7 @@ export function BulkActionsDropdown({
                     gap: "8px",
                   }}
                 >
-                  ⏸️ Bulk Deactivate ({selectedCount})
+                  ⏸️ Bulk Inactive ({selectedCount})
                 </button>
               )}
               {onBulkDelete && (

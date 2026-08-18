@@ -24,6 +24,11 @@ function resolveImageUrl(url: string | null | undefined): string {
     clean = clean.slice(1, -1).trim();
   }
   if (!clean) return "";
+  if (clean.toLowerCase().startsWith("/static/uploads/")) {
+    clean = "/static/uploads/" + clean.slice("/static/uploads/".length);
+  } else if (clean.toLowerCase().startsWith("/uploads/")) {
+    clean = "/uploads/" + clean.slice("/uploads/".length);
+  }
   if (clean.startsWith("data:") || clean.startsWith("http://") || clean.startsWith("https://")) {
     return encodeURI(clean);
   }

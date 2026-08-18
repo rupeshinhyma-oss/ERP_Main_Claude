@@ -668,7 +668,7 @@ export function MasterPage<T extends MasterRecord>({
 
     if (idx === 0) {
       return (
-        <th key="col-0" style={{ width: "40px", textAlign: "center", ...getFreezeStyle(0, true) }}>
+        <th key="col-0" style={{ width: "40px", minWidth: "40px", maxWidth: "45px", textAlign: "center", ...getFreezeStyle(0, true) }}>
           <input
             type="checkbox"
             checked={rows.length > 0 && rows.every((r) => selectedIds.includes(String(r.id)))}
@@ -687,10 +687,10 @@ export function MasterPage<T extends MasterRecord>({
 
     if (idx === 1) {
       return (
-        <th key="col-1" style={getFreezeStyle(1, true)}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "4px" }}>
-            <span>Sr. No.</span>
-            <button type="button" onClick={() => togglePin(1)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: "11px", opacity: pinnedCols[1] ? 1 : 0.4 }} title={pinnedCols[1] ? "Unfreeze" : "Freeze"}>
+        <th key="col-1" style={{ width: "65px", minWidth: "65px", maxWidth: "75px", textAlign: "center", ...getFreezeStyle(1, true) }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "2px" }}>
+            <span style={{ whiteSpace: "nowrap" }}>Sr. No.</span>
+            <button type="button" onClick={() => togglePin(1)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: "11px", opacity: pinnedCols[1] ? 1 : 0.4, padding: "0 2px" }} title={pinnedCols[1] ? "Unfreeze" : "Freeze"}>
               📌
             </button>
           </div>
@@ -741,7 +741,7 @@ export function MasterPage<T extends MasterRecord>({
   const renderBodyCell = (item: T, index: number, idx: number) => {
     if (idx === 0) {
       return (
-        <td key="cell-0" style={{ width: "40px", textAlign: "center", ...getFreezeStyle(0, false) }}>
+        <td key="cell-0" style={{ width: "40px", minWidth: "40px", maxWidth: "45px", textAlign: "center", ...getFreezeStyle(0, false) }}>
           <input
             type="checkbox"
             checked={selectedIds.includes(String(item.id))}
@@ -761,7 +761,7 @@ export function MasterPage<T extends MasterRecord>({
 
     if (idx === 1) {
       return (
-        <td key="cell-1" className="cell-srno" style={getFreezeStyle(1, false)}>
+        <td key="cell-1" className="cell-srno" style={{ width: "65px", minWidth: "65px", maxWidth: "75px", textAlign: "center", ...getFreezeStyle(1, false) }}>
           {startingSrNo + index}
         </td>
       );

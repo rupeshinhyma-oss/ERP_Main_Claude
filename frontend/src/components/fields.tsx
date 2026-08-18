@@ -6,7 +6,7 @@
  * style.css.
  */
 
-import React, { useState, useRef, useEffect, type ReactNode } from "react";
+import React, { useState, useRef, useEffect, useMemo, type ReactNode } from "react";
 
 interface BaseFieldProps {
   id: string;
@@ -14,6 +14,7 @@ interface BaseFieldProps {
   hint?: ReactNode;
   /** Inline overrides such as `grid-column: span 2`. */
   style?: React.CSSProperties;
+  hasError?: boolean;
 }
 
 function renderLabel(label: ReactNode) {
@@ -52,6 +53,7 @@ export function TextField({
   className,
   autoComplete = "off",
   disableAutoCapitalize,
+  hasError = false,
 }: BaseFieldProps & {
   value: string;
   onChange: (value: string) => void;
@@ -88,7 +90,11 @@ export function TextField({
         minLength={minLength}
         placeholder={placeholder}
         readOnly={readOnly}
-        style={inputStyle}
+        style={{
+          ...inputStyle,
+          border: hasError ? "1.5px solid #ef4444" : inputStyle?.border,
+          boxShadow: hasError ? "0 0 0 3px rgba(239, 68, 68, 0.15)" : inputStyle?.boxShadow,
+        }}
         step={step}
         min={min}
         max={max}
@@ -110,6 +116,7 @@ export function TextAreaField({
   hint,
   style,
   disableAutoCapitalize,
+  hasError = false,
 }: BaseFieldProps & {
   value: string;
   onChange: (value: string) => void;
@@ -132,8 +139,122 @@ export function TextAreaField({
         value={value}
         onChange={handleChange}
         placeholder={placeholder}
+        style={{
+          border: hasError ? "1.5px solid #ef4444" : undefined,
+          boxShadow: hasError ? "0 0 0 3px rgba(239, 68, 68, 0.15)" : undefined,
+        }}
       />
       {hint && <span className="hint">{hint}</span>}
+    </div>
+  );
+}
+
+export function PhoneGroupField({
+  id,
+  label,
+  value,
+  onChange,
+  hint,
+  placeholder = "13800000000",
+  defaultPrefix = "+86",
+  hasError = false,
+}: {
+  id?: string;
+  label?: React.ReactNode;
+  value: string;
+  onChange: (fullValue: string) => void;
+  hint?: React.ReactNode;
+  placeholder?: string;
+  defaultPrefix?: string;
+  hasError?: boolean;
+}) {
+  let prefix = "";
+  let number = "";
+
+  const trimmed = (value || "").trim();
+  if (trimmed.startsWith("+")) {
+    const spaceIdx = trimmed.indexOf(" ");
+    if (spaceIdx !== -1) {
+      prefix = trimmed.slice(0, spaceIdx);
+      number = trimmed.slice(spaceIdx + 1).trim();
+    } else {
+      prefix = trimmed;
+      number = "";
+    }
+  } else if (trimmed) {
+    prefix = defaultPrefix || "+86";
+    number = trimmed;
+  } else {
+    prefix = defaultPrefix || "+86";
+    number = "";
+  }
+
+  const handlePrefixChange = (newPrefix: string) => {
+    let cleanPrefix = newPrefix.trim();
+    if (cleanPrefix && !cleanPrefix.startsWith("+")) {
+      cleanPrefix = "+" + cleanPrefix;
+    }
+    const combined = number ? `${cleanPrefix} ${number}` : cleanPrefix;
+    onChange(combined);
+  };
+
+  const handleNumberChange = (newNumber: string) => {
+    const cleanNum = newNumber.replace(/[^\d\s-]/g, "");
+    const combined = prefix ? `${prefix} ${cleanNum}` : cleanNum;
+    onChange(combined);
+  };
+
+  return (
+    <div className="field">
+      {label && <label htmlFor={id}>{renderLabel(label)}</label>}
+      <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+        <input
+          type="text"
+          value={prefix}
+          placeholder={defaultPrefix || "+86"}
+          onChange={(e) => handlePrefixChange(e.target.value)}
+          style={{
+            width: "80px",
+            padding: "8px 10px",
+            fontSize: "13.5px",
+            fontWeight: 700,
+            borderRadius: "6px",
+            border: hasError ? "1.5px solid #ef4444" : "1px solid #cbd5e1",
+            boxShadow: hasError ? "0 0 0 3px rgba(239, 68, 68, 0.15)" : undefined,
+            background: "#f8fafc",
+            color: "#1e293b",
+            textAlign: "center",
+            outline: "none",
+            height: "38px",
+            boxSizing: "border-box",
+          }}
+        />
+        <input
+          id={id}
+          type="text"
+          value={number}
+          maxLength={15}
+          placeholder={placeholder}
+          onChange={(e) => handleNumberChange(e.target.value)}
+          style={{
+            flex: 1,
+            padding: "8px 11px",
+            fontSize: "13.5px",
+            borderRadius: "6px",
+            border: hasError ? "1.5px solid #ef4444" : "1px solid #cbd5e1",
+            boxShadow: hasError ? "0 0 0 3px rgba(239, 68, 68, 0.15)" : undefined,
+            outline: "none",
+            background: "#ffffff",
+            height: "38px",
+            boxSizing: "border-box",
+          }}
+        />
+      </div>
+      {hint && (
+        <div style={{ marginTop: "4px", fontSize: "12px", color: "#ef4444", fontWeight: 600, display: "flex", alignItems: "center", gap: "4px" }}>
+          {hint}
+        </div>
+      )}
     </div>
   );
 }
@@ -153,7 +274,19 @@ export function EmailTagInput({
 }) {
   const [inputValue, setInputValue] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
+  const [popoverOpen, setPopoverOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setPopoverOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -211,45 +344,61 @@ export function EmailTagInput({
 
   const removeTag = (indexToRemove: number) => {
     if (errorMsg) setErrorMsg("");
-    onChange(emails.filter((_, idx) => idx !== indexToRemove));
+    const next = emails.filter((_, idx) => idx !== indexToRemove);
+    onChange(next);
+    if (next.length <= 2) {
+      setPopoverOpen(false);
+    }
   };
 
+  const visibleEmails = emails.slice(0, 2);
+  const hiddenCount = emails.length - 2;
+
   return (
-    <div className="field">
+    <div className="field" ref={containerRef} style={{ position: "relative" }}>
       {label && <label htmlFor={id}>{renderLabel(label)}</label>}
       <div
         onClick={() => inputRef.current?.focus()}
         style={{
           display: "flex",
-          flexWrap: "wrap",
-          gap: "6px",
+          flexWrap: "nowrap",
           alignItems: "center",
-          padding: "6px 10px",
+          gap: "6px",
+          padding: "4px 8px",
           borderRadius: "6px",
-          border: errorMsg ? "1px solid #ef4444" : "1px solid #cbd5e1",
+          border: errorMsg ? "1.5px solid #ef4444" : "1px solid #cbd5e1",
           background: "#ffffff",
+          height: "38px",
           minHeight: "38px",
+          boxSizing: "border-box",
           cursor: "text",
           transition: "all 0.15s ease",
+          overflowX: "hidden",
         }}
       >
-        {emails.map((email, idx) => (
+        {visibleEmails.map((email, idx) => (
           <span
             key={`${email}-${idx}`}
             style={{
               background: "#2563eb",
               color: "#ffffff",
               borderRadius: "4px",
-              padding: "3px 8px 3px 10px",
-              fontSize: "12.5px",
+              padding: "2px 6px 2px 8px",
+              fontSize: "12px",
               fontWeight: 600,
               display: "inline-flex",
               alignItems: "center",
-              gap: "6px",
-              boxShadow: "0 1px 2px rgba(0,0,0,0.1)",
+              gap: "4px",
+              whiteSpace: "nowrap",
+              flexShrink: 0,
+              maxWidth: "130px",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
             }}
           >
-            {email}
+            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {email}
+            </span>
             <button
               type="button"
               onClick={(e) => {
@@ -261,7 +410,7 @@ export function EmailTagInput({
                 border: "none",
                 color: "#ffffff",
                 fontWeight: 700,
-                fontSize: "12px",
+                fontSize: "11px",
                 cursor: "pointer",
                 padding: "0 2px",
                 lineHeight: 1,
@@ -273,12 +422,41 @@ export function EmailTagInput({
             </button>
           </span>
         ))}
+
+        {hiddenCount > 0 && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setPopoverOpen((prev) => !prev);
+            }}
+            style={{
+              background: "#eff6ff",
+              color: "#1d4ed8",
+              border: "1px solid #bfdbfe",
+              borderRadius: "4px",
+              padding: "2px 7px",
+              fontSize: "11.5px",
+              fontWeight: 700,
+              cursor: "pointer",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "3px",
+              flexShrink: 0,
+              transition: "all 0.15s ease",
+            }}
+            title="Click to view all emails"
+          >
+            +{hiddenCount} more 👁️
+          </button>
+        )}
+
         <input
           ref={inputRef}
           id={id}
           type="text"
           value={inputValue}
-          placeholder={emails.length === 0 ? placeholder : "Add another email..."}
+          placeholder={emails.length === 0 ? placeholder : "Add..."}
           onChange={handleInputChange}
           onKeyDown={handleKeyDown}
           onBlur={handleBlur}
@@ -287,13 +465,93 @@ export function EmailTagInput({
             outline: "none",
             background: "transparent",
             flex: 1,
-            minWidth: "160px",
+            minWidth: "60px",
             fontSize: "13px",
             color: "#0f172a",
-            padding: "2px 0",
+            padding: "0 4px",
           }}
         />
       </div>
+
+      {/* Clean Popover to view and remove all emails */}
+      {popoverOpen && (
+        <div
+          style={{
+            position: "absolute",
+            top: "calc(100% + 4px)",
+            left: 0,
+            right: 0,
+            zIndex: 9999,
+            background: "#ffffff",
+            border: "1px solid #cbd5e1",
+            borderRadius: "8px",
+            boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.15), 0 8px 10px -6px rgba(0, 0, 0, 0.1)",
+            padding: "12px",
+            maxHeight: "220px",
+            overflowY: "auto",
+          }}
+        >
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px", borderBottom: "1px solid #f1f5f9", paddingBottom: "6px" }}>
+            <span style={{ fontSize: "12px", fontWeight: 700, color: "#1e293b" }}>
+              All Added Emails ({emails.length})
+            </span>
+            <button
+              type="button"
+              onClick={() => setPopoverOpen(false)}
+              style={{
+                background: "none",
+                border: "none",
+                color: "#64748b",
+                fontSize: "12px",
+                cursor: "pointer",
+                fontWeight: 600,
+              }}
+            >
+              Done ✕
+            </button>
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
+            {emails.map((email, idx) => (
+              <span
+                key={`all-${email}-${idx}`}
+                style={{
+                  background: "#2563eb",
+                  color: "#ffffff",
+                  borderRadius: "4px",
+                  padding: "4px 8px 4px 10px",
+                  fontSize: "12px",
+                  fontWeight: 600,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  boxShadow: "0 1px 2px rgba(0,0,0,0.1)",
+                }}
+              >
+                {email}
+                <button
+                  type="button"
+                  onClick={() => removeTag(idx)}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    color: "#ffffff",
+                    fontWeight: 700,
+                    fontSize: "12px",
+                    cursor: "pointer",
+                    padding: "0 2px",
+                    lineHeight: 1,
+                    opacity: 0.85,
+                  }}
+                  title="Remove email"
+                >
+                  ✕
+                </button>
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
       {errorMsg && (
         <div style={{ color: "#dc2626", fontSize: "12px", fontWeight: 600, marginTop: "4px" }}>
           {errorMsg}
@@ -312,6 +570,7 @@ export function SelectField({
   children,
   hint,
   style,
+  hasError = false,
 }: BaseFieldProps & {
   value: string;
   onChange: (value: string) => void;
@@ -333,77 +592,56 @@ export function SelectField({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  /**
-   * Recursively collect every real <option> element out of `children`,
-   * descending through React Fragments (<>...</>) and arrays.
-   *
-   * BUG THIS FIXES: `React.Children.forEach` only visits DIRECT children
-   * -- if a caller wraps its <option>s in a Fragment (e.g. a conditional
-   * block like `{cond ? <option/> : <><option/><option/></>}`, which is a
-   * completely ordinary, valid way to conditionally render multiple
-   * options), every option nested inside that Fragment was silently
-   * invisible to the old flat forEach loop: `child.type` for the
-   * Fragment itself is the Fragment symbol, never the string
-   * `"option"`, so the check below always failed for anything nested
-   * inside one. The dropdown would then show "No matching results" with
-   * NO error anywhere -- indistinguishable from "there really are no
-   * options" from the caller's point of view. This was a live production
-   * bug (Shipment Planning's branch picker: Darsh Impex genuinely has
-   * two branches, but they were wrapped in a Fragment, so zero options
-   * ever rendered).
-   *
-   * Plain <option> elements (the overwhelmingly common case, no
-   * Fragment) are unaffected -- this is purely additive.
-   */
-  function collectOptionElements(nodes: ReactNode): ReactNode[] {
-    const collected: ReactNode[] = [];
-    React.Children.forEach(nodes, (child) => {
-      if (!React.isValidElement(child)) return;
-      if (child.type === React.Fragment) {
-        collected.push(...collectOptionElements((child.props as { children?: ReactNode }).children));
-      } else if (child.type === "option") {
-        collected.push(child);
-      }
-      // Any other element type is intentionally ignored, matching the
-      // previous behavior -- this component only ever expects <option>
-      // children (optionally nested in Fragments).
-    });
-    return collected;
-  }
-
-  const options: { value: string; label: string; element: ReactNode }[] = [];
-  collectOptionElements(children).forEach((child) => {
-    if (React.isValidElement(child) && child.type === "option") {
-      const childProps = child.props as { value?: string | number; children?: ReactNode };
-      const valStr = String(childProps.value ?? "");
-      const labelText =
-        typeof childProps.children === "string" || typeof childProps.children === "number"
-          ? String(childProps.children)
-          : valStr;
-      options.push({
-        value: valStr,
-        label: labelText,
-        element: childProps.children ?? valStr,
+  const flattenedChildren = useMemo(() => {
+    const results: React.ReactElement[] = [];
+    function extract(nodes: ReactNode) {
+      React.Children.forEach(nodes, (child) => {
+        if (!React.isValidElement(child)) return;
+        if (child.type === React.Fragment) {
+          extract(child.props.children);
+        } else if (child.type === "option") {
+          results.push(child);
+        } else if (child.props && child.props.children) {
+          extract(child.props.children);
+        }
       });
     }
-  });
+    extract(children);
+    return results;
+  }, [children]);
 
-  const selectedOption = options.find((opt) => opt.value === value);
-  const displayLabel = selectedOption ? selectedOption.element : (options[0]?.element || "-- Select --");
+  const options = useMemo(() => {
+    const list: { value: string; label: string; element: ReactNode; disabled?: boolean }[] = [];
+    flattenedChildren.forEach((child) => {
+      list.push({
+        value: String(child.props.value ?? ""),
+        label: typeof child.props.children === "string" ? child.props.children : String(child.props.children ?? child.props.value ?? ""),
+        element: child.props.children ?? child.props.value ?? "",
+        disabled: child.props.disabled,
+      });
+    });
+    return list;
+  }, [flattenedChildren]);
 
-  const filteredOptions = options.filter((opt) => {
-    if (!searchTerm.trim()) return true;
-    return opt.label.toLowerCase().includes(searchTerm.toLowerCase());
-  });
+  const currentOption = options.find((o) => o.value === value);
+  const displayLabel = currentOption ? currentOption.element : (options[0]?.element || "Select...");
 
-  function toggleOpen() {
-    const nextState = !open;
-    setOpen(nextState);
-    if (nextState) {
-      setSearchTerm("");
-      setTimeout(() => searchInputRef.current?.focus(), 50);
-    }
-  }
+  const filteredOptions = useMemo(() => {
+    if (!searchTerm.trim()) return options;
+    const term = searchTerm.toLowerCase().trim();
+    return options.filter((o) => o.label.toLowerCase().includes(term));
+  }, [options, searchTerm]);
+
+  const toggleOpen = () => {
+    setOpen((prev) => {
+      const next = !prev;
+      if (next) {
+        setSearchTerm("");
+        setTimeout(() => searchInputRef.current?.focus(), 50);
+      }
+      return next;
+    });
+  };
 
   return (
     <div className="field" style={{ ...style, position: "relative" }} ref={containerRef}>
@@ -420,7 +658,8 @@ export function SelectField({
           }
         }}
         style={{
-          border: "1px solid var(--color-border-strong)",
+          border: hasError ? "1.5px solid #ef4444" : "1px solid var(--color-border-strong)",
+          boxShadow: hasError ? "0 0 0 3px rgba(239, 68, 68, 0.15)" : undefined,
           borderRadius: "var(--radius-sm)",
           padding: "9px 11px",
           fontSize: "13.5px",

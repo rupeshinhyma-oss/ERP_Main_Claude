@@ -1356,8 +1356,11 @@ td .cell-secondary {
   color: var(--color-muted);
   font-variant-numeric: tabular-nums;
   font-size: 12.5px;
-  width: 1%;
+  width: 60px;
+  min-width: 60px;
+  max-width: 70px;
   white-space: nowrap;
+  text-align: center;
 }
 
 .row-highlight {

@@ -26,8 +26,27 @@ import {
   SearchableDropdownMultiPanel,
   type DropdownOption,
 } from "@/components/SearchableDropdown";
-import { SelectField, TextAreaField, TextField, autoTitleCase } from "@/components/fields";
+import { EmailTagInput, PhoneGroupField, SelectField, TextAreaField, TextField, autoTitleCase } from "@/components/fields";
 import { useLookup } from "@/lib/lookups";
+
+function resolveImageUrl(url: string | null | undefined): string {
+  if (!url) return "";
+  let clean = url.trim();
+  if ((clean.startsWith('"') && clean.endsWith('"')) || (clean.startsWith("'") && clean.endsWith("'"))) {
+    clean = clean.slice(1, -1).trim();
+  }
+  if (!clean) return "";
+  if (clean.toLowerCase().startsWith("/static/uploads/")) {
+    clean = "/static/uploads/" + clean.slice("/static/uploads/".length);
+  } else if (clean.toLowerCase().startsWith("/uploads/")) {
+    clean = "/uploads/" + clean.slice("/uploads/".length);
+  }
+  if (clean.startsWith("data:") || clean.startsWith("http://") || clean.startsWith("https://")) {
+    return encodeURI(clean);
+  }
+  const fullUrl = `http://localhost:8000${clean.startsWith("/") ? "" : "/"}${clean}`;
+  return encodeURI(fullUrl);
+}
 import {
   apiDelete,
   apiGet,
@@ -96,8 +115,9 @@ const EMPTY_SUPPLIER_FORM = {
   contact_calling_number: "",
   contact_whatsapp_number: "",
   contact_wechat_number: "",
-  emails_input: "",
+  emails: [] as string[],
   tax_id_number: "",
+  address: "",
   town: "",
   primary_website: "",
   secondary_website: "",
@@ -143,11 +163,11 @@ function StatusPill({ value }: { value?: string | null }) {
   return <span className={`badge ${cls}`}>{label}</span>;
 }
 
-function validatePhoneNumber(val: string): string | null {
-  if (!val.trim()) return null;
+function validatePhoneNumber(val: string, fieldLabel = "Phone number"): string | null {
+  if (!val || !val.trim()) return null;
   const digits = val.replace(/\D/g, "");
   if (digits.length < 7 || digits.length > 15) {
-    return "Phone number must have between 7 and 15 digits.";
+    return `${fieldLabel} must have between 7 and 15 digits (including country code).`;
   }
   return null;
 }
@@ -171,6 +191,9 @@ export function SuppliersPage() {
   const [effectiveSearch, setEffectiveSearch] = useState("");
   const srNoJump = useSrNoJump();
   const tableBodyRef = useRef<HTMLTableSectionElement>(null);
+
+  /* Status Tab (Active vs Inactive) */
+  const [statusTab, setStatusTab] = useState<"active" | "inactive">("active");
 
   /* Filters */
   const [filterOpen, setFilterOpen] = useState(false);
@@ -381,10 +404,42 @@ export function SuppliersPage() {
   const [whatsappSameAsCalling, setWhatsappSameAsCalling] = useState(false);
   const [wechatSameAsCalling, setWechatSameAsCalling] = useState(false);
   const [callingNumberError, setCallingNumberError] = useState<string | null>(null);
+  const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
   const [defaultChinaId, setDefaultChinaId] = useState<string | null>(null);
+  const [formCountryPhoneCode, setFormCountryPhoneCode] = useState<string>("+86");
   const [saving, setSaving] = useState(false);
   const [uploadingMedia, setUploadingMedia] = useState(false);
   const existingSuppliers = useLookup<Supplier>("/suppliers", 500);
+
+  async function resolveCountryPhoneCode(countryId: string | null): Promise<string> {
+    if (!countryId) return "+86";
+    try {
+      const { data } = await apiGet<{ phone_code?: string }>(`/masters/countries/${countryId}`);
+      if (data?.phone_code) {
+        const rawCode = data.phone_code.trim().replace(/^\+/, "");
+        return `+${rawCode}`;
+      }
+    } catch {
+      // fallback
+    }
+    return "+86";
+  }
+
+  function focusAndScrollToField(fieldId: string) {
+    setTimeout(() => {
+      const el = document.getElementById(fieldId);
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        if (typeof (el as HTMLElement).focus === "function") {
+          (el as HTMLElement).focus();
+        }
+        if (el.tagName !== "INPUT" && el.tagName !== "SELECT" && el.tagName !== "TEXTAREA") {
+          const inner = el.querySelector<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>("input, select, textarea");
+          if (inner) inner.focus();
+        }
+      }
+    }, 60);
+  }
 
   const mediaList = useMemo(() => {
     return form.visit_media_input
@@ -502,6 +557,9 @@ export function SuppliersPage() {
   const setField = (id: keyof typeof EMPTY_SUPPLIER_FORM, value: string) => {
     const formatted = autoTitleCase(value, id as string);
     setForm((prev) => ({ ...prev, [id]: formatted }));
+    if (validationErrors[id as string]) {
+      setValidationErrors((prev) => ({ ...prev, [id as string]: "" }));
+    }
   };
 
   /* --- Bounded name resolver for the chip columns --- */
@@ -535,24 +593,70 @@ export function SuppliersPage() {
     });
   }, []);
 
-  /* --- Type-ahead fetchers --- */
+  /* --- Type-ahead fetchers & instant Geo Cache --- */
+  const geoDropdownCache = useRef<Record<string, DropdownOption[]>>({});
+
+  useEffect(() => {
+    if (formCountryId) {
+      const cacheKey = `/masters/states:{"country_id":"${formCountryId}"}`;
+      if (!geoDropdownCache.current[cacheKey]) {
+        void apiGet<{ id: string; name: string }[]>(
+          `/masters/states${toQueryString({ country_id: formCountryId, page: 1, page_size: 50, sort_order: "asc", status: "active" })}`
+        )
+          .then((res) => {
+            if (res?.data) {
+              geoDropdownCache.current[cacheKey] = res.data.map((d) => ({ value: d.id, label: d.name }));
+            }
+          })
+          .catch(() => {});
+      }
+    }
+  }, [formCountryId]);
+
+  useEffect(() => {
+    if (formStateId) {
+      const cacheKey = `/masters/cities:{"state_id":"${formStateId}"}`;
+      if (!geoDropdownCache.current[cacheKey]) {
+        void apiGet<{ id: string; name: string }[]>(
+          `/masters/cities${toQueryString({ state_id: formStateId, page: 1, page_size: 50, sort_order: "asc", status: "active" })}`
+        )
+          .then((res) => {
+            if (res?.data) {
+              geoDropdownCache.current[cacheKey] = res.data.map((d) => ({ value: d.id, label: d.name }));
+            }
+          })
+          .catch(() => {});
+      }
+    }
+  }, [formStateId]);
+
   const searchFetcher = useCallback(
     (apiBase: string, extraParams?: () => Record<string, string>) =>
       async (term: string, signal: AbortSignal): Promise<DropdownOption[]> => {
         const extra = extraParams ? extraParams() : {};
+        const cacheKey = `${apiBase}:${JSON.stringify(extra)}`;
+
+        if (!term.trim() && geoDropdownCache.current[cacheKey]) {
+          return geoDropdownCache.current[cacheKey];
+        }
+
         const { data } = await apiGet<{ id: string; name: string }[]>(
           apiBase +
           toQueryString({
             search: term,
             page: 1,
-            page_size: 20,
+            page_size: 50,
             sort_order: "asc",
             status: "active",
             ...extra,
           }),
           { signal }
         );
-        return data.map((d) => ({ value: d.id, label: d.name }));
+        const mapped = data.map((d) => ({ value: d.id, label: d.name }));
+        if (!term.trim()) {
+          geoDropdownCache.current[cacheKey] = mapped;
+        }
+        return mapped;
       },
     []
   );
@@ -568,19 +672,6 @@ export function SuppliersPage() {
     []
   );
 
-  function validateCallingNumber(val: string) {
-    if (!val || !val.trim()) {
-      setCallingNumberError(null);
-      return true;
-    }
-    const digitsOnly = val.replace(/\D/g, "");
-    if (digitsOnly.length < 7 || digitsOnly.length > 11) {
-      setCallingNumberError("Calling number must be between 7 and 11 digits.");
-      return false;
-    }
-    setCallingNumberError(null);
-    return true;
-  }
 
   const productFetcher = useCallback(
     async (term: string, signal: AbortSignal): Promise<DropdownOption[]> => {
@@ -647,6 +738,7 @@ export function SuppliersPage() {
         page_size: pageSize,
         sort_order: "asc",
         search: effectiveSearch,
+        is_active: statusTab === "active" ? "true" : "false",
         country_id: countryFilter || "",
         state_id: stateFilter || "",
         city_id: cityFilter || "",
@@ -691,6 +783,7 @@ export function SuppliersPage() {
       cancelled = true;
     };
   }, [
+    statusTab,
     currentPage,
     pageSize,
     effectiveSearch,
@@ -874,6 +967,7 @@ export function SuppliersPage() {
     setWhatsappSameAsCalling(false);
     setWechatSameAsCalling(false);
     setCallingNumberError(null);
+    setValidationErrors({});
     setFormStateCustomText("");
     setFormCityCustomText("");
 
@@ -888,8 +982,9 @@ export function SuppliersPage() {
         contact_calling_number: supplier.contact_calling_number || "",
         contact_whatsapp_number: supplier.contact_whatsapp_number || "",
         contact_wechat_number: supplier.contact_wechat_number || "",
-        emails_input: (supplier.emails || []).join(", "),
+        emails: supplier.emails || [],
         tax_id_number: supplier.tax_id_number || "",
+        address: supplier.address || "",
         town: supplier.town || "",
         primary_website: supplier.primary_website || "",
         secondary_website: supplier.secondary_website || "",
@@ -919,6 +1014,11 @@ export function SuppliersPage() {
       if (supplier.contact_calling_number && supplier.contact_wechat_number === supplier.contact_calling_number) {
         setWechatSameAsCalling(true);
       }
+      if (supplier.country_id) {
+        resolveCountryPhoneCode(supplier.country_id).then(setFormCountryPhoneCode);
+      } else {
+        setFormCountryPhoneCode("+86");
+      }
     } else {
       setForm(EMPTY_SUPPLIER_FORM);
       setFormStateId(null);
@@ -928,6 +1028,7 @@ export function SuppliersPage() {
       setFormProductIds([]);
       setLockNewStatus(false);
       setContacts([]);
+      setFormCountryPhoneCode("+86");
 
       let chinaId = defaultChinaId;
       if (!chinaId) {
@@ -944,13 +1045,11 @@ export function SuppliersPage() {
     setModalOpen(false);
     setCurrentSupplierId(null);
     setError(null);
+    setValidationErrors({});
   }
 
   function buildPayload() {
-    const emails = form.emails_input
-      .split(",")
-      .map((e) => e.trim())
-      .filter(Boolean);
+    const emails = form.emails || [];
     const visitMedia = form.visit_media_input
       .split(",")
       .map((v) => v.trim())
@@ -973,6 +1072,7 @@ export function SuppliersPage() {
       contact_wechat_number: form.contact_wechat_number.trim() || null,
       emails,
       tax_id_number: form.tax_id_number.trim() || null,
+      address: form.address.trim() || null,
       town: form.town.trim() || null,
       primary_website: form.primary_website.trim() || null,
       secondary_website: form.secondary_website.trim() || null,
@@ -1028,6 +1128,7 @@ export function SuppliersPage() {
         } else {
           const { data: newCity } = await apiPost<{ id: string }>("/masters/cities", {
             name: formCityCustomText.trim(),
+            country_id: countryId,
             state_id: stateId,
             code: formCityCustomText.trim().slice(0, 3).toUpperCase(),
           });
@@ -1073,49 +1174,57 @@ export function SuppliersPage() {
   }
 
   async function saveSupplierData(nextAction?: ModalTab | "exit") {
+    // 1. Validate immediate required fields
+    const initialErrors: Record<string, string> = {};
     if (!form.company_name.trim()) {
-      setError("Company Name is required.");
-      return false;
+      initialErrors.company_name = "Company Name is required.";
     }
     if (!formCountryId) {
-      setError("Country is required.");
-      return false;
+      initialErrors["field-country"] = "Country is required.";
     }
-    if (form.contact_calling_number && validateCallingNumber(form.contact_calling_number) === false) {
-      if (callingNumberError) {
-        setError(callingNumberError);
-        return false;
+    if (form.contact_calling_number) {
+      const callingErr = validatePhoneNumber(form.contact_calling_number, "Calling number");
+      if (callingErr) {
+        initialErrors["field-calling-number"] = callingErr;
+      }
+    }
+    if (form.contact_whatsapp_number) {
+      const whatsappErr = validatePhoneNumber(form.contact_whatsapp_number, "WhatsApp number");
+      if (whatsappErr) {
+        initialErrors["field-whatsapp-number"] = whatsappErr;
       }
     }
 
-    const triggerAlert = (err: unknown) => {
-      const msg = err instanceof Error ? err.message : String(err);
-      setError(msg);
-      const title = msg.toLowerCase().includes("duplicate") || msg.toLowerCase().includes("already exists")
-        ? "Duplicate Supplier Warning"
-        : "Validation Error";
-      setAlertPopup({ title, message: msg });
-      window.scrollTo({ top: 0, behavior: "smooth" });
-    };
+    if (Object.keys(initialErrors).length > 0) {
+      setValidationErrors((prev) => ({ ...prev, ...initialErrors }));
+      setError(Object.values(initialErrors)[0]);
+      const firstFieldId = Object.keys(initialErrors)[0];
+      focusAndScrollToField(firstFieldId);
+      return false;
+    }
 
     setError(null);
     setSaving(true);
     try {
       const { stateId, cityId } = await resolveCustomGeography(formCountryId);
+      const geoErrors: Record<string, string> = {};
       if (!stateId && !formStateCustomText.trim()) {
-        triggerAlert("Province is required.");
-        return false;
-      }
-      if (formStateCustomText.trim() && !stateId) {
-        triggerAlert("Province could not be resolved — please select from the dropdown or check your entry.");
-        return false;
+        geoErrors["field-province"] = "Province is required.";
+      } else if (formStateCustomText.trim() && !stateId) {
+        geoErrors["field-province"] = "Province could not be resolved — please select from dropdown.";
       }
       if (!cityId && !formCityCustomText.trim()) {
-        triggerAlert("City is required.");
-        return false;
+        geoErrors["field-city"] = "City is required.";
+      } else if (formCityCustomText.trim() && !cityId) {
+        geoErrors["field-city"] = "City could not be resolved — please select from dropdown.";
       }
-      if (formCityCustomText.trim() && !cityId) {
-        triggerAlert("City could not be resolved — please select from the dropdown or check your Province / City match.");
+
+      if (Object.keys(geoErrors).length > 0) {
+        setValidationErrors((prev) => ({ ...prev, ...geoErrors }));
+        setError(Object.values(geoErrors)[0]);
+        const firstFieldId = Object.keys(geoErrors)[0];
+        focusAndScrollToField(firstFieldId);
+        setSaving(false);
         return false;
       }
       const categoryIds = await resolveCustomCategories();
@@ -1152,7 +1261,28 @@ export function SuppliersPage() {
       }
       return true;
     } catch (err) {
-      triggerAlert(err);
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(msg);
+      const lower = msg.toLowerCase();
+      if (lower.includes("whatsapp")) {
+        setValidationErrors((prev) => ({ ...prev, "field-whatsapp-number": msg }));
+        focusAndScrollToField("field-whatsapp-number");
+        return false;
+      }
+      if (lower.includes("calling")) {
+        setValidationErrors((prev) => ({ ...prev, "field-calling-number": msg }));
+        focusAndScrollToField("field-calling-number");
+        return false;
+      }
+      if (lower.includes("company_name") || lower.includes("company name")) {
+        setValidationErrors((prev) => ({ ...prev, company_name: msg }));
+        focusAndScrollToField("company_name");
+        return false;
+      }
+      const title = lower.includes("duplicate") || lower.includes("already exists")
+        ? "Duplicate Supplier Warning"
+        : "Save Error";
+      setAlertPopup({ title, message: msg });
       return false;
     } finally {
       setSaving(false);
@@ -1299,6 +1429,34 @@ export function SuppliersPage() {
     });
   }
 
+  async function handleBulkDeactivate() {
+    if (!selectedIds.length) return;
+    if (!confirm(`Deactivate ${selectedIds.length} selected supplier(s)?`)) return;
+    await guardRowAction("bulk-deactivate", async () => {
+      try {
+        await Promise.all(selectedIds.map((id) => apiPost(`/suppliers/${id}/deactivate`, {})));
+        setSelectedIds([]);
+        reload();
+      } catch (err) {
+        setError(err);
+      }
+    });
+  }
+
+  async function handleBulkActivate() {
+    if (!selectedIds.length) return;
+    if (!confirm(`Activate ${selectedIds.length} selected supplier(s)?`)) return;
+    await guardRowAction("bulk-activate", async () => {
+      try {
+        await Promise.all(selectedIds.map((id) => apiPost(`/suppliers/${id}/activate`, {})));
+        setSelectedIds([]);
+        reload();
+      } catch (err) {
+        setError(err);
+      }
+    });
+  }
+
   async function handleInlineUpdate(path: string, payload: unknown) {
     try {
       await apiPatch(path, payload);
@@ -1423,19 +1581,34 @@ export function SuppliersPage() {
                   <h3 style={{ fontSize: "16px", fontWeight: 700, margin: "0 0 16px 0", color: "#0f172a" }}>
                     1. General Information
                   </h3>
-                  {/* Row 1: Company Name + Product Category (2 columns) */}
+                  {/* Row 1: Company Name + Category (2 columns) */}
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "18px", marginBottom: "18px" }}>
                     <div className="field" style={{ position: "relative" }}>
-                      <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>Name of Company *</label>
+                      <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>
+                        Name of Company <span style={{ color: "#ef4444" }}>*</span>
+                      </label>
                       <SearchableDropdown
+                        id="company_name"
+                        hasError={Boolean(validationErrors.company_name)}
                         value={form.company_name}
-                        onChange={(_, label) => setField("company_name", label)}
+                        onChange={(_, label) => {
+                          setField("company_name", label);
+                          if (validationErrors.company_name) setValidationErrors((prev) => ({ ...prev, company_name: "" }));
+                        }}
                         allowCustomText={true}
-                        onTextChange={(v) => setField("company_name", v)}
+                        onTextChange={(v) => {
+                          setField("company_name", v);
+                          if (validationErrors.company_name) setValidationErrors((prev) => ({ ...prev, company_name: "" }));
+                        }}
                         placeholder="Search existing or type company name..."
                         fetchOptions={companyNameFetcher}
                         fetchLabelForValue={async (v) => v}
                       />
+                      {validationErrors.company_name && (
+                        <div style={{ color: "#ef4444", fontSize: "12px", fontWeight: 600, marginTop: "5px", display: "flex", alignItems: "center", gap: "4px" }}>
+                          <span>⚠️</span> {validationErrors.company_name}
+                        </div>
+                      )}
                       {(() => {
                         const typed = (form.company_name || "").trim();
                         if (!typed) return null;
@@ -1515,30 +1688,48 @@ export function SuppliersPage() {
                   {/* Row 3: Country + Province + City (3 columns) */}
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "18px", marginBottom: "24px" }}>
                     <div className="field">
-                      <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>Country *</label>
+                      <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>
+                        Country <span style={{ color: "#ef4444" }}>*</span>
+                      </label>
                       <SearchableDropdown
+                        id="field-country"
+                        hasError={Boolean(validationErrors["field-country"])}
                         value={formCountryId}
-                        onChange={(v) => {
+                        onChange={async (v) => {
                           setFormCountryId(v);
                           setFormStateId(null);
                           setFormCityId(null);
                           setFormStateCustomText("");
                           setFormCityCustomText("");
+                          setValidationErrors((prev) => ({ ...prev, "field-country": "", "field-province": "", "field-city": "" }));
+                          const newCode = await resolveCountryPhoneCode(v);
+                          setFormCountryPhoneCode(newCode);
                         }}
                         placeholder="Search country..."
                         fetchOptions={searchFetcher("/masters/countries")}
                         fetchLabelForValue={fetchNameLabel("/masters/countries")}
                       />
+                      {validationErrors["field-country"] && (
+                        <div style={{ color: "#ef4444", fontSize: "12px", fontWeight: 600, marginTop: "5px", display: "flex", alignItems: "center", gap: "4px" }}>
+                          <span>⚠️</span> {validationErrors["field-country"]}
+                        </div>
+                      )}
                     </div>
                     <div className="field">
-                      <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>Province *</label>
+                      <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>
+                        Province <span style={{ color: "#ef4444" }}>*</span>
+                      </label>
                       <SearchableDropdown
+                        key={`field-province-${formCountryId || ""}`}
+                        id="field-province"
+                        hasError={Boolean(validationErrors["field-province"])}
                         value={formStateId}
                         onChange={(v, label) => {
                           setFormStateId(v);
                           setFormStateCustomText(v ? label : "");
                           setFormCityId(null);
                           setFormCityCustomText("");
+                          setValidationErrors((prev) => ({ ...prev, "field-province": "", "field-city": "" }));
                         }}
                         allowCustomText={true}
                         onTextChange={(text) => {
@@ -1546,6 +1737,7 @@ export function SuppliersPage() {
                           setFormStateId(null);
                           setFormCityId(null);
                           setFormCityCustomText("");
+                          setValidationErrors((prev) => ({ ...prev, "field-province": "", "field-city": "" }));
                         }}
                         placeholder="Search or type province..."
                         fetchOptions={searchFetcher("/masters/states", (): Record<string, string> =>
@@ -1553,28 +1745,48 @@ export function SuppliersPage() {
                         )}
                         fetchLabelForValue={fetchNameLabel("/masters/states")}
                       />
+                      {validationErrors["field-province"] && (
+                        <div style={{ color: "#ef4444", fontSize: "12px", fontWeight: 600, marginTop: "5px", display: "flex", alignItems: "center", gap: "4px" }}>
+                          <span>⚠️</span> {validationErrors["field-province"]}
+                        </div>
+                      )}
                     </div>
                     <div className="field">
-                      <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>City *</label>
+                      <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>
+                        City <span style={{ color: "#ef4444" }}>*</span>
+                      </label>
                       <SearchableDropdown
+                        key={`field-city-${formCountryId || ""}-${formStateId || formStateCustomText || ""}`}
+                        id="field-city"
+                        disabled={!formStateId && !formStateCustomText.trim()}
+                        hasError={Boolean(validationErrors["field-city"])}
                         value={formCityId}
                         onChange={(v, label) => {
                           setFormCityId(v);
                           setFormCityCustomText(v ? label : "");
+                          setValidationErrors((prev) => ({ ...prev, "field-city": "" }));
                         }}
                         allowCustomText={true}
                         onTextChange={(text) => {
                           setFormCityCustomText(text);
                           setFormCityId(null);
+                          setValidationErrors((prev) => ({ ...prev, "field-city": "" }));
                         }}
-                        placeholder="Search or type city..."
-                        fetchOptions={searchFetcher("/masters/cities", (): Record<string, string> => {
-                          if (formStateId) return { state_id: formStateId };
-                          if (formCountryId) return { country_id: formCountryId };
-                          return {};
-                        })}
+                        placeholder={formStateId || formStateCustomText.trim() ? "Search or type city..." : "Select a province first..."}
+                        fetchOptions={
+                          !formStateId
+                            ? async () => []
+                            : searchFetcher("/masters/cities", (): Record<string, string> => ({
+                                state_id: formStateId,
+                              }))
+                        }
                         fetchLabelForValue={fetchNameLabel("/masters/cities")}
                       />
+                      {validationErrors["field-city"] && (
+                        <div style={{ color: "#ef4444", fontSize: "12px", fontWeight: 600, marginTop: "5px", display: "flex", alignItems: "center", gap: "4px" }}>
+                          <span>⚠️</span> {validationErrors["field-city"]}
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -1622,81 +1834,124 @@ export function SuppliersPage() {
 
                     <TextField id="contact_designation" label="Designation" placeholder="e.g. Sales Manager" maxLength={150} value={form.contact_designation} onChange={(v) => setField("contact_designation", v)} />
 
-                    <div className="field">
-                      <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "4px", display: "block" }}>Calling Number</label>
-                      <input
-                        type="text"
-                        maxLength={30}
-                        placeholder="With country code, 7-11 digits"
-                        value={form.contact_calling_number}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          setField("contact_calling_number", val);
-                          if (whatsappSameAsCalling) setField("contact_whatsapp_number", val);
-                          if (wechatSameAsCalling) setField("contact_wechat_number", val);
-                          setCallingNumberError(validatePhoneNumber(val));
-                        }}
-                        style={{
-                          width: "100%",
-                          padding: "8px 11px",
-                          fontSize: "13.5px",
-                          borderRadius: "6px",
-                          border: callingNumberError ? "1px solid #ef4444" : "1px solid #cbd5e1",
-                          outline: "none",
-                        }}
-                      />
-                      {callingNumberError && <span style={{ color: "#ef4444", fontSize: "11px", marginTop: "4px", display: "block" }}>{callingNumberError}</span>}
-                    </div>
+                    <PhoneGroupField
+                      id="field-calling-number"
+                      label="Calling Number"
+                      defaultPrefix={formCountryPhoneCode}
+                      value={form.contact_calling_number}
+                      hasError={Boolean(validationErrors["field-calling-number"] || callingNumberError)}
+                      hint={
+                        validationErrors["field-calling-number"] || callingNumberError ? (
+                          <span>
+                            <span>⚠️</span> {validationErrors["field-calling-number"] || callingNumberError}
+                          </span>
+                        ) : undefined
+                      }
+                      onChange={(val) => {
+                        setField("contact_calling_number", val);
+                        const err = validatePhoneNumber(val, "Calling number");
+                        setCallingNumberError(err);
+                        setValidationErrors((prev) => ({ ...prev, "field-calling-number": err || "" }));
+                        if (whatsappSameAsCalling) {
+                          setField("contact_whatsapp_number", val);
+                          const wErr = validatePhoneNumber(val, "WhatsApp number");
+                          setValidationErrors((prev) => ({ ...prev, "field-whatsapp-number": wErr || "" }));
+                        }
+                        if (wechatSameAsCalling) {
+                          setField("contact_wechat_number", val);
+                        }
+                      }}
+                      placeholder="13800000000"
+                    />
 
-                    <div className="field">
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
-                        <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569" }}>WhatsApp Number</label>
-                        <label style={{ fontSize: "11px", color: "#64748b", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "4px" }}>
-                          <input
-                            type="checkbox"
-                            checked={whatsappSameAsCalling}
-                            onChange={(e) => {
-                              setWhatsappSameAsCalling(e.target.checked);
-                              if (e.target.checked) setField("contact_whatsapp_number", form.contact_calling_number);
-                            }}
-                          />
-                          Same as calling
-                        </label>
-                      </div>
-                      <input
-                        type="text"
-                        maxLength={30}
-                        value={form.contact_whatsapp_number}
-                        onChange={(e) => setField("contact_whatsapp_number", e.target.value)}
-                        style={{ width: "100%", padding: "8px 11px", fontSize: "13.5px", borderRadius: "6px", border: "1px solid #cbd5e1", outline: "none" }}
-                      />
-                    </div>
+                    <PhoneGroupField
+                      id="field-whatsapp-number"
+                      defaultPrefix={formCountryPhoneCode}
+                      label={
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                          <span style={{ fontSize: "12px", fontWeight: 600, color: "#475569" }}>WhatsApp Number</span>
+                          <label style={{ fontSize: "11px", color: "#64748b", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "4px", fontWeight: 500 }}>
+                            <input
+                              type="checkbox"
+                              checked={whatsappSameAsCalling}
+                              onChange={(e) => {
+                                const checked = e.target.checked;
+                                setWhatsappSameAsCalling(checked);
+                                if (checked) {
+                                  setField("contact_whatsapp_number", form.contact_calling_number);
+                                  const wErr = validatePhoneNumber(form.contact_calling_number, "WhatsApp number");
+                                  setValidationErrors((prev) => ({ ...prev, "field-whatsapp-number": wErr || "" }));
+                                }
+                              }}
+                            />
+                            Same as calling
+                          </label>
+                        </div>
+                      }
+                      value={form.contact_whatsapp_number}
+                      hasError={Boolean(validationErrors["field-whatsapp-number"])}
+                      hint={
+                        validationErrors["field-whatsapp-number"] ? (
+                          <span>
+                            <span>⚠️</span> {validationErrors["field-whatsapp-number"]}
+                          </span>
+                        ) : undefined
+                      }
+                      onChange={(val) => {
+                        setWhatsappSameAsCalling(false);
+                        setField("contact_whatsapp_number", val);
+                        const err = validatePhoneNumber(val, "WhatsApp number");
+                        setValidationErrors((prev) => ({ ...prev, "field-whatsapp-number": err || "" }));
+                      }}
+                      placeholder="13800000000"
+                    />
 
-                    <div className="field">
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
-                        <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569" }}>WeChat Number</label>
-                        <label style={{ fontSize: "11px", color: "#64748b", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "4px" }}>
-                          <input
-                            type="checkbox"
-                            checked={wechatSameAsCalling}
-                            onChange={(e) => {
-                              setWechatSameAsCalling(e.target.checked);
-                              if (e.target.checked) setField("contact_wechat_number", form.contact_calling_number);
-                            }}
-                          />
-                          Same as calling
-                        </label>
-                      </div>
-                      <input
-                        type="text"
-                        maxLength={50}
-                        value={form.contact_wechat_number}
-                        onChange={(e) => setField("contact_wechat_number", e.target.value)}
-                        style={{ width: "100%", padding: "8px 11px", fontSize: "13.5px", borderRadius: "6px", border: "1px solid #cbd5e1", outline: "none" }}
-                      />
-                    </div>
+                    <PhoneGroupField
+                      id="field-wechat-number"
+                      defaultPrefix={formCountryPhoneCode}
+                      label={
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                          <span style={{ fontSize: "12px", fontWeight: 600, color: "#475569" }}>WeChat Number</span>
+                          <label style={{ fontSize: "11px", color: "#64748b", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "4px", fontWeight: 500 }}>
+                            <input
+                              type="checkbox"
+                              checked={wechatSameAsCalling}
+                              onChange={(e) => {
+                                const checked = e.target.checked;
+                                setWechatSameAsCalling(checked);
+                                if (checked) setField("contact_wechat_number", form.contact_calling_number);
+                              }}
+                            />
+                            Same as calling
+                          </label>
+                        </div>
+                      }
+                      value={form.contact_wechat_number}
+                      hasError={Boolean(validationErrors["field-wechat-number"])}
+                      hint={
+                        validationErrors["field-wechat-number"] ? (
+                          <span>
+                            <span>⚠️</span> {validationErrors["field-wechat-number"]}
+                          </span>
+                        ) : undefined
+                      }
+                      onChange={(val) => {
+                        setWechatSameAsCalling(false);
+                        setField("contact_wechat_number", val);
+                        if (validationErrors["field-wechat-number"]) {
+                          setValidationErrors((prev) => ({ ...prev, "field-wechat-number": "" }));
+                        }
+                      }}
+                      placeholder="13800000000"
+                    />
 
-                    <TextField id="emails_input" label="Email ID (multiple emails)" placeholder="test6861@supplier.com" value={form.emails_input} onChange={(v) => setField("emails_input", v)} />
+                    <EmailTagInput
+                      id="emails"
+                      label="Email IDs (Multiple)"
+                      emails={form.emails}
+                      onChange={(newEmails) => setForm((prev) => ({ ...prev, emails: newEmails }))}
+                      placeholder="Type email address and press Enter..."
+                    />
                   </div>
                 </div>
 
@@ -1708,6 +1963,7 @@ export function SuppliersPage() {
                     </h3>
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "18px", marginBottom: "18px" }}>
                       <TextField id="tax_id_number" label="Tax ID Number" maxLength={100} value={form.tax_id_number} onChange={(v) => setField("tax_id_number", v)} />
+                      <TextField id="address" label="Address" maxLength={500} value={form.address} onChange={(v) => setField("address", v)} />
                       <TextField id="town" label="Town" maxLength={150} value={form.town} onChange={(v) => setField("town", v)} />
                       <TextField id="primary_website" label="Primary Website" placeholder="https://..." value={form.primary_website} onChange={(v) => setField("primary_website", v)} />
                       <TextField id="secondary_website" label="Secondary Website" placeholder="https://..." value={form.secondary_website} onChange={(v) => setField("secondary_website", v)} />
@@ -1716,7 +1972,6 @@ export function SuppliersPage() {
                         <option value="A">Grade A</option>
                         <option value="B">Grade B</option>
                         <option value="C">Grade C</option>
-                        <option value="D">Grade D</option>
                       </SelectField>
                       <SelectField id="current_status" label="Current Status" value={form.current_status} onChange={(v) => setField("current_status", v)}>
                         <option value="">Select</option>
@@ -1728,32 +1983,73 @@ export function SuppliersPage() {
                         <option value="Yes">Yes</option>
                         <option value="No">No</option>
                       </SelectField>
-                      <div style={{ gridColumn: "span 2" }}>
-                        <TextField id="potential_reason" label="Reason for Potential Status" placeholder="Explain why..." value={form.potential_reason} onChange={(v) => setField("potential_reason", v)} />
-                      </div>
                     </div>
 
-                    <div style={{ marginBottom: "18px" }}>
-                      <TextAreaField id="secondary_products_description" label="Secondary Products Description" rows={2} value={form.secondary_products_description} onChange={(v) => setField("secondary_products_description", v)} />
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "18px", marginBottom: "18px" }}>
+                      <TextAreaField
+                        id="potential_reason"
+                        label="Reason for Potential Status"
+                        placeholder="Explain why..."
+                        rows={2}
+                        value={form.potential_reason}
+                        onChange={(v) => setField("potential_reason", v)}
+                      />
+                      <TextAreaField
+                        id="secondary_products_description"
+                        label="Secondary Products Description"
+                        placeholder="Secondary products..."
+                        rows={2}
+                        value={form.secondary_products_description}
+                        onChange={(v) => setField("secondary_products_description", v)}
+                      />
                     </div>
 
-                    <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: "18px", marginBottom: "18px" }}>
+                    <div style={{ display: "grid", gridTemplateColumns: form.visited_factory_office === "true" ? "repeat(2, 1fr)" : "1fr", gap: "18px", marginBottom: "18px" }}>
                       <SelectField id="visited_factory_office" label="Visited Factory / Office?" value={form.visited_factory_office} onChange={(v) => setField("visited_factory_office", v)}>
                         <option value="false">No</option>
                         <option value="true">Yes</option>
                       </SelectField>
-                      <TextField id="visit_remarks" label="Visit Remarks / Summary" placeholder="Key observations..." value={form.visit_remarks} onChange={(v) => setField("visit_remarks", v)} />
+                      {form.visited_factory_office === "true" && (
+                        <TextField id="visit_remarks" label="Visit Remarks / Summary" placeholder="Key observations..." value={form.visit_remarks} onChange={(v) => setField("visit_remarks", v)} />
+                      )}
                     </div>
 
                     <div style={{ marginBottom: "18px" }}>
-                      <div className="card-header" style={{ marginBottom: "8px" }}>
-                        <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", margin: 0 }}>
-                          Visit Photos &amp; Videos (Supabase Storage)
+                      <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", marginBottom: "6px", display: "block" }}>
+                        Visit Photos &amp; Videos (Supabase Storage)
+                      </label>
+                      <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "10px" }}>
+                        <label
+                          className="btn btn-small"
+                          style={{
+                            background: "#0061f2",
+                            color: "#ffffff",
+                            border: "none",
+                            borderRadius: "6px",
+                            padding: "7px 14px",
+                            fontWeight: 600,
+                            fontSize: "12.5px",
+                            cursor: uploadingMedia ? "not-allowed" : "pointer",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "6px",
+                          }}
+                        >
+                          📁 {uploadingMedia ? "Uploading..." : "Select Photos / Videos"}
+                          <input
+                            type="file"
+                            multiple
+                            accept="image/*,video/*"
+                            onChange={(e) => void handleMediaFileUpload(e.target.files)}
+                            disabled={uploadingMedia}
+                            style={{ display: "none" }}
+                          />
                         </label>
-                        <label className="btn btn-small" style={{ background: "#f1f5f9", border: "1px solid #cbd5e1", color: "#334155", cursor: uploadingMedia ? "not-allowed" : "pointer" }}>
-                          {uploadingMedia ? "Uploading..." : "📁 Select Photos / Videos"}
-                          <input type="file" multiple accept="image/*,video/*" onChange={(e) => void handleMediaFileUpload(e.target.files)} disabled={uploadingMedia} style={{ display: "none" }} />
-                        </label>
+                        {uploadingMedia && (
+                          <span style={{ fontSize: "12px", color: "#64748b" }}>
+                            Uploading media, please wait...
+                          </span>
+                        )}
                       </div>
 
                       {mediaList.length > 0 && (
@@ -1761,13 +2057,43 @@ export function SuppliersPage() {
                           {mediaList.map((url, idx) => {
                             const isVideo = url.match(/\.(mp4|webm|ogg|mov)$/i);
                             return (
-                              <div key={idx} style={{ position: "relative", width: "100px", height: "80px", borderRadius: "6px", overflow: "hidden", border: "1px solid #cbd5e1" }}>
+                              <div
+                                key={idx}
+                                style={{
+                                  position: "relative",
+                                  width: "100px",
+                                  height: "80px",
+                                  borderRadius: "6px",
+                                  overflow: "hidden",
+                                  border: "1px solid #cbd5e1",
+                                  background: "#f8fafc",
+                                }}
+                              >
                                 {isVideo ? (
-                                  <div style={{ width: "100%", height: "100%", background: "#0f172a", display: "flex", alignItems: "center", justifyContent: "center", color: "#ffffff" }}>
+                                  <div
+                                    style={{
+                                      width: "100%",
+                                      height: "100%",
+                                      background: "#0f172a",
+                                      display: "flex",
+                                      alignItems: "center",
+                                      justifyContent: "center",
+                                      color: "#ffffff",
+                                    }}
+                                  >
                                     🎬
                                   </div>
                                 ) : (
-                                  <img src={url} alt={`Media ${idx + 1}`} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                                  <img
+                                    src={resolveImageUrl(url)}
+                                    alt={`Media ${idx + 1}`}
+                                    style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                                    onError={(e) => {
+                                      if (!url.startsWith("http") && !url.startsWith("data:")) {
+                                        (e.target as HTMLImageElement).src = `http://localhost:8000${url.startsWith("/") ? "" : "/"}${url}`;
+                                      }
+                                    }}
+                                  />
                                 )}
                                 <button
                                   type="button"
@@ -1785,6 +2111,10 @@ export function SuppliersPage() {
                                     cursor: "pointer",
                                     fontSize: "12px",
                                     fontWeight: 700,
+                                    display: "flex",
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                    boxShadow: "0 1px 3px rgba(0,0,0,0.2)",
                                   }}
                                 >
                                   ✕
@@ -1795,7 +2125,13 @@ export function SuppliersPage() {
                         </div>
                       )}
 
-                      <TextField id="visit_media_input" label="Media URLs (comma-separated URLs)" placeholder="https://... (Auto-filled on upload or paste manually)" value={form.visit_media_input} onChange={(v) => setField("visit_media_input", v)} />
+                      <TextField
+                        id="visit_media_input"
+                        label="Media URLs (comma-separated URLs)"
+                        placeholder="https://... (Auto-filled on upload or paste manually)"
+                        value={form.visit_media_input}
+                        onChange={(v) => setField("visit_media_input", v)}
+                      />
                     </div>
 
                     <div style={{ marginBottom: "16px" }}>
@@ -1810,12 +2146,54 @@ export function SuppliersPage() {
                   </div>
                 )}
 
-                {/* FULL PAGE FORM FOOTER ACTION BUTTONS */}
+                {/* FORM FOOTER ACTION BUTTONS */}
                 <div style={{ paddingTop: "24px", marginTop: "28px", borderTop: "1px solid #e2e8f0", display: "flex", gap: "12px", justifyContent: "flex-end" }}>
                   <button type="button" className="btn" onClick={closeModal} style={{ background: "#ffffff", border: "1px solid #cbd5e1", color: "#475569", padding: "10px 20px", borderRadius: "6px", fontWeight: 600, fontSize: "14px" }}>
                     Cancel
                   </button>
-                  {!currentSupplierId && (
+                  {modalMode === "quick" ? (
+                    <>
+                      <button
+                        type="button"
+                        className="btn"
+                        disabled={saving}
+                        style={{
+                          background: "#ffffff",
+                          border: "1px solid #cbd5e1",
+                          color: "#334155",
+                          padding: "10px 24px",
+                          borderRadius: "6px",
+                          fontWeight: 600,
+                          fontSize: "14px",
+                          cursor: saving ? "not-allowed" : "pointer",
+                          opacity: saving ? 0.7 : 1,
+                        }}
+                        onClick={handleSaveAndExit}
+                      >
+                        {saving ? "Saving..." : "Save & Exit"}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn"
+                        disabled={saving}
+                        style={{
+                          background: "#0061f2",
+                          color: "#ffffff",
+                          padding: "10px 24px",
+                          borderRadius: "6px",
+                          fontWeight: 600,
+                          fontSize: "14px",
+                          border: "none",
+                          cursor: saving ? "not-allowed" : "pointer",
+                          opacity: saving ? 0.7 : 1,
+                          boxShadow: "0 2px 6px rgba(0, 97, 242, 0.25)",
+                        }}
+                        onClick={handleSaveAndContinue}
+                      >
+                        {saving ? "Saving..." : "Save & Continue"}
+                      </button>
+                    </>
+                  ) : (
                     <button
                       type="button"
                       className="btn"
@@ -1832,30 +2210,11 @@ export function SuppliersPage() {
                         opacity: saving ? 0.7 : 1,
                         boxShadow: "0 2px 6px rgba(0, 97, 242, 0.25)",
                       }}
-                      onClick={handleSaveAndContinue}
+                      onClick={handleSaveAndExit}
                     >
-                      {saving ? "Saving..." : "Save & Continue"}
+                      {saving ? "Saving..." : (currentSupplierId ? "Save Changes" : "Save Supplier")}
                     </button>
                   )}
-                  <button
-                    type="button"
-                    className="btn"
-                    disabled={saving}
-                    style={{
-                      background: !currentSupplierId ? "#ffffff" : "#0061f2",
-                      border: !currentSupplierId ? "1px solid #cbd5e1" : "none",
-                      color: !currentSupplierId ? "#334155" : "#ffffff",
-                      padding: "10px 24px",
-                      borderRadius: "6px",
-                      fontWeight: 600,
-                      fontSize: "14px",
-                      cursor: saving ? "not-allowed" : "pointer",
-                      opacity: saving ? 0.7 : 1,
-                    }}
-                    onClick={handleSaveAndExit}
-                  >
-                    {saving ? "Saving..." : "Save & Exit"}
-                  </button>
                 </div>
               </form>
             )}
@@ -2494,6 +2853,8 @@ export function SuppliersPage() {
               </Can>
               <BulkActionsDropdown
                 selectedCount={selectedIds.length}
+                onBulkActivate={canUpdate && statusTab === "inactive" ? handleBulkActivate : undefined}
+                onBulkDeactivate={canUpdate && statusTab === "active" ? handleBulkDeactivate : undefined}
                 onBulkDelete={canDelete ? handleBulkDelete : undefined}
               />
             </div>
@@ -2703,6 +3064,50 @@ export function SuppliersPage() {
           )}
 
           <div className="card">
+            {/* Active / Inactive Top Tabs */}
+            <div style={{ display: "flex", gap: "24px", borderBottom: "1px solid #e2e8f0", padding: "0 20px", marginTop: "12px" }}>
+              <button
+                type="button"
+                style={{
+                  background: "none",
+                  border: "none",
+                  borderBottom: statusTab === "active" ? "2.5px solid #0061f2" : "2.5px solid transparent",
+                  color: statusTab === "active" ? "#0061f2" : "#64748b",
+                  fontWeight: 700,
+                  fontSize: "14px",
+                  paddingBottom: "10px",
+                  cursor: "pointer",
+                }}
+                onClick={() => {
+                  setCurrentPage(1);
+                  setSelectedIds([]);
+                  setStatusTab("active");
+                }}
+              >
+                Active
+              </button>
+              <button
+                type="button"
+                style={{
+                  background: "none",
+                  border: "none",
+                  borderBottom: statusTab === "inactive" ? "2.5px solid #0061f2" : "2.5px solid transparent",
+                  color: statusTab === "inactive" ? "#0061f2" : "#64748b",
+                  fontWeight: 700,
+                  fontSize: "14px",
+                  paddingBottom: "10px",
+                  cursor: "pointer",
+                }}
+                onClick={() => {
+                  setCurrentPage(1);
+                  setSelectedIds([]);
+                  setStatusTab("inactive");
+                }}
+              >
+                Inactive
+              </button>
+            </div>
+
             <div className="toolbar" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 20px", gap: "12px", flexWrap: "wrap" }}>
               <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
@@ -2845,7 +3250,7 @@ export function SuppliersPage() {
                     {displayOrder.map((idx) => {
                       if (idx === 0) {
                         return (
-                          <th key="col-0" style={getFreezeStyle(0, true)}>
+                          <th key="col-0" style={{ width: "40px", minWidth: "40px", maxWidth: "45px", textAlign: "center", ...getFreezeStyle(0, true) }}>
                             <input
                               type="checkbox"
                               checked={rows.length > 0 && rows.every((r) => selectedIds.includes(r.id))}
@@ -2865,11 +3270,18 @@ export function SuppliersPage() {
                         "Current Status", "Grade", "Potential", "Action"
                       ][idx];
                       const isPinned = Boolean(pinnedCols[idx]);
+                      const isSrNo = idx === 1;
                       return (
-                        <th key={`col-${idx}-${label}`} style={{ ...(idx === 14 ? { textAlign: "center" } : {}), ...getFreezeStyle(idx, true) }}>
-                          <div style={{ display: "flex", alignItems: "center", justifyContent: idx === 14 ? "center" : "space-between", gap: "4px" }}>
-                            <span>{label}</span>
-                            <button type="button" onClick={() => togglePin(idx)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: "11px", opacity: isPinned ? 1 : 0.3 }} title={isPinned ? "Unfreeze column" : "Freeze column"}>
+                        <th
+                          key={`col-${idx}-${label}`}
+                          style={{
+                            ...(isSrNo ? { width: "65px", minWidth: "65px", maxWidth: "75px", textAlign: "center" } : idx === 14 ? { textAlign: "center" } : {}),
+                            ...getFreezeStyle(idx, true),
+                          }}
+                        >
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: idx === 14 || isSrNo ? "center" : "space-between", gap: "2px" }}>
+                            <span style={isSrNo ? { whiteSpace: "nowrap" } : {}}>{label}</span>
+                            <button type="button" onClick={() => togglePin(idx)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: "11px", opacity: isPinned ? 1 : 0.3, padding: "0 2px" }} title={isPinned ? "Unfreeze column" : "Freeze column"}>
                               📌
                             </button>
                           </div>
@@ -2890,7 +3302,7 @@ export function SuppliersPage() {
                           switch (idx) {
                             case 0:
                               return (
-                                <td key="cell-0" style={getFreezeStyle(0, false)}>
+                                <td key="cell-0" style={{ width: "40px", minWidth: "40px", maxWidth: "45px", textAlign: "center", ...getFreezeStyle(0, false) }}>
                                   <input
                                     type="checkbox"
                                     className="row-select"
@@ -2905,7 +3317,7 @@ export function SuppliersPage() {
                               );
                             case 1:
                               return (
-                                <td key="cell-1" className="cell-srno" style={getFreezeStyle(1, false)}>
+                                <td key="cell-1" className="cell-srno" style={{ width: "65px", minWidth: "65px", maxWidth: "75px", textAlign: "center", ...getFreezeStyle(1, false) }}>
                                   {startSrNo + index}
                                 </td>
                               );
@@ -3027,34 +3439,46 @@ export function SuppliersPage() {
                                         </svg>
                                       </button>
                                     )}
-                                    {canDelete && (
-                                      <button
-                                        type="button"
-                                        className="btn"
-                                        disabled={isRowActionPending(`delete:${s.id}`)}
-                                        style={{
-                                          background: "#ef4444",
-                                          color: "#ffffff",
-                                          padding: "6px 9px",
-                                          borderRadius: "4px",
-                                          border: "none",
-                                          cursor: isRowActionPending(`delete:${s.id}`) ? "default" : "pointer",
-                                          opacity: isRowActionPending(`delete:${s.id}`) ? 0.6 : 1,
-                                          display: "inline-flex",
-                                          alignItems: "center",
-                                          justifyContent: "center",
-                                        }}
-                                        onClick={() => handleRowDelete(s.id)}
-                                        title="Delete Supplier"
-                                      >
-                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                          <polyline points="3 6 5 6 21 6" />
-                                          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                                          <line x1="10" y1="11" x2="10" y2="17" />
-                                          <line x1="14" y1="11" x2="14" y2="17" />
-                                        </svg>
-                                      </button>
-                                    )}
+                                {canDelete && (() => {
+                                  const isEligibleForDelete =
+                                    (!s.current_status || s.current_status.toLowerCase() === "new") &&
+                                    (!s.potential || s.potential.toLowerCase() === "no");
+                                  return (
+                                    <button
+                                      type="button"
+                                      className="btn"
+                                      disabled={!isEligibleForDelete || isRowActionPending(`delete:${s.id}`)}
+                                      style={{
+                                        background: isEligibleForDelete ? "#ef4444" : "#94a3b8",
+                                        color: "#ffffff",
+                                        padding: "6px 9px",
+                                        borderRadius: "4px",
+                                        border: "none",
+                                        cursor: !isEligibleForDelete ? "not-allowed" : (isRowActionPending(`delete:${s.id}`) ? "default" : "pointer"),
+                                        opacity: !isEligibleForDelete ? 0.45 : (isRowActionPending(`delete:${s.id}`) ? 0.6 : 1),
+                                        display: "inline-flex",
+                                        alignItems: "center",
+                                        justifyContent: "center",
+                                      }}
+                                      onClick={() => {
+                                        if (!isEligibleForDelete) return;
+                                        void handleRowDelete(s.id);
+                                      }}
+                                      title={
+                                        !isEligibleForDelete
+                                          ? "Cannot delete Existing or Potential suppliers; set to Inactive instead."
+                                          : "Delete Supplier"
+                                      }
+                                    >
+                                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                        <polyline points="3 6 5 6 21 6" />
+                                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                                        <line x1="10" y1="11" x2="10" y2="17" />
+                                        <line x1="14" y1="11" x2="14" y2="17" />
+                                      </svg>
+                                    </button>
+                                  );
+                                })()}
                                   </div>
                                 </td>
                               );
@@ -3088,7 +3512,13 @@ export function SuppliersPage() {
         isOpen={Boolean(alertPopup)}
         title={alertPopup?.title}
         message={alertPopup?.message || ""}
-        onClose={() => setAlertPopup(null)}
+        onClose={() => {
+          setAlertPopup(null);
+          const errKeys = Object.keys(validationErrors).filter((k) => validationErrors[k]);
+          if (errKeys.length > 0) {
+            setTimeout(() => focusAndScrollToField(errKeys[0]), 50);
+          }
+        }}
       />
 
       {drawerSupplier && (
@@ -3121,6 +3551,7 @@ export function SuppliersPage() {
                 { label: "Sub-Categories", value: chipList(drawerSupplier.sub_category_ids, "subCategories"), fullWidth: true },
                 { label: "Products Supplied", value: chipList(drawerSupplier.product_ids, "products"), fullWidth: true },
                 { label: "Secondary Products", value: drawerSupplier.secondary_products_description || "—", fullWidth: true },
+                { label: "Address", value: drawerSupplier.address || "—", fullWidth: true },
               ]}
             />
 

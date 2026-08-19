@@ -51,7 +51,6 @@ const EMPTY: FormState = {
   organization_id: "",
   organization_ids_json: "[]",
   branch_ids_json: "[]",
-  supplier_id: "",
   refund_vat_percent: "",
   license_certificate_required: "",
   conversion_factor: "",
@@ -110,7 +109,6 @@ export function ProductsPage() {
   const hsnCodes = useLookup<Hsn>("/masters/hsn", 250);
   const uoms = useLookup<Uom>("/masters/uom", 250);
   const organizations = useLookup<{ id: string; name: string }>("/masters/company-list", 250);
-  const suppliers = useLookup<{ id: string; company_name: string }>("/suppliers", 500);
   const existingProducts = useLookup<Product>("/masters/products", 1000);
 
 
@@ -259,7 +257,6 @@ export function ProductsPage() {
       columnHeaders={[
         "Product Name (As Per Tally)",
         "Product Code",
-        "Supplier Company Name",
         "Brand",
         "Sub Category",
         "HSN Code",
@@ -307,17 +304,6 @@ export function ProductsPage() {
               {p.product_code || "—"}
             </span>
           ),
-        },
-        {
-          header: "Supplier Company Name",
-          render: (p) => {
-            const name = p.supplier_company_name || suppliers.items.find((s) => s.id === p.supplier_id)?.company_name || "—";
-            return (
-              <span className="cell-truncate" title={name} style={{ maxWidth: "200px" }}>
-                {name}
-              </span>
-            );
-          },
         },
         {
           header: "Brand",
@@ -460,7 +446,6 @@ export function ProductsPage() {
               : []
           ),
           branch_ids_json: JSON.stringify(item?.branch_ids || []),
-          supplier_id: str(item?.supplier_id),
           refund_vat_percent: str(item?.refund_vat_percent),
           license_certificate_required: str(item?.license_certificate_required),
           conversion_factor: str(item?.conversion_factor),
@@ -531,7 +516,6 @@ export function ProductsPage() {
           hsn_id: f.hsn_id || null,
           uom_id: f.uom_id,
           secondary_uom_id: secUomId,
-          supplier_id: f.supplier_id || null,
 
           organization_id: (() => {
             try {
@@ -712,19 +696,6 @@ export function ProductsPage() {
                 ))}
               </SelectField>
               <TextField id="refund_vat_percent" label="Refund VAT %" type="number" step="0.01" min={0} max={100} placeholder="Auto from HSN or manual" value={f.refund_vat_percent} onChange={(v) => set("refund_vat_percent", v)} />
-              <SelectField
-                id="supplier_id"
-                label="Supplier Company Name"
-                value={f.supplier_id}
-                onChange={(v) => set("supplier_id", v)}
-              >
-                <option value="">-- Select Supplier Company Name --</option>
-                {suppliers.items.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.company_name}
-                  </option>
-                ))}
-              </SelectField>
               <MultiSelectField
                 id="organization_ids_json"
                 label="Organization"

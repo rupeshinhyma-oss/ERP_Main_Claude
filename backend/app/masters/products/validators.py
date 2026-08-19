@@ -40,7 +40,6 @@ def validate_product_row(raw_row: dict[str, str], row_number: int) -> dict[str, 
     category_code = _get_val(raw_row, "Category", "category_code", "Category Code", "category_name", "Category / Sub-Cat.")
     sub_category_code = _get_val(raw_row, "Sub Category", "Sub-Category", "Sub Cate.", "sub_category_code", "Sub-Category Code")
     brand_code = _get_val(raw_row, "Brand", "brand_code", "Brand Code", "brand_name")
-    supplier_name = _get_val(raw_row, "Supplier Company Name", "supplier_name", "Supplier", "supplier_id")
     hsn_code = _get_val(raw_row, "HSN Code", "HSN", "hsn_code")
     uom_code = _get_val(raw_row, "UOM", "uom_code", "Unit of Measure", "uom_name")
 
@@ -82,7 +81,6 @@ def validate_product_row(raw_row: dict[str, str], row_number: int) -> dict[str, 
         "product_code": product_code,
         "product_name": product_name,
         "product_name_tally": product_name,
-        "supplier_name": supplier_name or None,
         "category_code": category_code,
         "sub_category_code": sub_category_code or None,
         "brand_code": brand_code or None,

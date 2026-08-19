@@ -36,7 +36,6 @@ IMPORT_HEADERS = [
 EXPORT_HEADERS = [
     "Product Name (As Per Tally)",
     "Product Code",
-    "Supplier Company Name",
     "Brand",
     "Category",
     "Sub Category",

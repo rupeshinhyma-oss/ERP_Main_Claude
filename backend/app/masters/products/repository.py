@@ -69,23 +69,9 @@ class ProductRepository(BaseRepository[Product]):
         from app.masters.cities.models import City
         from app.suppliers.models import Supplier
 
-        supplier_ids = list({p.supplier_id for p in products if p.supplier_id})
-        name_and_city_by_supplier_id: dict[uuid.UUID, tuple[str, str | None]] = {}
-        if supplier_ids:
-            stmt = (
-                select(Supplier.id, Supplier.company_name, City.name)
-                .outerjoin(City, City.id == Supplier.city_id)
-                .where(Supplier.id.in_(supplier_ids))
-            )
-            result = await self.session.execute(stmt)
-            name_and_city_by_supplier_id = {row[0]: (row[1], row[2]) for row in result.all()}
-
         for product in products:
-            name, city = (
-                name_and_city_by_supplier_id.get(product.supplier_id) if product.supplier_id else None
-            ) or (None, None)
-            product._planning_supplier_name = name
-            product._planning_supplier_city = city
+            product._planning_supplier_name = None
+            product._planning_supplier_city = None
 
     def _apply_search(self, stmt, term: str | None):
         """
@@ -145,14 +131,6 @@ class ProductRepository(BaseRepository[Product]):
             exists().where(
                 Brand.id == Product.brand_id,
                 or_(Brand.name.ilike(pattern), Brand.code.ilike(pattern)),
-            )
-        )
-
-        # Linked Supplier
-        conditions.append(
-            exists().where(
-                Supplier.id == Product.supplier_id,
-                Supplier.company_name.ilike(pattern),
             )
         )
 

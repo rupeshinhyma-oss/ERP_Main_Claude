@@ -574,34 +574,69 @@ export function SuppliersPage() {
     }
   };
 
-  /* --- Bounded name resolver for the chip columns --- */
+  /* --- Bounded name resolver with fast batch lookup and global memory cache --- */
   const resolver = useMemo(() => {
-    const fetchNamesByIds = async (
+    const loadedBatchEndpoints = new Set<string>();
+
+    const fetchNamesBatch = async (
       apiBase: string,
       ids: string[],
       labelFn?: (d: Record<string, unknown>) => string
     ): Promise<[string, string][]> => {
-      const results = await Promise.all(
-        ids.map(async (id): Promise<[string, string | null]> => {
-          try {
-            const { data } = await apiGet<Record<string, unknown>>(`${apiBase}/${id}`);
-            return [id, labelFn ? labelFn(data) : (data.name as string)];
-          } catch {
-            return [id, null];
+      const results: [string, string][] = [];
+
+      // 1. Bulk-load the master endpoint on first encounter (1 single request for up to 250 records)
+      if (!loadedBatchEndpoints.has(apiBase)) {
+        loadedBatchEndpoints.add(apiBase);
+        try {
+          const { data } = await apiGet<Record<string, unknown>[]>(
+            `${apiBase}${toQueryString({ page: 1, page_size: 250, sort_order: "asc" })}`
+          );
+          if (Array.isArray(data)) {
+            for (const item of data) {
+              const itemId = String(item.id || "");
+              const itemLabel = labelFn ? labelFn(item) : String(item.name || item.code || "");
+              if (itemId && itemLabel) {
+                results.push([itemId, itemLabel]);
+              }
+            }
           }
-        })
-      );
-      return results.filter((pair): pair is [string, string] => pair[1] !== null);
+        } catch {
+          // If bulk load fails, fallback to individual resolution
+        }
+      }
+
+      // 2. Resolve any specific requested ID not present in the batch load
+      const foundMap = new Map(results);
+      const missingIds = ids.filter((id) => !foundMap.has(id));
+
+      if (missingIds.length > 0) {
+        const individual = await Promise.all(
+          missingIds.map(async (id): Promise<[string, string | null]> => {
+            try {
+              const { data } = await apiGet<Record<string, unknown>>(`${apiBase}/${id}`);
+              return [id, labelFn ? labelFn(data) : (data.name as string)];
+            } catch {
+              return [id, null];
+            }
+          })
+        );
+        for (const [id, label] of individual) {
+          if (label) results.push([id, label]);
+        }
+      }
+
+      return results;
     };
 
     return createNameResolver({
-      countries: (ids) => fetchNamesByIds("/masters/countries", ids),
-      states: (ids) => fetchNamesByIds("/masters/states", ids),
-      cities: (ids) => fetchNamesByIds("/masters/cities", ids),
-      categories: (ids) => fetchNamesByIds("/masters/product-categories", ids),
-      subCategories: (ids) => fetchNamesByIds("/masters/product-sub-categories", ids),
+      countries: (ids) => fetchNamesBatch("/masters/countries", ids),
+      states: (ids) => fetchNamesBatch("/masters/states", ids),
+      cities: (ids) => fetchNamesBatch("/masters/cities", ids),
+      categories: (ids) => fetchNamesBatch("/masters/product-categories", ids),
+      subCategories: (ids) => fetchNamesBatch("/masters/product-sub-categories", ids),
       products: (ids) =>
-        fetchNamesByIds("/masters/products", ids, (d) => d.product_name as string),
+        fetchNamesBatch("/masters/products", ids, (d) => d.product_name as string),
     });
   }, []);
 

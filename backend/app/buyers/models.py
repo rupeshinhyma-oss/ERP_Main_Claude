@@ -110,7 +110,7 @@ class Buyer(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin, SoftDeleteM
     contact_whatsapp_number: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
     tax_id_number: Mapped[str | None] = mapped_column(String(100), nullable=True)  # "Tax ID Number (TIN / GST)"
-    website: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    website: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     current_status: Mapped[BuyerCurrentStatus | None] = mapped_column(
         SAEnum(BuyerCurrentStatus, name="buyer_current_status", native_enum=False, length=20), nullable=True

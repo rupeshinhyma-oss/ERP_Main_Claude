@@ -24,7 +24,7 @@ import { Breadcrumb } from "@/components/Breadcrumb";
 import { Banner, Can } from "@/components/ui";
 import { Pagination } from "@/components/Pagination";
 import { SearchableDropdown, SearchableDropdownMultiPanel, type DropdownOption } from "@/components/SearchableDropdown";
-import { EmailTagInput, SelectField, TextAreaField, TextField } from "@/components/fields";
+import { EmailTagInput, PhoneGroupField, SelectField, TextAreaField, TextField, WebsiteTagInput } from "@/components/fields";
 import { SideDrawer, DetailFieldGrid } from "@/components/SideDrawer";
 import { ImpExpDropdown, BulkActionsDropdown, ImportSummaryPanel } from "@/components/ImportWizard";
 import { apiDelete, apiGet, apiPatch, apiPost, downloadExport, toQueryString } from "@/lib/api";
@@ -82,6 +82,7 @@ const EMPTY_BUYER_FORM = {
   buyer_grade: "",
   currently_buying_from: "",
   overall_remarks: "",
+  is_active: "true",
 };
 
 const EMPTY_CONTACT_FORM = {
@@ -115,97 +116,17 @@ const sectionTitleStyle: React.CSSProperties = {
   marginBottom: "14px",
 };
 
-function PhoneGroupField({
-  id,
-  label,
-  value,
-  onChange,
-  hint,
-  placeholder = "700000000",
-}: {
-  id: string;
-  label: React.ReactNode;
-  value: string;
-  onChange: (fullValue: string) => void;
-  hint?: React.ReactNode;
-  placeholder?: string;
-}) {
-  let prefix = "";
-  let number = "";
-
-  const trimmed = (value || "").trim();
-  if (trimmed.startsWith("+")) {
-    const spaceIdx = trimmed.indexOf(" ");
-    if (spaceIdx !== -1) {
-      prefix = trimmed.slice(0, spaceIdx);
-      number = trimmed.slice(spaceIdx + 1).trim();
-    } else {
-      prefix = trimmed;
-      number = "";
-    }
-  } else {
-    prefix = "";
-    number = trimmed;
+function validatePhoneNumber(val: string | undefined | null, fieldLabel = "Phone number"): string | null {
+  if (!val) return null;
+  const digits = val.replace(/\D/g, "");
+  if (!digits) return null;
+  if (digits.length < 7) {
+    return `${fieldLabel} must have at least 7 digits (including country code).`;
   }
-
-  const handlePrefixChange = (newPrefix: string) => {
-    let cleanPrefix = newPrefix.trim();
-    if (cleanPrefix && !cleanPrefix.startsWith("+")) {
-      cleanPrefix = "+" + cleanPrefix;
-    }
-    const combined = number ? `${cleanPrefix} ${number}` : cleanPrefix;
-    onChange(combined);
-  };
-
-  const handleNumberChange = (newNumber: string) => {
-    const cleanNum = newNumber.replace(/[^\d\s-]/g, "");
-    const combined = prefix ? `${prefix} ${cleanNum}` : cleanNum;
-    onChange(combined);
-  };
-
-  return (
-    <div className="field">
-      <label htmlFor={id}>{label}</label>
-      <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-        <input
-          type="text"
-          value={prefix}
-          placeholder="+256"
-          onChange={(e) => handlePrefixChange(e.target.value)}
-          style={{
-            width: "85px",
-            padding: "8px 10px",
-            fontSize: "13.5px",
-            fontWeight: 700,
-            borderRadius: "6px",
-            border: "1px solid #cbd5e1",
-            background: "#f8fafc",
-            color: "#0f172a",
-            textAlign: "center",
-            outline: "none",
-          }}
-          title="Country Code Prefix"
-        />
-        <input
-          id={id}
-          type="text"
-          value={number}
-          placeholder={placeholder}
-          onChange={(e) => handleNumberChange(e.target.value)}
-          style={{
-            flex: 1,
-            padding: "8px 11px",
-            fontSize: "13.5px",
-            borderRadius: "6px",
-            border: "1px solid #cbd5e1",
-            outline: "none",
-            background: "#ffffff",
-          }}
-        />
-      </div>
-      {hint && <span className="hint" style={{ marginTop: "4px" }}>{hint}</span>}
-    </div>
-  );
+  if (digits.length > 15) {
+    return `${fieldLabel} cannot exceed 15 digits (including country code).`;
+  }
+  return null;
 }
 
 export function BuyersPage() {
@@ -216,6 +137,9 @@ export function BuyersPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const [reloadCounter, setReloadCounter] = useState(0);
+
+  const [statusTab, setStatusTab] = useState<"active" | "inactive">("active");
+  const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
 
   /* Phase 7: double-submit guards. `formSubmitting`/`contactSubmitting` cover
      the two single-instance modal forms (like every other page's `submitting`
@@ -399,6 +323,7 @@ export function BuyersPage() {
           search: effectiveSearch,
           page: currentPage,
           page_size: pageSize,
+          is_active: statusTab === "active",
           buyer_type: buyerTypeFilter || undefined,
           current_status: statusFilter || undefined,
           potential: potentialFilter || undefined,
@@ -428,6 +353,7 @@ export function BuyersPage() {
     effectiveSearch,
     currentPage,
     pageSize,
+    statusTab,
     buyerTypeFilter,
     statusFilter,
     potentialFilter,
@@ -651,11 +577,13 @@ export function BuyersPage() {
     setEditTab("profile");
     setEditingId(null);
     setWhatsappSameAsCalling(false);
+    setValidationErrors({});
     setForm({
       ...EMPTY_BUYER_FORM,
       country_id: initCountryId,
       contact_calling_number: initPhoneCode,
       contact_whatsapp_number: initPhoneCode,
+      is_active: "true",
     });
     setCategoryIds([]);
     setSubCategoryIds([]);
@@ -671,6 +599,7 @@ export function BuyersPage() {
     setWhatsappSameAsCalling(
       Boolean(buyer.contact_calling_number && buyer.contact_calling_number === buyer.contact_whatsapp_number)
     );
+    setValidationErrors({});
     setForm({
       company_name: buyer.company_name,
       buyer_type: buyer.buyer_type || "",
@@ -692,6 +621,7 @@ export function BuyersPage() {
       buyer_grade: buyer.buyer_grade || "",
       currently_buying_from: buyer.currently_buying_from || "",
       overall_remarks: buyer.overall_remarks || "",
+      is_active: buyer.is_active !== false ? "true" : "false",
     });
     setCategoryIds(buyer.category_ids || []);
     setSubCategoryIds(buyer.sub_category_ids || []);
@@ -716,17 +646,14 @@ export function BuyersPage() {
         const selCountry = countries.items.find((c) => c.id === value);
         if (selCountry?.phone_code) {
           const rawCode = selCountry.phone_code.trim().replace(/^\+/, "");
-          const newPrefix = `+${rawCode} `;
+          const newPrefix = `+${rawCode}`;
 
           const updateNumber = (currNum: string) => {
             if (!currNum || /^\+?\d*\s*$/.test(currNum.trim())) {
-              return newPrefix;
+              return newPrefix ? `${newPrefix} ` : "";
             }
-            const spaceIdx = currNum.indexOf(" ");
-            if (spaceIdx !== -1) {
-              return newPrefix + currNum.slice(spaceIdx + 1).trim();
-            }
-            return newPrefix + currNum.replace(/^\+\d+/, "").trim();
+            const cleanDigits = currNum.replace(/^\+\d+\s*/, "").trim();
+            return newPrefix ? `${newPrefix} ${cleanDigits}` : cleanDigits;
           };
 
           next.contact_calling_number = updateNumber(prev.contact_calling_number);
@@ -735,6 +662,9 @@ export function BuyersPage() {
           } else {
             next.contact_whatsapp_number = updateNumber(prev.contact_whatsapp_number);
           }
+        } else {
+          next.contact_calling_number = "";
+          next.contact_whatsapp_number = "";
         }
       }
 
@@ -743,6 +673,10 @@ export function BuyersPage() {
       }
       return next;
     });
+
+    if (validationErrors[id as string]) {
+      setValidationErrors((prev) => ({ ...prev, [id as string]: "" }));
+    }
 
     /* Live company name suggestions */
     if (id === "company_name") {
@@ -772,11 +706,11 @@ export function BuyersPage() {
   }
 
   function focusAndScrollField(elementId: string, errorMsg: string) {
-    setError(new Error(errorMsg));
+    setValidationErrors((prev) => ({ ...prev, [elementId]: errorMsg }));
     const el = document.getElementById(elementId);
     if (el) {
       el.scrollIntoView({ behavior: "smooth", block: "center" });
-      setTimeout(() => el.focus(), 300);
+      setTimeout(() => el.focus(), 250);
     } else {
       window.scrollTo({ top: 0, behavior: "smooth" });
     }
@@ -787,27 +721,38 @@ export function BuyersPage() {
     if (formSubmitting) return; // Phase 7: ignore a second click while the first save is still in flight
     setError(null);
 
-    // 1. Required field validation
+    // 1. Required field validation & phone number digit checks (max 15 digits including country code)
+    const initialErrors: Record<string, string> = {};
     if (!form.company_name.trim()) {
-      focusAndScrollField("company_name", "Company Name is required.");
-      return;
+      initialErrors["company_name"] = "Company Name is required.";
     }
     if (!form.country_id) {
-      focusAndScrollField("country_id", "Country is required.");
-      return;
+      initialErrors["country_id"] = "Country is required.";
+    }
+    if (form.contact_calling_number) {
+      const callingErr = validatePhoneNumber(form.contact_calling_number, "Calling number");
+      if (callingErr) initialErrors["contact_calling_number"] = callingErr;
+    }
+    if (form.contact_whatsapp_number) {
+      const whatsappErr = validatePhoneNumber(form.contact_whatsapp_number, "WhatsApp number");
+      if (whatsappErr) initialErrors["contact_whatsapp_number"] = whatsappErr;
     }
 
     // 2. Real-time Field-level Duplicate checks
     if (fieldDuplicates.companyWarning) {
-      focusAndScrollField("company_name", fieldDuplicates.companyWarning);
-      return;
+      initialErrors["company_name"] = fieldDuplicates.companyWarning;
     }
     if (fieldDuplicates.callingWarning) {
-      focusAndScrollField("contact_calling_number", fieldDuplicates.callingWarning);
-      return;
+      initialErrors["contact_calling_number"] = fieldDuplicates.callingWarning;
     }
     if (fieldDuplicates.whatsappWarning) {
-      focusAndScrollField("contact_whatsapp_number", fieldDuplicates.whatsappWarning);
+      initialErrors["contact_whatsapp_number"] = fieldDuplicates.whatsappWarning;
+    }
+
+    if (Object.keys(initialErrors).length > 0) {
+      setValidationErrors((prev) => ({ ...prev, ...initialErrors }));
+      const firstField = Object.keys(initialErrors)[0];
+      focusAndScrollField(firstField, initialErrors[firstField]);
       return;
     }
 
@@ -836,6 +781,7 @@ export function BuyersPage() {
       overall_remarks: form.overall_remarks.trim() || null,
       category_ids: categoryIds,
       sub_category_ids: subCategoryIds,
+      is_active: form.is_active === "true",
     };
 
     setFormSubmitting(true);
@@ -920,6 +866,20 @@ export function BuyersPage() {
     if (!contactForm.person_name.trim()) {
       alert("Contact Full Name is required.");
       return;
+    }
+    if (contactForm.calling_number) {
+      const err = validatePhoneNumber(contactForm.calling_number, "Calling number");
+      if (err) {
+        alert(err);
+        return;
+      }
+    }
+    if (contactForm.whatsapp_number) {
+      const err = validatePhoneNumber(contactForm.whatsapp_number, "WhatsApp number");
+      if (err) {
+        alert(err);
+        return;
+      }
     }
     const payload = {
       ...contactForm,
@@ -1240,8 +1200,13 @@ export function BuyersPage() {
                         placeholder="Name of Company"
                         value={form.company_name}
                         onChange={(v) => setField("company_name", v)}
+                        hasError={Boolean(validationErrors["company_name"])}
                         hint={
-                          fieldDuplicates.companyWarning ? (
+                          validationErrors["company_name"] ? (
+                            <span style={{ color: "#dc2626", fontWeight: 600, fontSize: "12px" }}>
+                              ⚠️ {validationErrors["company_name"]}
+                            </span>
+                          ) : fieldDuplicates.companyWarning ? (
                             <span style={{ color: "#dc2626", fontWeight: 600, fontSize: "12px" }}>
                               ⚠️ {fieldDuplicates.companyWarning}
                             </span>
@@ -1379,6 +1344,14 @@ export function BuyersPage() {
                       required
                       value={form.country_id}
                       onChange={(v) => setField("country_id", v)}
+                      hasError={Boolean(validationErrors["country_id"])}
+                      hint={
+                        validationErrors["country_id"] ? (
+                          <span style={{ color: "#dc2626", fontWeight: 600, fontSize: "12px" }}>
+                            ⚠️ {validationErrors["country_id"]}
+                          </span>
+                        ) : undefined
+                      }
                     >
                       <option value="">-- Select Country --</option>
                       {countries.items.map((c) => (
@@ -1390,6 +1363,7 @@ export function BuyersPage() {
                     <div>
                       <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155", display: "block", marginBottom: "6px" }}>City</label>
                       <SearchableDropdown
+                        key={`buyer-city-${form.country_id}`}
                         value={formCityId}
                         onChange={(v, label) => {
                           setFormCityId(v);
@@ -1400,7 +1374,8 @@ export function BuyersPage() {
                           setField("city", text);
                           setFormCityId(null);
                         }}
-                        placeholder="Search or type city..."
+                        disabled={!form.country_id}
+                        placeholder={form.country_id ? "Search or type city..." : "Select a country first..."}
                         fetchOptions={searchFetcher("/masters/cities", (): Record<string, string> => {
                           return form.country_id ? { country_id: form.country_id } : {};
                         })}
@@ -1436,8 +1411,13 @@ export function BuyersPage() {
                       placeholder="700000000"
                       value={form.contact_calling_number}
                       onChange={(v) => setField("contact_calling_number", v)}
+                      hasError={Boolean(validationErrors["contact_calling_number"])}
                       hint={
-                        fieldDuplicates.callingWarning ? (
+                        validationErrors["contact_calling_number"] ? (
+                          <span style={{ color: "#dc2626", fontWeight: 600, fontSize: "12px" }}>
+                            ⚠️ {validationErrors["contact_calling_number"]}
+                          </span>
+                        ) : fieldDuplicates.callingWarning ? (
                           <span style={{ color: "#dc2626", fontWeight: 600, fontSize: "12px" }}>
                             ⚠️ {fieldDuplicates.callingWarning}
                           </span>
@@ -1471,8 +1451,13 @@ export function BuyersPage() {
                         setWhatsappSameAsCalling(false);
                         setField("contact_whatsapp_number", v);
                       }}
+                      hasError={Boolean(validationErrors["contact_whatsapp_number"])}
                       hint={
-                        fieldDuplicates.whatsappWarning ? (
+                        validationErrors["contact_whatsapp_number"] ? (
+                          <span style={{ color: "#dc2626", fontWeight: 600, fontSize: "12px" }}>
+                            ⚠️ {validationErrors["contact_whatsapp_number"]}
+                          </span>
+                        ) : fieldDuplicates.whatsappWarning ? (
                           <span style={{ color: "#dc2626", fontWeight: 600, fontSize: "12px" }}>
                             ⚠️ {fieldDuplicates.whatsappWarning}
                           </span>
@@ -1493,14 +1478,20 @@ export function BuyersPage() {
                       onChange={(newEmails) => setForm((prev) => ({ ...prev, emails: newEmails }))}
                       placeholder="Type email address and press Enter..."
                     />
-                    <TextField id="website" label="Website" placeholder="https://company.com" value={form.website} onChange={(v) => setField("website", v)} />
+                    <WebsiteTagInput
+                      id="website"
+                      label="Website (Multiple)"
+                      placeholder="Type website and press Enter..."
+                      value={form.website}
+                      onChange={(v) => setField("website", v)}
+                    />
                   </div>
                 </div>
 
                 {/* 6. Pipeline Status & Potential */}
                 <div>
                   <div style={sectionTitleStyle}>Sales Pipeline Status &amp; Potential</div>
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "16px" }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "16px" }}>
                     <SelectField
                       id="current_status"
                       label="Current Status"
@@ -1535,6 +1526,16 @@ export function BuyersPage() {
                       <option value="A">Grade A</option>
                       <option value="B">Grade B</option>
                       <option value="C">Grade C</option>
+                    </SelectField>
+
+                    <SelectField
+                      id="is_active"
+                      label="Status"
+                      value={form.is_active}
+                      onChange={(v) => setField("is_active", v)}
+                    >
+                      <option value="true">Active</option>
+                      <option value="false">Inactive</option>
                     </SelectField>
                   </div>
 
@@ -1743,8 +1744,20 @@ export function BuyersPage() {
                         <TextField id="designation" label="Designation" placeholder="e.g. Purchase Director" value={contactForm.designation} onChange={(v) => setContactForm((prev) => ({ ...prev, designation: v }))} />
 
                         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
-                          <TextField id="calling_number" label="Calling Number" placeholder="+256 700000000" value={contactForm.calling_number} onChange={(v) => setContactForm((prev) => ({ ...prev, calling_number: v }))} />
-                          <TextField id="whatsapp_number" label="WhatsApp Number" placeholder="+256 700000000" value={contactForm.whatsapp_number} onChange={(v) => setContactForm((prev) => ({ ...prev, whatsapp_number: v }))} />
+                          <PhoneGroupField
+                            id="contact_calling"
+                            label="Calling Number"
+                            placeholder="700000000"
+                            value={contactForm.calling_number}
+                            onChange={(v) => setContactForm((prev) => ({ ...prev, calling_number: v }))}
+                          />
+                          <PhoneGroupField
+                            id="contact_whatsapp"
+                            label="WhatsApp Number"
+                            placeholder="700000000"
+                            value={contactForm.whatsapp_number}
+                            onChange={(v) => setContactForm((prev) => ({ ...prev, whatsapp_number: v }))}
+                          />
                         </div>
 
                         <TextField id="email" label="Email Address" type="email" placeholder="contact@company.com" value={contactForm.email} onChange={(v) => setContactForm((prev) => ({ ...prev, email: v }))} />
@@ -1989,6 +2002,50 @@ export function BuyersPage() {
 
         {/* Main Table Card & Single-Row Toolbar */}
         <div style={{ background: "#ffffff", borderRadius: "8px", border: "1px solid #cbd5e1", overflow: "hidden", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }}>
+          {/* Active / Inactive Top Tabs */}
+          <div style={{ display: "flex", gap: "24px", borderBottom: "1px solid #e2e8f0", padding: "0 20px", marginTop: "12px" }}>
+            <button
+              type="button"
+              style={{
+                background: "none",
+                border: "none",
+                borderBottom: statusTab === "active" ? "2.5px solid #0061f2" : "2.5px solid transparent",
+                color: statusTab === "active" ? "#0061f2" : "#64748b",
+                fontWeight: 700,
+                fontSize: "14px",
+                paddingBottom: "10px",
+                cursor: "pointer",
+              }}
+              onClick={() => {
+                setCurrentPage(1);
+                setSelectedIds([]);
+                setStatusTab("active");
+              }}
+            >
+              Active
+            </button>
+            <button
+              type="button"
+              style={{
+                background: "none",
+                border: "none",
+                borderBottom: statusTab === "inactive" ? "2.5px solid #0061f2" : "2.5px solid transparent",
+                color: statusTab === "inactive" ? "#0061f2" : "#64748b",
+                fontWeight: 700,
+                fontSize: "14px",
+                paddingBottom: "10px",
+                cursor: "pointer",
+              }}
+              onClick={() => {
+                setCurrentPage(1);
+                setSelectedIds([]);
+                setStatusTab("inactive");
+              }}
+            >
+              Inactive
+            </button>
+          </div>
+
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 20px", borderBottom: "1px solid #e2e8f0", flexWrap: "wrap", gap: "12px" }}>
             <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
               <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
@@ -2099,7 +2156,7 @@ export function BuyersPage() {
             {/* Right Search Input */}
             <div style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
               <input
-                placeholder="Search company or code…"
+                placeholder="Search company, country, contact, city, phone..."
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
                 style={{ padding: "7px 32px 7px 12px", border: "1px solid #cbd5e1", borderRadius: "6px", fontSize: "13px", width: "240px" }}
@@ -2398,19 +2455,42 @@ export function BuyersPage() {
                       fullWidth: true,
                     },
                     {
-                      label: "Website",
+                      label: "Websites",
                       value: detailBuyer.website ? (
-                        <a
-                          href={detailBuyer.website.startsWith("http") ? detailBuyer.website : `https://${detailBuyer.website}`}
-                          target="_blank"
-                          rel="noreferrer"
-                          style={{ color: "#2563eb", textDecoration: "none", fontWeight: 500 }}
-                        >
-                          🌐 {detailBuyer.website}
-                        </a>
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
+                          {detailBuyer.website.split(",").map((rawUrl, idx) => {
+                            const clean = rawUrl.trim();
+                            if (!clean) return null;
+                            const href = clean.startsWith("http") ? clean : `https://${clean}`;
+                            return (
+                              <a
+                                key={idx}
+                                href={href}
+                                target="_blank"
+                                rel="noreferrer"
+                                style={{
+                                  color: "#0369a1",
+                                  background: "#e0f2fe",
+                                  border: "1px solid #bae6fd",
+                                  borderRadius: "4px",
+                                  padding: "2px 8px",
+                                  fontSize: "12px",
+                                  fontWeight: 600,
+                                  textDecoration: "none",
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: "4px",
+                                }}
+                              >
+                                🌐 {clean.replace(/^https?:\/\/(www\.)?/, "")} ↗
+                              </a>
+                            );
+                          })}
+                        </div>
                       ) : (
                         "—"
                       ),
+                      fullWidth: true,
                     },
                     { label: "Postal Address", value: detailBuyer.address || "—", fullWidth: true },
                   ]}

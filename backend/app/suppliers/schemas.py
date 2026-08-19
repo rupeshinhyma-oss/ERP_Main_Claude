@@ -118,8 +118,8 @@ class SupplierCreate(BaseModel):
     tax_id_number: str | None = Field(default=None, max_length=100)
     address: str | None = None
     town: str | None = Field(default=None, max_length=150)
-    primary_website: str | None = Field(default=None, max_length=500)
-    secondary_website: str | None = Field(default=None, max_length=500)
+    primary_website: str | None = Field(default=None, max_length=5000)
+    secondary_website: str | None = Field(default=None, max_length=5000)
     sub_category_ids: list[uuid.UUID] = Field(
         default_factory=list, description="Key Strength Product Sub Category (multiple)."
     )
@@ -183,8 +183,8 @@ class SupplierUpdate(BaseModel):
     tax_id_number: str | None = Field(default=None, max_length=100)
     address: str | None = None
     town: str | None = Field(default=None, max_length=150)
-    primary_website: str | None = Field(default=None, max_length=500)
-    secondary_website: str | None = Field(default=None, max_length=500)
+    primary_website: str | None = Field(default=None, max_length=5000)
+    secondary_website: str | None = Field(default=None, max_length=5000)
     sub_category_ids: list[uuid.UUID] | None = None
     product_ids: list[uuid.UUID] | None = None
     supplier_grade: SupplierGrade | None = None

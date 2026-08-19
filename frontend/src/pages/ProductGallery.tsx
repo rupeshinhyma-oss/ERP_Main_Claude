@@ -140,6 +140,16 @@ function downloadAllMediaFiles(urls: string[], filenamePrefix = "media") {
   });
 }
 
+function isDirectMediaUrl(url: string): boolean {
+  if (!url) return false;
+  const str = url.trim().toLowerCase();
+  if (str.startsWith("data:image/") || str.startsWith("data:video/")) return true;
+  if (str.includes("/storage/v1/object/public/") || str.includes("/uploads/")) return true;
+  if (str.match(/\.(jpg|jpeg|png|webp|gif|svg|bmp|avif)(\?.*)?$/i)) return true;
+  if (str.match(/\.(mp4|webm|mov|mkv|avi|m4v)(\?.*)?$/i)) return true;
+  return false;
+}
+
 function getSupplierMedia(supplier: Supplier): string[] {
   let rawItems: string[] = [];
 
@@ -174,7 +184,44 @@ function getSupplierMedia(supplier: Supplier): string[] {
       }
       return str;
     })
-    .filter((str) => Boolean(str));
+    .filter((str) => Boolean(str) && isDirectMediaUrl(str));
+}
+
+function getSupplierFolderLinks(supplier: Supplier): string[] {
+  let rawItems: string[] = [];
+
+  const visitMediaVal = supplier.visit_media as unknown;
+  const mediaUrlsVal = supplier.media_urls as unknown;
+
+  if (Array.isArray(visitMediaVal) && visitMediaVal.length > 0) {
+    rawItems = visitMediaVal.map(String);
+  } else if (typeof visitMediaVal === "string" && visitMediaVal.trim().length > 0) {
+    try {
+      const parsed = JSON.parse(visitMediaVal);
+      if (Array.isArray(parsed)) rawItems = parsed.map(String);
+      else rawItems = [visitMediaVal];
+    } catch {
+      rawItems = visitMediaVal.split(",");
+    }
+  } else if (typeof mediaUrlsVal === "string" && mediaUrlsVal.trim().length > 0) {
+    try {
+      const parsed = JSON.parse(mediaUrlsVal);
+      if (Array.isArray(parsed)) rawItems = parsed.map(String);
+      else rawItems = mediaUrlsVal.split(",");
+    } catch {
+      rawItems = mediaUrlsVal.split(",");
+    }
+  }
+
+  return rawItems
+    .map((item) => {
+      let str = String(item || "").trim();
+      if ((str.startsWith('"') && str.endsWith('"')) || (str.startsWith("'") && str.endsWith("'"))) {
+        str = str.slice(1, -1).trim();
+      }
+      return str;
+    })
+    .filter((str) => Boolean(str) && !isDirectMediaUrl(str));
 }
 
 type GalleryTab = "all" | "products" | "suppliers";
@@ -1133,8 +1180,57 @@ export function ProductGalleryPage() {
         onClose={() => setSelectedSupplier(null)}
       >
         {supp && (() => {
+          const suppFolderLinks = getSupplierFolderLinks(supp);
           const activeSuppMedia = suppMedia[selectedImageIndex] || suppMedia[0];
           const activeSuppIsVideo = isVideoUrl(activeSuppMedia);
+
+          const handleDeleteSupplierPhoto = async (indexToDelete: number) => {
+            if (!supp) return;
+            if (!window.confirm("Are you sure you want to delete this visit photo from the supplier?")) return;
+
+            const photoToDelete = suppMedia[indexToDelete];
+            if (!photoToDelete) return;
+
+            let rawAll: string[] = [];
+            if (Array.isArray(supp.visit_media)) {
+              rawAll = supp.visit_media.map(String);
+            } else if (typeof supp.visit_media === "string") {
+              try {
+                const parsed = JSON.parse(supp.visit_media);
+                rawAll = Array.isArray(parsed) ? parsed.map(String) : [supp.visit_media];
+              } catch {
+                rawAll = (supp.visit_media as string).split(",");
+              }
+            }
+
+            const updatedRaw = rawAll
+              .map((s) => s.trim())
+              .filter((s) => Boolean(s) && s !== photoToDelete);
+
+            await guardPhotoDelete(`supp:${supp.id}:${indexToDelete}`, async () => {
+              try {
+                const updatedPayload = {
+                  visit_media: updatedRaw.length ? updatedRaw : null,
+                };
+                await apiPatch<Supplier>(`/suppliers/${supp.id}`, updatedPayload);
+
+                const newSuppObj: Supplier = {
+                  ...supp,
+                  visit_media: updatedRaw.length ? updatedRaw : undefined,
+                };
+
+                setSuppliers((prev) =>
+                  prev.map((s) => (s.id === supp.id ? newSuppObj : s))
+                );
+                setSelectedSupplier(newSuppObj);
+                setSelectedImageIndex(0);
+                setSelectedMediaIndices([]);
+              } catch (err) {
+                console.error("Failed to delete supplier visit photo:", err);
+                alert("Failed to delete visit photo. Please try again.");
+              }
+            });
+          };
 
           return (
             <>
@@ -1242,6 +1338,29 @@ export function ProductGalleryPage() {
                         title={`Download ${activeSuppIsVideo ? "video" : "photo"}`}
                       >
                         📥 Active Only
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteSupplierPhoto(selectedImageIndex)}
+                        disabled={isPhotoDeletePending(`supp:${supp.id}:${selectedImageIndex}`)}
+                        style={{
+                          background: "#fee2e2",
+                          color: "#dc2626",
+                          border: "1px solid #fca5a5",
+                          borderRadius: "6px",
+                          padding: "4px 10px",
+                          fontSize: "12px",
+                          fontWeight: 600,
+                          cursor: isPhotoDeletePending(`supp:${supp.id}:${selectedImageIndex}`) ? "default" : "pointer",
+                          opacity: isPhotoDeletePending(`supp:${supp.id}:${selectedImageIndex}`) ? 0.6 : 1,
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "4px",
+                        }}
+                        title="Delete this visit photo from supplier"
+                      >
+                        {isPhotoDeletePending(`supp:${supp.id}:${selectedImageIndex}`) ? "Deleting…" : "🗑️ Delete"}
                       </button>
                     </div>
                   </div>
@@ -1365,6 +1484,42 @@ export function ProductGalleryPage() {
                   { label: "City", value: suppCity || "—" },
                   { label: "Visited Factory / Office", value: supp.visited_factory_office ? "Yes ✅" : "No ❌" },
                   { label: "Visit Remarks", value: supp.visit_remarks || "—", fullWidth: true },
+                  ...(suppFolderLinks.length > 0
+                    ? [
+                        {
+                          label: "Factory Video / Inspection Folder Link",
+                          value: (
+                            <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginTop: "4px" }}>
+                              {suppFolderLinks.map((link, idx) => (
+                                <a
+                                  key={idx}
+                                  href={link.startsWith("http") ? link : `https://${link}`}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  style={{
+                                    display: "inline-flex",
+                                    alignItems: "center",
+                                    gap: "6px",
+                                    padding: "6px 12px",
+                                    background: "#eff6ff",
+                                    border: "1px solid #bfdbfe",
+                                    borderRadius: "6px",
+                                    color: "#1d4ed8",
+                                    fontSize: "12.5px",
+                                    fontWeight: 600,
+                                    textDecoration: "none",
+                                    boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
+                                  }}
+                                >
+                                  📁 Open Inspection Folder / Link ({idx + 1}) ↗
+                                </a>
+                              ))}
+                            </div>
+                          ),
+                          fullWidth: true,
+                        },
+                      ]
+                    : []),
                   { label: "Overall Remarks", value: supp.overall_remarks || "—", fullWidth: true },
                 ]}
               />

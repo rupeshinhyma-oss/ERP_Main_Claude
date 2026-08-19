@@ -104,19 +104,73 @@ class ProductRepository(BaseRepository[Product]):
         if not term:
             return stmt
 
-        from sqlalchemy import func, or_
+        from sqlalchemy import exists, func, or_
+        from app.masters.brands.models import Brand
+        from app.masters.hsn.models import HSN
+        from app.masters.product_categories.models import ProductCategory
+        from app.masters.product_sub_categories.models import ProductSubCategory
+        from app.masters.uom.models import UnitOfMeasurement
+        from app.suppliers.models import Supplier
 
         clean_term = term.replace(" ", "").replace("-", "").lower()
         pattern = f"%{term}%"
         clean_pattern = f"%{clean_term}%"
 
         conditions = []
-        for field in ("product_code", "product_name", "product_name_tally", "product_name_invoice", "barcode"):
+        for field in ("product_code", "product_name", "product_name_tally", "product_name_invoice", "barcode", "description", "origin", "packaging"):
             if hasattr(self.model, field):
                 col = getattr(self.model, field)
                 conditions.append(col.ilike(pattern))
                 normalized_col = func.lower(func.replace(func.replace(col, " ", ""), "-", ""))
                 conditions.append(normalized_col.like(clean_pattern))
+
+        # Linked Category
+        conditions.append(
+            exists().where(
+                ProductCategory.id == Product.category_id,
+                or_(ProductCategory.name.ilike(pattern), ProductCategory.code.ilike(pattern)),
+            )
+        )
+
+        # Linked Sub-Category
+        conditions.append(
+            exists().where(
+                ProductSubCategory.id == Product.sub_category_id,
+                or_(ProductSubCategory.name.ilike(pattern), ProductSubCategory.code.ilike(pattern)),
+            )
+        )
+
+        # Linked Brand
+        conditions.append(
+            exists().where(
+                Brand.id == Product.brand_id,
+                or_(Brand.name.ilike(pattern), Brand.code.ilike(pattern)),
+            )
+        )
+
+        # Linked Supplier
+        conditions.append(
+            exists().where(
+                Supplier.id == Product.supplier_id,
+                Supplier.company_name.ilike(pattern),
+            )
+        )
+
+        # Linked HSN
+        conditions.append(
+            exists().where(
+                HSN.id == Product.hsn_id,
+                or_(HSN.code.ilike(pattern), HSN.description.ilike(pattern)),
+            )
+        )
+
+        # Linked UOM
+        conditions.append(
+            exists().where(
+                UnitOfMeasurement.id == Product.uom_id,
+                or_(UnitOfMeasurement.name.ilike(pattern), UnitOfMeasurement.code.ilike(pattern), UnitOfMeasurement.short_name.ilike(pattern)),
+            )
+        )
 
         return stmt.where(or_(*conditions))
 

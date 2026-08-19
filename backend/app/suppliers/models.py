@@ -131,8 +131,8 @@ class Supplier(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin, SoftDele
     tax_id_number: Mapped[str | None] = mapped_column(String(100), nullable=True)
     address: Mapped[str | None] = mapped_column(Text, nullable=True)
     town: Mapped[str | None] = mapped_column(String(150), nullable=True)
-    primary_website: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    secondary_website: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    primary_website: Mapped[str | None] = mapped_column(Text, nullable=True)
+    secondary_website: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     supplier_grade: Mapped[SupplierGrade | None] = mapped_column(
         SAEnum(SupplierGrade, name="supplier_grade", native_enum=False, length=5), nullable=True

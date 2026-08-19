@@ -275,53 +275,89 @@ export function ProductsPage() {
       columns={[
         {
           header: "Product Name (Tally)",
-          render: (p) => (
-            <>
-              <a
-                href="#"
-                className="cell-primary"
-                style={{ color: "var(--color-primary)", fontWeight: 600 }}
-                onClick={(e) => {
-                  e.preventDefault();
-                  openProductDetailView(p.id);
-                }}
-              >
-                {p.product_name_tally || p.product_name}
-              </a>
-              {p.license_certificate_required && (
-                <>
-                  <br />
-                  <span style={{ color: "#ef4444", fontSize: "11px", fontWeight: "bold" }}>
-                    ⚠️ License Required
+          render: (p) => {
+            const name = p.product_name_tally || p.product_name || "—";
+            return (
+              <div style={{ display: "inline-flex", alignItems: "center", gap: "6px", maxWidth: "340px", minWidth: "240px" }}>
+                <a
+                  href="#"
+                  className="cell-primary"
+                  title={name}
+                  style={{ color: "var(--color-primary)", fontWeight: 600, maxWidth: "300px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    openProductDetailView(p.id);
+                  }}
+                >
+                  {name}
+                </a>
+                {p.license_certificate_required && (
+                  <span title="License Required" style={{ color: "#ef4444", fontSize: "11px", fontWeight: "bold", flexShrink: 0 }}>
+                    ⚠️
                   </span>
-                </>
-              )}
-            </>
+                )}
+              </div>
+            );
+          },
+        },
+        {
+          header: "Product Code",
+          render: (p) => (
+            <span title={p.product_code || ""} style={{ fontWeight: 500, fontFamily: "monospace", fontSize: "13px" }}>
+              {p.product_code || "—"}
+            </span>
           ),
         },
-        { header: "Product Code", render: (p) => p.product_code },
         {
           header: "Supplier Company Name",
-          render: (p) => p.supplier_company_name || suppliers.items.find((s) => s.id === p.supplier_id)?.company_name || "—",
+          render: (p) => {
+            const name = p.supplier_company_name || suppliers.items.find((s) => s.id === p.supplier_id)?.company_name || "—";
+            return (
+              <span className="cell-truncate" title={name} style={{ maxWidth: "200px" }}>
+                {name}
+              </span>
+            );
+          },
         },
-
         {
           header: "Brand",
-          render: (p) => brands.items.find((x) => x.id === p.brand_id)?.name ?? "—",
+          render: (p) => {
+            const name = brands.items.find((x) => x.id === p.brand_id)?.name ?? "—";
+            return (
+              <span className="cell-truncate" title={name} style={{ maxWidth: "130px" }}>
+                {name}
+              </span>
+            );
+          },
         },
         {
           header: "Sub-Category",
-          render: (p) => subCategories.items.find((x) => x.id === p.sub_category_id)?.name ?? "—",
+          render: (p) => {
+            const name = subCategories.items.find((x) => x.id === p.sub_category_id)?.name ?? "—";
+            return (
+              <span className="cell-truncate" title={name} style={{ maxWidth: "180px", color: "#334155" }}>
+                {name}
+              </span>
+            );
+          },
         },
         {
           header: "HSN Code",
-          render: (p) => hsnCodes.items.find((x) => x.id === p.hsn_id)?.code ?? "—",
+          render: (p) => {
+            const code = hsnCodes.items.find((x) => x.id === p.hsn_id)?.code ?? "—";
+            return (
+              <span title={code} style={{ fontFamily: "monospace", fontSize: "12.5px" }}>
+                {code}
+              </span>
+            );
+          },
         },
         {
           header: "UOM",
           render: (p) => {
             const u = uoms.items.find((x) => x.id === p.uom_id);
-            return u ? `${u.name} (${u.code})` : "—";
+            const label = u ? `${u.name} (${u.code})` : "—";
+            return <span title={label}>{u ? u.code : "—"}</span>;
           },
         },
         {
@@ -334,7 +370,12 @@ export function ProductsPage() {
             const names = orgIds
               .map((id) => organizations.items.find((x) => x.id === id)?.name)
               .filter(Boolean);
-            return names.length > 0 ? names.join(", ") : "—";
+            const joined = names.join(", ") || "—";
+            return (
+              <span className="cell-truncate" title={joined} style={{ maxWidth: "160px" }}>
+                {joined}
+              </span>
+            );
           },
         },
         {
@@ -351,26 +392,12 @@ export function ProductsPage() {
               .filter(Boolean);
 
             if (!matchingBranches.length) return "—";
+            const joined = matchingBranches.join(", ");
 
             return (
-              <div style={{ display: "flex", gap: "4px", flexWrap: "wrap" }}>
-                {matchingBranches.map((bName, i) => (
-                  <span
-                    key={i}
-                    style={{
-                      background: "#e0f2fe",
-                      color: "#0369a1",
-                      border: "1px solid #bae6fd",
-                      borderRadius: "4px",
-                      padding: "1px 6px",
-                      fontSize: "11.5px",
-                      fontWeight: 600,
-                    }}
-                  >
-                    🏢 {bName}
-                  </span>
-                ))}
-              </div>
+              <span className="cell-truncate" title={joined} style={{ maxWidth: "150px" }}>
+                🏢 {matchingBranches[0]} {matchingBranches.length > 1 ? `(+${matchingBranches.length - 1})` : ""}
+              </span>
             );
           },
         },

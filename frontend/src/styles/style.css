@@ -114,7 +114,7 @@ svg {
   top: 0;
   left: 0;
   bottom: 0;
-  z-index: 30;
+  z-index: 100;
   /* The sidebar itself never scrolls -- only .sidebar-nav does (below),
      so the brand header and footer/user block stay pinned in place while
      the nav list scrolls independently. */
@@ -316,7 +316,7 @@ svg {
   height: 64px;
   position: sticky;
   top: 0;
-  z-index: 20;
+  z-index: 500;
 }
 
 .topbar-search {
@@ -777,7 +777,7 @@ svg {
   display: flex;
   justify-content: flex-end;
   align-items: stretch;
-  z-index: 999;
+  z-index: 2000;
   animation: backdropFadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 

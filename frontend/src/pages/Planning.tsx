@@ -91,7 +91,7 @@ import { BUILTIN_STATUS_COLORS } from "@/types/planning";
 // so auto-sizing it the same way wouldn't make sense).
 const CELL_MIN_WIDTH = 64;
 const CELL_MAX_WIDTH = 320;
-const ITEM_COL_WIDTH = 190;
+const ITEM_COL_WIDTH = 240;
 
 /**
  * Roughly how many pixels one character of a bold ~13px header label
@@ -974,6 +974,10 @@ function GridCell({
             }
             style={{
               width: "100%",
+              minWidth: 0,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
               cursor: isBlocked ? "not-allowed" : isActuallyEditable ? "text" : "default",
               fontSize: 13,
               minHeight: 18,
@@ -4034,9 +4038,10 @@ function EditableRowLabel({
         zIndex: 4,
         background: "#fff",
         boxShadow: isLastFrozen ? "3px 0 6px -2px rgba(0,0,0,0.15)" : undefined,
+        overflow: "hidden",
       }}
     >
-      <div style={{ position: "relative", display: "flex", alignItems: "center", gap: 4 }}>
+      <div style={{ position: "relative", display: "flex", alignItems: "center", gap: 4, width: "100%", minWidth: 0, overflow: "hidden" }}>
         {editing && canEdit && isManual ? (
           <input
             ref={inputRef}
@@ -4050,20 +4055,26 @@ function EditableRowLabel({
                 setEditing(false);
               }
             }}
-            style={{ width: "100%", border: "1px solid #2563EB", borderRadius: 4, padding: "3px 6px", fontSize: 13, fontWeight: 500 }}
+            style={{ width: "100%", border: "1px solid #2563EB", borderRadius: 4, padding: "3px 6px", fontSize: 13, fontWeight: 500, boxSizing: "border-box" }}
           />
         ) : (
           <span
             onClick={() => canEdit && isManual && setEditing(true)}
             title={
-              !isManual
-                ? `Auto-filled from Product Master (${sourceType})`
-                : canEdit
-                  ? "Click to edit Item label"
-                  : undefined
+              label
+                ? (!isManual
+                    ? `${label} (Auto-filled from Product Master)`
+                    : canEdit
+                      ? `${label} (Click to edit Item label)`
+                      : label)
+                : undefined
             }
             style={{
               flex: 1,
+              minWidth: 0,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
               cursor: canEdit && isManual ? "pointer" : "default",
               fontSize: 13,
               display: "block",

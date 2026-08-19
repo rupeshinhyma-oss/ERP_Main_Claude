@@ -119,18 +119,153 @@ export interface MasterPageProps<T extends MasterRecord> {
    * subscribe to for real-time create/update/delete events from other
    * users. Deliberately opt-in per page rather than derived automatically
    * from `permissionPrefix` -- several pages' `permissionPrefix` values
-   * (e.g. BuyerTypes/SupplierTypes/CompanyList using "buyer"/"supplier"/
-   * "company") do NOT correspond 1:1 with their own live channel, so an
-   * automatic derivation would silently mis-subscribe them to an
-   * unrelated module's events. Omit this prop for master pages that
-   * don't yet have a registered backend channel/publisher.
+   * (e.g. CompanyList using "company") do NOT correspond 1:1 with their
+   * own live channel, so an automatic derivation would silently
+   * mis-subscribe them to an unrelated module's events. Omit this prop
+   * for master pages that don't yet have a registered backend
+   * channel/publisher.
    */
   liveModule?: string;
+  /**
+   * Permission code gating the Export menu item independently from Import.
+   * Optional and backward-compatible: omitted (or left undefined) pages keep
+   * the original behavior where Export only shows up alongside Import
+   * (i.e. gated by `${permissionPrefix}.import` like before). Pass this to
+   * split Export onto its own permission, e.g. "suppliertype.export".
+   */
+  exportPermission?: string;
+  /**
+   * Permission code gating the whole Bulk Actions dropdown. Optional and
+   * backward-compatible: omitted pages keep the original behavior where
+   * Bulk Actions is always visible (individual bulk buttons still separately
+   * require `${permissionPrefix}.update` / `.delete` as before). Pass this
+   * to require a dedicated permission before the dropdown appears at all,
+   * e.g. "suppliertype.bulk_action".
+   */
+  bulkActionPermission?: string;
 }
 
 export interface MasterPageHandle {
   /** Fetches the record fresh and opens the edit modal for it, same as clicking a row's Edit button. */
   openEdit: (id: string) => void;
+}
+
+function MasterTableSkeletonRows<T extends MasterRecord>({
+  count = 8,
+  displayOrder,
+  colCount,
+  getFreezeStyle,
+  columns,
+}: {
+  count?: number;
+  displayOrder: number[];
+  colCount: number;
+  getFreezeStyle: (colIdx: number, isHeader?: boolean) => React.CSSProperties;
+  columns: MasterColumn<T>[];
+}) {
+  const textWidths = ["50%", "75%", "60%", "85%", "40%", "70%", "55%", "65%"];
+
+  return (
+    <>
+      {Array.from({ length: count }).map((_, rowIndex) => (
+        <tr key={`master-sk-row-${rowIndex}`}>
+          {displayOrder.map((colIdx) => {
+            if (colIdx === 0) {
+              return (
+                <td
+                  key={`sk-cell-0`}
+                  style={{
+                    width: "40px",
+                    minWidth: "40px",
+                    maxWidth: "45px",
+                    textAlign: "center",
+                    padding: "10px 8px",
+                    ...getFreezeStyle(0, false),
+                  }}
+                >
+                  <div
+                    className="skeleton-line"
+                    style={{ width: "16px", height: "16px", borderRadius: "4px", margin: "0 auto" }}
+                  />
+                </td>
+              );
+            }
+
+            if (colIdx === 1) {
+              return (
+                <td
+                  key={`sk-cell-1`}
+                  style={{
+                    width: "65px",
+                    minWidth: "65px",
+                    maxWidth: "75px",
+                    textAlign: "center",
+                    padding: "10px 8px",
+                    ...getFreezeStyle(1, false),
+                  }}
+                >
+                  <div
+                    className="skeleton-line"
+                    style={{ width: "24px", height: "14px", borderRadius: "4px", margin: "0 auto" }}
+                  />
+                </td>
+              );
+            }
+
+            if (colIdx === colCount - 1) {
+              return (
+                <td
+                  key={`sk-cell-action`}
+                  style={{
+                    textAlign: "center",
+                    padding: "8px 10px",
+                    ...getFreezeStyle(colCount - 1, false),
+                  }}
+                >
+                  <div style={{ display: "flex", gap: "6px", alignItems: "center", justifyContent: "center" }}>
+                    <div className="skeleton-line" style={{ width: "30px", height: "30px", borderRadius: "4px" }} />
+                    <div className="skeleton-line" style={{ width: "30px", height: "30px", borderRadius: "4px" }} />
+                  </div>
+                </td>
+              );
+            }
+
+            const mIdx = colIdx - 2;
+            const col = columns[mIdx];
+            const headerLower = (col?.header || "").toLowerCase();
+            const isStatus = headerLower.includes("status") || headerLower.includes("active");
+
+            return (
+              <td
+                key={`sk-cell-${colIdx}`}
+                style={{
+                  padding: "10px 14px",
+                  verticalAlign: "middle",
+                  ...getFreezeStyle(colIdx, false),
+                }}
+              >
+                {isStatus ? (
+                  <div
+                    className="skeleton-line"
+                    style={{ width: "55px", height: "20px", borderRadius: "10px" }}
+                  />
+                ) : (
+                  <div
+                    className="skeleton-line"
+                    style={{
+                      width: textWidths[(rowIndex + mIdx) % textWidths.length],
+                      height: "15px",
+                      borderRadius: "4px",
+                    }}
+                  />
+                )}
+              </td>
+            );
+          })}
+        </tr>
+      ))}
+    </>
+  );
 }
 
 export function MasterPage<T extends MasterRecord>({
@@ -163,6 +298,8 @@ export function MasterPage<T extends MasterRecord>({
   detailSubtitle,
   onReady,
   liveModule,
+  exportPermission,
+  bulkActionPermission,
 }: MasterPageProps<T>) {
   const { hasPermission } = useAuth();
 
@@ -170,6 +307,12 @@ export function MasterPage<T extends MasterRecord>({
   const canUpdate = hasPermission(`${permissionPrefix}.update`);
   const canDelete = hasPermission(`${permissionPrefix}.delete`);
   const canImport = hasPermission(`${permissionPrefix}.import`);
+  // Backward-compatible: pages that don't pass exportPermission keep the
+  // original behavior of Export following Import's visibility.
+  const canExport = exportPermission ? hasPermission(exportPermission) : canImport;
+  // Backward-compatible: pages that don't pass bulkActionPermission keep
+  // Bulk Actions always visible, same as before this prop existed.
+  const canBulkAction = bulkActionPermission ? hasPermission(bulkActionPermission) : true;
 
   const [rows, setRows] = useState<T[]>([]);
   const [pagination, setPagination] = useState<PaginationMeta | undefined>();
@@ -892,7 +1035,7 @@ export function MasterPage<T extends MasterRecord>({
                 + ADD NEW
               </button>
             )}
-            {canImport && (
+            {(canImport || canExport) && (
               <ImpExpDropdown
                 apiBase={apiBase}
                 entityName={entityName}
@@ -901,14 +1044,18 @@ export function MasterPage<T extends MasterRecord>({
                 onSummary={setImportSummary}
                 onError={(msg) => setImportError(msg)}
                 onExportCsv={() => handleExport("csv")}
+                showImport={canImport}
+                showExport={canExport}
               />
             )}
-            <BulkActionsDropdown
-              selectedCount={selectedIds.length}
-              onBulkActivate={canUpdate ? handleBulkActivate : undefined}
-              onBulkDeactivate={canUpdate ? handleBulkDeactivate : undefined}
-              onBulkDelete={canDelete ? handleBulkDelete : undefined}
-            />
+            {canBulkAction && (
+              <BulkActionsDropdown
+                selectedCount={selectedIds.length}
+                onBulkActivate={canUpdate ? handleBulkActivate : undefined}
+                onBulkDeactivate={canUpdate ? handleBulkDeactivate : undefined}
+                onBulkDelete={canDelete ? handleBulkDelete : undefined}
+              />
+            )}
           </div>
         </div>
         <Banner error={error} />
@@ -1175,7 +1322,13 @@ export function MasterPage<T extends MasterRecord>({
               </thead>
               <tbody ref={tableBodyRef}>
                 {loading ? (
-                  <TableMessageRow colSpan={colCount}>Loading...</TableMessageRow>
+                  <MasterTableSkeletonRows
+                    count={8}
+                    displayOrder={displayOrder}
+                    colCount={colCount}
+                    getFreezeStyle={getFreezeStyle}
+                    columns={columns}
+                  />
                 ) : rows.length === 0 ? (
                   <TableMessageRow colSpan={colCount}>No records found.</TableMessageRow>
                 ) : (

@@ -159,6 +159,8 @@ export function ProductsPage() {
       activeKey="masters-products"
       apiBase="/masters/products"
       permissionPrefix="product"
+      exportPermission="product.export"
+      bulkActionPermission="product.bulk_action"
       liveModule="inventory"
       entityName="product"
       heading="Products Master"

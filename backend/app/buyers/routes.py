@@ -231,7 +231,7 @@ async def list_buyers(
     category_id: uuid.UUID | None = None,
     sub_category_id: uuid.UUID | None = None,
     service: BuyerService = Depends(get_buyer_service),
-    _current_user: CurrentUser = Depends(require_permission("buyer.read")),
+    _current_user: CurrentUser = Depends(require_permission("buyer.view")),
 ) -> dict:
     """
     List buyers, with search/sort/filter/pagination.
@@ -254,7 +254,7 @@ async def export_buyers(
     request: Request,
     format: str = "csv",
     service: BuyerService = Depends(get_buyer_service),
-    current_user: CurrentUser = Depends(require_permission("buyer.read")),
+    current_user: CurrentUser = Depends(require_permission("buyer.export")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> Response:
     """Export every buyer as a CSV or XLSX file."""
@@ -285,7 +285,7 @@ async def import_buyers(
     request: Request,
     file: UploadFile = File(...),
     service: BuyerService = Depends(get_buyer_service),
-    current_user: CurrentUser = Depends(require_permission("buyer.create")),
+    current_user: CurrentUser = Depends(require_permission("buyer.import")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     """Import buyers from an uploaded CSV/XLSX file, validating every row with 3-way duplicate detection."""
@@ -308,7 +308,7 @@ async def get_buyer(
     buyer_id: uuid.UUID,
     request: Request,
     service: BuyerService = Depends(get_buyer_service),
-    _current_user: CurrentUser = Depends(require_permission("buyer.read")),
+    _current_user: CurrentUser = Depends(require_permission("buyer.view")),
 ) -> dict:
     """Fetch a single buyer profile by ID, including contacts, emails, and category links."""
     buyer = await service.get_by_id_or_raise(buyer_id)
@@ -566,7 +566,7 @@ async def list_buyer_contacts(
     buyer_id: uuid.UUID,
     request: Request,
     service: BuyerService = Depends(get_buyer_service),
-    _current_user: CurrentUser = Depends(require_permission("buyer.read")),
+    _current_user: CurrentUser = Depends(require_permission("buyer.view")),
 ) -> dict:
     """List every contact person for a buyer (document: "Main Form contact details should appear in the Contact list also")."""
     await service.get_by_id_or_raise(buyer_id)

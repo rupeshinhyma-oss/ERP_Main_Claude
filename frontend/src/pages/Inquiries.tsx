@@ -36,6 +36,90 @@ const EMPTY_ITEM_FORM = {
   product_specs_remarks: "",
 };
 
+function InquiriesBuyerSummarySkeletonRows({ count = 6 }: { count?: number }) {
+  const companyWidths = ["70%", "85%", "60%", "75%", "90%", "65%"];
+  return (
+    <>
+      {Array.from({ length: count }).map((_, i) => (
+        <tr key={`inq-b-sk-${i}`}>
+          <td style={{ padding: "12px 14px" }}>
+            <div className="skeleton-line" style={{ width: "16px", height: "16px", borderRadius: "4px" }} />
+          </td>
+          <td style={{ padding: "12px 14px" }}>
+            <div className="skeleton-line" style={{ width: companyWidths[i % companyWidths.length], height: "15px", borderRadius: "4px" }} />
+          </td>
+          <td style={{ padding: "12px 14px" }}>
+            <div style={{ display: "flex", gap: "4px" }}>
+              <div className="skeleton-line" style={{ width: "45px", height: "18px", borderRadius: "10px" }} />
+              <div className="skeleton-line" style={{ width: "45px", height: "18px", borderRadius: "10px" }} />
+            </div>
+          </td>
+          <td style={{ padding: "12px 14px" }}>
+            <div className="skeleton-line" style={{ width: "65px", height: "20px", borderRadius: "12px" }} />
+          </td>
+          <td style={{ padding: "12px 14px" }}>
+            <div className="skeleton-line" style={{ width: "40px", height: "14px", borderRadius: "4px" }} />
+          </td>
+          <td style={{ padding: "12px 14px" }}>
+            <div className="skeleton-line" style={{ width: "45px", height: "14px", borderRadius: "4px" }} />
+          </td>
+          <td style={{ padding: "12px 14px" }}>
+            <div className="skeleton-line" style={{ width: "70px", height: "14px", borderRadius: "4px" }} />
+          </td>
+          <td style={{ padding: "12px 14px" }}>
+            <div className="skeleton-line" style={{ width: "60px", height: "24px", borderRadius: "4px" }} />
+          </td>
+        </tr>
+      ))}
+    </>
+  );
+}
+
+function InquiriesConsignmentSkeletonRows({ count = 5 }: { count?: number }) {
+  return (
+    <>
+      {Array.from({ length: count }).map((_, i) => (
+        <tr key={`inq-c-sk-${i}`}>
+          <td style={{ padding: "12px 14px" }}><div className="skeleton-line" style={{ width: "16px", height: "16px", borderRadius: "4px" }} /></td>
+          <td style={{ padding: "12px 14px" }}><div className="skeleton-line" style={{ width: "65px", height: "15px", borderRadius: "4px" }} /></td>
+          <td style={{ padding: "12px 14px" }}><div className="skeleton-line" style={{ width: "70px", height: "20px", borderRadius: "12px" }} /></td>
+          <td style={{ padding: "12px 14px" }}><div className="skeleton-line" style={{ width: "45px", height: "14px", borderRadius: "4px" }} /></td>
+          <td style={{ padding: "12px 14px" }}><div className="skeleton-line" style={{ width: "50px", height: "14px", borderRadius: "4px" }} /></td>
+          <td style={{ padding: "12px 14px" }}><div className="skeleton-line" style={{ width: "75px", height: "14px", borderRadius: "4px" }} /></td>
+          <td style={{ padding: "12px 14px" }}><div className="skeleton-line" style={{ width: "50px", height: "24px", borderRadius: "4px" }} /></td>
+        </tr>
+      ))}
+    </>
+  );
+}
+
+function InquiriesItemsSkeletonRows({ count = 6 }: { count?: number }) {
+  const prodWidths = ["80%", "65%", "90%", "75%", "85%"];
+  return (
+    <>
+      {Array.from({ length: count }).map((_, i) => (
+        <tr key={`inq-i-sk-${i}`}>
+          <td style={{ padding: "12px 14px" }}><div className="skeleton-line" style={{ width: "16px", height: "16px", borderRadius: "4px" }} /></td>
+          <td style={{ padding: "12px 14px" }}><div className="skeleton-line" style={{ width: prodWidths[i % prodWidths.length], height: "15px", borderRadius: "4px" }} /></td>
+          <td style={{ padding: "12px 14px" }}><div className="skeleton-line" style={{ width: "35px", height: "14px", borderRadius: "4px" }} /></td>
+          <td style={{ padding: "12px 14px" }}><div className="skeleton-line" style={{ width: "30px", height: "14px", borderRadius: "4px" }} /></td>
+          <td style={{ padding: "12px 14px" }}><div className="skeleton-line" style={{ width: "55px", height: "14px", borderRadius: "4px" }} /></td>
+          <td style={{ padding: "12px 14px" }}><div className="skeleton-line" style={{ width: "70px", height: "14px", borderRadius: "4px" }} /></td>
+          <td style={{ padding: "12px 14px" }}><div className="skeleton-line" style={{ width: "65px", height: "20px", borderRadius: "12px" }} /></td>
+          <td style={{ padding: "12px 14px" }}><div className="skeleton-line" style={{ width: "40px", height: "18px", borderRadius: "10px" }} /></td>
+          <td style={{ padding: "12px 14px" }}><div className="skeleton-line" style={{ width: "60px", height: "14px", borderRadius: "4px" }} /></td>
+          <td style={{ padding: "12px 14px" }}>
+            <div style={{ display: "flex", gap: "6px" }}>
+              <div className="skeleton-line" style={{ width: "28px", height: "28px", borderRadius: "4px" }} />
+              <div className="skeleton-line" style={{ width: "28px", height: "28px", borderRadius: "4px" }} />
+            </div>
+          </td>
+        </tr>
+      ))}
+    </>
+  );
+}
+
 function statusBadgeClass(status: string): string {
   if (status === "fully_approved" || status === "approved") return "badge-green";
   if (status === "partial_approved") return "badge-yellow";
@@ -580,7 +664,7 @@ function CompaniesView({
           </thead>
           <tbody>
             {loading ? (
-              <TableMessageRow colSpan={8}>Loading…</TableMessageRow>
+              <InquiriesBuyerSummarySkeletonRows count={6} />
             ) : summaries.length === 0 ? (
               <TableMessageRow colSpan={8}>No inquiries yet. Add an item from a consignment to get started.</TableMessageRow>
             ) : (
@@ -775,7 +859,7 @@ function ConsignmentsView({
           </thead>
           <tbody>
             {loading ? (
-              <TableMessageRow colSpan={7}>Loading…</TableMessageRow>
+              <InquiriesConsignmentSkeletonRows count={5} />
             ) : filtered.length === 0 ? (
               <TableMessageRow colSpan={7}>No consignments for this company yet.</TableMessageRow>
             ) : (
@@ -1036,7 +1120,7 @@ function ItemsView({
           </thead>
           <tbody>
             {loading ? (
-              <TableMessageRow colSpan={10}>Loading…</TableMessageRow>
+              <InquiriesItemsSkeletonRows count={6} />
             ) : items.length === 0 ? (
               <TableMessageRow colSpan={10}>No items in this consignment yet.</TableMessageRow>
             ) : (

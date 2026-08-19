@@ -119,7 +119,7 @@ async def list_brands(
     request: Request,
     query: ListQueryParams = Depends(get_list_query_params),
     service: BrandService = Depends(get_brand_service),
-    _current_user: CurrentUser = Depends(require_permission("brand.read")),
+    _current_user: CurrentUser = Depends(require_permission("brand.view")),
 ) -> dict:
     """List brands, with search/sort/filter/pagination."""
     brands, total = await service.list_paginated(query)
@@ -133,7 +133,7 @@ async def export_brands(
     request: Request,
     format: str = "csv",
     service: BrandService = Depends(get_brand_service),
-    current_user: CurrentUser = Depends(require_permission("brand.read")),
+    current_user: CurrentUser = Depends(require_permission("brand.export")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> Response:
     """Export every brand as a CSV or XLSX file."""
@@ -156,7 +156,7 @@ async def import_brands(
     request: Request,
     file: UploadFile = File(...),
     service: BrandService = Depends(get_brand_service),
-    current_user: CurrentUser = Depends(require_permission("brand.create")),
+    current_user: CurrentUser = Depends(require_permission("brand.import")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     """Import brands from an uploaded CSV/XLSX file, validating every row."""
@@ -177,7 +177,7 @@ async def get_brand(
     brand_id: uuid.UUID,
     request: Request,
     service: BrandService = Depends(get_brand_service),
-    _current_user: CurrentUser = Depends(require_permission("brand.read")),
+    _current_user: CurrentUser = Depends(require_permission("brand.view")),
 ) -> dict:
     """Fetch a single brand by ID."""
     brand = await service.get_by_id_or_raise(brand_id)

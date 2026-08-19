@@ -62,6 +62,34 @@ function DetailItem({
   );
 }
 
+function OrganizationDetailSkeleton() {
+  return (
+    <div className="card">
+      <div className="detail-grid">
+        {Array.from({ length: 10 }).map((_, i) => (
+          <div key={i}>
+            <div className="label"><div className="skeleton-line" style={{ width: "80px", height: "12px", marginBottom: "4px" }} /></div>
+            <div className="value"><div className="skeleton-line" style={{ width: "140px", height: "16px" }} /></div>
+          </div>
+        ))}
+      </div>
+      <div className="section-title">Address</div>
+      <div className="detail-grid">
+        <div style={{ gridColumn: "1 / -1" }}>
+          <div className="label"><div className="skeleton-line" style={{ width: "60px", height: "12px", marginBottom: "4px" }} /></div>
+          <div className="value"><div className="skeleton-line" style={{ width: "80%", height: "16px" }} /></div>
+        </div>
+        {Array.from({ length: 4 }).map((_, i) => (
+          <div key={i}>
+            <div className="label"><div className="skeleton-line" style={{ width: "60px", height: "12px", marginBottom: "4px" }} /></div>
+            <div className="value"><div className="skeleton-line" style={{ width: "110px", height: "16px" }} /></div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function OrganizationPage() {
   const [org, setOrg] = useState<Organization | null>(null);
   const [form, setForm] = useState<OrgForm>(EMPTY_FORM);
@@ -175,6 +203,8 @@ export function OrganizationPage() {
           )}
         </div>
         <Banner error={error} success={success} />
+
+        {!editing && !org && <OrganizationDetailSkeleton />}
 
         {!editing && org && (
           <div className="card">

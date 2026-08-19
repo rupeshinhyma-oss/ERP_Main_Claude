@@ -4,7 +4,7 @@ Product Category Routes. Standard CRUD + activate/deactivate + import/export, wi
 Phase 9: added live event publishing on every mutation so the Categories
 list page receives real-time updates from other users without a manual
 refresh. Uses ``module:categories`` (entity="category"), registered in
-``app.events.channels.MODULE_CHANNEL_PERMISSIONS`` -> ``category.read``.
+``app.events.channels.MODULE_CHANNEL_PERMISSIONS`` -> ``category.view``.
 """
 
 from __future__ import annotations
@@ -128,7 +128,7 @@ async def list_categories(
     request: Request,
     query: ListQueryParams = Depends(get_list_query_params),
     service: ProductCategoryService = Depends(get_product_category_service),
-    _current_user: CurrentUser = Depends(require_permission("category.read")),
+    _current_user: CurrentUser = Depends(require_permission("category.view")),
 ) -> dict:
     """List product categories, with search/sort/filter/pagination."""
     categories, total = await service.list_paginated(query)
@@ -142,7 +142,7 @@ async def export_categories(
     request: Request,
     format: str = "csv",
     service: ProductCategoryService = Depends(get_product_category_service),
-    current_user: CurrentUser = Depends(require_permission("category.read")),
+    current_user: CurrentUser = Depends(require_permission("category.export")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> Response:
     """Export every product category as a CSV or XLSX file."""
@@ -168,7 +168,7 @@ async def import_categories(
     request: Request,
     file: UploadFile = File(...),
     service: ProductCategoryService = Depends(get_product_category_service),
-    current_user: CurrentUser = Depends(require_permission("category.create")),
+    current_user: CurrentUser = Depends(require_permission("category.import")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     """Import product categories from an uploaded CSV/XLSX file, validating every row."""
@@ -192,7 +192,7 @@ async def get_category(
     category_id: uuid.UUID,
     request: Request,
     service: ProductCategoryService = Depends(get_product_category_service),
-    _current_user: CurrentUser = Depends(require_permission("category.read")),
+    _current_user: CurrentUser = Depends(require_permission("category.view")),
 ) -> dict:
     """Fetch a single product category by ID."""
     category = await service.get_by_id_or_raise(category_id)

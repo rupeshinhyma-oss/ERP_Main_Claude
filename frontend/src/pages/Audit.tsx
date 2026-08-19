@@ -40,6 +40,45 @@ function StatusCodeBadge({ code }: { code?: number | null }) {
   return <span className={`badge ${cls}`}>{code}</span>;
 }
 
+function AuditTableSkeletonRows({ count = 8 }: { count?: number }) {
+  const descWidths = ["75%", "90%", "60%", "85%", "70%", "65%"];
+  return (
+    <>
+      {Array.from({ length: count }).map((_, idx) => (
+        <tr key={`audit-sk-${idx}`}>
+          <td style={{ padding: "12px 14px" }}>
+            <div className="skeleton-line" style={{ width: "110px", height: "14px", borderRadius: "4px" }} />
+          </td>
+          <td style={{ padding: "12px 14px" }}>
+            <div className="skeleton-line" style={{ width: "80px", height: "14px", borderRadius: "4px" }} />
+          </td>
+          <td style={{ padding: "12px 14px" }}>
+            <div className="skeleton-line" style={{ width: "65px", height: "20px", borderRadius: "12px" }} />
+          </td>
+          <td style={{ padding: "12px 14px" }}>
+            <div className="skeleton-line" style={{ width: "70px", height: "14px", borderRadius: "4px" }} />
+          </td>
+          <td style={{ padding: "12px 14px" }}>
+            <div className="skeleton-line" style={{ width: "75px", height: "14px", borderRadius: "4px" }} />
+          </td>
+          <td style={{ padding: "12px 14px" }}>
+            <div
+              className="skeleton-line"
+              style={{ width: descWidths[idx % descWidths.length], height: "14px", borderRadius: "4px" }}
+            />
+          </td>
+          <td style={{ padding: "12px 14px" }}>
+            <div className="skeleton-line" style={{ width: "40px", height: "20px", borderRadius: "12px" }} />
+          </td>
+          <td style={{ padding: "12px 14px" }}>
+            <div className="skeleton-line" style={{ width: "45px", height: "24px", borderRadius: "4px" }} />
+          </td>
+        </tr>
+      ))}
+    </>
+  );
+}
+
 function DetailItem({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div>
@@ -172,7 +211,7 @@ export function AuditPage() {
               </thead>
               <tbody>
                 {loading ? (
-                  <TableMessageRow colSpan={8}>Loading...</TableMessageRow>
+                  <AuditTableSkeletonRows count={8} />
                 ) : rows.length === 0 ? (
                   <TableMessageRow colSpan={8}>No audit entries found.</TableMessageRow>
                 ) : (

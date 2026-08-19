@@ -21,6 +21,26 @@ interface UserProfileData {
   username: string;
 }
 
+function ProfileFormSkeleton() {
+  return (
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+        gap: "24px",
+        marginBottom: "28px",
+      }}
+    >
+      {Array.from({ length: 4 }).map((_, i) => (
+        <div key={i}>
+          <div className="skeleton-line" style={{ width: "80px", height: "14px", marginBottom: "8px", borderRadius: "4px" }} />
+          <div className="skeleton-line" style={{ width: "100%", height: "40px", borderRadius: "6px" }} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function ProfilePage() {
   const navigate = useNavigate();
   const { profile } = useAuth();
@@ -170,15 +190,18 @@ export function ProfilePage() {
             marginBottom: "28px",
           }}
         >
-          <form onSubmit={handleProfileSubmit}>
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
-                gap: "24px",
-                marginBottom: "28px",
-              }}
-            >
+          {loading ? (
+            <ProfileFormSkeleton />
+          ) : (
+            <form onSubmit={handleProfileSubmit}>
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+                  gap: "24px",
+                  marginBottom: "28px",
+                }}
+              >
               <div>
                 <label style={{ display: "block", fontSize: "14px", fontWeight: 600, color: "#334155", marginBottom: "8px" }}>
                   First Name <span style={{ color: "#dc2626" }}>*</span>
@@ -290,6 +313,7 @@ export function ProfilePage() {
               {savingProfile ? "Updating..." : "Update"}
             </button>
           </form>
+          )}
         </div>
 
         {/* Change Password Card */}

@@ -29,6 +29,8 @@ export function SubCategoriesPage() {
       activeKey="masters-subcategories"
       apiBase="/masters/product-sub-categories"
       permissionPrefix="subcategory"
+      exportPermission="subcategory.export"
+      bulkActionPermission="subcategory.bulk_action"
       liveModule="subcategories"
       entityName="sub-category"
       heading="Product Sub-Categories"

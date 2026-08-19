@@ -58,7 +58,7 @@ class Event:
     event_type:
         Dotted ``"{entity}.{action}"`` string, e.g. ``"buyer.updated"``,
         matching this codebase's existing permission-code convention
-        (``"buyer.read"``, ``"planning.sheet.manage"``, ...) so the two
+        (``"buyer.view"``, ``"planning.sheet.manage"``, ...) so the two
         stay easy to reason about side by side. Not machine-validated
         against a fixed enum on purpose -- Phase 1 is infrastructure, not
         a registry of every event every future module will ever emit;

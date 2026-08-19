@@ -67,6 +67,36 @@ function formatRoleCreatedAt(value: unknown): string {
   });
 }
 
+function RolesTableSkeletonRows({ count = 6 }: { count?: number }) {
+  const roleWidths = ["55%", "70%", "45%", "65%", "50%", "60%"];
+  return (
+    <>
+      {Array.from({ length: count }).map((_, idx) => (
+        <tr key={`role-sk-row-${idx}`}>
+          <td style={{ textAlign: "center", padding: "12px 14px" }}>
+            <div className="skeleton-line" style={{ width: "16px", height: "16px", borderRadius: "4px", margin: "0 auto" }} />
+          </td>
+          <td style={{ padding: "12px 14px" }}>
+            <div className="skeleton-line" style={{ width: "24px", height: "14px", borderRadius: "4px" }} />
+          </td>
+          <td style={{ padding: "12px 14px" }}>
+            <div
+              className="skeleton-line"
+              style={{ width: roleWidths[idx % roleWidths.length], height: "15px", borderRadius: "4px" }}
+            />
+          </td>
+          <td style={{ padding: "12px 14px" }}>
+            <div className="skeleton-line" style={{ width: "120px", height: "14px", borderRadius: "4px" }} />
+          </td>
+          <td style={{ padding: "12px 14px", textAlign: "center" }}>
+            <div className="skeleton-line" style={{ width: "32px", height: "32px", borderRadius: "4px", margin: "0 auto" }} />
+          </td>
+        </tr>
+      ))}
+    </>
+  );
+}
+
 export function RbacPage() {
   const { hasPermission } = useAuth();
   const showToast = useToast();
@@ -856,11 +886,7 @@ export function RbacPage() {
                   </thead>
                   <tbody>
                     {rolesLoading ? (
-                      <tr>
-                        <td colSpan={5} style={{ textAlign: "center", padding: "24px" }} className="muted">
-                          Loading system roles...
-                        </td>
-                      </tr>
+                      <RolesTableSkeletonRows count={6} />
                     ) : filteredRoles.length ? (
                       filteredRoles.slice(0, rolePageSize).map((role, idx) => {
                         const isSelected = selectedRoleIds.includes(role.id);

@@ -33,6 +33,59 @@ function InfoItem({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
+function EffectivePermissionsSkeleton() {
+  return (
+    <>
+      <div className="info-card" style={{ marginBottom: "16px" }}>
+        <div className="section-header-title">👤 User Information</div>
+        <div className="info-grid">
+          <div><div className="info-label"><div className="skeleton-line" style={{ width: "80px", height: "12px" }} /></div><div className="info-value"><div className="skeleton-line" style={{ width: "140px", height: "16px" }} /></div></div>
+          <div><div className="info-label"><div className="skeleton-line" style={{ width: "70px", height: "12px" }} /></div><div className="info-value"><div className="skeleton-line" style={{ width: "100px", height: "16px" }} /></div></div>
+          <div><div className="info-label"><div className="skeleton-line" style={{ width: "90px", height: "12px" }} /></div><div className="info-value"><div className="skeleton-line" style={{ width: "120px", height: "16px" }} /></div></div>
+          <div><div className="info-label"><div className="skeleton-line" style={{ width: "90px", height: "12px" }} /></div><div className="info-value"><div className="skeleton-line" style={{ width: "70px", height: "20px", borderRadius: "10px" }} /></div></div>
+        </div>
+      </div>
+
+      <div className="info-card" style={{ marginBottom: "16px" }}>
+        <div className="section-header-title">🛡️ Role Permissions</div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+          {Array.from({ length: 12 }).map((_, i) => (
+            <div key={i} className="skeleton-line" style={{ width: `${80 + (i % 5) * 15}px`, height: "22px", borderRadius: "4px" }} />
+          ))}
+        </div>
+      </div>
+
+      <div className="info-card">
+        <div className="section-header-title">🔍 Debug &amp; Permission Tracing Log</div>
+        <table className="data-table" style={{ width: "100%" }}>
+          <thead>
+            <tr>
+              <th style={{ width: "40px" }}><input type="checkbox" disabled /></th>
+              <th>Permission Code</th>
+              <th>Module</th>
+              <th>Inherited Role(s)</th>
+              <th>Override Status</th>
+              <th>Calculated Source</th>
+            </tr>
+          </thead>
+          <tbody>
+            {Array.from({ length: 6 }).map((_, i) => (
+              <tr key={i}>
+                <td style={{ padding: "12px 14px", textAlign: "center" }}><div className="skeleton-line" style={{ width: "16px", height: "16px", borderRadius: "4px" }} /></td>
+                <td style={{ padding: "12px 14px" }}><div className="skeleton-line" style={{ width: "130px", height: "14px", borderRadius: "4px" }} /></td>
+                <td style={{ padding: "12px 14px" }}><div className="skeleton-line" style={{ width: "75px", height: "14px", borderRadius: "4px" }} /></td>
+                <td style={{ padding: "12px 14px" }}><div className="skeleton-line" style={{ width: "90px", height: "14px", borderRadius: "4px" }} /></td>
+                <td style={{ padding: "12px 14px" }}><div className="skeleton-line" style={{ width: "60px", height: "18px", borderRadius: "10px" }} /></td>
+                <td style={{ padding: "12px 14px" }}><div className="skeleton-line" style={{ width: "80px", height: "18px", borderRadius: "10px" }} /></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
+  );
+}
+
 export function EffectivePermissionsPage() {
   const [params] = useSearchParams();
   const [users, setUsers] = useState<User[]>([]);
@@ -168,7 +221,7 @@ export function EffectivePermissionsPage() {
           <p className="muted">Select a user account above to view their effective access report.</p>
         )}
         {status === "loading" && (
-          <p className="muted">Calculating effective permissions and tracing sources...</p>
+          <EffectivePermissionsSkeleton />
         )}
         {status === "ready" && !info && (
           <p className="muted">No access data available for selected user.</p>

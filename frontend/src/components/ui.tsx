@@ -161,7 +161,7 @@ export function Can({
 }
 
 /* ------------------------------------------------------------------ */
-/* Table helpers                                                      */
+/* Table & Skeleton helpers                                           */
 /* ------------------------------------------------------------------ */
 
 /** Full-width muted message row used for loading / empty states. */
@@ -178,6 +178,112 @@ export function TableMessageRow({
         {children}
       </td>
     </tr>
+  );
+}
+
+export function SkeletonLine({
+  width = "100%",
+  height = "14px",
+  style,
+  className = "",
+}: {
+  width?: string | number;
+  height?: string | number;
+  style?: React.CSSProperties;
+  className?: string;
+}) {
+  return (
+    <div
+      className={`skeleton-line ${className}`.trim()}
+      style={{ width, height, ...style }}
+    />
+  );
+}
+
+export function SkeletonCircle({
+  size = 32,
+  style,
+  className = "",
+}: {
+  size?: number | string;
+  style?: React.CSSProperties;
+  className?: string;
+}) {
+  return (
+    <div
+      className={`skeleton-circle ${className}`.trim()}
+      style={{ width: size, height: size, minWidth: size, minHeight: size, ...style }}
+    />
+  );
+}
+
+export function SkeletonBox({
+  width = "100%",
+  height = "100%",
+  style,
+  className = "",
+}: {
+  width?: string | number;
+  height?: string | number;
+  style?: React.CSSProperties;
+  className?: string;
+}) {
+  return (
+    <div
+      className={`skeleton-box ${className}`.trim()}
+      style={{ width, height, ...style }}
+    />
+  );
+}
+
+export function SkeletonBadge({
+  width = "60px",
+  height = "20px",
+  style,
+  className = "",
+}: {
+  width?: string | number;
+  height?: string | number;
+  style?: React.CSSProperties;
+  className?: string;
+}) {
+  return (
+    <div
+      className={`skeleton-badge ${className}`.trim()}
+      style={{ width, height, ...style }}
+    />
+  );
+}
+
+export function SkeletonTableRows({
+  count = 6,
+  colSpan = 6,
+  cellHeights = "14px",
+  cellWidths = ["30%", "70%", "50%", "40%", "60%", "35%"],
+}: {
+  count?: number;
+  colSpan?: number;
+  cellHeights?: string;
+  cellWidths?: string[];
+}) {
+  return (
+    <>
+      {Array.from({ length: count }).map((_, rIdx) => (
+        <tr key={`sk-row-${rIdx}`}>
+          {Array.from({ length: colSpan }).map((_, cIdx) => (
+            <td key={`sk-cell-${rIdx}-${cIdx}`} style={{ padding: "12px 14px" }}>
+              <div
+                className="skeleton-line"
+                style={{
+                  height: cellHeights,
+                  width: cellWidths[(rIdx + cIdx) % cellWidths.length],
+                }}
+              />
+            </td>
+          ))}
+        </tr>
+      ))}
+    </>
   );
 }
 

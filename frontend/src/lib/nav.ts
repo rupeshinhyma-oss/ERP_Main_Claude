@@ -44,15 +44,23 @@ export const NAV_SECTIONS: NavSection[] = [
       { key: "masters-categories", label: "Categories", path: "/masters/categories", icon: "layers", permission: "category.view" },
       { key: "masters-subcategories", label: "Sub Categories", path: "/masters/subcategories", icon: "folderTree", permission: "subcategory.view" },
       { key: "masters-brands", label: "Brands", path: "/masters/brands", icon: "award", permission: "brand.view" },
-      { key: "masters-supplier-types", label: "Supplier Types", path: "/masters/supplier-types", icon: "network", permission: "supplier.view" },
-      { key: "masters-buyer-types", label: "Buyer Types", path: "/masters/buyer-types", icon: "idCard", permission: "buyer.view" },
+      { key: "masters-supplier-types", label: "Supplier Types", path: "/masters/supplier-types", icon: "network", permission: "suppliertype.view" },
+      { key: "masters-buyer-types", label: "Buyer Types", path: "/masters/buyer-types", icon: "idCard", permission: "buyertype.view" },
     ],
   },
 
   {
     label: "SALE",
     items: [
-      { key: "proforma", label: "Inquiries", path: "/inquiries", icon: "fileText", permission: "inquiry.view" },
+      // Bug fix: this key used to be "proforma" while Inquiries.tsx passes
+      // <AppShell activeKey="inquiries">, and Sidebar only highlights a nav
+      // item when `item.key === activeKey` matches exactly (see
+      // AppShell.tsx's `nav-item ${item.key === activeKey ? "active" : ""}`).
+      // The mismatch meant this item's row/icon never got the active
+      // highlight or auto-scroll-into-view, even while on the Inquiries
+      // page -- every other nav item's key already matches its page's
+      // activeKey (e.g. "masters-buyer-types"), so this brings it in line.
+      { key: "inquiries", label: "Inquiries", path: "/inquiries", icon: "fileText", permission: "inquiry.view" },
     ],
   },
   {

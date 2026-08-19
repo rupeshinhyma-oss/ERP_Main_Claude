@@ -214,6 +214,64 @@ function loadColumnIdSet(key: string): Set<string> {
   }
 }
 
+function PlanningGridSkeletonRows({
+  columns,
+  count = 10,
+}: {
+  columns: PlanningColumn[];
+  count?: number;
+}) {
+  return (
+    <>
+      {Array.from({ length: count }).map((_, rIdx) => (
+        <tr key={`plan-sk-row-${rIdx}`}>
+          <td
+            style={{
+              position: "sticky",
+              left: 0,
+              zIndex: 3,
+              background: "#F8FAFC",
+              borderRight: "2px solid #CBD5E1",
+              padding: "10px 12px",
+              minWidth: 160,
+              maxWidth: 220,
+            }}
+          >
+            <div
+              className="skeleton-line"
+              style={{
+                width: ["65%", "85%", "70%", "90%", "60%"][rIdx % 5],
+                height: "15px",
+                borderRadius: "4px",
+              }}
+            />
+          </td>
+          {columns.map((col, cIdx) => (
+            <td
+              key={`plan-sk-cell-${rIdx}-${col.id}`}
+              style={{
+                padding: "8px 10px",
+                textAlign: col.data_type === "number" ? "right" : "left",
+                minWidth: col.width_px || 120,
+              }}
+            >
+              <div
+                className="skeleton-line"
+                style={{
+                  width: col.data_type === "boolean_yn" ? "40px" : col.data_type === "date" ? "75px" : ["70%", "50%", "85%", "60%", "40%"][(rIdx + cIdx) % 5],
+                  height: col.data_type === "boolean_yn" ? "18px" : "14px",
+                  borderRadius: col.data_type === "boolean_yn" ? "10px" : "4px",
+                  marginLeft: col.data_type === "number" ? "auto" : undefined,
+                }}
+              />
+            </td>
+          ))}
+        </tr>
+      ))}
+    </>
+  );
+}
+
 function statusSwatchColor(
   statusColor: PlanningCellStatusColor | null | undefined,
   customStatusTagId: string | null | undefined,
@@ -3004,7 +3062,7 @@ export function PlanningPage() {
                 </thead>
                 <tbody>
                   {loading ? (
-                    <TableMessageRow colSpan={orderedColumns.length + 1}>Loading grid…</TableMessageRow>
+                    <PlanningGridSkeletonRows columns={orderedColumns} count={10} />
                   ) : rows.length === 0 ? (
                     <TableMessageRow colSpan={orderedColumns.length + 1}>
                       {activeFilterCount > 0 ? (

@@ -66,7 +66,7 @@ async def _publish_supplier_event(
     Phase 9: mirrors ``app.buyers.routes._publish_buyer_event`` exactly
     (Suppliers is one of the two large, frequently-edited list modules
     Phase 9 targets, and its channel/permission was already registered in
-    ``app.events.channels.MODULE_CHANNEL_PERMISSIONS`` -- ``supplier.read``
+    ``app.events.channels.MODULE_CHANNEL_PERMISSIONS`` -- ``supplier.view``
     -- since Phase 1, but nothing ever actually published to it until
     now). Publishes to ``module:suppliers`` only, same reasoning as
     Buyers: no Supplier detail page/side-panel subscribes to a per-record
@@ -219,7 +219,7 @@ async def list_suppliers(
     sub_category_id: uuid.UUID | None = None,
     product_id: uuid.UUID | None = None,
     service: SupplierService = Depends(get_supplier_service),
-    _current_user: CurrentUser = Depends(require_permission("supplier.read")),
+    _current_user: CurrentUser = Depends(require_permission("supplier.view")),
 ) -> dict:
     """
     List suppliers, with search/sort/filter/pagination.
@@ -245,7 +245,7 @@ async def export_suppliers(
     request: Request,
     format: str = "csv",
     service: SupplierService = Depends(get_supplier_service),
-    current_user: CurrentUser = Depends(require_permission("supplier.read")),
+    current_user: CurrentUser = Depends(require_permission("supplier.export")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> Response:
     """Export every supplier as a CSV or XLSX file."""
@@ -351,7 +351,7 @@ async def get_supplier(
     supplier_id: uuid.UUID,
     request: Request,
     service: SupplierService = Depends(get_supplier_service),
-    _current_user: CurrentUser = Depends(require_permission("supplier.read")),
+    _current_user: CurrentUser = Depends(require_permission("supplier.view")),
 ) -> dict:
     """Fetch a single supplier profile by ID, including contacts, emails, and category links."""
     supplier = await service.get_by_id_or_raise(supplier_id)
@@ -401,7 +401,7 @@ async def update_supplier_grade(
     payload: SupplierGradeUpdate,
     request: Request,
     service: SupplierService = Depends(get_supplier_service),
-    current_user: CurrentUser = Depends(require_permission("supplier.update")),
+    current_user: CurrentUser = Depends(require_permission("supplier.grade_edit")),
     audit_service: AuditService = Depends(get_audit_service),
     db: AsyncSession = Depends(get_db_session),
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
@@ -436,7 +436,7 @@ async def update_supplier_potential(
     payload: SupplierPotentialUpdate,
     request: Request,
     service: SupplierService = Depends(get_supplier_service),
-    current_user: CurrentUser = Depends(require_permission("supplier.update")),
+    current_user: CurrentUser = Depends(require_permission("supplier.potential_edit")),
     audit_service: AuditService = Depends(get_audit_service),
     db: AsyncSession = Depends(get_db_session),
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
@@ -613,7 +613,7 @@ async def list_supplier_contacts(
     supplier_id: uuid.UUID,
     request: Request,
     service: SupplierService = Depends(get_supplier_service),
-    _current_user: CurrentUser = Depends(require_permission("supplier.read")),
+    _current_user: CurrentUser = Depends(require_permission("supplier.view")),
 ) -> dict:
     """List every contact person for a supplier ("Add Contacts List")."""
     await service.get_by_id_or_raise(supplier_id)

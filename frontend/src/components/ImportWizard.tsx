@@ -894,9 +894,8 @@ function WizardModal({
                     ))}
                   </select>
                   <span
-                    className={`iw-match-badge ${
-                      mapping[h.key] ? "iw-match-auto" : "iw-match-none"
-                    }`}
+                    className={`iw-match-badge ${mapping[h.key] ? "iw-match-auto" : "iw-match-none"
+                      }`}
                   >
                     {mapping[h.key] ? "Matched" : h.required ? "Required" : "Optional"}
                   </span>
@@ -1091,6 +1090,10 @@ export interface ImpExpDropdownProps {
   onSummary: (summary: ImportSummary | null) => void;
   onError: (message: string | null) => void;
   onExportCsv: () => void;
+  /** Show the IMPORT menu item (and Sample File, which only import needs). Defaults to true. */
+  showImport?: boolean;
+  /** Show the EXPORT menu item. Defaults to true. */
+  showExport?: boolean;
 }
 
 const REALISTIC_SAMPLES: Record<string, string> = {
@@ -1194,6 +1197,8 @@ export function ImpExpDropdown({
   onSummary,
   onError,
   onExportCsv,
+  showImport = true,
+  showExport = true,
 }: ImpExpDropdownProps) {
   const [open, setOpen] = useState(false);
   const [pending, setPending] = useState<{
@@ -1231,6 +1236,8 @@ export function ImpExpDropdown({
       onError(errorMessage(err) || "Could not read that file.");
     }
   }
+
+  if (!showImport && !showExport) return null;
 
   return (
     <div ref={menuRef} style={{ position: "relative", display: "inline-block" }}>
@@ -1271,76 +1278,82 @@ export function ImpExpDropdown({
             overflow: "hidden",
           }}
         >
-          <button
-            type="button"
-            onClick={() => {
-              setOpen(false);
-              downloadSampleCsv(entityName, importHeaders);
-            }}
-            style={{
-              width: "100%",
-              textAlign: "left",
-              padding: "10px 14px",
-              fontSize: "13.5px",
-              color: "#334155",
-              fontWeight: 600,
-              background: "none",
-              border: "none",
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              gap: "8px",
-            }}
-          >
-            📄 SAMPLE FILE
-          </button>
-          <label
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "8px",
-              padding: "10px 14px",
-              fontSize: "13.5px",
-              color: "#334155",
-              fontWeight: 600,
-              cursor: "pointer",
-              margin: 0,
-              borderTop: "1px solid #f1f5f9",
-            }}
-          >
-            📥 IMPORT
-            <input
-              ref={inputRef}
-              type="file"
-              accept=".csv,.xlsx"
-              onChange={handleFileChange}
-              style={{ display: "none" }}
-            />
-          </label>
-          <button
-            type="button"
-            onClick={() => {
-              setOpen(false);
-              onExportCsv();
-            }}
-            style={{
-              width: "100%",
-              textAlign: "left",
-              padding: "10px 14px",
-              fontSize: "13.5px",
-              color: "#334155",
-              fontWeight: 600,
-              background: "none",
-              border: "none",
-              borderTop: "1px solid #f1f5f9",
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              gap: "8px",
-            }}
-          >
-            📤 EXPORT
-          </button>
+          {showImport && (
+            <button
+              type="button"
+              onClick={() => {
+                setOpen(false);
+                downloadSampleCsv(entityName, importHeaders);
+              }}
+              style={{
+                width: "100%",
+                textAlign: "left",
+                padding: "10px 14px",
+                fontSize: "13.5px",
+                color: "#334155",
+                fontWeight: 600,
+                background: "none",
+                border: "none",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
+              }}
+            >
+              📄 SAMPLE FILE
+            </button>
+          )}
+          {showImport && (
+            <label
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
+                padding: "10px 14px",
+                fontSize: "13.5px",
+                color: "#334155",
+                fontWeight: 600,
+                cursor: "pointer",
+                margin: 0,
+                borderTop: "1px solid #f1f5f9",
+              }}
+            >
+              📥 IMPORT
+              <input
+                ref={inputRef}
+                type="file"
+                accept=".csv,.xlsx"
+                onChange={handleFileChange}
+                style={{ display: "none" }}
+              />
+            </label>
+          )}
+          {showExport && (
+            <button
+              type="button"
+              onClick={() => {
+                setOpen(false);
+                onExportCsv();
+              }}
+              style={{
+                width: "100%",
+                textAlign: "left",
+                padding: "10px 14px",
+                fontSize: "13.5px",
+                color: "#334155",
+                fontWeight: 600,
+                background: "none",
+                border: "none",
+                borderTop: "1px solid #f1f5f9",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
+              }}
+            >
+              📤 EXPORT
+            </button>
+          )}
         </div>
       )}
 

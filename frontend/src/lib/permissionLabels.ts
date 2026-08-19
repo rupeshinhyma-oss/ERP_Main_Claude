@@ -15,7 +15,9 @@ export const MODULE_NAMES: Record<string, string> = {
   dashboard: "Dashboard",
   company: "Companies",
   buyer: "Agents & Buyers",
+  buyertype: "Buyer Types",
   supplier: "Suppliers",
+  suppliertype: "Supplier Types",
   inquiry: "Proforma & Inquiries",
   planning: "Shipment Planning",
   product: "Products Master",
@@ -46,6 +48,9 @@ const ACTION_LABELS: Record<string, string> = {
   import: "Import",
   approve: "Approve",
   manage: "Manage All",
+  bulk_action: "Bulk Actions",
+  grade_edit: "Edit Grade",
+  potential_edit: "Edit Potential",
 };
 
 /** "product.create" -> "Create"; unknown actions fall back to the raw code. */

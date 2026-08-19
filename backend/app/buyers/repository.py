@@ -18,12 +18,30 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.buyers.models import Buyer, BuyerCategoryLink, BuyerContact, BuyerEmail, BuyerSubCategoryLink
 from app.common.base_repository import BaseRepository
+from app.masters.countries.models import Country
+from app.masters.product_categories.models import ProductCategory
+from app.masters.product_sub_categories.models import ProductSubCategory
 
 
 class BuyerRepository(BaseRepository[Buyer]):
     """Repository for buyer profile rows."""
 
-    searchable_fields = ("company_name",)
+    searchable_fields = (
+        "company_name",
+        "buyer_type",
+        "city",
+        "address",
+        "contact_full_name",
+        "contact_designation",
+        "contact_calling_number",
+        "contact_whatsapp_number",
+        "tax_id_number",
+        "website",
+        "product_range",
+        "potential_reason",
+        "currently_buying_from",
+        "overall_remarks",
+    )
     sortable_fields = ("company_name", "created_at", "updated_at", "buyer_grade", "current_status")
     filterable_fields = (
         "country_id",
@@ -37,6 +55,87 @@ class BuyerRepository(BaseRepository[Buyer]):
     def __init__(self, session: AsyncSession) -> None:
         """Bind to a DB session, operating on the ``Buyer`` model."""
         super().__init__(session, Buyer)
+
+    def _apply_search(self, stmt: Select, term: str | None) -> Select:
+        """
+        Comprehensive search matching anything visible on the buyer row / details:
+        company name, buyer type, country (name/code), city, address, contact name/phone/email,
+        tax ID, websites, product range, remarks, and linked categories/sub-categories.
+        """
+        if not term:
+            return stmt
+        clean = term.strip()
+        if not clean:
+            return stmt
+        pattern = f"%{clean}%"
+
+        direct_columns = [
+            Buyer.company_name,
+            Buyer.buyer_type,
+            Buyer.city,
+            Buyer.address,
+            Buyer.contact_full_name,
+            Buyer.contact_designation,
+            Buyer.contact_calling_number,
+            Buyer.contact_whatsapp_number,
+            Buyer.tax_id_number,
+            Buyer.website,
+            Buyer.product_range,
+            Buyer.potential_reason,
+            Buyer.currently_buying_from,
+            Buyer.overall_remarks,
+        ]
+        conditions = [col.ilike(pattern) for col in direct_columns]
+
+        # 1. Country Name / Code
+        conditions.append(
+            exists().where(
+                Country.id == Buyer.country_id,
+                or_(Country.name.ilike(pattern), Country.code.ilike(pattern)),
+            )
+        )
+
+        # 2. Child Emails
+        conditions.append(
+            exists().where(
+                BuyerEmail.buyer_id == Buyer.id,
+                BuyerEmail.email.ilike(pattern),
+            )
+        )
+
+        # 3. Child Contacts (name, phone, email, designation)
+        conditions.append(
+            exists().where(
+                BuyerContact.buyer_id == Buyer.id,
+                or_(
+                    BuyerContact.person_name.ilike(pattern),
+                    BuyerContact.calling_number.ilike(pattern),
+                    BuyerContact.whatsapp_number.ilike(pattern),
+                    BuyerContact.email.ilike(pattern),
+                    BuyerContact.designation.ilike(pattern),
+                ),
+            )
+        )
+
+        # 4. Linked Product Categories
+        conditions.append(
+            exists().where(
+                BuyerCategoryLink.buyer_id == Buyer.id,
+                ProductCategory.id == BuyerCategoryLink.category_id,
+                or_(ProductCategory.name.ilike(pattern), ProductCategory.code.ilike(pattern)),
+            )
+        )
+
+        # 5. Linked Product Sub Categories
+        conditions.append(
+            exists().where(
+                BuyerSubCategoryLink.buyer_id == Buyer.id,
+                ProductSubCategory.id == BuyerSubCategoryLink.sub_category_id,
+                or_(ProductSubCategory.name.ilike(pattern), ProductSubCategory.code.ilike(pattern)),
+            )
+        )
+
+        return stmt.where(or_(*conditions))
 
     async def find_duplicate(
         self,

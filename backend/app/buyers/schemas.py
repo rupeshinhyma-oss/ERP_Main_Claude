@@ -105,7 +105,7 @@ class BuyerCreate(BaseModel):
     emails: list[str] = Field(default_factory=list, description="Email ID (multiple emails).")
 
     tax_id_number: str | None = Field(default=None, max_length=100)
-    website: str | None = Field(default=None, max_length=500)
+    website: str | None = Field(default=None, max_length=5000)
     current_status: BuyerCurrentStatus | None = None
     product_range: str | None = None
     potential: BuyerPotential | None = None
@@ -160,7 +160,7 @@ class BuyerUpdate(BaseModel):
     emails: list[str] | None = None
 
     tax_id_number: str | None = Field(default=None, max_length=100)
-    website: str | None = Field(default=None, max_length=500)
+    website: str | None = Field(default=None, max_length=5000)
     current_status: BuyerCurrentStatus | None = None
     product_range: str | None = None
     potential: BuyerPotential | None = None

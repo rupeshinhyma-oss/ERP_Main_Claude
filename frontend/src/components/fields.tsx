@@ -259,6 +259,358 @@ export function PhoneGroupField({
   );
 }
 
+export const WebsiteField = WebsiteTagInput;
+
+export function WebsiteTagInput({
+  id,
+  label = "Website",
+  value,
+  onChange,
+  placeholder = "Type website and press Enter...",
+  hint,
+  hasError = false,
+}: {
+  id?: string;
+  label?: React.ReactNode;
+  value: string;
+  onChange: (val: string) => void;
+  placeholder?: string;
+  hint?: React.ReactNode;
+  hasError?: boolean;
+}) {
+  const [inputValue, setInputValue] = useState("");
+  const [errorMsg, setErrorMsg] = useState("");
+  const [popoverOpen, setPopoverOpen] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Parse comma-separated website URLs into an array of clean links
+  const links = useMemo(() => {
+    if (!value) return [];
+    return value
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+  }, [value]);
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setPopoverOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const commitLink = (raw: string) => {
+    const clean = raw.trim();
+    if (!clean) {
+      setErrorMsg("");
+      return;
+    }
+
+    const parts = clean.split(/[\s,]+/).map((p) => p.trim()).filter(Boolean);
+    const updated = [...links];
+
+    for (let p of parts) {
+      if (!p.startsWith("http://") && !p.startsWith("https://")) {
+        p = `https://${p}`;
+      }
+      if (!updated.includes(p)) {
+        updated.push(p);
+      }
+    }
+
+    onChange(updated.join(", "));
+    setInputValue("");
+    setErrorMsg("");
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter" || e.key === "," || e.key === " ") {
+      e.preventDefault();
+      commitLink(inputValue);
+    } else if (e.key === "Backspace" && !inputValue && links.length > 0) {
+      setErrorMsg("");
+      const next = links.slice(0, -1);
+      onChange(next.join(", "));
+    }
+  };
+
+  const handleBlur = () => {
+    if (inputValue.trim()) {
+      commitLink(inputValue);
+    }
+  };
+
+  const removeTag = (indexToRemove: number) => {
+    if (errorMsg) setErrorMsg("");
+    const next = links.filter((_, idx) => idx !== indexToRemove);
+    onChange(next.join(", "));
+    if (next.length <= 2) {
+      setPopoverOpen(false);
+    }
+  };
+
+  const formatDisplayUrl = (url: string) => {
+    return url.replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, "");
+  };
+
+  const visibleLinks = links.slice(0, 2);
+  const hiddenCount = links.length - 2;
+
+  return (
+    <div className="field" ref={containerRef} style={{ position: "relative" }}>
+      {label && <label htmlFor={id}>{renderLabel(label)}</label>}
+      <div
+        onClick={() => inputRef.current?.focus()}
+        style={{
+          display: "flex",
+          flexWrap: "nowrap",
+          alignItems: "center",
+          gap: "6px",
+          padding: "4px 8px",
+          borderRadius: "6px",
+          border: hasError || errorMsg ? "1.5px solid #ef4444" : "1px solid #cbd5e1",
+          background: "#ffffff",
+          height: "38px",
+          minHeight: "38px",
+          boxSizing: "border-box",
+          cursor: "text",
+          transition: "all 0.15s ease",
+          overflowX: "hidden",
+        }}
+      >
+        {visibleLinks.map((link, idx) => (
+          <span
+            key={`${link}-${idx}`}
+            style={{
+              background: "#0284c7",
+              color: "#ffffff",
+              borderRadius: "4px",
+              padding: "2px 6px 2px 8px",
+              fontSize: "12px",
+              fontWeight: 600,
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "5px",
+              whiteSpace: "nowrap",
+              flexShrink: 0,
+              maxWidth: "140px",
+              overflow: "hidden",
+            }}
+          >
+            <a
+              href={link}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                color: "#ffffff",
+                textDecoration: "none",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "3px",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+              title={`Visit: ${link}`}
+            >
+              <span>🌐</span>
+              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {formatDisplayUrl(link)}
+              </span>
+              <span style={{ fontSize: "10px", opacity: 0.85 }}>↗</span>
+            </a>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                removeTag(idx);
+              }}
+              style={{
+                background: "none",
+                border: "none",
+                color: "#ffffff",
+                fontWeight: 700,
+                fontSize: "11px",
+                cursor: "pointer",
+                padding: "0 2px",
+                lineHeight: 1,
+                opacity: 0.85,
+              }}
+              title="Remove website link"
+            >
+              ✕
+            </button>
+          </span>
+        ))}
+
+        {hiddenCount > 0 && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setPopoverOpen((prev) => !prev);
+            }}
+            style={{
+              background: "#e0f2fe",
+              color: "#0369a1",
+              border: "1px solid #bae6fd",
+              borderRadius: "4px",
+              padding: "2px 7px",
+              fontSize: "11.5px",
+              fontWeight: 700,
+              cursor: "pointer",
+              whiteSpace: "nowrap",
+              flexShrink: 0,
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "2px",
+            }}
+            title="View all website links"
+          >
+            +{hiddenCount} 👁️
+          </button>
+        )}
+
+        <input
+          ref={inputRef}
+          id={id}
+          type="text"
+          value={inputValue}
+          onChange={(e) => setInputValue(e.target.value)}
+          onKeyDown={handleKeyDown}
+          onBlur={handleBlur}
+          placeholder={links.length === 0 ? placeholder : "Add..."}
+          style={{
+            border: "none",
+            outline: "none",
+            padding: "2px 4px",
+            fontSize: "13px",
+            background: "transparent",
+            color: "#0f172a",
+            minWidth: "60px",
+            flex: 1,
+          }}
+        />
+      </div>
+
+      {popoverOpen && hiddenCount > 0 && (
+        <div
+          style={{
+            position: "absolute",
+            top: "calc(100% + 4px)",
+            right: 0,
+            zIndex: 9999,
+            background: "#ffffff",
+            border: "1px solid #cbd5e1",
+            borderRadius: "8px",
+            boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.15)",
+            padding: "10px 12px",
+            minWidth: "260px",
+            maxWidth: "360px",
+          }}
+        >
+          <div
+            style={{
+              fontSize: "11.5px",
+              fontWeight: 700,
+              color: "#64748b",
+              marginBottom: "8px",
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+            }}
+          >
+            <span>All Websites ({links.length})</span>
+            <button
+              type="button"
+              onClick={() => setPopoverOpen(false)}
+              style={{
+                background: "none",
+                border: "none",
+                color: "#94a3b8",
+                cursor: "pointer",
+                fontSize: "12px",
+                padding: "0 2px",
+              }}
+            >
+              ✕
+            </button>
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", maxHeight: "180px", overflowY: "auto" }}>
+            {links.map((link, idx) => (
+              <span
+                key={`popover-${link}-${idx}`}
+                style={{
+                  background: "#0284c7",
+                  color: "#ffffff",
+                  borderRadius: "4px",
+                  padding: "3px 8px",
+                  fontSize: "12px",
+                  fontWeight: 600,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  maxWidth: "100%",
+                }}
+              >
+                <a
+                  href={link}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{
+                    color: "#ffffff",
+                    textDecoration: "none",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "4px",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  <span>🌐</span>
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {formatDisplayUrl(link)}
+                  </span>
+                  <span>↗</span>
+                </a>
+                <button
+                  type="button"
+                  onClick={() => removeTag(idx)}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    color: "#ffffff",
+                    fontWeight: 700,
+                    fontSize: "11px",
+                    cursor: "pointer",
+                    padding: "0 2px",
+                    opacity: 0.85,
+                  }}
+                  title="Remove"
+                >
+                  ✕
+                </button>
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {(hint || errorMsg) && (
+        <div style={{ marginTop: "4px", fontSize: "12px", color: "#ef4444", fontWeight: 600, display: "flex", alignItems: "center", gap: "4px" }}>
+          {errorMsg || hint}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function EmailTagInput({
   id,
   label,

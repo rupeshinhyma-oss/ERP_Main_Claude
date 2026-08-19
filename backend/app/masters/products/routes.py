@@ -137,22 +137,7 @@ async def list_products(
     products, total = await service.list_paginated(query)
     meta = PageMeta.build(page=query.page.page, page_size=query.page.page_size, total_records=total).as_meta_dict()
 
-    supplier_ids = list({p.supplier_id for p in products if p.supplier_id})
-    supplier_map = {}
-    if supplier_ids:
-        from sqlalchemy import select
-        from app.suppliers.models import Supplier
-        stmt = select(Supplier.id, Supplier.company_name).where(Supplier.id.in_(supplier_ids))
-        res = await service.repository.session.execute(stmt)
-        supplier_map = {row.id: row.company_name for row in res}
-
-    data = []
-    for p in products:
-        p_dict = ProductRead.model_validate(p).model_dump(mode="json")
-        if p.supplier_id and p.supplier_id in supplier_map:
-            p_dict["supplier_company_name"] = supplier_map[p.supplier_id]
-        data.append(p_dict)
-
+    data = [ProductRead.model_validate(p) for p in products]
     return build_success_response(data=data, request_id=request.state.request_id, meta=meta)
 
 

@@ -262,16 +262,6 @@ class ProductService:
             hsn_code = field_values.pop("hsn_code", None)
             uom_code = field_values.pop("uom_code")
             secondary_uom_code = field_values.pop("secondary_uom_code", None)
-            supplier_name = field_values.pop("supplier_name", None)
-
-            if supplier_name:
-                from sqlalchemy import select
-                from app.suppliers.models import Supplier
-                stmt = select(Supplier).where(Supplier.company_name.ilike(supplier_name.strip()))
-                res = await self.repository.session.execute(stmt)
-                supp = res.scalar_one_or_none()
-                if supp:
-                    field_values["supplier_id"] = supp.id
 
             category = await self.category_repository.get_by_code(category_code)
             if category is None:
@@ -318,20 +308,18 @@ class ProductService:
 
             raw_product_code = field_values.get("product_code")
             product_name = (field_values.get("product_name_tally") or field_values.get("product_name") or "").strip()
-            supp_id = field_values.get("supplier_id")
-            prod_key = (product_name.lower(), str(supp_id) if supp_id else "")
+            prod_key = product_name.lower()
 
             if prod_key in seen_in_batch:
                 raise ConflictException(
                     f"Product '{product_name}' appears multiple times in the import file (duplicate)."
                 )
 
-            # Check if already exists in DB under same supplier/company
-            if supp_id and product_name:
+            # Check if already exists in DB
+            if product_name:
                 from sqlalchemy import select
                 stmt_dup = select(Product).where(
-                    Product.product_name_tally.ilike(product_name),
-                    Product.supplier_id == supp_id
+                    Product.product_name_tally.ilike(product_name)
                 )
                 res_dup = await self.repository.session.execute(stmt_dup)
                 existing_dup = res_dup.scalar_one_or_none()
@@ -339,7 +327,7 @@ class ProductService:
                     # If same product code or no code, flag as duplicate
                     if not raw_product_code or raw_product_code == existing_dup.product_code:
                         raise ConflictException(
-                            f"Product '{product_name}' already exists for this company (Code: {existing_dup.product_code}) — skipped duplicate."
+                            f"Product '{product_name}' already exists (Code: {existing_dup.product_code}) — skipped duplicate."
                         )
 
             product_code = field_values["product_code"]
@@ -369,7 +357,6 @@ class ProductService:
     async def export_file(self, file_format: str) -> bytes:
         """Export every product to CSV or XLSX bytes with clean, resolved business headers matching UI sequence."""
         from sqlalchemy import select
-        from app.suppliers.models import Supplier
         from app.masters.company_list.models import MasterCompany
 
         products = await self.repository.list_all()
@@ -381,10 +368,7 @@ class ProductService:
         hsns = {str(h.id): h.code for h in await self.hsn_repository.list(limit=2000)}
         uoms = {str(u.id): (u.short_name or u.name or u.code) for u in await self.uom_repository.list(limit=2000)}
 
-        # Suppliers & Organizations
-        supplier_res = await self.repository.session.execute(select(Supplier.id, Supplier.company_name))
-        suppliers = {str(row.id): row.company_name for row in supplier_res}
-
+        # Organizations
         org_res = await self.repository.session.execute(select(MasterCompany.id, MasterCompany.name, MasterCompany.branches))
         orgs: dict[str, str] = {}
         branch_map: dict[str, str] = {}
@@ -416,7 +400,6 @@ class ProductService:
             rows.append({
                 "Product Name (As Per Tally)": p.product_name_tally or p.product_name or "",
                 "Product Code": p.product_code or "",
-                "Supplier Company Name": suppliers.get(str(p.supplier_id), "") if p.supplier_id else "",
                 "Brand": brands.get(str(p.brand_id), "") if p.brand_id else "",
                 "Category": categories.get(str(p.category_id), "") if p.category_id else "",
                 "Sub Category": sub_categories.get(str(p.sub_category_id), "") if p.sub_category_id else "",

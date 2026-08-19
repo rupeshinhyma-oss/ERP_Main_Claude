@@ -16,6 +16,12 @@ from sqlalchemy import Select, and_, exists, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.base_repository import BaseRepository
+from app.masters.cities.models import City
+from app.masters.countries.models import Country
+from app.masters.product_categories.models import ProductCategory
+from app.masters.product_sub_categories.models import ProductSubCategory
+from app.masters.products.models import Product
+from app.masters.states.models import State
 from app.suppliers.models import (
     Supplier,
     SupplierCategoryLink,
@@ -29,7 +35,24 @@ from app.suppliers.models import (
 class SupplierRepository(BaseRepository[Supplier]):
     """Repository for supplier profile rows."""
 
-    searchable_fields = ("company_name",)
+    searchable_fields = (
+        "company_name",
+        "supplier_type",
+        "contact_full_name",
+        "contact_designation",
+        "contact_calling_number",
+        "contact_whatsapp_number",
+        "contact_wechat_number",
+        "tax_id_number",
+        "address",
+        "town",
+        "primary_website",
+        "secondary_website",
+        "brand_description",
+        "secondary_products_description",
+        "visit_remarks",
+        "overall_remarks",
+    )
     sortable_fields = (
         "company_name",
         "created_at",
@@ -57,6 +80,119 @@ class SupplierRepository(BaseRepository[Supplier]):
     def _base_select(self) -> Select:
         """Exclude soft-deleted suppliers, same as the generic BaseRepository behavior."""
         return super()._base_select()
+
+    def _apply_search(self, stmt: Select, term: str | None) -> Select:
+        """
+        Comprehensive search matching anything visible on the supplier row / details:
+        company name, geography (country name/code, state, city, town), contacts,
+        phone numbers, emails, websites, tax ID, categories, sub-categories, and products.
+        """
+        if not term:
+            return stmt
+        clean = term.strip()
+        if not clean:
+            return stmt
+        pattern = f"%{clean}%"
+
+        direct_columns = [
+            Supplier.company_name,
+            Supplier.supplier_type,
+            Supplier.contact_full_name,
+            Supplier.contact_designation,
+            Supplier.contact_calling_number,
+            Supplier.contact_whatsapp_number,
+            Supplier.contact_wechat_number,
+            Supplier.tax_id_number,
+            Supplier.address,
+            Supplier.town,
+            Supplier.primary_website,
+            Supplier.secondary_website,
+            Supplier.brand_description,
+            Supplier.secondary_products_description,
+            Supplier.visit_remarks,
+            Supplier.overall_remarks,
+        ]
+        conditions = [col.ilike(pattern) for col in direct_columns]
+
+        # 1. Country Name / Code
+        conditions.append(
+            exists().where(
+                Country.id == Supplier.country_id,
+                or_(Country.name.ilike(pattern), Country.code.ilike(pattern)),
+            )
+        )
+
+        # 2. State / Province Name / Code
+        conditions.append(
+            exists().where(
+                State.id == Supplier.state_id,
+                or_(State.name.ilike(pattern), State.code.ilike(pattern)),
+            )
+        )
+
+        # 3. City Name
+        conditions.append(
+            exists().where(
+                City.id == Supplier.city_id,
+                City.name.ilike(pattern),
+            )
+        )
+
+        # 4. Child Emails
+        conditions.append(
+            exists().where(
+                SupplierEmail.supplier_id == Supplier.id,
+                SupplierEmail.email.ilike(pattern),
+            )
+        )
+
+        # 5. Child Contacts (name, phone, email, designation)
+        conditions.append(
+            exists().where(
+                SupplierContact.supplier_id == Supplier.id,
+                or_(
+                    SupplierContact.person_name.ilike(pattern),
+                    SupplierContact.calling_number.ilike(pattern),
+                    SupplierContact.whatsapp_number.ilike(pattern),
+                    SupplierContact.email.ilike(pattern),
+                    SupplierContact.designation.ilike(pattern),
+                ),
+            )
+        )
+
+        # 6. Linked Product Categories
+        conditions.append(
+            exists().where(
+                SupplierCategoryLink.supplier_id == Supplier.id,
+                ProductCategory.id == SupplierCategoryLink.category_id,
+                or_(ProductCategory.name.ilike(pattern), ProductCategory.code.ilike(pattern)),
+            )
+        )
+
+        # 7. Linked Product Sub Categories
+        conditions.append(
+            exists().where(
+                SupplierSubCategoryLink.supplier_id == Supplier.id,
+                ProductSubCategory.id == SupplierSubCategoryLink.sub_category_id,
+                or_(ProductSubCategory.name.ilike(pattern), ProductSubCategory.code.ilike(pattern)),
+            )
+        )
+
+        # 8. Linked Products
+        conditions.append(
+            exists().where(
+                SupplierProductLink.supplier_id == Supplier.id,
+                Product.id == SupplierProductLink.product_id,
+                or_(
+                    Product.product_name.ilike(pattern),
+                    Product.product_code.ilike(pattern),
+                    Product.product_name_tally.ilike(pattern),
+                    Product.product_name_invoice.ilike(pattern),
+                ),
+            )
+        )
+
+        return stmt.where(or_(*conditions))
 
     async def name_city_exists(
         self, company_name: str, city_id: uuid.UUID, *, exclude_id: uuid.UUID | None = None

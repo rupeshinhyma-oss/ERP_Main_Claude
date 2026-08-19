@@ -28,7 +28,6 @@ class ProductCreate(BaseModel):
     organization_id: uuid.UUID | None = None
     organization_ids: list[uuid.UUID] | None = None
     branch_ids: list[str] | None = None
-    supplier_id: uuid.UUID | None = None
 
     refund_vat_percent: float | None = Field(default=None, ge=0, le=100)
     license_certificate_required: str | None = None
@@ -82,7 +81,6 @@ class ProductUpdate(BaseModel):
     organization_id: uuid.UUID | None = None
     organization_ids: list[uuid.UUID] | None = None
     branch_ids: list[str] | None = None
-    supplier_id: uuid.UUID | None = None
 
     refund_vat_percent: float | None = Field(default=None, ge=0, le=100)
     license_certificate_required: str | None = None
@@ -138,8 +136,6 @@ class ProductRead(BaseModel):
     organization_id: uuid.UUID | None = None
     organization_ids: list[uuid.UUID] | None = None
     branch_ids: list[str] | None = None
-    supplier_id: uuid.UUID | None = None
-    supplier_company_name: str | None = None
 
 
     refund_vat_percent: float = 0.0

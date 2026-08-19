@@ -26,7 +26,7 @@ import {
   SearchableDropdownMultiPanel,
   type DropdownOption,
 } from "@/components/SearchableDropdown";
-import { EmailTagInput, PhoneGroupField, SelectField, TextAreaField, TextField, autoTitleCase } from "@/components/fields";
+import { EmailTagInput, PhoneGroupField, SelectField, TextAreaField, TextField, WebsiteField, autoTitleCase } from "@/components/fields";
 import { useLookup } from "@/lib/lookups";
 
 function resolveImageUrl(url: string | null | undefined): string {
@@ -2230,8 +2230,8 @@ export function SuppliersPage() {
                       <TextField id="tax_id_number" label="Tax ID Number" maxLength={100} value={form.tax_id_number} onChange={(v) => setField("tax_id_number", v)} />
                       <TextField id="address" label="Address" maxLength={500} value={form.address} onChange={(v) => setField("address", v)} />
                       <TextField id="town" label="Town" maxLength={150} value={form.town} onChange={(v) => setField("town", v)} />
-                      <TextField id="primary_website" label="Primary Website" placeholder="https://..." value={form.primary_website} onChange={(v) => setField("primary_website", v)} />
-                      <TextField id="secondary_website" label="Secondary Website" placeholder="https://..." value={form.secondary_website} onChange={(v) => setField("secondary_website", v)} />
+                      <WebsiteField id="primary_website" label="Primary Website" placeholder="https://..." value={form.primary_website} onChange={(v) => setField("primary_website", v)} />
+                      <WebsiteField id="secondary_website" label="Secondary Website" placeholder="https://..." value={form.secondary_website} onChange={(v) => setField("secondary_website", v)} />
                       <SelectField id="supplier_grade" label="Supplier Grade" value={form.supplier_grade} onChange={(v) => setField("supplier_grade", v)}>
                         <option value="">Select Grade</option>
                         <option value="A">Grade A</option>
@@ -3472,7 +3472,7 @@ export function SuppliersPage() {
               <div style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
                 <input
                   type="text"
-                  placeholder="Search company name or Sr. No..."
+                  placeholder="Search company, country, contact, city, phone..."
                   value={searchInput}
                   onChange={(e) => setSearchInput(e.target.value)}
                   style={{ width: "320px", padding: "8px 36px 8px 14px", borderRadius: "6px", border: "1px solid #cbd5e1" }}

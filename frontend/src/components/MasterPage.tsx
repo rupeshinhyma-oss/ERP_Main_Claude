@@ -136,6 +136,10 @@ export interface MasterPageProps<T extends MasterRecord> {
    * for instant client-side multi-field searching.
    */
   customSearchMatcher?: (item: T, term: string, cleanTerm: string) => boolean;
+  /**
+   * Callback fired whenever records are loaded into MasterPage.
+   */
+  onItemsLoaded?: (items: T[]) => void;
 }
 
 export interface MasterPageHandle {
@@ -175,6 +179,7 @@ export function MasterPage<T extends MasterRecord>({
   liveModule,
   clientSideSearch = false,
   customSearchMatcher,
+  onItemsLoaded,
 }: MasterPageProps<T>) {
   const { hasPermission } = useAuth();
 
@@ -403,6 +408,7 @@ export function MasterPage<T extends MasterRecord>({
         }
         setAllRecords(items);
         setRows(items);
+        onItemsLoaded?.(items);
         setError(null);
       } catch (err) {
         if (cancelled) return;

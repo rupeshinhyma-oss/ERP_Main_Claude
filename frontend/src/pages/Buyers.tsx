@@ -882,8 +882,13 @@ export function BuyersPage() {
       }
     }
     const payload = {
-      ...contactForm,
-      country_id: contactForm.country_id || form.country_id,
+      salutation: contactForm.salutation?.trim() || null,
+      person_name: contactForm.person_name.trim(),
+      designation: contactForm.designation?.trim() || null,
+      calling_number: contactForm.calling_number?.trim() || null,
+      whatsapp_number: contactForm.whatsapp_number?.trim() || null,
+      email: contactForm.email?.trim() || null,
+      country_id: contactForm.country_id || form.country_id || null,
     };
     setContactSubmitting(true);
     try {

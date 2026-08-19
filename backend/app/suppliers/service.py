@@ -520,7 +520,7 @@ class SupplierService:
 
         # Pre-fetch existing suppliers for duplicate detection
         existing_suppliers = await self.repository.list_all()
-        existing_names = {s.company_name.strip().lower() for s in existing_suppliers}
+        existing_map = {s.company_name.strip().lower(): s for s in existing_suppliers}
 
         all_countries = await self.country_repository.list_all()
         all_states = await self.state_repository.list_all()
@@ -532,9 +532,11 @@ class SupplierService:
             company_name = field_values["company_name"].strip()
 
             # Duplicate check on Company Name
-            if company_name.lower() in existing_names:
+            if company_name.lower() in existing_map:
+                dup_supplier = existing_map[company_name.lower()]
                 raise ConflictException(
-                    f"Supplier '{company_name}' already exists (duplicate company name)."
+                    f"Supplier '{company_name}' already exists in Supplier Master (duplicate company name).",
+                    details={"existing": model_to_dict(dup_supplier)},
                 )
 
             country_raw = field_values.pop("country_code", "").strip()
@@ -639,7 +641,7 @@ class SupplierService:
                 )
 
             # Prevent duplicate within the same batch file
-            existing_names.add(company_name.lower())
+            existing_map[company_name.lower()] = supplier
             return supplier
 
         summary = await run_import(

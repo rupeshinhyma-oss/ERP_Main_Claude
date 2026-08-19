@@ -102,6 +102,210 @@ export function resolveImageUrl(url: string | null | undefined): string {
   return encodeURI(fullUrl);
 }
 
+function BranchPopoverCell({ branches }: { branches: string[] }) {
+  const [isOpen, setIsOpen] = useState(false);
+
+  if (!branches.length) return <span style={{ color: "#94a3b8" }}>—</span>;
+
+  if (branches.length === 1) {
+    return (
+      <span className="cell-truncate" title={branches[0]} style={{ maxWidth: "160px", color: "#1e293b", fontSize: "13px" }}>
+        🏢 {branches[0]}
+      </span>
+    );
+  }
+
+  return (
+    <div
+      style={{ position: "relative", display: "inline-flex", alignItems: "center" }}
+      onMouseEnter={() => setIsOpen(true)}
+      onMouseLeave={() => setIsOpen(false)}
+    >
+      <div style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+        <span className="cell-truncate" title={branches[0]} style={{ maxWidth: "120px", color: "#1e293b", fontSize: "13px" }}>
+          🏢 {branches[0]}
+        </span>
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            setIsOpen((prev) => !prev);
+          }}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "3px",
+            padding: "2px 7px",
+            fontSize: "11px",
+            fontWeight: 600,
+            color: "#2563eb",
+            background: "#eff6ff",
+            border: "1px solid #bfdbfe",
+            borderRadius: "12px",
+            cursor: "pointer",
+            lineHeight: 1.2,
+            transition: "all 0.15s ease",
+            boxShadow: "0 1px 2px rgba(37,99,235,0.08)",
+          }}
+          title="Click or hover to view all branches"
+        >
+          👁️ +{branches.length - 1}
+        </button>
+      </div>
+
+      {isOpen && (
+        <div
+          style={{
+            position: "absolute",
+            bottom: "100%",
+            left: 0,
+            marginBottom: "8px",
+            background: "#ffffff",
+            border: "1px solid #cbd5e1",
+            borderRadius: "8px",
+            boxShadow: "0 12px 28px -4px rgba(0, 0, 0, 0.18), 0 8px 12px -6px rgba(0, 0, 0, 0.1)",
+            padding: "10px 12px",
+            minWidth: "230px",
+            maxWidth: "340px",
+            maxHeight: "240px",
+            overflowY: "auto",
+            zIndex: 99999,
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div style={{ fontSize: "11.5px", fontWeight: 700, color: "#475569", marginBottom: "6px", borderBottom: "1px solid #f1f5f9", paddingBottom: "4px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span>📍 Assigned Branches ({branches.length})</span>
+            <span style={{ fontSize: "11px", color: "#2563eb", fontWeight: 600 }}>👁️ View</span>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
+            {branches.map((b, i) => (
+              <div
+                key={i}
+                style={{
+                  fontSize: "12px",
+                  color: "#1e293b",
+                  fontWeight: 500,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  padding: "4px 8px",
+                  borderRadius: "4px",
+                  background: "#f8fafc",
+                }}
+              >
+                <span style={{ color: "#3b82f6", fontSize: "12px" }}>🏢</span>
+                <span>{b}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function OrgPopoverCell({ orgNames }: { orgNames: string[] }) {
+  const [isOpen, setIsOpen] = useState(false);
+
+  if (!orgNames.length) return <span style={{ color: "#94a3b8" }}>—</span>;
+
+  if (orgNames.length === 1) {
+    return (
+      <span className="cell-truncate" title={orgNames[0]} style={{ maxWidth: "160px", color: "#1e293b", fontSize: "13px" }}>
+        {orgNames[0]}
+      </span>
+    );
+  }
+
+  return (
+    <div
+      style={{ position: "relative", display: "inline-flex", alignItems: "center" }}
+      onMouseEnter={() => setIsOpen(true)}
+      onMouseLeave={() => setIsOpen(false)}
+    >
+      <div style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+        <span className="cell-truncate" title={orgNames[0]} style={{ maxWidth: "120px", color: "#1e293b", fontSize: "13px" }}>
+          {orgNames[0]}
+        </span>
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            setIsOpen((prev) => !prev);
+          }}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "3px",
+            padding: "2px 7px",
+            fontSize: "11px",
+            fontWeight: 600,
+            color: "#059669",
+            background: "#ecfdf5",
+            border: "1px solid #a7f3d0",
+            borderRadius: "12px",
+            cursor: "pointer",
+            lineHeight: 1.2,
+            transition: "all 0.15s ease",
+            boxShadow: "0 1px 2px rgba(5,150,105,0.08)",
+          }}
+          title="Click or hover to view all organizations"
+        >
+          👁️ +{orgNames.length - 1}
+        </button>
+      </div>
+
+      {isOpen && (
+        <div
+          style={{
+            position: "absolute",
+            bottom: "100%",
+            left: 0,
+            marginBottom: "8px",
+            background: "#ffffff",
+            border: "1px solid #cbd5e1",
+            borderRadius: "8px",
+            boxShadow: "0 12px 28px -4px rgba(0, 0, 0, 0.18), 0 8px 12px -6px rgba(0, 0, 0, 0.1)",
+            padding: "10px 12px",
+            minWidth: "210px",
+            maxWidth: "320px",
+            maxHeight: "240px",
+            overflowY: "auto",
+            zIndex: 99999,
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div style={{ fontSize: "11.5px", fontWeight: 700, color: "#475569", marginBottom: "6px", borderBottom: "1px solid #f1f5f9", paddingBottom: "4px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span>🏢 Organizations ({orgNames.length})</span>
+            <span style={{ fontSize: "11px", color: "#059669", fontWeight: 600 }}>👁️ View</span>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
+            {orgNames.map((name, i) => (
+              <div
+                key={i}
+                style={{
+                  fontSize: "12px",
+                  color: "#1e293b",
+                  fontWeight: 500,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  padding: "4px 8px",
+                  borderRadius: "4px",
+                  background: "#f8fafc",
+                }}
+              >
+                <span style={{ color: "#10b981", fontSize: "12px" }}>🏢</span>
+                <span>{name}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function ProductsPage() {
   const categories = useLookup<ProductCategory>("/masters/product-categories", 250);
   const subCategories = useLookup<ProductSubCategory>("/masters/product-sub-categories", 500);
@@ -109,7 +313,7 @@ export function ProductsPage() {
   const hsnCodes = useLookup<Hsn>("/masters/hsn", 250);
   const uoms = useLookup<Uom>("/masters/uom", 250);
   const organizations = useLookup<{ id: string; name: string }>("/masters/company-list", 250);
-  const existingProducts = useLookup<Product>("/masters/products", 1000);
+  const [catalogProducts, setCatalogProducts] = useState<Product[]>([]);
 
 
   const [categoryFilter, setCategoryFilter] = useState("");
@@ -214,6 +418,7 @@ export function ProductsPage() {
       newButtonLabel="+ New Product"
       searchPlaceholder="Search code, name, or barcode or Sr. No..."
       reloadToken={lookupsReady}
+      onItemsLoaded={setCatalogProducts}
       useFullPageForm={true}
       hideQuickAdd={true}
       extraFilters={Object.keys(extraFilters).length ? extraFilters : undefined}
@@ -399,39 +604,27 @@ export function ProductsPage() {
             const orgIds = p.organization_ids && p.organization_ids.length > 0
               ? p.organization_ids
               : (p.organization_id ? [p.organization_id] : []);
-            if (!orgIds.length) return "—";
+            if (!orgIds.length) return <span style={{ color: "#94a3b8" }}>—</span>;
             const names = orgIds
               .map((id) => organizations.items.find((x) => x.id === id)?.name)
-              .filter(Boolean);
-            const joined = names.join(", ") || "—";
-            return (
-              <span className="cell-truncate" title={joined} style={{ maxWidth: "160px" }}>
-                {joined}
-              </span>
-            );
+              .filter(Boolean) as string[];
+            return <OrgPopoverCell orgNames={names} />;
           },
         },
         {
           header: "Branches",
           render: (p) => {
             const branchIds = p.branch_ids || [];
-            if (!branchIds.length) return "—";
+            if (!branchIds.length) return <span style={{ color: "#94a3b8" }}>—</span>;
             const allBranches = organizations.items.flatMap((org: any) => org.branches || []);
             const matchingBranches = branchIds
               .map((bId) => {
                 const found = allBranches.find((b: any) => b.id === bId || `${bId}`.endsWith(b.name));
                 return found ? `${found.name}${found.code_prefix ? ` (${found.code_prefix})` : ""}` : null;
               })
-              .filter(Boolean);
+              .filter(Boolean) as string[];
 
-            if (!matchingBranches.length) return "—";
-            const joined = matchingBranches.join(", ");
-
-            return (
-              <span className="cell-truncate" title={joined} style={{ maxWidth: "150px" }}>
-                🏢 {matchingBranches[0]} {matchingBranches.length > 1 ? `(+${matchingBranches.length - 1})` : ""}
-              </span>
-            );
+            return <BranchPopoverCell branches={matchingBranches} />;
           },
         },
         {
@@ -452,7 +645,6 @@ export function ProductsPage() {
       importHeaders={[
         { key: "Product Name (As Per Tally)", label: "Product Name (As Per Tally)", required: true },
         { key: "Product Code", label: "Product Code" },
-        { key: "Supplier Company Name", label: "Supplier Company Name" },
         { key: "Brand", label: "Brand" },
         { key: "Category", label: "Category", required: true },
         { key: "Sub Category", label: "Sub Category" },
@@ -529,10 +721,10 @@ export function ProductsPage() {
             : numOrNull(f.packaging_unit_cbm);
 
         if (!f.category_id) throw new Error("Please select a Category.");
+        if (!f.sub_category_id) throw new Error("Please select a Sub-Category.");
+        if (!f.hsn_id) throw new Error("Please select a HSN Code.");
         if (!f.uom_id) throw new Error("Please select a Primary UOM.");
         if (numOrNull(f.packaging_quantity) === null) throw new Error("Packaging Quantity (unit) is required.");
-        if (numOrNull(f.packaging_net_weight) === null) throw new Error("Packaging Net Weight (kg) is required.");
-        if (numOrNull(f.packaging_gross_weight) === null) throw new Error("Packaging Gross Weight (kg) is required.");
 
         // A secondary UOM identical to the primary carries no information.
         let secUomId: string | null = f.secondary_uom_id || null;
@@ -542,13 +734,24 @@ export function ProductsPage() {
         if (!tallyName) throw new Error("Product Name (As per Tally) is required.");
 
         const cleanTally = tallyName.toLowerCase().replace(/[\s-]/g, "");
-        const duplicate = existingProducts.items.find((p) => {
+        const duplicate = catalogProducts.find((p) => {
           const pName = (p.product_name_tally || p.product_name || "").toLowerCase().replace(/[\s-]/g, "");
           return pName === cleanTally;
         });
 
         if (duplicate && (!f._editing_id || duplicate.id !== f._editing_id)) {
           throw new Error(`Product "${tallyName}" already exists in Product Master! Duplicate products are not allowed.`);
+        }
+
+        const codeClean = (f.product_code || "").trim().toLowerCase();
+        if (codeClean) {
+          const duplicateCode = catalogProducts.find((p) => {
+            const pCode = (p.product_code || "").trim().toLowerCase();
+            return pCode === codeClean;
+          });
+          if (duplicateCode && (!f._editing_id || duplicateCode.id !== f._editing_id)) {
+            throw new Error(`Product Code "${f.product_code}" already exists in Product Master (used by "${duplicateCode.product_name_tally || duplicateCode.product_name}")! Duplicate Product Code is not allowed.`);
+          }
         }
 
         return {
@@ -642,13 +845,13 @@ export function ProductsPage() {
                 {(() => {
                   const cleanTyped = (f.product_name_tally || "").trim().toLowerCase().replace(/[\s-]/g, "");
                   if (!cleanTyped) return null;
-                  const matches = existingProducts.items.filter((p) => {
+                  const matches = catalogProducts.filter((p) => {
                     if (f._editing_id && p.id === f._editing_id) return false;
                     const pName = (p.product_name_tally || p.product_name || "").toLowerCase().replace(/[\s-]/g, "");
                     const pCode = (p.product_code || "").toLowerCase().replace(/[\s-]/g, "");
                     return pName.includes(cleanTyped) || pCode.includes(cleanTyped);
                   }).slice(0, 5);
-                  const exact = existingProducts.items.find((p) => {
+                  const exact = catalogProducts.find((p) => {
                     if (f._editing_id && p.id === f._editing_id) return false;
                     const pName = (p.product_name_tally || p.product_name || "").toLowerCase().replace(/[\s-]/g, "");
                     const pCode = (p.product_code || "").toLowerCase().replace(/[\s-]/g, "");
@@ -684,13 +887,31 @@ export function ProductsPage() {
                 })()}
               </div>
               <TextField id="product_name_invoice" label="Product Name (As per Invoice)" maxLength={255} placeholder="Name for Tax Invoices" value={f.product_name_invoice} onChange={(v) => set("product_name_invoice", v)} />
-              <TextField id="product_code" label="Product Code" maxLength={50} placeholder="e.g. PRD-001" value={f.product_code} onChange={(v) => set("product_code", v)} />
+              <div style={{ position: "relative" }}>
+                <TextField id="product_code" label="Product Code" maxLength={50} placeholder="e.g. PRD-001" value={f.product_code} onChange={(v) => set("product_code", v)} />
+                {(() => {
+                  const cleanCode = (f.product_code || "").trim().toLowerCase();
+                  if (!cleanCode) return null;
+                  const exactCode = catalogProducts.find((p) => {
+                    if (f._editing_id && p.id === f._editing_id) return false;
+                    return (p.product_code || "").trim().toLowerCase() === cleanCode;
+                  });
+                  if (exactCode) {
+                    return (
+                      <div style={{ marginTop: "4px", fontSize: "12px", color: "#dc2626", fontWeight: 600, display: "flex", alignItems: "center", gap: "4px" }}>
+                        <span>⚠️</span> Product Code "{exactCode.product_code}" already exists (used by "{exactCode.product_name_tally || exactCode.product_name}")!
+                      </div>
+                    );
+                  }
+                  return null;
+                })()}
+              </div>
             </div>
 
             <div className="section-title">Classification &amp; Tax</div>
             <div className="form-grid" style={{ gridTemplateColumns: "repeat(3, 1fr)" }}>
               {/* Row 2: Brand, Category, Sub-Category */}
-              <SelectField id="brand_id" label="Brand *" value={f.brand_id} onChange={(v) => set("brand_id", v)}>
+              <SelectField id="brand_id" label="Brand" value={f.brand_id} onChange={(v) => set("brand_id", v)}>
                 <option value="">-- Select Brand --</option>
                 {brands.items.map((b) => (
                   <option key={b.id} value={b.id}>
@@ -833,16 +1054,16 @@ export function ProductsPage() {
                 ))}
               </SelectField>
               <TextField id="packaging_quantity" label="Packaging Quantity (unit) *" required type="number" step="0.001" min={0} value={f.packaging_quantity} onChange={(v) => set("packaging_quantity", v)} />
-              <TextField id="packaging_net_weight" label="Packaging Net Weight (kg) *" required type="number" step="0.001" min={0} value={f.packaging_net_weight} onChange={(v) => set("packaging_net_weight", v)} />
-              <TextField id="packaging_gross_weight" label="Packaging Gross Weight (kg) *" required type="number" step="0.001" min={0} value={f.packaging_gross_weight} onChange={(v) => set("packaging_gross_weight", v)} />
+              <TextField id="packaging_net_weight" label="Packaging Net Weight (kg)" type="number" step="0.001" min={0} value={f.packaging_net_weight} onChange={(v) => set("packaging_net_weight", v)} />
+              <TextField id="packaging_gross_weight" label="Packaging Gross Weight (kg)" type="number" step="0.001" min={0} value={f.packaging_gross_weight} onChange={(v) => set("packaging_gross_weight", v)} />
             </div>
 
 
             <div className="section-title" style={{ marginTop: "16px" }}>Dimensions For CBM</div>
             <div className="form-grid" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
-              <TextField id="length_cm" label="Length (cm) *" type="number" step="0.001" min={0} className="cbm-calc" value={f.length_cm} onChange={(v) => setDimension("length_cm", v)} />
-              <TextField id="width_cm" label="Width (cm) *" type="number" step="0.001" min={0} className="cbm-calc" value={f.width_cm} onChange={(v) => setDimension("width_cm", v)} />
-              <TextField id="height_cm" label="Height (cm) *" type="number" step="0.001" min={0} className="cbm-calc" value={f.height_cm} onChange={(v) => setDimension("height_cm", v)} />
+              <TextField id="length_cm" label="Length (cm)" type="number" step="0.001" min={0} className="cbm-calc" value={f.length_cm} onChange={(v) => setDimension("length_cm", v)} />
+              <TextField id="width_cm" label="Width (cm)" type="number" step="0.001" min={0} className="cbm-calc" value={f.width_cm} onChange={(v) => setDimension("width_cm", v)} />
+              <TextField id="height_cm" label="Height (cm)" type="number" step="0.001" min={0} className="cbm-calc" value={f.height_cm} onChange={(v) => setDimension("height_cm", v)} />
               <TextField
                 id="packaging_unit_cbm"
                 label="Packaging Unit CBM"

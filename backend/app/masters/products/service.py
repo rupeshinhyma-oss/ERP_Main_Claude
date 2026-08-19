@@ -308,48 +308,54 @@ class ProductService:
 
             raw_product_code = field_values.get("product_code")
             product_name = (field_values.get("product_name_tally") or field_values.get("product_name") or "").strip()
-            prod_key = product_name.lower()
+            clean_name_key = product_name.lower().replace(" ", "").replace("-", "")
+            clean_code_key = (raw_product_code or "").strip().lower()
 
-            if prod_key in seen_in_batch:
+            if clean_name_key in seen_names:
                 raise ConflictException(
-                    f"Product '{product_name}' appears multiple times in the import file (duplicate)."
+                    f"Product '{product_name}' appears multiple times in the import file (in-file duplicate)."
+                )
+            if clean_code_key and clean_code_key in seen_codes:
+                raise ConflictException(
+                    f"Product Code '{raw_product_code}' appears multiple times in the import file (in-file duplicate)."
                 )
 
-            # Check if already exists in DB
+            # Check if Product Name already exists in DB
             if product_name:
-                from sqlalchemy import select
+                from sqlalchemy import select, or_
                 stmt_dup = select(Product).where(
-                    Product.product_name_tally.ilike(product_name)
+                    or_(
+                        Product.product_name_tally.ilike(product_name),
+                        Product.product_name.ilike(product_name),
+                    )
                 )
                 res_dup = await self.repository.session.execute(stmt_dup)
-                existing_dup = res_dup.scalar_one_or_none()
+                existing_dup = res_dup.scalars().first()
                 if existing_dup is not None:
-                    # If same product code or no code, flag as duplicate
-                    if not raw_product_code or raw_product_code == existing_dup.product_code:
-                        raise ConflictException(
-                            f"Product '{product_name}' already exists (Code: {existing_dup.product_code}) — skipped duplicate."
-                        )
+                    raise ConflictException(
+                        f"Product '{product_name}' already exists in Product Master (Code: {existing_dup.product_code}) — duplicate skipped.",
+                        details={"existing": model_to_dict(existing_dup)},
+                    )
 
-            product_code = field_values["product_code"]
-            existing = await self.repository.get_by_code(product_code)
-            if existing is not None:
-                # Auto-append counter to make unique if code collided
-                base_code = product_code
-                attempt = 1
-                while True:
-                    candidate = f"{base_code}-{attempt}"
-                    if await self.repository.get_by_code(candidate) is None:
-                        field_values["product_code"] = candidate
-                        break
-                    attempt += 1
+            # Check if Product Code already exists in DB
+            if raw_product_code:
+                existing_code = await self.repository.get_by_code(raw_product_code)
+                if existing_code is not None:
+                    raise ConflictException(
+                        f"Product Code '{raw_product_code}' already exists in Product Master (used by '{existing_code.product_name_tally or existing_code.product_name}') — duplicate skipped.",
+                        details={"existing": model_to_dict(existing_code)},
+                    )
 
             created_prod = await self.repository.create(**field_values)
-            seen_in_batch.add(prod_key)
+            seen_names.add(clean_name_key)
+            if clean_code_key:
+                seen_codes.add(clean_code_key)
             return created_prod
 
-        seen_in_batch = set()
+        seen_names: set[str] = set()
+        seen_codes: set[str] = set()
         summary = await run_import(
-            rows, row_validator=validate_product_row, row_creator=_create, dedupe_keys=("product_code",)
+            rows, row_validator=validate_product_row, row_creator=_create
         )
         await self._invalidate_cache()
         return summary

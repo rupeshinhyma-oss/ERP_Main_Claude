@@ -391,27 +391,166 @@ interface DiffRow {
   differs: boolean;
 }
 
+const CANONICAL_FIELD_LABELS: Record<string, string> = {
+  productnametally: "Product Name (As per Tally)",
+  productname: "Product Name",
+  productnameinvoice: "Product Name (Invoice)",
+  productcode: "Product Code",
+  brand: "Brand",
+  category: "Category",
+  subcategory: "Sub Category",
+  hsn: "HSN Code",
+  hsncode: "HSN Code",
+  uom: "UOM",
+  secondaryuom: "Secondary UOM",
+  packqty: "Packaging Quantity",
+  packagingquantity: "Packaging Quantity",
+  packnetweight: "Packaging Net Weight (kg)",
+  packagingnetweight: "Packaging Net Weight (kg)",
+  packgrossweight: "Packaging Gross Weight (kg)",
+  packaginggrossweight: "Packaging Gross Weight (kg)",
+  lengthcm: "Length (cm)",
+  length: "Length (cm)",
+  widthcm: "Width (cm)",
+  width: "Width (cm)",
+  heightcm: "Height (cm)",
+  height: "Height (cm)",
+  packunitcbm: "Packaging Unit CBM",
+  packagingunitcbm: "Packaging Unit CBM",
+  refundvat: "Refund VAT %",
+  refundvatpercent: "Refund VAT %",
+  compliancelicense: "Compliance & License Requirements",
+  licensecertificaterequired: "Compliance & License Requirements",
+  specification: "Specification",
+  description: "Description",
+  color: "Color",
+  material: "Material",
+  status: "Status",
+  isactive: "Status",
+  companyname: "Company Name",
+  country: "Country",
+  countrycode: "Country",
+  state: "State / Province",
+  statename: "State / Province",
+  city: "City",
+  cityname: "City",
+  town: "Town",
+  address: "Address",
+  taxidnumber: "Tax ID Number",
+  website: "Website",
+  primarywebsite: "Primary Website",
+  secondarywebsite: "Secondary Website",
+  personname: "Contact Name",
+  fullname: "Contact Name",
+  contactfullname: "Contact Name",
+  designation: "Designation",
+  contactdesignation: "Designation",
+  callingnumber: "Calling Number",
+  contactcallingnumber: "Calling Number",
+  whatsappnumber: "WhatsApp Number",
+  contactwhatsappnumber: "WhatsApp Number",
+  wechatnumber: "WeChat Number",
+  contactwechatnumber: "WeChat Number",
+  email: "Email",
+  emails: "Email(s)",
+  potential: "Potential",
+  potentialreason: "Potential Reason",
+  buyergrade: "Buyer Grade",
+  suppliergrade: "Supplier Grade",
+  currentstatus: "Current Status",
+};
+
+function normalizeKey(k: string): string {
+  return k
+    .toLowerCase()
+    .replace(/[\s\-_()./&%?]/g, "")
+    .replace(/^(pack|packaging)/, "pack")
+    .replace(/^contact/, "")
+    .replace(/id$/, "");
+}
+
+function prettifyRawKey(k: string): string {
+  return k
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function formatVal(v: unknown): string {
+  if (v === undefined || v === null || v === "") return "—";
+  if (typeof v === "boolean") return v ? "Active" : "Inactive";
+  if (Array.isArray(v)) {
+    if (!v.length) return "—";
+    return v.join(", ");
+  }
+  const s = String(v).trim();
+  return s ? s : "—";
+}
+
 function fieldDiffRows(
   importedRow: Record<string, unknown>,
   existingRow: Record<string, unknown>
 ): DiffRow[] {
-  const keys = new Set([
-    ...Object.keys(importedRow || {}),
-    ...Object.keys(existingRow || {}),
+  // Skip internal or technical metadata columns that clutter duplicate comparisons
+  const skipNormalized = new Set([
+    "id",
+    "createdat",
+    "updatedat",
+    "deletedat",
+    "version",
+    "organizationidsjson",
+    "branchidsjson",
+    "imagesjson",
+    "imageurl",
+    "categorylinks",
+    "subcategorylinks",
+    "productlinks",
+    "subcategories",
   ]);
-  // Skip internal/bookkeeping columns that aren't meaningful to compare.
-  const skip = new Set(["id", "created_at", "updated_at", "deleted_at"]);
-  const rows: DiffRow[] = [];
-  for (const key of keys) {
-    if (skip.has(key)) continue;
-    const a = importedRow ? importedRow[key] : undefined;
-    const b = existingRow ? existingRow[key] : undefined;
-    const aStr = a === undefined || a === null || a === "" ? "—" : String(a);
-    const bStr = b === undefined || b === null || b === "" ? "—" : String(b);
-    rows.push({ key, aStr, bStr, differs: aStr !== bStr });
+
+  const unifiedFields = new Map<string, { label: string; aVal: unknown; bVal: unknown }>();
+
+  // Process importedRow (uploaded file headers)
+  for (const [key, val] of Object.entries(importedRow || {})) {
+    const norm = normalizeKey(key);
+    if (skipNormalized.has(norm)) continue;
+    const label = CANONICAL_FIELD_LABELS[norm] || prettifyRawKey(key);
+    const existing = unifiedFields.get(norm);
+    if (existing) {
+      existing.aVal = val;
+    } else {
+      unifiedFields.set(norm, { label, aVal: val, bVal: undefined });
+    }
   }
-  // Differing fields first, so what's actually different is visible without
-  // scrolling through a long list of identical values.
+
+  // Process existingRow (database columns)
+  for (const [key, val] of Object.entries(existingRow || {})) {
+    const norm = normalizeKey(key);
+    if (skipNormalized.has(norm)) continue;
+    const label = CANONICAL_FIELD_LABELS[norm] || prettifyRawKey(key);
+    const existing = unifiedFields.get(norm);
+    if (existing) {
+      existing.bVal = val;
+    } else {
+      unifiedFields.set(norm, { label, aVal: undefined, bVal: val });
+    }
+  }
+
+  const rows: DiffRow[] = [];
+  for (const [, field] of unifiedFields) {
+    const aStr = formatVal(field.aVal);
+    const bStr = formatVal(field.bVal);
+    // Don't show rows where both sides are blank
+    if (aStr === "—" && bStr === "—") continue;
+    const differs = aStr.toLowerCase() !== bStr.toLowerCase();
+    rows.push({
+      key: field.label,
+      aStr,
+      bStr,
+      differs,
+    });
+  }
+
+  // Differing fields first
   rows.sort((a, b) => Number(b.differs) - Number(a.differs));
   return rows;
 }

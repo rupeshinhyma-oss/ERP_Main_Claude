@@ -480,7 +480,7 @@ class BuyerService:
     async def import_file(self, filename: str, raw_bytes: bytes) -> Any:
         """Validate and import buyers from an uploaded CSV/XLSX file with 3-way duplicate detection."""
         from app.buyers.validators import validate_buyer_row
-        from app.masters.import_export import parse_rows_from_file, run_import
+        from app.masters.import_export import model_to_dict, parse_rows_from_file, run_import
 
         rows = parse_rows_from_file(filename, raw_bytes)
 
@@ -510,7 +510,10 @@ class BuyerService:
                 whatsapp_number=wa_num,
             )
             if dup is not None:
-                raise ConflictException(f"Buyer '{company_name}' already exists (duplicate check: Company Name / Calling / WhatsApp Number).")
+                raise ConflictException(
+                    f"Buyer '{company_name}' already exists (duplicate check: Company Name / Calling / WhatsApp Number).",
+                    details={"existing": model_to_dict(dup)},
+                )
 
             # Resolve Country
             country = next(

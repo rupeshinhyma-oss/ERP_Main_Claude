@@ -47,6 +47,13 @@ class SupplierContactCreate(BaseModel):
     wechat_number: str | None = Field(default=None, max_length=50)
     email: EmailStr | None = None
 
+    @field_validator("email", mode="before")
+    @classmethod
+    def _validate_optional_email(cls, v: Any) -> Any:
+        if v is None or (isinstance(v, str) and not v.strip()):
+            return None
+        return v.strip()
+
     _validate_calling = field_validator("calling_number")(_phone_validator("Calling number"))
     _validate_whatsapp = field_validator("whatsapp_number")(_phone_validator("WhatsApp number"))
 
@@ -63,6 +70,13 @@ class SupplierContactUpdate(BaseModel):
     whatsapp_number: str | None = Field(default=None, max_length=50)
     wechat_number: str | None = Field(default=None, max_length=50)
     email: EmailStr | None = None
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def _validate_optional_email(cls, v: Any) -> Any:
+        if v is None or (isinstance(v, str) and not v.strip()):
+            return None
+        return v.strip()
 
     _validate_calling = field_validator("calling_number")(_phone_validator("Calling number"))
     _validate_whatsapp = field_validator("whatsapp_number")(_phone_validator("WhatsApp number"))

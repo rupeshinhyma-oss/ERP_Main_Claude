@@ -44,15 +44,6 @@ class ForgotPasswordRequest(BaseModel):
     )
 
 
-class TokenResponse(BaseModel):
-    """Response payload carrying a fresh access/refresh token pair."""
-
-    access_token: str
-    refresh_token: str
-    token_type: str = "bearer"
-    expires_in: int = Field(..., description="Access token lifetime in seconds.")
-
-
 class ProfileResponse(BaseModel):
     """Response payload for ``GET /auth/profile``: the caller's own profile, roles, and permissions."""
 
@@ -73,6 +64,16 @@ class ProfileResponse(BaseModel):
     created_at: datetime
     roles: list[str] = Field(default_factory=list)
     permissions: list[str] = Field(default_factory=list)
+
+
+class TokenResponse(BaseModel):
+    """Response payload carrying a fresh access/refresh token pair."""
+
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
+    expires_in: int = Field(..., description="Access token lifetime in seconds.")
+    user: ProfileResponse | None = None
 
 
 class SessionRead(BaseModel):

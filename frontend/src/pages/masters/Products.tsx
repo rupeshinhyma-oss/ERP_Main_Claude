@@ -363,10 +363,12 @@ export function ProductsPage() {
       activeKey="masters-products"
       apiBase="/masters/products"
       permissionPrefix="product"
+      exportPermission="product.export"
+      bulkActionPermission="product.bulk_action"
       liveModule="inventory"
       entityName="product"
       clientSideSearch={true}
-      customSearchMatcher={(p, term, cleanTerm) => {
+      customSearchMatcher={(p: Product, term: string, cleanTerm: string) => {
         const brand = brands.items.find((x) => x.id === p.brand_id);
         const cat = categories.items.find((x) => x.id === p.category_id);
         const subCat = subCategories.items.find((x) => x.id === p.sub_category_id);
@@ -377,7 +379,7 @@ export function ProductsPage() {
           ? p.organization_ids
           : (p.organization_id ? [p.organization_id] : []);
         const orgNames = orgIds
-          .map((id) => organizations.items.find((x) => x.id === id)?.name)
+          .map((id: string) => organizations.items.find((x) => x.id === id)?.name)
           .filter(Boolean);
 
         const searchBlob = [

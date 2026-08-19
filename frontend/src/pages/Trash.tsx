@@ -19,6 +19,46 @@ interface TrashItem {
   deleted_at?: string | null;
 }
 
+function TrashTableSkeletonRows({ count = 6 }: { count?: number }) {
+  const titleWidths = ["70%", "85%", "60%", "75%", "90%"];
+  const detailWidths = ["50%", "65%", "40%", "60%", "45%"];
+  return (
+    <>
+      {Array.from({ length: count }).map((_, idx) => (
+        <tr key={`trash-sk-${idx}`} style={{ borderBottom: "1px solid #f1f5f9" }}>
+          <td style={{ padding: "12px 16px", width: "40px" }}>
+            <div className="skeleton-line" style={{ width: "16px", height: "16px", borderRadius: "4px" }} />
+          </td>
+          <td style={{ padding: "12px 16px" }}>
+            <div className="skeleton-line" style={{ width: "80px", height: "20px", borderRadius: "12px" }} />
+          </td>
+          <td style={{ padding: "12px 16px" }}>
+            <div
+              className="skeleton-line"
+              style={{ width: titleWidths[idx % titleWidths.length], height: "15px", borderRadius: "4px" }}
+            />
+          </td>
+          <td style={{ padding: "12px 16px" }}>
+            <div
+              className="skeleton-line"
+              style={{ width: detailWidths[idx % detailWidths.length], height: "13px", borderRadius: "4px" }}
+            />
+          </td>
+          <td style={{ padding: "12px 16px" }}>
+            <div className="skeleton-line" style={{ width: "90px", height: "14px", borderRadius: "4px" }} />
+          </td>
+          <td style={{ padding: "12px 16px", textAlign: "right" }}>
+            <div style={{ display: "inline-flex", gap: "8px" }}>
+              <div className="skeleton-line" style={{ width: "70px", height: "28px", borderRadius: "6px" }} />
+              <div className="skeleton-line" style={{ width: "65px", height: "28px", borderRadius: "6px" }} />
+            </div>
+          </td>
+        </tr>
+      ))}
+    </>
+  );
+}
+
 export function TrashPage() {
   const [items, setItems] = useState<TrashItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -360,7 +400,41 @@ export function TrashPage() {
           }}
         >
           {loading ? (
-            <div style={{ padding: "40px", textAlign: "center", color: "#64748b" }}>Loading trash items...</div>
+            <table className="table" style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead>
+                <tr style={{ background: "#f8fafc", borderBottom: "1px solid #e2e8f0", textAlign: "left" }}>
+                  <th style={{ padding: "12px 16px", width: "40px" }}>
+                    <input type="checkbox" disabled />
+                  </th>
+                  <th style={{ padding: "12px 16px", fontSize: "13px", fontWeight: 600, color: "#475569" }}>
+                    Module Type
+                  </th>
+                  <th style={{ padding: "12px 16px", fontSize: "13px", fontWeight: 600, color: "#475569" }}>
+                    Name / Title
+                  </th>
+                  <th style={{ padding: "12px 16px", fontSize: "13px", fontWeight: 600, color: "#475569" }}>
+                    Details
+                  </th>
+                  <th style={{ padding: "12px 16px", fontSize: "13px", fontWeight: 600, color: "#475569" }}>
+                    Deleted At
+                  </th>
+                  <th
+                    style={{
+                      padding: "12px 16px",
+                      fontSize: "13px",
+                      fontWeight: 600,
+                      color: "#475569",
+                      textAlign: "right",
+                    }}
+                  >
+                    Actions
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                <TrashTableSkeletonRows count={6} />
+              </tbody>
+            </table>
           ) : filteredItems.length === 0 ? (
             <div style={{ padding: "48px", textAlign: "center", color: "#64748b" }}>
               <div style={{ fontSize: "36px", marginBottom: "8px" }}>🗑️</div>

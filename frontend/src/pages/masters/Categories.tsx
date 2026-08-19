@@ -13,6 +13,8 @@ export function CategoriesPage() {
       activeKey="masters-categories"
       apiBase="/masters/product-categories"
       permissionPrefix="category"
+      exportPermission="category.export"
+      bulkActionPermission="category.bulk_action"
       liveModule="categories"
       entityName="category"
       heading="Product Categories"

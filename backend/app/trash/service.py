@@ -38,7 +38,7 @@ from app.buyers.models import Buyer, BuyerContact
 from app.users.models import User
 from app.rbac.models import Role
 from app.inquiries.models import ConsignmentCode, Inquiry, InquiryItem
-from app.planning.models import PlanningSheet, PlanningRow, PlanningColumn, PlanningStatusTag
+from app.planning.models import PlanningChangeLog, PlanningSheet, PlanningRow, PlanningColumn, PlanningStatusTag
 
 # (model class, primary display-name attribute, secondary "code"-like
 # attribute or None). ``name_attr`` MUST be a real attribute on the model
@@ -186,6 +186,18 @@ class TrashService:
 
         Phase 8: no longer commits internally -- see ``restore_item``'s
         docstring above; the same reasoning applies here.
+
+        Bug fix: ``PlanningSheet.rows``/``.columns`` cascade fine on
+        delete (``cascade="all, delete-orphan"``), but
+        ``PlanningChangeLog.sheet_id`` is a plain FK with NO
+        ``ondelete`` and NO ORM relationship/cascade at all -- it isn't
+        reachable from ``PlanningSheet`` in the object graph. Any sheet
+        that has ever been edited (row/column/cell change) has rows
+        here, so deleting the sheet used to hit a database-level
+        foreign-key violation, surfaced to the user as a generic
+        "unexpected error" and leaving the item stuck in Trash forever.
+        We explicitly clear the sheet's change-log rows first so the
+        FK is satisfied before the sheet itself is deleted.
         """
         if entity_type not in MODEL_MAP:
             raise NotFoundException(f"Unknown entity type '{entity_type}'.")
@@ -198,6 +210,9 @@ class TrashService:
 
         if row is None:
             raise NotFoundException(f"{entity_type} with ID '{item_id}' not found.")
+
+        if entity_type == "Planning Sheet":
+            await self.db.execute(delete(PlanningChangeLog).where(PlanningChangeLog.sheet_id == uid))
 
         await self.db.delete(row)
         await self.db.flush()
@@ -222,6 +237,21 @@ class TrashService:
         for entity_type, (model_cls, _, _) in MODEL_MAP.items():
             if not hasattr(model_cls, "deleted_at"):
                 continue
+
+            # Same FK gap as hard_delete_item() above: PlanningChangeLog
+            # rows referencing a to-be-deleted PlanningSheet aren't
+            # cascaded automatically, so clear them first or the bulk
+            # DELETE below fails with a foreign-key violation and no
+            # trash gets emptied at all.
+            if entity_type == "Planning Sheet":
+                await self.db.execute(
+                    delete(PlanningChangeLog).where(
+                        PlanningChangeLog.sheet_id.in_(
+                            select(PlanningSheet.id).where(PlanningSheet.deleted_at.is_not(None))
+                        )
+                    )
+                )
+
             stmt = delete(model_cls).where(model_cls.deleted_at.is_not(None))
             res = await self.db.execute(stmt)
             count += res.rowcount or 0

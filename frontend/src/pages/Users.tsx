@@ -48,6 +48,57 @@ const STATUS_OPTIONS: [string, string][] = [
  */
 const RESERVED_ROLE_NAMES = new Set(["super_admin", "user", "admin"]);
 
+function UserTableSkeletonRows({ count = 8 }: { count?: number }) {
+  const nameWidths = ["75%", "60%", "85%", "70%", "90%", "65%"];
+  const userWidths = ["60%", "50%", "70%", "55%", "65%", "45%"];
+  const emailWidths = ["80%", "70%", "85%", "75%", "90%", "65%"];
+
+  return (
+    <>
+      {Array.from({ length: count }).map((_, idx) => (
+        <tr key={`user-sk-row-${idx}`}>
+          <td style={{ textAlign: "center", padding: "12px 14px" }}>
+            <div className="skeleton-line" style={{ width: "16px", height: "16px", borderRadius: "4px", margin: "0 auto" }} />
+          </td>
+          <td style={{ padding: "12px 14px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+              <div className="skeleton-circle" style={{ width: "32px", height: "32px" }} />
+              <div
+                className="skeleton-line"
+                style={{ width: nameWidths[idx % nameWidths.length], height: "15px", borderRadius: "4px" }}
+              />
+            </div>
+          </td>
+          <td style={{ padding: "12px 14px" }}>
+            <div
+              className="skeleton-line"
+              style={{ width: userWidths[idx % userWidths.length], height: "14px", borderRadius: "4px" }}
+            />
+          </td>
+          <td style={{ padding: "12px 14px" }}>
+            <div
+              className="skeleton-line"
+              style={{ width: emailWidths[idx % emailWidths.length], height: "14px", borderRadius: "4px" }}
+            />
+          </td>
+          <td style={{ padding: "12px 14px" }}>
+            <div className="skeleton-line" style={{ width: "65px", height: "20px", borderRadius: "12px" }} />
+          </td>
+          <td style={{ padding: "12px 14px" }}>
+            <div className="skeleton-line" style={{ width: "55px", height: "20px", borderRadius: "12px" }} />
+          </td>
+          <td style={{ padding: "12px 14px" }}>
+            <div className="skeleton-line" style={{ width: "80px", height: "14px", borderRadius: "4px" }} />
+          </td>
+          <td style={{ padding: "12px 14px", textAlign: "center" }}>
+            <div className="skeleton-line" style={{ width: "32px", height: "32px", borderRadius: "4px", margin: "0 auto" }} />
+          </td>
+        </tr>
+      ))}
+    </>
+  );
+}
+
 /** Friendly display name for a role name coming back from the API. */
 function roleDisplayName(name: string): string {
   if (name === "super_admin") return "Admin";
@@ -563,7 +614,7 @@ export function UsersPage() {
               </thead>
               <tbody>
                 {loading ? (
-                  <TableMessageRow colSpan={8}>Loading user accounts...</TableMessageRow>
+                  <UserTableSkeletonRows count={8} />
                 ) : rows.length === 0 ? (
                   <TableMessageRow colSpan={8}>No user accounts found.</TableMessageRow>
                 ) : (

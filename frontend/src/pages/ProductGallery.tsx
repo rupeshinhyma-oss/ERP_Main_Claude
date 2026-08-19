@@ -3,7 +3,7 @@ import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { SideDrawer, DetailFieldGrid } from "@/components/SideDrawer";
 import { apiGet, apiPatch } from "@/lib/api";
-import { usePendingGuard } from "@/lib/hooks";
+import { usePendingGuard, useAuth } from "@/lib/hooks";
 import { useLookup } from "@/lib/lookups";
 import type {
   Product,
@@ -224,9 +224,110 @@ function getSupplierFolderLinks(supplier: Supplier): string[] {
     .filter((str) => Boolean(str) && !isDirectMediaUrl(str));
 }
 
+function ProductGallerySkeletonGrid({ count = 12 }: { count?: number }) {
+  const titleWidths = ["85%", "70%", "90%", "65%", "75%", "80%"];
+  const subWidths = ["45%", "60%", "40%", "50%", "55%", "35%"];
+
+  return (
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))",
+        gap: "20px",
+      }}
+    >
+      {Array.from({ length: count }).map((_, idx) => (
+        <div
+          key={`gallery-sk-${idx}`}
+          className="card"
+          style={{
+            borderRadius: "10px",
+            overflow: "hidden",
+            border: "1px solid #e2e8f0",
+            display: "flex",
+            flexDirection: "column",
+            background: "#ffffff",
+          }}
+        >
+          {/* Image Thumbnail Placeholder */}
+          <div
+            style={{
+              height: "180px",
+              background: "#f8fafc",
+              position: "relative",
+              overflow: "hidden",
+            }}
+          >
+            <div className="skeleton-box" style={{ width: "100%", height: "100%", borderRadius: 0 }} />
+            <div
+              className="skeleton-line"
+              style={{
+                position: "absolute",
+                top: "10px",
+                left: "10px",
+                width: "60px",
+                height: "18px",
+                borderRadius: "4px",
+              }}
+            />
+            <div
+              className="skeleton-line"
+              style={{
+                position: "absolute",
+                bottom: "10px",
+                right: "10px",
+                width: "65px",
+                height: "18px",
+                borderRadius: "4px",
+              }}
+            />
+          </div>
+
+          {/* Card Body */}
+          <div style={{ padding: "14px", flex: 1, display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
+            <div>
+              <div
+                className="skeleton-line"
+                style={{
+                  width: titleWidths[idx % titleWidths.length],
+                  height: "15px",
+                  marginBottom: "8px",
+                  borderRadius: "4px",
+                }}
+              />
+              <div
+                className="skeleton-line"
+                style={{
+                  width: subWidths[idx % subWidths.length],
+                  height: "12px",
+                  borderRadius: "4px",
+                }}
+              />
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "14px" }}>
+              <div
+                className="skeleton-line"
+                style={{ width: "50px", height: "18px", borderRadius: "10px" }}
+              />
+              <div
+                className="skeleton-line"
+                style={{ width: "70px", height: "24px", borderRadius: "4px" }}
+              />
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 type GalleryTab = "all" | "products" | "suppliers";
 
 export function ProductGalleryPage() {
+  const { hasPermission } = useAuth();
+  const canDeleteProductMedia = hasPermission("product.update");
+  const canDeleteSupplierMedia = hasPermission("supplier.update");
+
   const [products, setProducts] = useState<Product[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [loading, setLoading] = useState(true);
@@ -512,9 +613,7 @@ export function ProductGalleryPage() {
         </div>
 
         {loading ? (
-          <div style={{ textAlign: "center", padding: "60px", color: "#64748b" }}>
-            Loading media gallery...
-          </div>
+          <ProductGallerySkeletonGrid count={12} />
         ) : (galleryTab === "products" && filteredProducts.length === 0) ||
           (galleryTab === "suppliers" && filteredSuppliers.length === 0) ||
           (galleryTab === "all" && filteredProducts.length === 0 && filteredSuppliers.length === 0) ? (
@@ -1017,28 +1116,30 @@ export function ProductGalleryPage() {
                         📥 Active Only
                       </button>
 
-                      <button
-                        type="button"
-                        onClick={() => handleDeletePhoto(selectedImageIndex)}
-                        disabled={isPhotoDeletePending(`${p.id}:${selectedImageIndex}`)}
-                        style={{
-                          background: "#fee2e2",
-                          color: "#dc2626",
-                          border: "1px solid #fca5a5",
-                          borderRadius: "6px",
-                          padding: "4px 10px",
-                          fontSize: "12px",
-                          fontWeight: 600,
-                          cursor: isPhotoDeletePending(`${p.id}:${selectedImageIndex}`) ? "default" : "pointer",
-                          opacity: isPhotoDeletePending(`${p.id}:${selectedImageIndex}`) ? 0.6 : 1,
-                          display: "inline-flex",
-                          alignItems: "center",
-                          gap: "4px",
-                        }}
-                        title="Delete this media from product"
-                      >
-                        {isPhotoDeletePending(`${p.id}:${selectedImageIndex}`) ? "Deleting…" : "🗑️ Delete"}
-                      </button>
+                      {canDeleteProductMedia && (
+                        <button
+                          type="button"
+                          onClick={() => handleDeletePhoto(selectedImageIndex)}
+                          disabled={isPhotoDeletePending(`${p.id}:${selectedImageIndex}`)}
+                          style={{
+                            background: "#fee2e2",
+                            color: "#dc2626",
+                            border: "1px solid #fca5a5",
+                            borderRadius: "6px",
+                            padding: "4px 10px",
+                            fontSize: "12px",
+                            fontWeight: 600,
+                            cursor: isPhotoDeletePending(`${p.id}:${selectedImageIndex}`) ? "default" : "pointer",
+                            opacity: isPhotoDeletePending(`${p.id}:${selectedImageIndex}`) ? 0.6 : 1,
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "4px",
+                          }}
+                          title="Delete this media from product"
+                        >
+                          {isPhotoDeletePending(`${p.id}:${selectedImageIndex}`) ? "Deleting…" : "🗑️ Delete"}
+                        </button>
+                      )}
                     </div>
                   </div>
 
@@ -1340,28 +1441,30 @@ export function ProductGalleryPage() {
                         📥 Active Only
                       </button>
 
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteSupplierPhoto(selectedImageIndex)}
-                        disabled={isPhotoDeletePending(`supp:${supp.id}:${selectedImageIndex}`)}
-                        style={{
-                          background: "#fee2e2",
-                          color: "#dc2626",
-                          border: "1px solid #fca5a5",
-                          borderRadius: "6px",
-                          padding: "4px 10px",
-                          fontSize: "12px",
-                          fontWeight: 600,
-                          cursor: isPhotoDeletePending(`supp:${supp.id}:${selectedImageIndex}`) ? "default" : "pointer",
-                          opacity: isPhotoDeletePending(`supp:${supp.id}:${selectedImageIndex}`) ? 0.6 : 1,
-                          display: "inline-flex",
-                          alignItems: "center",
-                          gap: "4px",
-                        }}
-                        title="Delete this visit photo from supplier"
-                      >
-                        {isPhotoDeletePending(`supp:${supp.id}:${selectedImageIndex}`) ? "Deleting…" : "🗑️ Delete"}
-                      </button>
+                      {canDeleteSupplierMedia && (
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteSupplierPhoto(selectedImageIndex)}
+                          disabled={isPhotoDeletePending(`supp:${supp.id}:${selectedImageIndex}`)}
+                          style={{
+                            background: "#fee2e2",
+                            color: "#dc2626",
+                            border: "1px solid #fca5a5",
+                            borderRadius: "6px",
+                            padding: "4px 10px",
+                            fontSize: "12px",
+                            fontWeight: 600,
+                            cursor: isPhotoDeletePending(`supp:${supp.id}:${selectedImageIndex}`) ? "default" : "pointer",
+                            opacity: isPhotoDeletePending(`supp:${supp.id}:${selectedImageIndex}`) ? 0.6 : 1,
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "4px",
+                          }}
+                          title="Delete this visit photo from supplier"
+                        >
+                          {isPhotoDeletePending(`supp:${supp.id}:${selectedImageIndex}`) ? "Deleting…" : "🗑️ Delete"}
+                        </button>
+                      )}
                     </div>
                   </div>
 
@@ -1486,39 +1589,39 @@ export function ProductGalleryPage() {
                   { label: "Visit Remarks", value: supp.visit_remarks || "—", fullWidth: true },
                   ...(suppFolderLinks.length > 0
                     ? [
-                        {
-                          label: "Factory Video / Inspection Folder Link",
-                          value: (
-                            <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginTop: "4px" }}>
-                              {suppFolderLinks.map((link, idx) => (
-                                <a
-                                  key={idx}
-                                  href={link.startsWith("http") ? link : `https://${link}`}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  style={{
-                                    display: "inline-flex",
-                                    alignItems: "center",
-                                    gap: "6px",
-                                    padding: "6px 12px",
-                                    background: "#eff6ff",
-                                    border: "1px solid #bfdbfe",
-                                    borderRadius: "6px",
-                                    color: "#1d4ed8",
-                                    fontSize: "12.5px",
-                                    fontWeight: 600,
-                                    textDecoration: "none",
-                                    boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
-                                  }}
-                                >
-                                  📁 Open Inspection Folder / Link ({idx + 1}) ↗
-                                </a>
-                              ))}
-                            </div>
-                          ),
-                          fullWidth: true,
-                        },
-                      ]
+                      {
+                        label: "Factory Video / Inspection Folder Link",
+                        value: (
+                          <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginTop: "4px" }}>
+                            {suppFolderLinks.map((link, idx) => (
+                              <a
+                                key={idx}
+                                href={link.startsWith("http") ? link : `https://${link}`}
+                                target="_blank"
+                                rel="noreferrer"
+                                style={{
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: "6px",
+                                  padding: "6px 12px",
+                                  background: "#eff6ff",
+                                  border: "1px solid #bfdbfe",
+                                  borderRadius: "6px",
+                                  color: "#1d4ed8",
+                                  fontSize: "12.5px",
+                                  fontWeight: 600,
+                                  textDecoration: "none",
+                                  boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
+                                }}
+                              >
+                                📁 Open Inspection Folder / Link ({idx + 1}) ↗
+                              </a>
+                            ))}
+                          </div>
+                        ),
+                        fullWidth: true,
+                      },
+                    ]
                     : []),
                   { label: "Overall Remarks", value: supp.overall_remarks || "—", fullWidth: true },
                 ]}

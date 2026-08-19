@@ -5,7 +5,7 @@ Phase 9: added live event publishing on every mutation so the Sub
 Categories list page receives real-time updates from other users without
 a manual refresh. Uses ``module:subcategories`` (entity="subcategory"),
 registered in ``app.events.channels.MODULE_CHANNEL_PERMISSIONS`` ->
-``subcategory.read``.
+``subcategory.view``.
 """
 
 from __future__ import annotations
@@ -129,7 +129,7 @@ async def list_sub_categories(
     request: Request,
     query: ListQueryParams = Depends(get_list_query_params),
     service: ProductSubCategoryService = Depends(get_product_sub_category_service),
-    _current_user: CurrentUser = Depends(require_permission("subcategory.read")),
+    _current_user: CurrentUser = Depends(require_permission("subcategory.view")),
 ) -> dict:
     """List product sub-categories, with search/sort/filter/pagination."""
     sub_categories, total = await service.list_paginated(query)
@@ -143,7 +143,7 @@ async def export_sub_categories(
     request: Request,
     format: str = "csv",
     service: ProductSubCategoryService = Depends(get_product_sub_category_service),
-    current_user: CurrentUser = Depends(require_permission("subcategory.read")),
+    current_user: CurrentUser = Depends(require_permission("subcategory.export")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> Response:
     """Export every product sub-category as a CSV or XLSX file."""
@@ -169,7 +169,7 @@ async def import_sub_categories(
     request: Request,
     file: UploadFile = File(...),
     service: ProductSubCategoryService = Depends(get_product_sub_category_service),
-    current_user: CurrentUser = Depends(require_permission("subcategory.create")),
+    current_user: CurrentUser = Depends(require_permission("subcategory.import")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     """Import product sub-categories from an uploaded CSV/XLSX file, validating every row."""
@@ -193,7 +193,7 @@ async def get_sub_category(
     sub_category_id: uuid.UUID,
     request: Request,
     service: ProductSubCategoryService = Depends(get_product_sub_category_service),
-    _current_user: CurrentUser = Depends(require_permission("subcategory.read")),
+    _current_user: CurrentUser = Depends(require_permission("subcategory.view")),
 ) -> dict:
     """Fetch a single product sub-category by ID."""
     sub_category = await service.get_by_id_or_raise(sub_category_id)

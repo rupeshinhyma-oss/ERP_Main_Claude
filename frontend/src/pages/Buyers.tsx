@@ -21,7 +21,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
-import { Banner, Can } from "@/components/ui";
+import { Banner } from "@/components/ui";
 import { Pagination } from "@/components/Pagination";
 import { SearchableDropdown, SearchableDropdownMultiPanel, type DropdownOption } from "@/components/SearchableDropdown";
 import { EmailTagInput, PhoneGroupField, SelectField, TextAreaField, TextField, WebsiteTagInput } from "@/components/fields";
@@ -29,7 +29,7 @@ import { SideDrawer, DetailFieldGrid } from "@/components/SideDrawer";
 import { ImpExpDropdown, BulkActionsDropdown, ImportSummaryPanel } from "@/components/ImportWizard";
 import { apiDelete, apiGet, apiPatch, apiPost, downloadExport, toQueryString } from "@/lib/api";
 import { useLookup } from "@/lib/lookups";
-import { usePendingGuard, useModalHistorySync } from "@/lib/hooks";
+import { usePendingGuard, useModalHistorySync, useAuth } from "@/lib/hooks";
 import { useLiveConnectionStatus } from "@/lib/live/useLive";
 import { useLiveList } from "@/lib/live/useLiveList";
 import type { Country, ImportHeader, ImportSummary, ProductCategory, ProductSubCategory } from "@/types";
@@ -129,7 +129,175 @@ function validatePhoneNumber(val: string | undefined | null, fieldLabel = "Phone
   return null;
 }
 
+function BuyerSkeletonRows({
+  count = 8,
+  displayOrder,
+  getFreezeStyle,
+}: {
+  count?: number;
+  displayOrder: number[];
+  getFreezeStyle: (colIdx: number, isHeader?: boolean) => React.CSSProperties;
+}) {
+  const rowIndexes = Array.from({ length: count }, (_, i) => i);
+  const nameWidths = ["72%", "86%", "64%", "80%", "92%", "68%", "76%", "84%"];
+
+  return (
+    <>
+      {rowIndexes.map((rowIndex) => (
+        <tr key={`buyer-sk-row-${rowIndex}`} style={{ borderBottom: "1px solid #f1f5f9" }}>
+          {displayOrder.map((colIdx) => {
+            let content: React.ReactNode = null;
+            switch (colIdx) {
+              case 0:
+                content = (
+                  <div
+                    className="skeleton-line"
+                    style={{ width: "16px", height: "16px", borderRadius: "4px", margin: "0 auto" }}
+                  />
+                );
+                break;
+              case 1:
+                content = (
+                  <div
+                    className="skeleton-line"
+                    style={{ width: "24px", height: "14px", borderRadius: "4px", margin: "0 auto" }}
+                  />
+                );
+                break;
+              case 2:
+                content = (
+                  <div
+                    className="skeleton-line"
+                    style={{
+                      width: nameWidths[rowIndex % nameWidths.length],
+                      height: "15px",
+                      borderRadius: "4px",
+                    }}
+                  />
+                );
+                break;
+              case 3:
+                content = (
+                  <div
+                    className="skeleton-line"
+                    style={{ width: "55px", height: "20px", borderRadius: "10px" }}
+                  />
+                );
+                break;
+              case 4:
+                content = (
+                  <div style={{ display: "inline-flex", gap: "4px", alignItems: "center" }}>
+                    <div
+                      className="skeleton-line"
+                      style={{ width: "65px", height: "20px", borderRadius: "10px" }}
+                    />
+                    <div
+                      className="skeleton-line"
+                      style={{ width: "32px", height: "20px", borderRadius: "10px" }}
+                    />
+                  </div>
+                );
+                break;
+              case 5:
+                content = (
+                  <div style={{ display: "inline-flex", gap: "4px", alignItems: "center" }}>
+                    <div
+                      className="skeleton-line"
+                      style={{ width: "60px", height: "20px", borderRadius: "10px" }}
+                    />
+                  </div>
+                );
+                break;
+              case 6:
+                content = (
+                  <div
+                    className="skeleton-line"
+                    style={{ width: "60px", height: "14px", borderRadius: "4px" }}
+                  />
+                );
+                break;
+              case 7:
+                content = (
+                  <div
+                    className="skeleton-line"
+                    style={{ width: "60px", height: "20px", borderRadius: "12px" }}
+                  />
+                );
+                break;
+              case 8:
+                content = (
+                  <div
+                    className="skeleton-line"
+                    style={{ width: "45px", height: "20px", borderRadius: "12px" }}
+                  />
+                );
+                break;
+              case 9:
+                content = (
+                  <div
+                    className="skeleton-line"
+                    style={{ width: "35px", height: "20px", borderRadius: "4px" }}
+                  />
+                );
+                break;
+              case 10:
+                content = (
+                  <div
+                    className="skeleton-line"
+                    style={{ width: "70px", height: "14px", borderRadius: "4px" }}
+                  />
+                );
+                break;
+              case 11:
+                content = (
+                  <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                    <div
+                      className="skeleton-line"
+                      style={{ width: "30px", height: "30px", borderRadius: "4px" }}
+                    />
+                    <div
+                      className="skeleton-line"
+                      style={{ width: "30px", height: "30px", borderRadius: "4px" }}
+                    />
+                  </div>
+                );
+                break;
+              default:
+                content = <div className="skeleton-line" style={{ height: "14px" }} />;
+            }
+
+            return (
+              <td
+                key={`buyer-sk-cell-${colIdx}`}
+                style={{
+                  padding: colIdx === 0 || colIdx === 1 ? "10px 8px" : "10px 14px",
+                  verticalAlign: "middle",
+                  width: colIdx === 0 ? "40px" : colIdx === 1 ? "65px" : undefined,
+                  minWidth: colIdx === 0 ? "40px" : colIdx === 1 ? "65px" : undefined,
+                  maxWidth: colIdx === 0 ? "45px" : colIdx === 1 ? "75px" : undefined,
+                  textAlign: colIdx === 0 || colIdx === 1 ? "center" : "left",
+                  ...getFreezeStyle(colIdx, false),
+                }}
+              >
+                {content}
+              </td>
+            );
+          })}
+        </tr>
+      ))}
+    </>
+  );
+}
+
 export function BuyersPage() {
+  const { hasPermission } = useAuth();
+  const canCreate = hasPermission("buyer.create");
+  const canUpdate = hasPermission("buyer.update");
+  const canDelete = hasPermission("buyer.delete");
+  const canExport = hasPermission("buyer.export");
+  const canImport = hasPermission("buyer.import");
+  const canBulkAction = hasPermission("buyer.bulk_action");
+
   const [rows, setRows] = useState<Buyer[]>([]);
   const [totalRecords, setTotalRecords] = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
@@ -1851,7 +2019,7 @@ export function BuyersPage() {
             </button>
 
             {/* Add New Buyer */}
-            <Can permission="buyer.create">
+            {canCreate && (
               <button
                 type="button"
                 className="btn btn-primary"
@@ -1869,28 +2037,30 @@ export function BuyersPage() {
               >
                 + ADD NEW BUYER
               </button>
-            </Can>
+            )}
 
             {/* Import / Export Dropdown */}
-            <Can permission="buyer.import">
-              <ImpExpDropdown
-                apiBase="/buyers"
-                entityName="buyer"
-                importHeaders={BUYER_IMPORT_HEADERS}
-                onSummary={setImportSummary}
-                onError={setImportError}
-                onComplete={() => reload()}
-                onExportCsv={() => handleExport("csv")}
-              />
-            </Can>
+            <ImpExpDropdown
+              apiBase="/buyers"
+              entityName="buyer"
+              importHeaders={BUYER_IMPORT_HEADERS}
+              onSummary={setImportSummary}
+              onError={setImportError}
+              onComplete={() => reload()}
+              onExportCsv={() => handleExport("csv")}
+              showImport={canImport}
+              showExport={canExport}
+            />
 
             {/* Bulk Actions Dropdown (Bulk Activate, Bulk Deactivate, Bulk Delete) */}
-            <BulkActionsDropdown
-              selectedCount={selectedIds.length}
-              onBulkActivate={handleBulkActivate}
-              onBulkDeactivate={handleBulkDeactivate}
-              onBulkDelete={handleBulkDelete}
-            />
+            {canBulkAction && (
+              <BulkActionsDropdown
+                selectedCount={selectedIds.length}
+                onBulkActivate={canUpdate ? handleBulkActivate : undefined}
+                onBulkDeactivate={canUpdate ? handleBulkDeactivate : undefined}
+                onBulkDelete={canDelete ? handleBulkDelete : undefined}
+              />
+            )}
           </div>
         </div>
 
@@ -2225,11 +2395,7 @@ export function BuyersPage() {
               </thead>
               <tbody>
                 {loading ? (
-                  <tr>
-                    <td colSpan={12} style={{ textAlign: "center", padding: "30px", color: "#64748b" }}>
-                      Loading buyer profiles…
-                    </td>
-                  </tr>
+                  <BuyerSkeletonRows count={8} displayOrder={displayOrder} getFreezeStyle={getFreezeStyle} />
                 ) : rows.length === 0 ? (
                   <tr>
                     <td colSpan={12} style={{ textAlign: "center", padding: "30px", color: "#64748b" }}>
@@ -2300,52 +2466,56 @@ export function BuyersPage() {
                       10: r.created_at ? new Date(r.created_at).toLocaleDateString() : "—",
                       11: (
                         <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
-                          <button
-                            type="button"
-                            onClick={() => openEdit(r)}
-                            title="Edit Buyer"
-                            style={{
-                              background: "#0061f2",
-                              color: "#ffffff",
-                              padding: "6px 9px",
-                              borderRadius: "4px",
-                              border: "none",
-                              cursor: "pointer",
-                              display: "inline-flex",
-                              alignItems: "center",
-                              justifyContent: "center",
-                            }}
-                          >
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-                            </svg>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleDelete(r)}
-                            title={cannotDelete ? "Cannot delete buyer with Existing status or Yes potential (document rule)" : "Delete buyer"}
-                            disabled={cannotDelete || isRowActionPending(`delete:${r.id}`)}
-                            style={{
-                              background: cannotDelete ? "#cbd5e1" : "#ef4444",
-                              color: "#ffffff",
-                              padding: "6px 9px",
-                              borderRadius: "4px",
-                              border: "none",
-                              cursor: cannotDelete ? "not-allowed" : "pointer",
-                              display: "inline-flex",
-                              alignItems: "center",
-                              justifyContent: "center",
-                              opacity: cannotDelete ? 0.6 : 1,
-                            }}
-                          >
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                              <polyline points="3 6 5 6 21 6" />
-                              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                              <line x1="10" y1="11" x2="10" y2="17" />
-                              <line x1="14" y1="11" x2="14" y2="17" />
-                            </svg>
-                          </button>
+                          {canUpdate && (
+                            <button
+                              type="button"
+                              onClick={() => openEdit(r)}
+                              title="Edit Buyer"
+                              style={{
+                                background: "#0061f2",
+                                color: "#ffffff",
+                                padding: "6px 9px",
+                                borderRadius: "4px",
+                                border: "none",
+                                cursor: "pointer",
+                                display: "inline-flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                              }}
+                            >
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                              </svg>
+                            </button>
+                          )}
+                          {canDelete && (
+                            <button
+                              type="button"
+                              onClick={() => handleDelete(r)}
+                              title={cannotDelete ? "Cannot delete buyer with Existing status or Yes potential (document rule)" : "Delete buyer"}
+                              disabled={cannotDelete || isRowActionPending(`delete:${r.id}`)}
+                              style={{
+                                background: cannotDelete ? "#cbd5e1" : "#ef4444",
+                                color: "#ffffff",
+                                padding: "6px 9px",
+                                borderRadius: "4px",
+                                border: "none",
+                                cursor: cannotDelete ? "not-allowed" : "pointer",
+                                display: "inline-flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                opacity: cannotDelete ? 0.6 : 1,
+                              }}
+                            >
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <polyline points="3 6 5 6 21 6" />
+                                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                                <line x1="10" y1="11" x2="10" y2="17" />
+                                <line x1="14" y1="11" x2="14" y2="17" />
+                              </svg>
+                            </button>
+                          )}
                         </div>
                       ),
                     };
@@ -2398,11 +2568,15 @@ export function BuyersPage() {
             title={`Buyer Detail #${detailBuyer.company_name}`}
             subtitle={`Buyer Type: ${detailBuyer.buyer_type ? detailBuyer.buyer_type.toUpperCase() : "—"} | Status: ${detailBuyer.current_status ? detailBuyer.current_status.toUpperCase() : "NEW"}`}
             onClose={() => setDetailBuyer(null)}
-            onEdit={() => {
-              const b = detailBuyer;
-              setDetailBuyer(null);
-              openEdit(b);
-            }}
+            onEdit={
+              canUpdate
+                ? () => {
+                  const b = detailBuyer;
+                  setDetailBuyer(null);
+                  openEdit(b);
+                }
+                : undefined
+            }
             editLabel="✏️ Edit Buyer"
           >
             <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>

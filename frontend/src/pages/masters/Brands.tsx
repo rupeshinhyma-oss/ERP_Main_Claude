@@ -13,6 +13,8 @@ export function BrandsPage() {
       activeKey="masters-brands"
       apiBase="/masters/brands"
       permissionPrefix="brand"
+      exportPermission="brand.export"
+      bulkActionPermission="brand.bulk_action"
       liveModule="brands"
       entityName="brand"
       heading="Brands"

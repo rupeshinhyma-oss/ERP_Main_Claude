@@ -16,7 +16,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
-import { apiGet, apiPost } from "@/lib/api";
+import { API_BASE, apiGet, apiPost } from "@/lib/api";
 import { Auth } from "@/lib/auth";
 import { useAuth } from "@/lib/hooks";
 import {
@@ -497,15 +497,33 @@ function Topbar() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [profileOpen]);
 
-  async function handleLogout() {
+  function handleLogout() {
     setProfileOpen(false);
-    try {
-      await apiPost("/auth/logout", { refresh_token: Auth.getRefreshToken() });
-    } catch {
-      /* local session is cleared either way */
-    }
+    const refreshToken = Auth.getRefreshToken();
+    const accessToken = Auth.getAccessToken();
+
+    // 1. Immediately clear local session and transition to login (0ms perceived lag)
     Auth.clear();
     navigate("/login", { replace: true });
+
+    // 2. Best-effort background revocation on server with keepalive
+    if (refreshToken && accessToken) {
+      try {
+        fetch(`${API_BASE}/auth/logout`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify({ refresh_token: refreshToken }),
+          keepalive: true,
+        }).catch(() => {
+          /* background revocation best-effort */
+        });
+      } catch {
+        /* ignore */
+      }
+    }
   }
 
   function handleEditProfile() {

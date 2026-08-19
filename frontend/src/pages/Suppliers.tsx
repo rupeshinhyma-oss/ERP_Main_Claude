@@ -17,7 +17,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
-import { Banner, Can, ModalAlert, TableMessageRow } from "@/components/ui";
+import { Banner, ModalAlert, TableMessageRow } from "@/components/ui";
 import { SideDrawer, DetailFieldGrid } from "@/components/SideDrawer";
 import { Pagination } from "@/components/Pagination";
 import { ImpExpDropdown, BulkActionsDropdown, ImportSummaryPanel } from "@/components/ImportWizard";
@@ -173,11 +173,197 @@ function validatePhoneNumber(val: string, fieldLabel = "Phone number"): string |
   return null;
 }
 
+function SupplierSkeletonRows({
+  count = 8,
+  displayOrder,
+  getFreezeStyle,
+}: {
+  count?: number;
+  displayOrder: number[];
+  getFreezeStyle: (colIdx: number, isHeader?: boolean) => React.CSSProperties;
+}) {
+  const rowIndexes = Array.from({ length: count }, (_, i) => i);
+  const nameWidths = ["72%", "86%", "64%", "80%", "92%", "68%", "76%", "84%"];
+  const catWidths = ["80px", "65px", "90px", "75px", "85px", "70px", "82px", "68px"];
+
+  return (
+    <>
+      {rowIndexes.map((rowIndex) => (
+        <tr key={`skeleton-row-${rowIndex}`} style={{ borderBottom: "1px solid #f1f5f9" }}>
+          {displayOrder.map((colIdx) => {
+            let content: React.ReactNode = null;
+            switch (colIdx) {
+              case 0:
+                content = (
+                  <div
+                    className="skeleton-line"
+                    style={{ width: "16px", height: "16px", borderRadius: "4px", margin: "0 auto" }}
+                  />
+                );
+                break;
+              case 1:
+                content = (
+                  <div
+                    className="skeleton-line"
+                    style={{ width: "24px", height: "14px", borderRadius: "4px", margin: "0 auto" }}
+                  />
+                );
+                break;
+              case 2:
+                content = (
+                  <div
+                    className="skeleton-line"
+                    style={{
+                      width: nameWidths[rowIndex % nameWidths.length],
+                      height: "15px",
+                      borderRadius: "4px",
+                    }}
+                  />
+                );
+                break;
+              case 3:
+                content = (
+                  <div style={{ display: "inline-flex", gap: "4px", alignItems: "center" }}>
+                    <div
+                      className="skeleton-line"
+                      style={{
+                        width: catWidths[rowIndex % catWidths.length],
+                        height: "20px",
+                        borderRadius: "10px",
+                      }}
+                    />
+                    <div
+                      className="skeleton-line"
+                      style={{ width: "32px", height: "20px", borderRadius: "10px" }}
+                    />
+                  </div>
+                );
+                break;
+              case 4:
+                content = (
+                  <div
+                    className="skeleton-line"
+                    style={{ width: "60px", height: "14px", borderRadius: "4px" }}
+                  />
+                );
+                break;
+              case 5:
+                content = (
+                  <div
+                    className="skeleton-line"
+                    style={{ width: "55px", height: "14px", borderRadius: "4px" }}
+                  />
+                );
+                break;
+              case 6:
+                content = (
+                  <div
+                    className="skeleton-line"
+                    style={{ width: "70px", height: "14px", borderRadius: "4px" }}
+                  />
+                );
+                break;
+              case 7:
+                content = (
+                  <div
+                    className="skeleton-line"
+                    style={{ width: "48px", height: "14px", borderRadius: "4px" }}
+                  />
+                );
+                break;
+              case 8:
+                content = (
+                  <div
+                    className="skeleton-line"
+                    style={{ width: "85px", height: "14px", borderRadius: "4px" }}
+                  />
+                );
+                break;
+              case 9:
+                content = (
+                  <div
+                    className="skeleton-line"
+                    style={{ width: "50px", height: "14px", borderRadius: "4px" }}
+                  />
+                );
+                break;
+              case 10:
+                content = (
+                  <div
+                    className="skeleton-line"
+                    style={{ width: "75px", height: "14px", borderRadius: "4px" }}
+                  />
+                );
+                break;
+              case 11:
+                content = (
+                  <div
+                    className="skeleton-line"
+                    style={{ width: "60px", height: "20px", borderRadius: "12px" }}
+                  />
+                );
+                break;
+              case 12:
+                content = (
+                  <div
+                    className="skeleton-line"
+                    style={{ width: "42px", height: "22px", borderRadius: "4px" }}
+                  />
+                );
+                break;
+              case 13:
+                content = (
+                  <div
+                    className="skeleton-line"
+                    style={{ width: "50px", height: "20px", borderRadius: "12px" }}
+                  />
+                );
+                break;
+              case 14:
+                content = (
+                  <div
+                    className="skeleton-line"
+                    style={{ width: "32px", height: "26px", borderRadius: "4px", margin: "0 auto" }}
+                  />
+                );
+                break;
+              default:
+                content = <div className="skeleton-line" style={{ height: "14px" }} />;
+            }
+
+            return (
+              <td
+                key={`skeleton-cell-${colIdx}`}
+                style={{
+                  padding: "10px 12px",
+                  verticalAlign: "middle",
+                  width: colIdx === 0 ? "40px" : colIdx === 1 ? "65px" : undefined,
+                  minWidth: colIdx === 0 ? "40px" : colIdx === 1 ? "65px" : undefined,
+                  maxWidth: colIdx === 0 ? "45px" : colIdx === 1 ? "75px" : undefined,
+                  textAlign: colIdx === 0 || colIdx === 1 || colIdx === 14 ? "center" : "left",
+                  ...getFreezeStyle(colIdx, false),
+                }}
+              >
+                {content}
+              </td>
+            );
+          })}
+        </tr>
+      ))}
+    </>
+  );
+}
+
 export function SuppliersPage() {
   const { hasPermission } = useAuth();
   const canCreate = hasPermission("supplier.create");
   const canUpdate = hasPermission("supplier.update");
   const canDelete = hasPermission("supplier.delete");
+  const canExport = hasPermission("supplier.export");
+  const canImport = hasPermission("supplier.import");
+  const canBulkAction = hasPermission("supplier.bulk_action");
+  const canEditGrade = hasPermission("supplier.grade_edit");
+  const canEditPotential = hasPermission("supplier.potential_edit");
 
   const [rows, setRows] = useState<Supplier[]>([]);
   const [pagination, setPagination] = useState<PaginationMeta | undefined>();
@@ -655,7 +841,7 @@ export function SuppliersPage() {
               geoDropdownCache.current[cacheKey] = res.data.map((d) => ({ value: d.id, label: d.name }));
             }
           })
-          .catch(() => {});
+          .catch(() => { });
       }
     }
   }, [formCountryId]);
@@ -672,7 +858,7 @@ export function SuppliersPage() {
               geoDropdownCache.current[cacheKey] = res.data.map((d) => ({ value: d.id, label: d.name }));
             }
           })
-          .catch(() => {});
+          .catch(() => { });
       }
     }
   }, [formStateId]);
@@ -802,28 +988,32 @@ export function SuppliersPage() {
         const { data, meta } = await apiGet<Supplier[]>("/suppliers" + toQueryString(params));
         if (cancelled) return;
         const items = data || [];
+        // Immediately render rows to the user without delay
+        setRows(items);
+        setPagination(meta?.pagination);
+        setError(null);
+        setLoading(false);
+
         if (items.length) {
-          // Resolve every related name needed for this page's rows only.
-          await Promise.all([
+          // Resolve every related name concurrently in background
+          void Promise.all([
             resolver.resolve("countries", items.map((s) => s.country_id)),
             resolver.resolve("states", items.map((s) => s.state_id)),
             resolver.resolve("cities", items.map((s) => s.city_id)),
             resolver.resolve("categories", items.flatMap((s) => s.category_ids || [])),
             resolver.resolve("subCategories", items.flatMap((s) => s.sub_category_ids || [])),
             resolver.resolve("products", items.flatMap((s) => s.product_ids || [])),
-          ]);
-          if (cancelled) return;
-          setNamesVersion((n) => n + 1);
+          ]).then(() => {
+            if (!cancelled) {
+              setNamesVersion((n) => n + 1);
+            }
+          });
         }
-        setRows(items);
-        setPagination(meta?.pagination);
-        setError(null);
       } catch (err) {
         if (cancelled) return;
         setRows([]);
         setError(err);
-      } finally {
-        if (!cancelled) setLoading(false);
+        setLoading(false);
       }
     })();
     return () => {
@@ -1117,9 +1307,9 @@ export function SuppliersPage() {
     const isVisited = form.visited_factory_office === "true";
     const visitPhotos = isVisited
       ? form.visit_media_input
-          .split(",")
-          .map((v) => v.trim())
-          .filter(Boolean)
+        .split(",")
+        .map((v) => v.trim())
+        .filter(Boolean)
       : [];
     const visitVideo = isVisited && form.visit_video_url ? form.visit_video_url.trim() : "";
     const visitMedia = visitVideo ? [...visitPhotos, visitVideo] : visitPhotos;
@@ -1857,8 +2047,8 @@ export function SuppliersPage() {
                           !formStateId
                             ? async () => []
                             : searchFetcher("/masters/cities", (): Record<string, string> => ({
-                                state_id: formStateId,
-                              }))
+                              state_id: formStateId,
+                            }))
                         }
                         fetchLabelForValue={fetchNameLabel("/masters/cities")}
                       />
@@ -2915,23 +3105,25 @@ export function SuppliersPage() {
                   + ADD NEW
                 </button>
               )}
-              <Can permission="supplier.import">
-                <ImpExpDropdown
-                  apiBase="/suppliers"
-                  entityName="supplier"
-                  importHeaders={SUPPLIER_IMPORT_HEADERS}
-                  onSummary={setImportSummary}
-                  onError={setImportError}
-                  onComplete={() => reload()}
-                  onExportCsv={() => handleExport("csv")}
-                />
-              </Can>
-              <BulkActionsDropdown
-                selectedCount={selectedIds.length}
-                onBulkActivate={canUpdate && statusTab === "inactive" ? handleBulkActivate : undefined}
-                onBulkDeactivate={canUpdate && statusTab === "active" ? handleBulkDeactivate : undefined}
-                onBulkDelete={canDelete ? handleBulkDelete : undefined}
+              <ImpExpDropdown
+                apiBase="/suppliers"
+                entityName="supplier"
+                importHeaders={SUPPLIER_IMPORT_HEADERS}
+                onSummary={setImportSummary}
+                onError={setImportError}
+                onComplete={() => reload()}
+                onExportCsv={() => handleExport("csv")}
+                showImport={canImport}
+                showExport={canExport}
               />
+              {canBulkAction && (
+                <BulkActionsDropdown
+                  selectedCount={selectedIds.length}
+                  onBulkActivate={canUpdate && statusTab === "inactive" ? handleBulkActivate : undefined}
+                  onBulkDeactivate={canUpdate && statusTab === "active" ? handleBulkDeactivate : undefined}
+                  onBulkDelete={canDelete ? handleBulkDelete : undefined}
+                />
+              )}
             </div>
           </div>
           <Banner error={error} />
@@ -3367,7 +3559,7 @@ export function SuppliersPage() {
                 </thead>
                 <tbody ref={tableBodyRef} data-names-version={namesVersion}>
                   {loading ? (
-                    <TableMessageRow colSpan={15}>Loading...</TableMessageRow>
+                    <SupplierSkeletonRows count={8} displayOrder={displayOrder} getFreezeStyle={getFreezeStyle} />
                   ) : rows.length === 0 ? (
                     <TableMessageRow colSpan={15}>No suppliers found.</TableMessageRow>
                   ) : (
@@ -3444,7 +3636,7 @@ export function SuppliersPage() {
                             case 12:
                               return (
                                 <td key="cell-12" style={getFreezeStyle(12, false)}>
-                                  {canUpdate ? (
+                                  {canEditGrade ? (
                                     <select
                                       className="inline-select"
                                       defaultValue={s.supplier_grade || ""}
@@ -3467,7 +3659,7 @@ export function SuppliersPage() {
                             case 13:
                               return (
                                 <td key="cell-13" style={getFreezeStyle(13, false)}>
-                                  {canUpdate ? (
+                                  {canEditPotential ? (
                                     <select
                                       className="inline-select"
                                       defaultValue={s.potential || ""}
@@ -3514,46 +3706,46 @@ export function SuppliersPage() {
                                         </svg>
                                       </button>
                                     )}
-                                {canDelete && (() => {
-                                  const isEligibleForDelete =
-                                    (!s.current_status || s.current_status.toLowerCase() === "new") &&
-                                    (!s.potential || s.potential.toLowerCase() === "no");
-                                  return (
-                                    <button
-                                      type="button"
-                                      className="btn"
-                                      disabled={!isEligibleForDelete || isRowActionPending(`delete:${s.id}`)}
-                                      style={{
-                                        background: isEligibleForDelete ? "#ef4444" : "#94a3b8",
-                                        color: "#ffffff",
-                                        padding: "6px 9px",
-                                        borderRadius: "4px",
-                                        border: "none",
-                                        cursor: !isEligibleForDelete ? "not-allowed" : (isRowActionPending(`delete:${s.id}`) ? "default" : "pointer"),
-                                        opacity: !isEligibleForDelete ? 0.45 : (isRowActionPending(`delete:${s.id}`) ? 0.6 : 1),
-                                        display: "inline-flex",
-                                        alignItems: "center",
-                                        justifyContent: "center",
-                                      }}
-                                      onClick={() => {
-                                        if (!isEligibleForDelete) return;
-                                        void handleRowDelete(s.id);
-                                      }}
-                                      title={
-                                        !isEligibleForDelete
-                                          ? "Cannot delete Existing or Potential suppliers; set to Inactive instead."
-                                          : "Delete Supplier"
-                                      }
-                                    >
-                                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                        <polyline points="3 6 5 6 21 6" />
-                                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                                        <line x1="10" y1="11" x2="10" y2="17" />
-                                        <line x1="14" y1="11" x2="14" y2="17" />
-                                      </svg>
-                                    </button>
-                                  );
-                                })()}
+                                    {canDelete && (() => {
+                                      const isEligibleForDelete =
+                                        (!s.current_status || s.current_status.toLowerCase() === "new") &&
+                                        (!s.potential || s.potential.toLowerCase() === "no");
+                                      return (
+                                        <button
+                                          type="button"
+                                          className="btn"
+                                          disabled={!isEligibleForDelete || isRowActionPending(`delete:${s.id}`)}
+                                          style={{
+                                            background: isEligibleForDelete ? "#ef4444" : "#94a3b8",
+                                            color: "#ffffff",
+                                            padding: "6px 9px",
+                                            borderRadius: "4px",
+                                            border: "none",
+                                            cursor: !isEligibleForDelete ? "not-allowed" : (isRowActionPending(`delete:${s.id}`) ? "default" : "pointer"),
+                                            opacity: !isEligibleForDelete ? 0.45 : (isRowActionPending(`delete:${s.id}`) ? 0.6 : 1),
+                                            display: "inline-flex",
+                                            alignItems: "center",
+                                            justifyContent: "center",
+                                          }}
+                                          onClick={() => {
+                                            if (!isEligibleForDelete) return;
+                                            void handleRowDelete(s.id);
+                                          }}
+                                          title={
+                                            !isEligibleForDelete
+                                              ? "Cannot delete Existing or Potential suppliers; set to Inactive instead."
+                                              : "Delete Supplier"
+                                          }
+                                        >
+                                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                            <polyline points="3 6 5 6 21 6" />
+                                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                                            <line x1="10" y1="11" x2="10" y2="17" />
+                                            <line x1="14" y1="11" x2="14" y2="17" />
+                                          </svg>
+                                        </button>
+                                      );
+                                    })()}
                                   </div>
                                 </td>
                               );

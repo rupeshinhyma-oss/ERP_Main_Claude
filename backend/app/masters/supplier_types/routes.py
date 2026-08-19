@@ -61,7 +61,7 @@ async def create_supplier_type(
     payload: SupplierTypeCreate,
     request: Request,
     service: SupplierTypeService = Depends(get_supplier_type_service),
-    current_user: CurrentUser = Depends(require_permission("supplier.create")),
+    current_user: CurrentUser = Depends(require_permission("suppliertype.create")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     item = await service.create(**payload.model_dump())
@@ -83,7 +83,7 @@ async def list_supplier_types(
     request: Request,
     query: ListQueryParams = Depends(get_list_query_params),
     service: SupplierTypeService = Depends(get_supplier_type_service),
-    _current_user: CurrentUser = Depends(require_permission("supplier.read")),
+    _current_user: CurrentUser = Depends(require_permission("suppliertype.view")),
 ) -> dict:
     items, total = await service.list_paginated(query)
     meta = PageMeta.build(page=query.page.page, page_size=query.page.page_size, total_records=total).as_meta_dict()
@@ -96,7 +96,7 @@ async def export_supplier_types(
     request: Request,
     format: str = "csv",
     service: SupplierTypeService = Depends(get_supplier_type_service),
-    current_user: CurrentUser = Depends(require_permission("supplier.read")),
+    current_user: CurrentUser = Depends(require_permission("suppliertype.export")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> Response:
     file_format = format.lower()
@@ -121,7 +121,7 @@ async def import_supplier_types(
     request: Request,
     file: UploadFile = File(...),
     service: SupplierTypeService = Depends(get_supplier_type_service),
-    current_user: CurrentUser = Depends(require_permission("supplier.create")),
+    current_user: CurrentUser = Depends(require_permission("suppliertype.import")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     raw_bytes = await file.read()
@@ -144,7 +144,7 @@ async def get_supplier_type(
     supplier_type_id: uuid.UUID,
     request: Request,
     service: SupplierTypeService = Depends(get_supplier_type_service),
-    _current_user: CurrentUser = Depends(require_permission("supplier.read")),
+    _current_user: CurrentUser = Depends(require_permission("suppliertype.view")),
 ) -> dict:
     item = await service.get_by_id_or_raise(supplier_type_id)
     data = SupplierTypeRead.model_validate(item).model_dump(mode="json")
@@ -157,7 +157,7 @@ async def update_supplier_type(
     payload: SupplierTypeUpdate,
     request: Request,
     service: SupplierTypeService = Depends(get_supplier_type_service),
-    current_user: CurrentUser = Depends(require_permission("supplier.update")),
+    current_user: CurrentUser = Depends(require_permission("suppliertype.update")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     item = await service.update(supplier_type_id, **payload.model_dump())
@@ -179,7 +179,7 @@ async def activate_supplier_type(
     supplier_type_id: uuid.UUID,
     request: Request,
     service: SupplierTypeService = Depends(get_supplier_type_service),
-    current_user: CurrentUser = Depends(require_permission("supplier.update")),
+    current_user: CurrentUser = Depends(require_permission("suppliertype.update")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     item = await service.activate(supplier_type_id)
@@ -200,7 +200,7 @@ async def deactivate_supplier_type(
     supplier_type_id: uuid.UUID,
     request: Request,
     service: SupplierTypeService = Depends(get_supplier_type_service),
-    current_user: CurrentUser = Depends(require_permission("supplier.update")),
+    current_user: CurrentUser = Depends(require_permission("suppliertype.update")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     item = await service.deactivate(supplier_type_id)
@@ -221,7 +221,7 @@ async def delete_supplier_type(
     supplier_type_id: uuid.UUID,
     request: Request,
     service: SupplierTypeService = Depends(get_supplier_type_service),
-    current_user: CurrentUser = Depends(require_permission("supplier.delete")),
+    current_user: CurrentUser = Depends(require_permission("suppliertype.delete")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     await service.delete(supplier_type_id)

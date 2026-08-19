@@ -3,7 +3,7 @@
 Phase 9: added live event publishing on every mutation so ProductMaster and
 ProductGallery pages receive real-time updates. Uses the shared ``module:inventory``
 channel (entity="product") that ``app.events.channels`` already maps to
-``product.read`` -- matching the existing frontend ENTITY_TO_MODULE_CHANNEL
+``product.view`` -- matching the existing frontend ENTITY_TO_MODULE_CHANNEL
 entry for ``"product" -> moduleChannel("inventory")``.
 """
 
@@ -47,7 +47,7 @@ async def _publish_product_event(
 
     Phase 9: Products use entity="product" which the frontend
     ENTITY_TO_MODULE_CHANNEL table already maps to moduleChannel("inventory"),
-    matching the MODULE_CHANNEL_PERMISSIONS entry ``module:inventory -> product.read``.
+    matching the MODULE_CHANNEL_PERMISSIONS entry ``module:inventory -> product.view``.
     No version field on Product yet -- passed as None (liveEntityStore handles
     missing versions by skipping the staleness check, still applying the event).
     """
@@ -131,7 +131,7 @@ async def list_products(
     request: Request,
     query: ListQueryParams = Depends(get_list_query_params),
     service: ProductService = Depends(get_product_service),
-    _current_user: CurrentUser = Depends(require_permission("product.read")),
+    _current_user: CurrentUser = Depends(require_permission("product.view")),
 ) -> dict:
     """List products, with search/sort/filter/pagination."""
     products, total = await service.list_paginated(query)
@@ -146,7 +146,7 @@ async def export_products(
     request: Request,
     format: str = "csv",
     service: ProductService = Depends(get_product_service),
-    current_user: CurrentUser = Depends(require_permission("product.read")),
+    current_user: CurrentUser = Depends(require_permission("product.export")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> Response:
     """Export every product as a CSV or XLSX file."""
@@ -174,7 +174,7 @@ async def import_products(
     request: Request,
     file: UploadFile = File(...),
     service: ProductService = Depends(get_product_service),
-    current_user: CurrentUser = Depends(require_permission("product.create")),
+    current_user: CurrentUser = Depends(require_permission("product.import")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     """Import products from an uploaded CSV/XLSX file, validating every row."""
@@ -259,7 +259,7 @@ async def get_product(
     product_id: uuid.UUID,
     request: Request,
     service: ProductService = Depends(get_product_service),
-    _current_user: CurrentUser = Depends(require_permission("product.read")),
+    _current_user: CurrentUser = Depends(require_permission("product.view")),
 ) -> dict:
     """Fetch a single product by ID."""
     product = await service.get_by_id_or_raise(product_id)

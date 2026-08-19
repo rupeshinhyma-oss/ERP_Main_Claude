@@ -61,7 +61,7 @@ async def create_buyer_type(
     payload: BuyerTypeCreate,
     request: Request,
     service: BuyerTypeService = Depends(get_buyer_type_service),
-    current_user: CurrentUser = Depends(require_permission("buyer.create")),
+    current_user: CurrentUser = Depends(require_permission("buyertype.create")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     item = await service.create(**payload.model_dump())
@@ -83,7 +83,7 @@ async def list_buyer_types(
     request: Request,
     query: ListQueryParams = Depends(get_list_query_params),
     service: BuyerTypeService = Depends(get_buyer_type_service),
-    _current_user: CurrentUser = Depends(require_permission("buyer.read")),
+    _current_user: CurrentUser = Depends(require_permission("buyertype.view")),
 ) -> dict:
     items, total = await service.list_paginated(query)
     meta = PageMeta.build(page=query.page.page, page_size=query.page.page_size, total_records=total).as_meta_dict()
@@ -96,7 +96,7 @@ async def export_buyer_types(
     request: Request,
     format: str = "csv",
     service: BuyerTypeService = Depends(get_buyer_type_service),
-    current_user: CurrentUser = Depends(require_permission("buyer.read")),
+    current_user: CurrentUser = Depends(require_permission("buyertype.export")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> Response:
     file_format = format.lower()
@@ -121,7 +121,7 @@ async def import_buyer_types(
     request: Request,
     file: UploadFile = File(...),
     service: BuyerTypeService = Depends(get_buyer_type_service),
-    current_user: CurrentUser = Depends(require_permission("buyer.create")),
+    current_user: CurrentUser = Depends(require_permission("buyertype.import")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     raw_bytes = await file.read()
@@ -143,7 +143,7 @@ async def get_buyer_type(
     buyer_type_id: uuid.UUID,
     request: Request,
     service: BuyerTypeService = Depends(get_buyer_type_service),
-    _current_user: CurrentUser = Depends(require_permission("buyer.read")),
+    _current_user: CurrentUser = Depends(require_permission("buyertype.view")),
 ) -> dict:
     item = await service.get_by_id_or_raise(buyer_type_id)
     data = BuyerTypeRead.model_validate(item).model_dump(mode="json")
@@ -156,7 +156,7 @@ async def update_buyer_type(
     payload: BuyerTypeUpdate,
     request: Request,
     service: BuyerTypeService = Depends(get_buyer_type_service),
-    current_user: CurrentUser = Depends(require_permission("buyer.update")),
+    current_user: CurrentUser = Depends(require_permission("buyertype.update")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     item = await service.update(buyer_type_id, **payload.model_dump(exclude_unset=True))
@@ -178,7 +178,7 @@ async def delete_buyer_type(
     buyer_type_id: uuid.UUID,
     request: Request,
     service: BuyerTypeService = Depends(get_buyer_type_service),
-    current_user: CurrentUser = Depends(require_permission("buyer.delete")),
+    current_user: CurrentUser = Depends(require_permission("buyertype.delete")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     item = await service.get_by_id_or_raise(buyer_type_id)

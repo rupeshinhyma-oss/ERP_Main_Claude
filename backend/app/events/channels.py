@@ -18,7 +18,7 @@ This module owns:
    :mod:`app.events.routes` needs to change.
 
 Deliberately reuses the SAME permission codes already seeded by
-``scripts/seed.py`` (e.g. ``"buyer.read"``) rather than inventing a
+``scripts/seed.py`` (e.g. ``"buyer.view"``) rather than inventing a
 parallel "can subscribe to live updates" permission -- per the brief's
 "Use the existing permission system. Do not duplicate the permission
 engine."
@@ -80,10 +80,10 @@ entry in :data:`MODULE_CHANNEL_PERMISSIONS` below (see
 # Phase 9 additions (all newly wired to a real backend publisher in this
 # phase -- see app.suppliers.routes, app.masters.products.routes,
 # app.inquiries.routes, and each app.masters.<module>.routes):
-#   - module:products        -> product.read      (Product Gallery alias)
-#   - module:brands          -> brand.read
-#   - module:categories      -> category.read
-#   - module:subcategories   -> subcategory.read
+#   - module:products        -> product.view      (Product Gallery alias)
+#   - module:brands          -> brand.view
+#   - module:categories      -> category.view
+#   - module:subcategories   -> subcategory.view
 #   - module:countries       -> country.read
 #   - module:states          -> state.read
 #   - module:cities          -> city.read
@@ -92,17 +92,17 @@ entry in :data:`MODULE_CHANNEL_PERMISSIONS` below (see
 #   - module:hsn             -> hsn.read
 MODULE_CHANNEL_PERMISSIONS: dict[str, str] = {
     # --- Core transactional modules (buyers/planning: Phase 1/2; suppliers/inquiries: Phase 9) ---
-    module_channel("buyers"):        "buyer.read",
-    module_channel("suppliers"):     "supplier.read",
+    module_channel("buyers"):        "buyer.view",
+    module_channel("suppliers"):     "supplier.view",
     module_channel("planning"):      "planning.read",
     module_channel("inquiries"):     "inquiry.read",
     # --- Product catalog ---
-    module_channel("inventory"):     "product.read",   # Product Master (entity="product")
-    module_channel("products"):      "product.read",   # Product Gallery alias
+    module_channel("inventory"):     "product.view",   # Product Master (entity="product")
+    module_channel("products"):      "product.view",   # Product Gallery alias
     # --- Master data (Phase 9) ---
-    module_channel("brands"):        "brand.read",
-    module_channel("categories"):    "category.read",
-    module_channel("subcategories"): "subcategory.read",
+    module_channel("brands"):        "brand.view",
+    module_channel("categories"):    "category.view",
+    module_channel("subcategories"): "subcategory.view",
     module_channel("countries"):     "country.read",
     module_channel("states"):        "state.read",
     module_channel("cities"):        "city.read",

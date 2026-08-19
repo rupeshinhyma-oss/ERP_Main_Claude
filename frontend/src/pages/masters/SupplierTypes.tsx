@@ -12,7 +12,9 @@ export function SupplierTypesPage() {
     <MasterPage<SupplierType>
       activeKey="masters-supplier-types"
       apiBase="/masters/supplier-types"
-      permissionPrefix="supplier"
+      permissionPrefix="suppliertype"
+      exportPermission="suppliertype.export"
+      bulkActionPermission="suppliertype.bulk_action"
       entityName="supplier type"
       heading="Supplier Types"
       subtitle="Manufacturer, Dealer / Trader, Agent, Importer, Service Provider, etc."

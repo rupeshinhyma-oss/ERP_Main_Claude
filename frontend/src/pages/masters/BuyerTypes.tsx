@@ -21,7 +21,9 @@ export function BuyerTypesPage() {
     <MasterPage<BuyerTypeItem>
       activeKey="masters-buyer-types"
       apiBase="/masters/buyer-types"
-      permissionPrefix="buyer"
+      permissionPrefix="buyertype"
+      exportPermission="buyertype.export"
+      bulkActionPermission="buyertype.bulk_action"
       entityName="buyer type"
       heading="Buyer Types"
       subtitle="Manufacturer, Dealer / Trader, Agent, Importer, Distributor, etc."

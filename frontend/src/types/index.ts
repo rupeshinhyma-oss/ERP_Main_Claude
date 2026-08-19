@@ -56,6 +56,7 @@ export interface ApiResult<T> {
 export interface TokenPair {
   access_token: string;
   refresh_token: string;
+  user?: Profile;
 }
 
 export interface Profile {

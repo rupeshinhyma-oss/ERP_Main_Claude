@@ -143,6 +143,16 @@ export interface MasterPageProps<T extends MasterRecord> {
    * e.g. "suppliertype.bulk_action".
    */
   bulkActionPermission?: string;
+  /**
+   * When true, loads full catalog in-memory once and executes instant sub-millisecond
+   * client-side search, multi-field filtering, and local pagination (0ms DataTables-style).
+   */
+  clientSideSearch?: boolean;
+  /**
+   * Optional custom matcher to resolve related lookup names (e.g. Brand Name, Category Name, HSN Code)
+   * for instant client-side multi-field searching.
+   */
+  customSearchMatcher?: (item: T, term: string, cleanTerm: string) => boolean;
 }
 
 export interface MasterPageHandle {
@@ -300,6 +310,8 @@ export function MasterPage<T extends MasterRecord>({
   liveModule,
   exportPermission,
   bulkActionPermission,
+  clientSideSearch = false,
+  customSearchMatcher,
 }: MasterPageProps<T>) {
   const { hasPermission } = useAuth();
 
@@ -315,6 +327,7 @@ export function MasterPage<T extends MasterRecord>({
   const canBulkAction = bulkActionPermission ? hasPermission(bulkActionPermission) : true;
 
   const [rows, setRows] = useState<T[]>([]);
+  const [allRecords, setAllRecords] = useState<T[]>([]);
   const [pagination, setPagination] = useState<PaginationMeta | undefined>();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<unknown>(null);
@@ -482,30 +495,22 @@ export function MasterPage<T extends MasterRecord>({
     };
   }, [pinnedCols, colLeftOffsets, colRightOffsets, displayOrder]);
 
-
-
-
-
-
   const reload = useCallback(() => setReloadCounter((n) => n + 1), []);
 
   /**
    * Live sync (Phase 9): every master page built on MasterPage gets
-   * real-time create/update/delete sync for free by passing `liveModule`
-   * -- no per-page wiring needed, unlike Buyers/Suppliers/Inquiries which
-   * each hand-roll their own `useLiveList` call because they DON'T share
-   * a common list component. Conservative like those hand-rolled
-   * integrations: skips patching while any search/status filter is
-   * active or the view isn't on page 1, since replicating this page's
-   * own `extraFilters` matching logic here (different per page: category
-   * scoping, country/state scoping, etc.) isn't something this shared
-   * component can safely generalize. `total_records` is kept in sync on
-   * create/delete the same way Buyers/Suppliers already do.
+   * live sync for free when mounted. Incoming broadcasts update the
+   * state in-place, keeping UI reactive.
    */
   const hasActiveMasterFilterOrSearch = Boolean(effectiveSearch) || Boolean(statusFilter) || Boolean(extraFiltersKey);
   useLiveList<T>({
     moduleName: liveModule ?? null,
-    setRecords: setRows,
+    setRecords: (updater) => {
+      setRows(updater);
+      if (clientSideSearch) {
+        setAllRecords(updater);
+      }
+    },
     shouldSkip: () => hasActiveMasterFilterOrSearch || currentPage !== 1,
     onApplied: (result) => {
       if (result.action === "created" || result.action === "deleted") {
@@ -524,8 +529,42 @@ export function MasterPage<T extends MasterRecord>({
     },
   });
 
-  /* --- Table load --- */
+  /* --- Client-Side Table Load (Executes ONCE on mount or reloadCounter) --- */
   useEffect(() => {
+    if (!clientSideSearch) return;
+    let cancelled = false;
+
+    (async () => {
+      setLoading(true);
+      try {
+        const { data } = await apiGet<T[]>(`${apiBase}?page=1&page_size=10000&sort_order=asc`);
+        if (cancelled) return;
+        const items = data || [];
+        if (resolveNames && items.length) {
+          await resolveNames(items);
+          if (cancelled) return;
+        }
+        setAllRecords(items);
+        setRows(items);
+        setError(null);
+      } catch (err) {
+        if (cancelled) return;
+        setAllRecords([]);
+        setRows([]);
+        setError(err);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [clientSideSearch, apiBase, reloadCounter]);
+
+  /* --- Server-Side Table load --- */
+  useEffect(() => {
+    if (clientSideSearch) return;
     let cancelled = false;
 
     (async () => {
@@ -562,10 +601,8 @@ export function MasterPage<T extends MasterRecord>({
     return () => {
       cancelled = true;
     };
-    // resolveNames is intentionally omitted: pages recreate it every render,
-    // and reloadToken already covers "lookups changed, reload".
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
+    clientSideSearch,
     apiBase,
     currentPage,
     pageSize,
@@ -576,8 +613,81 @@ export function MasterPage<T extends MasterRecord>({
     reloadToken,
   ]);
 
-  /* --- Search: 300ms debounce --- */
+  /* --- Client-side instant 0ms search & filter --- */
+  const filteredRecords = useMemo(() => {
+    if (!clientSideSearch) return rows;
+    let list = allRecords;
+    if (statusFilter) {
+      list = list.filter((r) => (r as unknown as { status?: string }).status === statusFilter);
+    }
+    if (extraFilters) {
+      for (const [k, v] of Object.entries(extraFilters)) {
+        if (v) {
+          list = list.filter((r) => String((r as unknown as Record<string, unknown>)[k]) === String(v));
+        }
+      }
+    }
+    const term = searchInput.trim().toLowerCase();
+    if (term) {
+      const cleanTerm = term.replace(/[\s-]/g, "");
+      list = list.filter((item) => {
+        if (customSearchMatcher && customSearchMatcher(item, term, cleanTerm)) {
+          return true;
+        }
+        for (const val of Object.values(item as Record<string, unknown>)) {
+          if (val == null) continue;
+          if (typeof val === "string" || typeof val === "number") {
+            const str = String(val).toLowerCase();
+            if (str.includes(term) || str.replace(/[\s-]/g, "").includes(cleanTerm)) {
+              return true;
+            }
+          }
+          if (Array.isArray(val)) {
+            for (const sub of val) {
+              if (sub == null) continue;
+              const sStr = String(sub).toLowerCase();
+              if (sStr.includes(term) || sStr.replace(/[\s-]/g, "").includes(cleanTerm)) {
+                return true;
+              }
+            }
+          }
+        }
+        return false;
+      });
+    }
+    return list;
+  }, [clientSideSearch, rows, allRecords, statusFilter, extraFiltersKey, searchInput, customSearchMatcher]);
+
+  const displayedRows = useMemo(() => {
+    if (!clientSideSearch) return rows;
+    const start = (currentPage - 1) * pageSize;
+    return filteredRecords.slice(start, start + pageSize);
+  }, [clientSideSearch, rows, filteredRecords, currentPage, pageSize]);
+
+  const displayedPagination: PaginationMeta | undefined = useMemo(() => {
+    if (!clientSideSearch) {
+      return pagination;
+    }
+    const total = filteredRecords.length;
+    const totalPages = Math.ceil(total / pageSize) || 1;
+    return {
+      current_page: currentPage,
+      page: currentPage,
+      page_size: pageSize,
+      total_records: total,
+      total_pages: totalPages,
+      has_next: currentPage < totalPages,
+      has_previous: currentPage > 1,
+    };
+  }, [clientSideSearch, pagination, filteredRecords.length, currentPage, pageSize]);
+
+  /* --- Search: instant on clientSide, 300ms debounce on serverSide --- */
   useEffect(() => {
+    if (clientSideSearch) {
+      setCurrentPage(1);
+      srNoJump.clear();
+      return;
+    }
     const timer = setTimeout(() => {
       const raw = searchInput.trim();
       srNoJump.clear();
@@ -585,13 +695,13 @@ export function MasterPage<T extends MasterRecord>({
       setEffectiveSearch(raw);
     }, 300);
     return () => clearTimeout(timer);
-  }, [searchInput, pageSize]);
+  }, [clientSideSearch, searchInput, pageSize]);
 
   // Once the target page has painted, scroll to the row and flash it.
   useEffect(() => {
     if (!loading) srNoJump.applyTo(tableBodyRef.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading, rows]);
+  }, [loading, displayedRows]);
 
   /* --- Modal --- */
   function openModal(item: T | null) {
@@ -646,6 +756,7 @@ export function MasterPage<T extends MasterRecord>({
           await resolveNames([recordToUse]);
         }
         setRows((prev) => prev.map((row) => (row.id === editingId ? recordToUse : row)));
+        setAllRecords((prev) => prev.map((row) => (row.id === editingId ? recordToUse : row)));
       } else {
         const { data: newRecord } = await apiPost<T>(apiBase, payload);
         if (newRecord) {
@@ -653,6 +764,7 @@ export function MasterPage<T extends MasterRecord>({
             await resolveNames([newRecord]);
           }
           setRows((prev) => [newRecord, ...prev]);
+          setAllRecords((prev) => [newRecord, ...prev]);
           setPagination((prev) => (prev ? { ...prev, total_records: (prev.total_records || 0) + 1 } : prev));
         } else {
           reload();
@@ -689,6 +801,7 @@ export function MasterPage<T extends MasterRecord>({
     try {
       await apiDelete(`${apiBase}/${id}`);
       setRows((prev) => prev.filter((row) => row.id !== id));
+      setAllRecords((prev) => prev.filter((row) => row.id !== id));
       setPagination((prev) => (prev ? { ...prev, total_records: Math.max(0, (prev.total_records || 1) - 1) } : prev));
     } catch (err) {
       setError(err);
@@ -708,6 +821,7 @@ export function MasterPage<T extends MasterRecord>({
     try {
       await Promise.all(selectedIds.map((id) => apiPost(`${apiBase}/${id}/activate`)));
       setRows((prev) => prev.map((row) => (selectedIds.includes(row.id) ? { ...row, status: "active" } : row)));
+      setAllRecords((prev) => prev.map((row) => (selectedIds.includes(row.id) ? { ...row, status: "active" } : row)));
       setSelectedIds([]);
     } catch (err) {
       setError(err);
@@ -719,6 +833,7 @@ export function MasterPage<T extends MasterRecord>({
     try {
       await Promise.all(selectedIds.map((id) => apiPost(`${apiBase}/${id}/deactivate`)));
       setRows((prev) => prev.map((row) => (selectedIds.includes(row.id) ? { ...row, status: "inactive" } : row)));
+      setAllRecords((prev) => prev.map((row) => (selectedIds.includes(row.id) ? { ...row, status: "inactive" } : row)));
       setSelectedIds([]);
     } catch (err) {
       setError(err);
@@ -731,6 +846,7 @@ export function MasterPage<T extends MasterRecord>({
     try {
       await Promise.all(selectedIds.map((id) => apiDelete(`${apiBase}/${id}`)));
       setRows((prev) => prev.filter((row) => !selectedIds.includes(row.id)));
+      setAllRecords((prev) => prev.filter((row) => !selectedIds.includes(row.id)));
       setSelectedIds([]);
     } catch (err) {
       setError(err);
@@ -814,10 +930,10 @@ export function MasterPage<T extends MasterRecord>({
         <th key="col-0" style={{ width: "40px", minWidth: "40px", maxWidth: "45px", textAlign: "center", ...getFreezeStyle(0, true) }}>
           <input
             type="checkbox"
-            checked={rows.length > 0 && rows.every((r) => selectedIds.includes(String(r.id)))}
+            checked={displayedRows.length > 0 && displayedRows.every((r) => selectedIds.includes(String(r.id)))}
             onChange={(e) => {
               if (e.target.checked) {
-                setSelectedIds(rows.map((r) => String(r.id)));
+                setSelectedIds(displayedRows.map((r) => String(r.id)));
               } else {
                 setSelectedIds([]);
               }
@@ -1329,10 +1445,10 @@ export function MasterPage<T extends MasterRecord>({
                     getFreezeStyle={getFreezeStyle}
                     columns={columns}
                   />
-                ) : rows.length === 0 ? (
+                ) : displayedRows.length === 0 ? (
                   <TableMessageRow colSpan={colCount}>No records found.</TableMessageRow>
                 ) : (
-                  rows.map((item, index) => (
+                  displayedRows.map((item, index) => (
                     <tr key={item.id}>
                       {displayOrder.map((idx) => renderBodyCell(item, index, idx))}
                     </tr>
@@ -1344,7 +1460,7 @@ export function MasterPage<T extends MasterRecord>({
           <div className="pagination">
 
             <Pagination
-              pagination={pagination}
+              pagination={displayedPagination}
               pageSize={pageSize}
               onPageChange={setCurrentPage}
               onPageSizeChange={(size) => {

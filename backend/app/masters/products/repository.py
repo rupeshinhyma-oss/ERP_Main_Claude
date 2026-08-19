@@ -92,11 +92,10 @@ class ProductRepository(BaseRepository[Product]):
 
         from sqlalchemy import exists, func, or_
         from app.masters.brands.models import Brand
-        from app.masters.hsn.models import HSN
+        from app.masters.hsn.models import HsnCode
         from app.masters.product_categories.models import ProductCategory
         from app.masters.product_sub_categories.models import ProductSubCategory
         from app.masters.uom.models import UnitOfMeasurement
-        from app.suppliers.models import Supplier
 
         clean_term = term.replace(" ", "").replace("-", "").lower()
         pattern = f"%{term}%"
@@ -137,8 +136,8 @@ class ProductRepository(BaseRepository[Product]):
         # Linked HSN
         conditions.append(
             exists().where(
-                HSN.id == Product.hsn_id,
-                or_(HSN.code.ilike(pattern), HSN.description.ilike(pattern)),
+                HsnCode.id == Product.hsn_id,
+                or_(HsnCode.code.ilike(pattern), HsnCode.description.ilike(pattern)),
             )
         )
 

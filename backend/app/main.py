@@ -145,6 +145,8 @@ def create_application() -> FastAPI:
     # is added before RequestIdMiddleware so the request ID is already
     # set on request.state by the time the audit entry is written.
     # ---------------------------------------------------------------
+    from fastapi.middleware.gzip import GZipMiddleware
+    app.add_middleware(GZipMiddleware, minimum_size=1000)
     app.add_middleware(AccessLogMiddleware)
     app.add_middleware(AuditMiddleware)
     app.add_middleware(RequestIdMiddleware)

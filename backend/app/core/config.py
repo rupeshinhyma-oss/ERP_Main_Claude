@@ -233,7 +233,7 @@ class Settings(BaseSettings):
     # Pagination / search / sorting (Phase 2.5: shared list-endpoint framework)
     # -------------------------------------------------------------------
     DEFAULT_PAGE_SIZE: int = 20
-    MAX_PAGE_SIZE: int = 1000
+    MAX_PAGE_SIZE: int = 10000
     DEFAULT_SORT_ORDER: str = "asc"
 
     @property

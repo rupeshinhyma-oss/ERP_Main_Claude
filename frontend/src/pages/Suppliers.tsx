@@ -574,34 +574,69 @@ export function SuppliersPage() {
     }
   };
 
-  /* --- Bounded name resolver for the chip columns --- */
+  /* --- Bounded name resolver with fast batch lookup and global memory cache --- */
   const resolver = useMemo(() => {
-    const fetchNamesByIds = async (
+    const loadedBatchEndpoints = new Set<string>();
+
+    const fetchNamesBatch = async (
       apiBase: string,
       ids: string[],
       labelFn?: (d: Record<string, unknown>) => string
     ): Promise<[string, string][]> => {
-      const results = await Promise.all(
-        ids.map(async (id): Promise<[string, string | null]> => {
-          try {
-            const { data } = await apiGet<Record<string, unknown>>(`${apiBase}/${id}`);
-            return [id, labelFn ? labelFn(data) : (data.name as string)];
-          } catch {
-            return [id, null];
+      const results: [string, string][] = [];
+
+      // 1. Bulk-load the master endpoint on first encounter (1 single request for up to 250 records)
+      if (!loadedBatchEndpoints.has(apiBase)) {
+        loadedBatchEndpoints.add(apiBase);
+        try {
+          const { data } = await apiGet<Record<string, unknown>[]>(
+            `${apiBase}${toQueryString({ page: 1, page_size: 250, sort_order: "asc" })}`
+          );
+          if (Array.isArray(data)) {
+            for (const item of data) {
+              const itemId = String(item.id || "");
+              const itemLabel = labelFn ? labelFn(item) : String(item.name || item.code || "");
+              if (itemId && itemLabel) {
+                results.push([itemId, itemLabel]);
+              }
+            }
           }
-        })
-      );
-      return results.filter((pair): pair is [string, string] => pair[1] !== null);
+        } catch {
+          // If bulk load fails, fallback to individual resolution
+        }
+      }
+
+      // 2. Resolve any specific requested ID not present in the batch load
+      const foundMap = new Map(results);
+      const missingIds = ids.filter((id) => !foundMap.has(id));
+
+      if (missingIds.length > 0) {
+        const individual = await Promise.all(
+          missingIds.map(async (id): Promise<[string, string | null]> => {
+            try {
+              const { data } = await apiGet<Record<string, unknown>>(`${apiBase}/${id}`);
+              return [id, labelFn ? labelFn(data) : (data.name as string)];
+            } catch {
+              return [id, null];
+            }
+          })
+        );
+        for (const [id, label] of individual) {
+          if (label) results.push([id, label]);
+        }
+      }
+
+      return results;
     };
 
     return createNameResolver({
-      countries: (ids) => fetchNamesByIds("/masters/countries", ids),
-      states: (ids) => fetchNamesByIds("/masters/states", ids),
-      cities: (ids) => fetchNamesByIds("/masters/cities", ids),
-      categories: (ids) => fetchNamesByIds("/masters/product-categories", ids),
-      subCategories: (ids) => fetchNamesByIds("/masters/product-sub-categories", ids),
+      countries: (ids) => fetchNamesBatch("/masters/countries", ids),
+      states: (ids) => fetchNamesBatch("/masters/states", ids),
+      cities: (ids) => fetchNamesBatch("/masters/cities", ids),
+      categories: (ids) => fetchNamesBatch("/masters/product-categories", ids),
+      subCategories: (ids) => fetchNamesBatch("/masters/product-sub-categories", ids),
       products: (ids) =>
-        fetchNamesByIds("/masters/products", ids, (d) => d.product_name as string),
+        fetchNamesBatch("/masters/products", ids, (d) => d.product_name as string),
     });
   }, []);
 
@@ -924,8 +959,24 @@ export function SuppliersPage() {
   function chipList(ids: string[] | undefined, tableKey: string, modalTitle = "Selected Items") {
     if (!ids || !ids.length) return <span className="muted">—</span>;
     const names = ids.map((id) => resolver.get(tableKey, id) || "…");
+    const hasUnresolved = names.some((n) => n === "…");
+    if (hasUnresolved) {
+      void resolver.resolve(tableKey, ids).then(() => setNamesVersion((n) => n + 1));
+    }
     const first = names[0];
     const remaining = names.length - 1;
+
+    const handleOpenModal = async () => {
+      if (hasUnresolved) {
+        await resolver.resolve(tableKey, ids);
+        const resolvedNames = ids.map((id) => resolver.get(tableKey, id) || id);
+        setAlertPopup({ title: modalTitle, message: "• " + resolvedNames.join("\n• ") });
+        setNamesVersion((n) => n + 1);
+      } else {
+        setAlertPopup({ title: modalTitle, message: "• " + names.join("\n• ") });
+      }
+    };
+
     return (
       <div className="chip-list" style={{ display: "inline-flex", flexWrap: "nowrap", gap: "4px", alignItems: "center", whiteSpace: "nowrap" }}>
         <span
@@ -947,7 +998,7 @@ export function SuppliersPage() {
             type="button"
             className="chip-more"
             title={names.join(", ")}
-            onClick={() => setAlertPopup({ title: modalTitle, message: "• " + names.join("\n• ") })}
+            onClick={() => void handleOpenModal()}
             style={{
               fontWeight: 600,
               fontSize: "11px",
@@ -1267,6 +1318,17 @@ export function SuppliersPage() {
       } else if (supplier) {
         setRows((prev) => [supplier, ...prev]);
         setPagination((prev) => (prev ? { ...prev, total_records: (prev.total_records || 0) + 1 } : prev));
+      }
+
+      if (supplier) {
+        void Promise.all([
+          resolver.resolve("countries", [supplier.country_id]),
+          resolver.resolve("states", [supplier.state_id]),
+          resolver.resolve("cities", [supplier.city_id]),
+          resolver.resolve("categories", supplier.category_ids || []),
+          resolver.resolve("subCategories", supplier.sub_category_ids || []),
+          resolver.resolve("products", supplier.product_ids || []),
+        ]).then(() => setNamesVersion((n) => n + 1));
       }
 
       if (nextAction === "exit") {

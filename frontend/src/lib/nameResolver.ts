@@ -13,29 +13,49 @@
  * the cache only cares about the final pairs.
  */
 
+/**
+ * Shared global in-memory name resolution cache, keyed by "tableKey:id".
+ * Preserved across components and re-renders during the user session.
+ */
+const globalCache: Record<string, Record<string, string>> = {};
+
 export type NameFetcher = (ids: string[]) => Promise<[string, string][]>;
 
 export interface NameResolverInstance {
   get(tableKey: string, id?: string | null): string | undefined;
   resolve(tableKey: string, ids: (string | null | undefined)[]): Promise<void>;
+  set(tableKey: string, id: string, name: string): void;
+  clear(tableKey?: string): void;
 }
 
 export function createNameResolver(
   fetchers: Record<string, NameFetcher>
 ): NameResolverInstance {
-  const cache: Record<string, Record<string, string>> = {};
-
   return {
     get(tableKey, id) {
       if (!id) return undefined;
-      return cache[tableKey]?.[id];
+      return globalCache[tableKey]?.[id];
+    },
+
+    set(tableKey, id, name) {
+      if (!id || !name) return;
+      globalCache[tableKey] = globalCache[tableKey] || {};
+      globalCache[tableKey][id] = name;
+    },
+
+    clear(tableKey) {
+      if (tableKey) {
+        delete globalCache[tableKey];
+      } else {
+        Object.keys(globalCache).forEach((k) => delete globalCache[k]);
+      }
     },
 
     async resolve(tableKey, ids) {
       const fetcher = fetchers[tableKey];
       if (!fetcher) return;
-      cache[tableKey] = cache[tableKey] || {};
-      const table = cache[tableKey];
+      globalCache[tableKey] = globalCache[tableKey] || {};
+      const table = globalCache[tableKey];
       const missing = [...new Set(ids)].filter(
         (id): id is string => Boolean(id) && !(id as string in table)
       );
@@ -46,8 +66,9 @@ export function createNameResolver(
           table[id] = label;
         }
       } catch {
-        /* best-effort -- the table just shows a fallback for unresolved ids */
+        /* best-effort -- fallback shown for unresolved ids */
       }
     },
   };
 }
+

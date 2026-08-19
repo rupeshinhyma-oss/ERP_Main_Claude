@@ -49,9 +49,17 @@ function LoginIllustration() {
   );
 }
 
+const BRAND_CACHE_KEY = "erp_brand_name";
+
 export function LoginPage() {
   const navigate = useNavigate();
-  const [brand, setBrand] = useState(DEFAULT_LOGIN_BRAND);
+  const [brand, setBrand] = useState(() => {
+    try {
+      return localStorage.getItem(BRAND_CACHE_KEY) || DEFAULT_LOGIN_BRAND;
+    } catch {
+      return DEFAULT_LOGIN_BRAND;
+    }
+  });
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [passwordVisible, setPasswordVisible] = useState(false);
@@ -63,17 +71,25 @@ export function LoginPage() {
   useEffect(() => {
     let cancelled = false;
     document.title = `Sign In — ${brand}`;
+
+    // Fast background pre-warm & brand check
     (async () => {
       try {
         const { data } = await apiGet<PublicOrgInfo>("/organizations/public");
         if (cancelled || !data?.company_name) return;
         setBrand(data.company_name);
         setBrandName(data.company_name);
+        try {
+          localStorage.setItem(BRAND_CACHE_KEY, data.company_name);
+        } catch {
+          /* ignore */
+        }
         document.title = `Sign In — ${data.company_name}`;
       } catch {
         /* fallback to default */
       }
     })();
+
     return () => {
       cancelled = true;
     };
@@ -89,17 +105,29 @@ export function LoginPage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (!identifier.trim() || !password) return;
     setError(null);
     setSubmitting(true);
+
     try {
+      // 1. Single-roundtrip authentication: /auth/login returns both tokens and user profile
       const { data: tokens } = await apiPost<TokenPair>("/auth/login", {
         identifier: identifier.trim(),
         password,
       });
-      Auth.setSession(tokens);
 
-      const { data: profile } = await apiGet<Profile>("/auth/profile");
-      Auth.updateProfile(profile);
+      if (tokens.user) {
+        Auth.setSession(tokens, tokens.user);
+      } else {
+        // Fallback for legacy responses missing user profile
+        Auth.setSession(tokens);
+        try {
+          const { data: profile } = await apiGet<Profile>("/auth/profile");
+          Auth.updateProfile(profile);
+        } catch {
+          /* navigate to dashboard regardless */
+        }
+      }
 
       navigate("/dashboard", { replace: true });
     } catch (err) {
@@ -147,7 +175,10 @@ export function LoginPage() {
                   required
                   style={{ width: "100%", padding: "10px 14px", fontSize: "14px", borderRadius: "6px", border: "1px solid #cbd5e1", outline: "none" }}
                   value={identifier}
-                  onChange={(e) => setIdentifier(e.target.value)}
+                  onChange={(e) => {
+                    setIdentifier(e.target.value);
+                    if (error) setError(null);
+                  }}
                 />
               </div>
 
@@ -175,7 +206,10 @@ export function LoginPage() {
                     required
                     style={{ width: "100%", padding: "10px 40px 10px 14px", fontSize: "14px", borderRadius: "6px", border: "1px solid #cbd5e1", outline: "none" }}
                     value={password}
-                    onChange={(e) => setPassword(e.target.value)}
+                    onChange={(e) => {
+                      setPassword(e.target.value);
+                      if (error) setError(null);
+                    }}
                   />
                   <button
                     type="button"
@@ -205,16 +239,38 @@ export function LoginPage() {
                 style={{
                   width: "100%",
                   padding: "12px",
-                  background: "#003399",
+                  background: submitting ? "#1e40af" : "#003399",
                   color: "#ffffff",
                   fontSize: "14px",
                   fontWeight: 700,
                   border: "none",
                   borderRadius: "6px",
-                  cursor: "pointer",
+                  cursor: submitting ? "not-allowed" : "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: "8px",
+                  transition: "background 0.2s ease",
                 }}
               >
-                {submitting ? "Signing In..." : "Sign In"}
+                {submitting ? (
+                  <>
+                    <svg
+                      width="16"
+                      height="16"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.5"
+                      style={{ animation: "spin 0.8s linear infinite" }}
+                    >
+                      <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                    </svg>
+                    <span>Signing In...</span>
+                  </>
+                ) : (
+                  "Sign In"
+                )}
               </button>
             </form>
           </div>

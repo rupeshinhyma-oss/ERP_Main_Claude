@@ -50,12 +50,15 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
 _bearer_scheme = HTTPBearer(auto_error=True)
 
 
-def _token_response(access_token: str, refresh_token: str) -> TokenResponse:
+def _token_response(
+    access_token: str, refresh_token: str, user: ProfileResponse | None = None
+) -> TokenResponse:
     """Build the standard token-pair response payload."""
     return TokenResponse(
         access_token=access_token,
         refresh_token=refresh_token,
         expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        user=user,
     )
 
 
@@ -64,6 +67,7 @@ async def login(
     payload: LoginRequest,
     request: Request,
     auth_service: AuthService = Depends(get_auth_service),
+    rbac_service: RBACService = Depends(get_rbac_service),
     context: LoginContext = Depends(get_login_context),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
@@ -71,6 +75,26 @@ async def login(
     user, access_token, refresh_token = await auth_service.login(
         identifier=payload.identifier, password=payload.password, context=context
     )
+    roles = await rbac_service.list_roles_for_user(user.id)
+    permissions = await auth_service.get_user_effective_permissions(user.id)
+    profile = ProfileResponse(
+        id=user.id,
+        first_name=user.first_name,
+        last_name=user.last_name,
+        employee_code=user.employee_code,
+        username=user.username,
+        email=user.email,
+        phone=user.phone,
+        status=user.status.value,
+        is_active=user.is_active,
+        must_change_password=user.must_change_password,
+        last_login_at=user.last_login_at,
+        password_changed_at=user.password_changed_at,
+        created_at=user.created_at,
+        roles=[role.name for role in roles],
+        permissions=sorted(permissions),
+    )
+
     await audit_service.record(
         action=AuditAction.LOGIN,
         module="auth",
@@ -87,7 +111,7 @@ async def login(
         description="Successful login.",
     )
     request.state.audit_logged = True
-    data = _token_response(access_token, refresh_token).model_dump(mode="json")
+    data = _token_response(access_token, refresh_token, user=profile).model_dump(mode="json")
     return build_success_response(data=data, request_id=request.state.request_id)
 
 

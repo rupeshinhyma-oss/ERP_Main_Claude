@@ -173,6 +173,187 @@ function validatePhoneNumber(val: string, fieldLabel = "Phone number"): string |
   return null;
 }
 
+function SupplierSkeletonRows({
+  count = 8,
+  displayOrder,
+  getFreezeStyle,
+}: {
+  count?: number;
+  displayOrder: number[];
+  getFreezeStyle: (colIdx: number, isHeader?: boolean) => React.CSSProperties;
+}) {
+  const rowIndexes = Array.from({ length: count }, (_, i) => i);
+  const nameWidths = ["72%", "86%", "64%", "80%", "92%", "68%", "76%", "84%"];
+  const catWidths = ["80px", "65px", "90px", "75px", "85px", "70px", "82px", "68px"];
+
+  return (
+    <>
+      {rowIndexes.map((rowIndex) => (
+        <tr key={`skeleton-row-${rowIndex}`} style={{ borderBottom: "1px solid #f1f5f9" }}>
+          {displayOrder.map((colIdx) => {
+            let content: React.ReactNode = null;
+            switch (colIdx) {
+              case 0:
+                content = (
+                  <div
+                    className="skeleton-line"
+                    style={{ width: "16px", height: "16px", borderRadius: "4px", margin: "0 auto" }}
+                  />
+                );
+                break;
+              case 1:
+                content = (
+                  <div
+                    className="skeleton-line"
+                    style={{ width: "24px", height: "14px", borderRadius: "4px", margin: "0 auto" }}
+                  />
+                );
+                break;
+              case 2:
+                content = (
+                  <div
+                    className="skeleton-line"
+                    style={{
+                      width: nameWidths[rowIndex % nameWidths.length],
+                      height: "15px",
+                      borderRadius: "4px",
+                    }}
+                  />
+                );
+                break;
+              case 3:
+                content = (
+                  <div style={{ display: "inline-flex", gap: "4px", alignItems: "center" }}>
+                    <div
+                      className="skeleton-line"
+                      style={{
+                        width: catWidths[rowIndex % catWidths.length],
+                        height: "20px",
+                        borderRadius: "10px",
+                      }}
+                    />
+                    <div
+                      className="skeleton-line"
+                      style={{ width: "32px", height: "20px", borderRadius: "10px" }}
+                    />
+                  </div>
+                );
+                break;
+              case 4:
+                content = (
+                  <div
+                    className="skeleton-line"
+                    style={{ width: "60px", height: "14px", borderRadius: "4px" }}
+                  />
+                );
+                break;
+              case 5:
+                content = (
+                  <div
+                    className="skeleton-line"
+                    style={{ width: "55px", height: "14px", borderRadius: "4px" }}
+                  />
+                );
+                break;
+              case 6:
+                content = (
+                  <div
+                    className="skeleton-line"
+                    style={{ width: "70px", height: "14px", borderRadius: "4px" }}
+                  />
+                );
+                break;
+              case 7:
+                content = (
+                  <div
+                    className="skeleton-line"
+                    style={{ width: "48px", height: "14px", borderRadius: "4px" }}
+                  />
+                );
+                break;
+              case 8:
+                content = (
+                  <div
+                    className="skeleton-line"
+                    style={{ width: "85px", height: "14px", borderRadius: "4px" }}
+                  />
+                );
+                break;
+              case 9:
+                content = (
+                  <div
+                    className="skeleton-line"
+                    style={{ width: "50px", height: "14px", borderRadius: "4px" }}
+                  />
+                );
+                break;
+              case 10:
+                content = (
+                  <div
+                    className="skeleton-line"
+                    style={{ width: "75px", height: "14px", borderRadius: "4px" }}
+                  />
+                );
+                break;
+              case 11:
+                content = (
+                  <div
+                    className="skeleton-line"
+                    style={{ width: "60px", height: "20px", borderRadius: "12px" }}
+                  />
+                );
+                break;
+              case 12:
+                content = (
+                  <div
+                    className="skeleton-line"
+                    style={{ width: "42px", height: "22px", borderRadius: "4px" }}
+                  />
+                );
+                break;
+              case 13:
+                content = (
+                  <div
+                    className="skeleton-line"
+                    style={{ width: "50px", height: "20px", borderRadius: "12px" }}
+                  />
+                );
+                break;
+              case 14:
+                content = (
+                  <div
+                    className="skeleton-line"
+                    style={{ width: "32px", height: "26px", borderRadius: "4px", margin: "0 auto" }}
+                  />
+                );
+                break;
+              default:
+                content = <div className="skeleton-line" style={{ height: "14px" }} />;
+            }
+
+            return (
+              <td
+                key={`skeleton-cell-${colIdx}`}
+                style={{
+                  padding: "10px 12px",
+                  verticalAlign: "middle",
+                  width: colIdx === 0 ? "40px" : colIdx === 1 ? "65px" : undefined,
+                  minWidth: colIdx === 0 ? "40px" : colIdx === 1 ? "65px" : undefined,
+                  maxWidth: colIdx === 0 ? "45px" : colIdx === 1 ? "75px" : undefined,
+                  textAlign: colIdx === 0 || colIdx === 1 || colIdx === 14 ? "center" : "left",
+                  ...getFreezeStyle(colIdx, false),
+                }}
+              >
+                {content}
+              </td>
+            );
+          })}
+        </tr>
+      ))}
+    </>
+  );
+}
+
 export function SuppliersPage() {
   const { hasPermission } = useAuth();
   const canCreate = hasPermission("supplier.create");
@@ -802,28 +983,32 @@ export function SuppliersPage() {
         const { data, meta } = await apiGet<Supplier[]>("/suppliers" + toQueryString(params));
         if (cancelled) return;
         const items = data || [];
+        // Immediately render rows to the user without delay
+        setRows(items);
+        setPagination(meta?.pagination);
+        setError(null);
+        setLoading(false);
+
         if (items.length) {
-          // Resolve every related name needed for this page's rows only.
-          await Promise.all([
+          // Resolve every related name concurrently in background
+          void Promise.all([
             resolver.resolve("countries", items.map((s) => s.country_id)),
             resolver.resolve("states", items.map((s) => s.state_id)),
             resolver.resolve("cities", items.map((s) => s.city_id)),
             resolver.resolve("categories", items.flatMap((s) => s.category_ids || [])),
             resolver.resolve("subCategories", items.flatMap((s) => s.sub_category_ids || [])),
             resolver.resolve("products", items.flatMap((s) => s.product_ids || [])),
-          ]);
-          if (cancelled) return;
-          setNamesVersion((n) => n + 1);
+          ]).then(() => {
+            if (!cancelled) {
+              setNamesVersion((n) => n + 1);
+            }
+          });
         }
-        setRows(items);
-        setPagination(meta?.pagination);
-        setError(null);
       } catch (err) {
         if (cancelled) return;
         setRows([]);
         setError(err);
-      } finally {
-        if (!cancelled) setLoading(false);
+        setLoading(false);
       }
     })();
     return () => {
@@ -3367,7 +3552,7 @@ export function SuppliersPage() {
                 </thead>
                 <tbody ref={tableBodyRef} data-names-version={namesVersion}>
                   {loading ? (
-                    <TableMessageRow colSpan={15}>Loading...</TableMessageRow>
+                    <SupplierSkeletonRows count={8} displayOrder={displayOrder} getFreezeStyle={getFreezeStyle} />
                   ) : rows.length === 0 ? (
                     <TableMessageRow colSpan={15}>No suppliers found.</TableMessageRow>
                   ) : (

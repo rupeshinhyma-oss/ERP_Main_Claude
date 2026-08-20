@@ -3332,7 +3332,7 @@ export function SuppliersPage() {
 
           <div className="card">
             {/* Active / Inactive Top Tabs */}
-            <div style={{ display: "flex", gap: "24px", borderBottom: "1px solid #e2e8f0", padding: "0 20px", marginTop: "12px" }}>
+            <div style={{ display: "flex", gap: "20px", borderBottom: "1px solid #e2e8f0", padding: "6px 16px 0" }}>
               <button
                 type="button"
                 style={{
@@ -3341,8 +3341,8 @@ export function SuppliersPage() {
                   borderBottom: statusTab === "active" ? "2.5px solid #0061f2" : "2.5px solid transparent",
                   color: statusTab === "active" ? "#0061f2" : "#64748b",
                   fontWeight: 700,
-                  fontSize: "14px",
-                  paddingBottom: "10px",
+                  fontSize: "13.5px",
+                  paddingBottom: "6px",
                   cursor: "pointer",
                 }}
                 onClick={() => {
@@ -3361,8 +3361,8 @@ export function SuppliersPage() {
                   borderBottom: statusTab === "inactive" ? "2.5px solid #0061f2" : "2.5px solid transparent",
                   color: statusTab === "inactive" ? "#0061f2" : "#64748b",
                   fontWeight: 700,
-                  fontSize: "14px",
-                  paddingBottom: "10px",
+                  fontSize: "13.5px",
+                  paddingBottom: "6px",
                   cursor: "pointer",
                 }}
                 onClick={() => {
@@ -3375,7 +3375,7 @@ export function SuppliersPage() {
               </button>
             </div>
 
-            <div className="toolbar" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 20px", gap: "12px", flexWrap: "wrap" }}>
+            <div className="toolbar" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 14px", gap: "10px", flexWrap: "wrap" }}>
               <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                   <select

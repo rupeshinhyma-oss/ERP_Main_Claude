@@ -488,6 +488,17 @@ class BuyerService:
         all_cats = await self.category_repository.list_all()
         all_sub_cats = await self.sub_category_repository.list_all()
 
+        country_name_map = {str(c.id): c.name for c in all_countries}
+
+        def _serialize_buyer_for_compare(b: Buyer) -> dict[str, Any]:
+            return {
+                "Company Name": b.company_name,
+                "Country": country_name_map.get(str(b.country_id), "—"),
+                "Calling Number": getattr(b, "contact_calling_number", "—") or "—",
+                "WhatsApp Number": getattr(b, "contact_whatsapp_number", "—") or "—",
+                "Status": "Active" if b.is_active else "Inactive",
+            }
+
         seen_in_batch = set()
 
         async def _create(field_values: dict[str, Any]) -> Buyer:
@@ -512,7 +523,7 @@ class BuyerService:
             if dup is not None:
                 raise ConflictException(
                     f"Buyer '{company_name}' already exists (duplicate check: Company Name / Calling / WhatsApp Number).",
-                    details={"existing": model_to_dict(dup)},
+                    details={"existing": _serialize_buyer_for_compare(dup)},
                 )
 
             # Resolve Country

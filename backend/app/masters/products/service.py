@@ -255,6 +255,34 @@ class ProductService:
         """Validate and import products from an uploaded CSV/XLSX file."""
         rows = parse_rows_from_file(filename, raw_bytes)
 
+        # Lookup maps for clean human-readable duplicate comparison (resolved names, zero UUIDs)
+        categories_map = {str(c.id): c.name for c in await self.category_repository.list(limit=2000)}
+        sub_categories_map = {str(sc.id): sc.name for sc in await self.sub_category_repository.list(limit=3000)}
+        brands_map = {str(b.id): b.name for b in await self.brand_repository.list(limit=2000)}
+        hsns_map = {str(h.id): h.code for h in await self.hsn_repository.list(limit=2000)}
+        uoms_map = {str(u.id): (u.short_name or u.name or u.code) for u in await self.uom_repository.list(limit=2000)}
+
+        def _serialize_for_compare(p: Product) -> dict[str, Any]:
+            return {
+                "Product Name (As Per Tally)": p.product_name_tally or p.product_name or "—",
+                "Product Code": p.product_code or "—",
+                "Brand": brands_map.get(str(p.brand_id), "—") if p.brand_id else "—",
+                "Category": categories_map.get(str(p.category_id), "—") if p.category_id else "—",
+                "Sub Category": sub_categories_map.get(str(p.sub_category_id), "—") if p.sub_category_id else "—",
+                "HSN Code": hsns_map.get(str(p.hsn_id), "—") if p.hsn_id else "—",
+                "UOM": uoms_map.get(str(p.uom_id), "—") if p.uom_id else "—",
+                "Pack. Qty": p.packaging_quantity if p.packaging_quantity is not None else "—",
+                "Pack. Net Weight": p.packaging_net_weight if p.packaging_net_weight is not None else "—",
+                "Pack. Gross Weight": p.packaging_gross_weight if p.packaging_gross_weight is not None else "—",
+                "Length (cm)": getattr(p, "length_cm", None) or getattr(p, "length", "—") or "—",
+                "Width (cm)": getattr(p, "width_cm", None) or getattr(p, "width", "—") or "—",
+                "Height (cm)": getattr(p, "height_cm", None) or getattr(p, "height", "—") or "—",
+                "Pack. Unit CBM": p.packaging_unit_cbm if p.packaging_unit_cbm is not None else "—",
+                "Refund VAT %": p.refund_vat_percent if p.refund_vat_percent is not None else "—",
+                "Compliance & License Requirements": p.license_certificate_required or "—",
+                "Status": (p.status.value if hasattr(p.status, "value") else str(p.status or "active")).capitalize(),
+            }
+
         async def _create(field_values: dict[str, Any]) -> Product:
             category_code = field_values.pop("category_code")
             sub_category_code = field_values.pop("sub_category_code", None)
@@ -334,7 +362,7 @@ class ProductService:
                 if existing_dup is not None:
                     raise ConflictException(
                         f"Product '{product_name}' already exists in Product Master (Code: {existing_dup.product_code}) — duplicate skipped.",
-                        details={"existing": model_to_dict(existing_dup)},
+                        details={"existing": _serialize_for_compare(existing_dup)},
                     )
 
             # Check if Product Code already exists in DB
@@ -343,7 +371,7 @@ class ProductService:
                 if existing_code is not None:
                     raise ConflictException(
                         f"Product Code '{raw_product_code}' already exists in Product Master (used by '{existing_code.product_name_tally or existing_code.product_name}') — duplicate skipped.",
-                        details={"existing": model_to_dict(existing_code)},
+                        details={"existing": _serialize_for_compare(existing_code)},
                     )
 
             created_prod = await self.repository.create(**field_values)

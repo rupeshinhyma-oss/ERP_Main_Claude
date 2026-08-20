@@ -391,90 +391,6 @@ interface DiffRow {
   differs: boolean;
 }
 
-const CANONICAL_FIELD_LABELS: Record<string, string> = {
-  productnametally: "Product Name (As per Tally)",
-  productname: "Product Name",
-  productnameinvoice: "Product Name (Invoice)",
-  productcode: "Product Code",
-  brand: "Brand",
-  category: "Category",
-  subcategory: "Sub Category",
-  hsn: "HSN Code",
-  hsncode: "HSN Code",
-  uom: "UOM",
-  secondaryuom: "Secondary UOM",
-  packqty: "Packaging Quantity",
-  packagingquantity: "Packaging Quantity",
-  packnetweight: "Packaging Net Weight (kg)",
-  packagingnetweight: "Packaging Net Weight (kg)",
-  packgrossweight: "Packaging Gross Weight (kg)",
-  packaginggrossweight: "Packaging Gross Weight (kg)",
-  lengthcm: "Length (cm)",
-  length: "Length (cm)",
-  widthcm: "Width (cm)",
-  width: "Width (cm)",
-  heightcm: "Height (cm)",
-  height: "Height (cm)",
-  packunitcbm: "Packaging Unit CBM",
-  packagingunitcbm: "Packaging Unit CBM",
-  refundvat: "Refund VAT %",
-  refundvatpercent: "Refund VAT %",
-  compliancelicense: "Compliance & License Requirements",
-  licensecertificaterequired: "Compliance & License Requirements",
-  specification: "Specification",
-  description: "Description",
-  color: "Color",
-  material: "Material",
-  status: "Status",
-  isactive: "Status",
-  companyname: "Company Name",
-  country: "Country",
-  countrycode: "Country",
-  state: "State / Province",
-  statename: "State / Province",
-  city: "City",
-  cityname: "City",
-  town: "Town",
-  address: "Address",
-  taxidnumber: "Tax ID Number",
-  website: "Website",
-  primarywebsite: "Primary Website",
-  secondarywebsite: "Secondary Website",
-  personname: "Contact Name",
-  fullname: "Contact Name",
-  contactfullname: "Contact Name",
-  designation: "Designation",
-  contactdesignation: "Designation",
-  callingnumber: "Calling Number",
-  contactcallingnumber: "Calling Number",
-  whatsappnumber: "WhatsApp Number",
-  contactwhatsappnumber: "WhatsApp Number",
-  wechatnumber: "WeChat Number",
-  contactwechatnumber: "WeChat Number",
-  email: "Email",
-  emails: "Email(s)",
-  potential: "Potential",
-  potentialreason: "Potential Reason",
-  buyergrade: "Buyer Grade",
-  suppliergrade: "Supplier Grade",
-  currentstatus: "Current Status",
-};
-
-function normalizeKey(k: string): string {
-  return k
-    .toLowerCase()
-    .replace(/[\s\-_()./&%?]/g, "")
-    .replace(/^(pack|packaging)/, "pack")
-    .replace(/^contact/, "")
-    .replace(/id$/, "");
-}
-
-function prettifyRawKey(k: string): string {
-  return k
-    .replace(/_/g, " ")
-    .replace(/\b\w/g, (c) => c.toUpperCase());
-}
-
 function formatVal(v: unknown): string {
   if (v === undefined || v === null || v === "") return "—";
   if (typeof v === "boolean") return v ? "Active" : "Inactive";
@@ -490,60 +406,78 @@ function fieldDiffRows(
   importedRow: Record<string, unknown>,
   existingRow: Record<string, unknown>
 ): DiffRow[] {
-  // Skip internal or technical metadata columns that clutter duplicate comparisons
-  const skipNormalized = new Set([
+  const skipColumns = new Set([
     "id",
-    "createdat",
-    "updatedat",
-    "deletedat",
+    "created_at",
+    "updated_at",
+    "deleted_at",
     "version",
-    "organizationidsjson",
-    "branchidsjson",
-    "imagesjson",
-    "imageurl",
-    "categorylinks",
-    "subcategorylinks",
-    "productlinks",
-    "subcategories",
+    "organization_id",
+    "organization_ids",
+    "organization_ids_json",
+    "branch_ids",
+    "branch_ids_json",
+    "images_json",
+    "image_url",
+    "current_stock",
+    "is_active_for_inventory",
+    "is_purchasable",
+    "is_sellable",
+    "category_links",
+    "sub_category_links",
+    "product_links",
   ]);
 
-  const unifiedFields = new Map<string, { label: string; aVal: unknown; bVal: unknown }>();
+  // Build a normalized lookup map for existingRow: cleanKey -> { originalKey, val }
+  const existingMap = new Map<string, { key: string; val: unknown }>();
+  for (const [k, v] of Object.entries(existingRow || {})) {
+    if (skipColumns.has(k.toLowerCase().trim())) continue;
+    const cleanK = k.toLowerCase().replace(/[\s\-_()./&%?]/g, "");
+    existingMap.set(cleanK, { key: k, val: v });
+  }
 
-  // Process importedRow (uploaded file headers)
-  for (const [key, val] of Object.entries(importedRow || {})) {
-    const norm = normalizeKey(key);
-    if (skipNormalized.has(norm)) continue;
-    const label = CANONICAL_FIELD_LABELS[norm] || prettifyRawKey(key);
-    const existing = unifiedFields.get(norm);
-    if (existing) {
-      existing.aVal = val;
-    } else {
-      unifiedFields.set(norm, { label, aVal: val, bVal: undefined });
+  // Build a normalized lookup map for importedRow: cleanKey -> { originalKey, val }
+  const importedMap = new Map<string, { key: string; val: unknown }>();
+  for (const [k, v] of Object.entries(importedRow || {})) {
+    if (skipColumns.has(k.toLowerCase().trim())) continue;
+    const cleanK = k.toLowerCase().replace(/[\s\-_()./&%?]/g, "");
+    importedMap.set(cleanK, { key: k, val: v });
+  }
+
+  // Preserve the visual ordering: imported keys in order first, then any extra keys from existing
+  const orderedCleanKeys: string[] = [];
+  const added = new Set<string>();
+
+  for (const cleanK of importedMap.keys()) {
+    if (!added.has(cleanK)) {
+      added.add(cleanK);
+      orderedCleanKeys.push(cleanK);
     }
   }
 
-  // Process existingRow (database columns)
-  for (const [key, val] of Object.entries(existingRow || {})) {
-    const norm = normalizeKey(key);
-    if (skipNormalized.has(norm)) continue;
-    const label = CANONICAL_FIELD_LABELS[norm] || prettifyRawKey(key);
-    const existing = unifiedFields.get(norm);
-    if (existing) {
-      existing.bVal = val;
-    } else {
-      unifiedFields.set(norm, { label, aVal: undefined, bVal: val });
+  for (const cleanK of existingMap.keys()) {
+    if (!added.has(cleanK)) {
+      added.add(cleanK);
+      orderedCleanKeys.push(cleanK);
     }
   }
 
   const rows: DiffRow[] = [];
-  for (const [, field] of unifiedFields) {
-    const aStr = formatVal(field.aVal);
-    const bStr = formatVal(field.bVal);
-    // Don't show rows where both sides are blank
+  for (const cleanK of orderedCleanKeys) {
+    const imp = importedMap.get(cleanK);
+    const ext = existingMap.get(cleanK);
+
+    // Display label: prioritize the clean title from import, fallback to existing key
+    const displayLabel = imp?.key || ext?.key || cleanK;
+
+    const aStr = formatVal(imp?.val);
+    const bStr = formatVal(ext?.val);
+
     if (aStr === "—" && bStr === "—") continue;
-    const differs = aStr.toLowerCase() !== bStr.toLowerCase();
+
+    const differs = aStr.toLowerCase().trim() !== bStr.toLowerCase().trim();
     rows.push({
-      key: field.label,
+      key: displayLabel,
       aStr,
       bStr,
       differs,

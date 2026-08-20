@@ -1144,6 +1144,20 @@ export function BuyersPage() {
     });
   }
 
+  async function handleInlineUpdate(buyerId: string, path: string, updates: Record<string, unknown>) {
+    // 1. Optimistic live update in memory (0ms dynamic UI reaction)
+    setRows((prev) =>
+      prev.map((b) => (b.id === buyerId ? { ...b, ...updates } : b))
+    );
+    // 2. Persist to server in background
+    try {
+      await apiPatch(path, updates);
+    } catch (err) {
+      setError(err);
+      reload();
+    }
+  }
+
   async function handleExport(format: "csv" | "xlsx") {
     try {
       await downloadExport("/buyers", format, "buyers");
@@ -2434,7 +2448,31 @@ export function BuyersPage() {
                       4: renderChips(r.category_ids, categories.items, "Product Categories"),
                       5: renderChips(r.sub_category_ids, subCategories.items, "Product Sub-Categories"),
                       6: countryName,
-                      7: (
+                      7: canUpdate ? (
+                        <select
+                          className="inline-select"
+                          value={r.current_status || ""}
+                          onChange={(e) =>
+                            handleInlineUpdate(r.id, `/buyers/${r.id}`, {
+                              current_status: e.target.value || null,
+                            })
+                          }
+                          style={{
+                            padding: "3px 6px",
+                            borderRadius: "4px",
+                            fontSize: "12px",
+                            fontWeight: 600,
+                            border: "1px solid #cbd5e1",
+                            background: r.current_status === "existing" ? "#dcfce7" : "#fef9c3",
+                            color: r.current_status === "existing" ? "#15803d" : "#854d0e",
+                            cursor: "pointer",
+                          }}
+                        >
+                          <option value="">SELECT</option>
+                          <option value="new">NEW</option>
+                          <option value="existing">EXISTING</option>
+                        </select>
+                      ) : (
                         <span
                           style={{
                             padding: "3px 8px",
@@ -2448,7 +2486,31 @@ export function BuyersPage() {
                           {r.current_status ? r.current_status.toUpperCase() : "SELECT"}
                         </span>
                       ),
-                      8: (
+                      8: canUpdate ? (
+                        <select
+                          className="inline-select"
+                          value={r.potential || ""}
+                          onChange={(e) =>
+                            handleInlineUpdate(r.id, `/buyers/${r.id}/potential`, {
+                              potential: e.target.value || null,
+                            })
+                          }
+                          style={{
+                            padding: "3px 6px",
+                            borderRadius: "4px",
+                            fontSize: "12px",
+                            fontWeight: 600,
+                            border: "1px solid #cbd5e1",
+                            background: r.potential === "yes" ? "#dbeafe" : r.potential === "no" ? "#fee2e2" : "#f1f5f9",
+                            color: r.potential === "yes" ? "#1d4ed8" : r.potential === "no" ? "#b91c1c" : "#475569",
+                            cursor: "pointer",
+                          }}
+                        >
+                          <option value="">SELECT</option>
+                          <option value="yes">YES</option>
+                          <option value="no">NO</option>
+                        </select>
+                      ) : (
                         <span
                           style={{
                             padding: "3px 8px",
@@ -2462,7 +2524,33 @@ export function BuyersPage() {
                           {r.potential ? r.potential.toUpperCase() : "SELECT"}
                         </span>
                       ),
-                      9: r.buyer_grade ? `Grade ${r.buyer_grade}` : "—",
+                      9: canUpdate ? (
+                        <select
+                          className="inline-select"
+                          value={r.buyer_grade || ""}
+                          onChange={(e) =>
+                            handleInlineUpdate(r.id, `/buyers/${r.id}/grade`, {
+                              buyer_grade: e.target.value || null,
+                            })
+                          }
+                          style={{
+                            padding: "3px 6px",
+                            borderRadius: "4px",
+                            fontSize: "12px",
+                            border: "1px solid #cbd5e1",
+                            background: "#ffffff",
+                            cursor: "pointer",
+                          }}
+                        >
+                          <option value="">Select</option>
+                          <option value="A">Grade A</option>
+                          <option value="B">Grade B</option>
+                          <option value="C">Grade C</option>
+                          <option value="D">Grade D</option>
+                        </select>
+                      ) : (
+                        <span>{r.buyer_grade ? `Grade ${r.buyer_grade}` : "—"}</span>
+                      ),
                       10: r.created_at ? new Date(r.created_at).toLocaleDateString() : "—",
                       11: (
                         <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>

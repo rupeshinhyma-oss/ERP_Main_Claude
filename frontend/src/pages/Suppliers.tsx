@@ -1727,9 +1727,14 @@ export function SuppliersPage() {
     });
   }
 
-  async function handleInlineUpdate(path: string, payload: unknown) {
+  async function handleInlineUpdate(supplierId: string, path: string, updates: Record<string, unknown>) {
+    // 1. Optimistic live update in memory (0ms dynamic UI reaction)
+    setRows((prev) =>
+      prev.map((s) => (s.id === supplierId ? { ...s, ...updates } : s))
+    );
+    // 2. Persist to server in background
     try {
-      await apiPatch(path, payload);
+      await apiPatch(path, updates);
     } catch (err) {
       setError(err);
       reload();
@@ -3639,9 +3644,9 @@ export function SuppliersPage() {
                                   {canEditGrade ? (
                                     <select
                                       className="inline-select"
-                                      defaultValue={s.supplier_grade || ""}
+                                      value={s.supplier_grade || ""}
                                       onChange={(e) =>
-                                        handleInlineUpdate(`/suppliers/${s.id}/grade`, {
+                                        handleInlineUpdate(s.id, `/suppliers/${s.id}/grade`, {
                                           supplier_grade: e.target.value || null,
                                         })
                                       }
@@ -3662,9 +3667,9 @@ export function SuppliersPage() {
                                   {canEditPotential ? (
                                     <select
                                       className="inline-select"
-                                      defaultValue={s.potential || ""}
+                                      value={s.potential || ""}
                                       onChange={(e) =>
-                                        handleInlineUpdate(`/suppliers/${s.id}/potential`, {
+                                        handleInlineUpdate(s.id, `/suppliers/${s.id}/potential`, {
                                           potential: e.target.value || null,
                                         })
                                       }

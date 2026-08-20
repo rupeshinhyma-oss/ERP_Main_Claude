@@ -1029,6 +1029,24 @@ td .cell-secondary {
   flex: 1;
 }
 
+.inline-select {
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  padding: 3px 6px;
+  font-size: 12px;
+  background: #ffffff;
+  color: #1e293b;
+  cursor: pointer;
+  outline: none;
+  font-family: inherit;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.inline-select:focus {
+  border-color: #0061f2;
+  box-shadow: 0 0 0 2px rgba(0, 97, 242, 0.15);
+}
+
 /* ==========================================================================
    Status badges / pills
    ========================================================================== */

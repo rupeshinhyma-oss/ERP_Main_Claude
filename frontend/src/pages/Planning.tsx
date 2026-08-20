@@ -17,6 +17,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useSearchParams } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
@@ -90,7 +91,7 @@ import { BUILTIN_STATUS_COLORS } from "@/types/planning";
 // so auto-sizing it the same way wouldn't make sense).
 const CELL_MIN_WIDTH = 64;
 const CELL_MAX_WIDTH = 320;
-const ITEM_COL_WIDTH = 190;
+const ITEM_COL_WIDTH = 240;
 
 /**
  * Roughly how many pixels one character of a bold ~13px header label
@@ -327,23 +328,26 @@ function DescriptionPopover({
     onClose();
   }
 
-  // Position below the anchor, clamped to viewport width
-  const left = Math.min(rect.left, window.innerWidth - 280);
-  const top = rect.bottom + 6;
+  // Position below the anchor, clamped to viewport width and height
+  const left = Math.max(10, Math.min(rect.left, window.innerWidth - 290));
+  const top =
+    rect.bottom + 230 > window.innerHeight && rect.top > 240
+      ? Math.max(10, rect.top - 220)
+      : Math.max(10, Math.min(rect.bottom + 6, window.innerHeight - 240));
 
-  return (
+  return createPortal(
     <>
-      <div style={{ position: "fixed", inset: 0, zIndex: 55 }} onClick={() => { onSave(text); onClose(); }} />
+      <div style={{ position: "fixed", inset: 0, zIndex: 9998 }} onClick={() => { onSave(text); onClose(); }} />
       <div
         style={{
           position: "fixed",
           top,
           left,
-          zIndex: 56,
+          zIndex: 9999,
           background: "#fff",
           border: "1px solid #CBD5E1",
           borderRadius: 8,
-          boxShadow: "0 8px 24px rgba(0,0,0,0.14)",
+          boxShadow: "0 10px 25px -5px rgba(0,0,0,0.2), 0 8px 10px -6px rgba(0,0,0,0.1)",
           padding: 10,
           width: 270,
         }}
@@ -391,7 +395,8 @@ function DescriptionPopover({
         </div>
         <div style={{ fontSize: 11, color: "#94A3B8", marginTop: 4, textAlign: "right" }}>Ctrl+Enter to save</div>
       </div>
-    </>
+    </>,
+    document.body
   );
 }
 
@@ -475,19 +480,19 @@ function ColumnFilterPopover({
     onClose();
   };
 
-  return (
+  return createPortal(
     <>
-      <div style={{ position: "fixed", inset: 0, zIndex: 55 }} onClick={onClose} />
+      <div style={{ position: "fixed", inset: 0, zIndex: 9998 }} onClick={onClose} />
       <div
         style={{
           position: "fixed",
           top,
           left,
-          zIndex: 56,
+          zIndex: 9999,
           background: "#FFFFFF",
           border: "1px solid #CBD5E1",
           borderRadius: 8,
-          boxShadow: "0 10px 25px -5px rgba(0,0,0,0.15), 0 8px 10px -6px rgba(0,0,0,0.1)",
+          boxShadow: "0 10px 25px -5px rgba(0,0,0,0.2), 0 8px 10px -6px rgba(0,0,0,0.1)",
           padding: 12,
           width: 250,
           display: "flex",
@@ -596,7 +601,8 @@ function ColumnFilterPopover({
           </button>
         </div>
       </div>
-    </>
+    </>,
+    document.body
   );
 }
 function isSystemColumn(name: string): boolean {
@@ -728,22 +734,22 @@ function MumStatusHistoryPopover({
     return `${day}/${month}/${year} ${hours}:${minutes}`;
   }
 
-  return (
+  return createPortal(
     <>
-      <div style={{ position: "fixed", inset: 0, zIndex: 199 }} onClick={onClose} />
+      <div style={{ position: "fixed", inset: 0, zIndex: 9998 }} onClick={onClose} />
       <div
         style={{
           position: "fixed",
-          top: Math.min(rect.bottom + 4, window.innerHeight - 340),
+          top: Math.max(10, Math.min(rect.bottom + 4, window.innerHeight - 340)),
           left: Math.max(10, Math.min(rect.left, window.innerWidth - 340)),
-          zIndex: 200,
+          zIndex: 9999,
           width: 320,
           maxHeight: 380,
           overflowY: "auto",
           background: "#fff",
           border: "1px solid #CBD5E1",
           borderRadius: 8,
-          boxShadow: "0 8px 24px rgba(0,0,0,0.18)",
+          boxShadow: "0 10px 25px -5px rgba(0,0,0,0.2), 0 8px 10px -6px rgba(0,0,0,0.1)",
           padding: 12,
           textAlign: "left",
         }}
@@ -817,7 +823,8 @@ function MumStatusHistoryPopover({
           ))
         )}
       </div>
-    </>
+    </>,
+    document.body
   );
 }
 
@@ -967,6 +974,10 @@ function GridCell({
             }
             style={{
               width: "100%",
+              minWidth: 0,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
               cursor: isBlocked ? "not-allowed" : isActuallyEditable ? "text" : "default",
               fontSize: 13,
               minHeight: 18,
@@ -1094,19 +1105,25 @@ function StatusPicker({
   onClose: () => void;
 }) {
   const rect = anchor.getBoundingClientRect();
-  return (
+  const top =
+    rect.bottom + 250 > window.innerHeight && rect.top > 260
+      ? Math.max(10, rect.top - 250)
+      : Math.max(10, Math.min(rect.bottom + 6, window.innerHeight - 250));
+  const left = Math.max(10, Math.min(rect.left, window.innerWidth - 230));
+
+  return createPortal(
     <>
-      <div style={{ position: "fixed", inset: 0, zIndex: 50 }} onClick={onClose} />
+      <div style={{ position: "fixed", inset: 0, zIndex: 9998 }} onClick={onClose} />
       <div
         style={{
           position: "fixed",
-          top: rect.bottom + 6,
-          left: Math.min(rect.left, window.innerWidth - 220),
-          zIndex: 51,
+          top,
+          left,
+          zIndex: 9999,
           background: "#fff",
           border: "1px solid #E2E8F0",
           borderRadius: 8,
-          boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
+          boxShadow: "0 10px 25px -5px rgba(0,0,0,0.2), 0 8px 10px -6px rgba(0,0,0,0.1)",
           padding: 8,
           width: 210,
         }}
@@ -1184,7 +1201,8 @@ function StatusPicker({
           Clear status
         </button>
       </div>
-    </>
+    </>,
+    document.body
   );
 }
 
@@ -4020,9 +4038,10 @@ function EditableRowLabel({
         zIndex: 4,
         background: "#fff",
         boxShadow: isLastFrozen ? "3px 0 6px -2px rgba(0,0,0,0.15)" : undefined,
+        overflow: "hidden",
       }}
     >
-      <div style={{ position: "relative", display: "flex", alignItems: "center", gap: 4 }}>
+      <div style={{ position: "relative", display: "flex", alignItems: "center", gap: 4, width: "100%", minWidth: 0, overflow: "hidden" }}>
         {editing && canEdit && isManual ? (
           <input
             ref={inputRef}
@@ -4036,20 +4055,26 @@ function EditableRowLabel({
                 setEditing(false);
               }
             }}
-            style={{ width: "100%", border: "1px solid #2563EB", borderRadius: 4, padding: "3px 6px", fontSize: 13, fontWeight: 500 }}
+            style={{ width: "100%", border: "1px solid #2563EB", borderRadius: 4, padding: "3px 6px", fontSize: 13, fontWeight: 500, boxSizing: "border-box" }}
           />
         ) : (
           <span
             onClick={() => canEdit && isManual && setEditing(true)}
             title={
-              !isManual
-                ? `Auto-filled from Product Master (${sourceType})`
-                : canEdit
-                  ? "Click to edit Item label"
-                  : undefined
+              label
+                ? (!isManual
+                    ? `${label} (Auto-filled from Product Master)`
+                    : canEdit
+                      ? `${label} (Click to edit Item label)`
+                      : label)
+                : undefined
             }
             style={{
               flex: 1,
+              minWidth: 0,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
               cursor: canEdit && isManual ? "pointer" : "default",
               fontSize: 13,
               display: "block",

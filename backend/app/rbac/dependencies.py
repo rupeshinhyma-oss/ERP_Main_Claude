@@ -50,6 +50,31 @@ def require_permission(permission_code: str) -> Callable[..., Coroutine[Any, Any
     return _checker
 
 
+def require_any_permission(*permission_codes: str) -> Callable[..., Coroutine[Any, Any, CurrentUser]]:
+    """
+    Build a FastAPI dependency that authorizes a request if the user holds ANY ONE of several
+    permission codes (as opposed to :func:`require_permission`, which requires exactly one fixed code).
+
+    Used where a route's fine-grained authorization can't be fully decided until the request body
+    is inspected (e.g. Shipment Planning's cell-value/status-color routes: which specific permission
+    is required depends on WHICH column or WHICH status color the request targets, resolved deeper in
+    the service layer). This dependency only performs the coarse "is this user allowed to even attempt
+    this route at all" pass -- letting through anyone with the general permission (e.g.
+    planning.cell.edit) OR any of the narrower, column/color-specific permissions (e.g.
+    planning.textyn.edit) -- and the service layer still performs the real, specific check once it
+    knows exactly which column or color is involved, rejecting the request there if the user's
+    specific permission doesn't actually cover that column/color.
+    """
+
+    async def _checker(current_user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
+        if not any(code in current_user.permissions for code in permission_codes):
+            codes_display = " or ".join(repr(c) for c in permission_codes)
+            raise ForbiddenException(f"This action requires one of the following permissions: {codes_display}.")
+        return current_user
+
+    return _checker
+
+
 def require_super_admin() -> Callable[..., Coroutine[Any, Any, CurrentUser]]:
     """
     Build a FastAPI dependency that verifies the current user has the super_admin role.

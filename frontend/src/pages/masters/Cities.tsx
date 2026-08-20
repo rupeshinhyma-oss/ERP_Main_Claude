@@ -26,6 +26,8 @@ export function CitiesPage() {
       activeKey="masters-cities"
       apiBase="/masters/cities"
       permissionPrefix="city"
+      exportPermission="city.export"
+      bulkActionPermission="city.bulk_action"
       liveModule="cities"
       entityName="city"
       heading="City Master"

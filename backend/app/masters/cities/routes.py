@@ -119,7 +119,7 @@ async def list_citys(
     request: Request,
     query: ListQueryParams = Depends(get_list_query_params),
     service: CityService = Depends(get_city_service),
-    _current_user: CurrentUser = Depends(require_permission("city.read")),
+    _current_user: CurrentUser = Depends(require_permission("city.view")),
 ) -> dict:
     """List citys, with search/sort/filter/pagination."""
     citys, total = await service.list_paginated(query)
@@ -133,7 +133,7 @@ async def export_citys(
     request: Request,
     format: str = "csv",
     service: CityService = Depends(get_city_service),
-    current_user: CurrentUser = Depends(require_permission("city.read")),
+    current_user: CurrentUser = Depends(require_permission("city.export")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> Response:
     """Export every city as a CSV or XLSX file."""
@@ -156,7 +156,7 @@ async def import_citys(
     request: Request,
     file: UploadFile = File(...),
     service: CityService = Depends(get_city_service),
-    current_user: CurrentUser = Depends(require_permission("city.create")),
+    current_user: CurrentUser = Depends(require_permission("city.import")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     """Import citys from an uploaded CSV/XLSX file, validating every row."""
@@ -177,7 +177,7 @@ async def get_city(
     city_id: uuid.UUID,
     request: Request,
     service: CityService = Depends(get_city_service),
-    _current_user: CurrentUser = Depends(require_permission("city.read")),
+    _current_user: CurrentUser = Depends(require_permission("city.view")),
 ) -> dict:
     """Fetch a single city by ID."""
     city = await service.get_by_id_or_raise(city_id)

@@ -60,20 +60,20 @@ export const NAV_SECTIONS: NavSection[] = [
       // highlight or auto-scroll-into-view, even while on the Inquiries
       // page -- every other nav item's key already matches its page's
       // activeKey (e.g. "masters-buyer-types"), so this brings it in line.
-      { key: "inquiries", label: "Inquiries", path: "/inquiries", icon: "fileText", permission: "inquiry.view" },
+      { key: "inquiries", label: "Inquiries", path: "/inquiries", icon: "fileText" },
     ],
   },
   {
     label: "PLANNING",
     items: [
-      { key: "planning", label: "Shipment Planning", path: "/planning", icon: "truck", permission: "planning.read" },
+      { key: "planning", label: "Shipment Planning", path: "/planning", icon: "truck", permission: "planning.view" },
     ],
   },
   {
     label: "USER MANAGEMENT",
     items: [
       { key: "users", label: "Users", path: "/users", icon: "user", permission: "user.view" },
-      { key: "rbac", label: "Roles & Permissions", path: "/rbac", icon: "shield", permission: "settings.manage" },
+      { key: "rbac", label: "Roles & Permissions", path: "/rbac", icon: "shield", superAdminOnly: true },
     ],
   },
   {

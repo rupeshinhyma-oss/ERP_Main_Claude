@@ -11,7 +11,7 @@ are only ever created internally (by :class:`app.audit.middleware.AuditMiddlewar
 and explicit service-layer calls), and per the Phase 3 retention
 requirement, never modified or deleted by anyone, including via this API.
 
-Every route requires ``audit.read``, a permission deliberately NOT granted
+Every route requires ``audit.view``, a permission deliberately NOT granted
 to the default 'employee' role seeded for regular team members (see
 scripts/seed.py) -- so only super_admin (or any other role an admin
 explicitly grants it to) can view the audit trail. Regular team members
@@ -46,7 +46,7 @@ async def list_audit_logs(
     employee_name: str | None = None,
     employee_email: str | None = None,
     audit_repository: AuditRepository = Depends(get_audit_repository),
-    _current_user: CurrentUser = Depends(require_permission("audit.read")),
+    _current_user: CurrentUser = Depends(require_permission("audit.view")),
 ) -> dict:
     """
     List audit log entries, paginated/searchable/sortable/filterable
@@ -74,7 +74,7 @@ async def get_audit_log(
     audit_log_id: uuid.UUID,
     request: Request,
     audit_repository: AuditRepository = Depends(get_audit_repository),
-    _current_user: CurrentUser = Depends(require_permission("audit.read")),
+    _current_user: CurrentUser = Depends(require_permission("audit.view")),
 ) -> dict:
     """Fetch a single audit log entry by ID."""
     entry = await audit_repository.get_by_id(audit_log_id)

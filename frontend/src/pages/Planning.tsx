@@ -835,6 +835,7 @@ function GridCell({
   customStatusTagId,
   customTags,
   canEdit,
+  canSetStatus,
   sourceType,
   enableStatusColor,
   showMumHistory,
@@ -857,6 +858,7 @@ function GridCell({
   customStatusTagId: string | null | undefined;
   customTags: PlanningStatusTag[];
   canEdit: boolean;
+  canSetStatus?: boolean;
   sourceType: PlanningColumnSourceType;
   enableStatusColor?: boolean;
   /** True only for the Approval Date column -- adds the Mum-status-history eye button. */
@@ -889,6 +891,14 @@ function GridCell({
   const colWidth = width ?? CELL_MIN_WIDTH;
   const isBlocked = !!disabledReason;
   const isActuallyEditable = canEdit && isManual && !isBlocked;
+  const canInteractWithStatus = canSetStatus ?? canEdit;
+  const hasValidValue = (() => {
+    const val = (value ?? "").trim();
+    if (!val || val === "0") return false;
+    const num = Number(val);
+    return !isNaN(num) ? num > 0 : true;
+  })();
+  const effectiveSwatch = hasValidValue ? swatch : undefined;
 
   useEffect(() => {
     if (editing) inputRef.current?.focus();
@@ -956,8 +966,8 @@ function GridCell({
               padding: "3px 5px",
               fontSize: 13,
               textAlign: "center",
-              color: swatch || undefined,
-              fontWeight: swatch ? 600 : undefined,
+              color: effectiveSwatch || undefined,
+              fontWeight: effectiveSwatch ? 600 : undefined,
             }}
           />
         ) : (
@@ -984,8 +994,8 @@ function GridCell({
               display: "block",
               textAlign: "center",
               fontStyle: !isManual ? "italic" : undefined,
-              color: isBlocked ? "#94A3B8" : swatch || (!isManual ? "#475569" : undefined),
-              fontWeight: swatch ? 600 : undefined,
+              color: isBlocked ? "#94A3B8" : effectiveSwatch || (!isManual ? "#475569" : undefined),
+              fontWeight: effectiveSwatch ? 600 : undefined,
               opacity: isBlocked ? 0.7 : 1,
             }}
           >
@@ -1047,7 +1057,7 @@ function GridCell({
               ⚠
             </button>
           )}
-          {canEdit && !editing && enableStatusColor && (hovered || swatch) && (
+          {canInteractWithStatus && !editing && enableStatusColor && hasValidValue && (hovered || effectiveSwatch) && (
             <button
               type="button"
               className="planning-status-dot"
@@ -1057,11 +1067,25 @@ function GridCell({
                 width: 12,
                 height: 12,
                 borderRadius: "50%",
-                border: swatch ? "none" : "1px dashed #CBD5E1",
-                background: swatch || "transparent",
+                border: effectiveSwatch ? "none" : "1px dashed #CBD5E1",
+                background: effectiveSwatch || "transparent",
                 flexShrink: 0,
                 cursor: "pointer",
-                opacity: swatch ? 1 : 0.4,
+                opacity: effectiveSwatch ? 1 : 0.4,
+              }}
+            />
+          )}
+          {!canInteractWithStatus && !editing && enableStatusColor && effectiveSwatch && (
+            <span
+              className="planning-status-dot-static"
+              title={statusLabel(statusColor, customStatusTagId, customTags)}
+              style={{
+                width: 12,
+                height: 12,
+                borderRadius: "50%",
+                background: effectiveSwatch,
+                flexShrink: 0,
+                opacity: 1,
               }}
             />
           )}
@@ -1098,11 +1122,21 @@ function StatusPicker({
   customTags,
   onPick,
   onClose,
+  canPickRed,
+  canPickGreen,
+  canPickBlue,
+  canPickCustom,
+  canClearStatus,
 }: {
   anchor: HTMLElement;
   customTags: PlanningStatusTag[];
   onPick: (color: PlanningCellStatusColor | null, customTagId: string | null) => void;
   onClose: () => void;
+  canPickRed: boolean;
+  canPickGreen: boolean;
+  canPickBlue: boolean;
+  canPickCustom: boolean;
+  canClearStatus: boolean;
 }) {
   const rect = anchor.getBoundingClientRect();
   const top =
@@ -1130,38 +1164,57 @@ function StatusPicker({
       >
         <div style={{ fontSize: 11, fontWeight: 600, color: "#64748B", padding: "2px 6px 6px" }}>SET STATUS</div>
         {(Object.entries(BUILTIN_STATUS_COLORS) as [PlanningCellStatusColor, { label: string; hex: string }][]).map(
-          ([key, { label, hex }]) => (
-            <button
-              key={key}
-              type="button"
-              onClick={() => onPick(key, null)}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                width: "100%",
-                padding: "6px 8px",
-                border: "none",
-                background: "transparent",
-                borderRadius: 6,
-                cursor: "pointer",
-                fontSize: 13,
-                textAlign: "left",
-              }}
-              onMouseEnter={(e) => (e.currentTarget.style.background = "#F1F5F9")}
-              onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-            >
-              <span style={{ width: 12, height: 12, borderRadius: "50%", background: hex, flexShrink: 0 }} />
-              {label}
-            </button>
-          )
+          ([key, { label, hex }]) => {
+            const isBlocked =
+              (key === "red_requirement" && !canPickRed) ||
+              (key === "green_purchased" && !canPickGreen) ||
+              (key === "blue_ordered" && !canPickBlue);
+            return (
+              <button
+                key={key}
+                type="button"
+                disabled={isBlocked}
+                title={isBlocked ? "You don't have permission to set this status color." : undefined}
+                onClick={() => {
+                  if (isBlocked) return;
+                  onPick(key, null);
+                }}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  width: "100%",
+                  padding: "6px 8px",
+                  border: "none",
+                  background: "transparent",
+                  borderRadius: 6,
+                  cursor: isBlocked ? "not-allowed" : "pointer",
+                  fontSize: 13,
+                  textAlign: "left",
+                  opacity: isBlocked ? 0.4 : 1,
+                }}
+                onMouseEnter={(e) => {
+                  if (!isBlocked) e.currentTarget.style.background = "#F1F5F9";
+                }}
+                onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+              >
+                <span style={{ width: 12, height: 12, borderRadius: "50%", background: hex, flexShrink: 0 }} />
+                {label}
+              </button>
+            );
+          }
         )}
         {customTags.length > 0 && <div style={{ borderTop: "1px solid #EEF2F6", margin: "6px 0" }} />}
         {customTags.map((tag) => (
           <button
             key={tag.id}
             type="button"
-            onClick={() => onPick("custom", tag.id)}
+            disabled={!canPickCustom}
+            title={!canPickCustom ? "You don't have permission to set custom status tags." : undefined}
+            onClick={() => {
+              if (!canPickCustom) return;
+              onPick("custom", tag.id);
+            }}
             style={{
               display: "flex",
               alignItems: "center",
@@ -1171,11 +1224,14 @@ function StatusPicker({
               border: "none",
               background: "transparent",
               borderRadius: 6,
-              cursor: "pointer",
+              cursor: !canPickCustom ? "not-allowed" : "pointer",
               fontSize: 13,
               textAlign: "left",
+              opacity: !canPickCustom ? 0.4 : 1,
             }}
-            onMouseEnter={(e) => (e.currentTarget.style.background = "#F1F5F9")}
+            onMouseEnter={(e) => {
+              if (canPickCustom) e.currentTarget.style.background = "#F1F5F9";
+            }}
             onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
           >
             <span style={{ width: 12, height: 12, borderRadius: "50%", background: tag.hex_color, flexShrink: 0 }} />
@@ -1185,18 +1241,28 @@ function StatusPicker({
         <div style={{ borderTop: "1px solid #EEF2F6", margin: "6px 0" }} />
         <button
           type="button"
-          onClick={() => onPick(null, null)}
+          disabled={!canClearStatus}
+          title={!canClearStatus ? "You don't have permission to clear status." : undefined}
+          onClick={() => {
+            if (!canClearStatus) return;
+            onPick(null, null);
+          }}
           style={{
             width: "100%",
             padding: "6px 8px",
             border: "none",
             background: "transparent",
             borderRadius: 6,
-            cursor: "pointer",
+            cursor: !canClearStatus ? "not-allowed" : "pointer",
             fontSize: 13,
             color: "#94A3B8",
             textAlign: "left",
+            opacity: !canClearStatus ? 0.4 : 1,
           }}
+          onMouseEnter={(e) => {
+            if (canClearStatus) e.currentTarget.style.background = "#F1F5F9";
+          }}
+          onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
         >
           Clear status
         </button>
@@ -1263,6 +1329,10 @@ export function PlanningPage() {
   const showToast = useToast();
   const canManageColumns = hasPermission("planning.column.manage");
   const canEditCells = hasPermission("planning.cell.edit");
+  const canEditTestYN = hasPermission("planning.textyn.edit");
+  const canEditApprovalDate = hasPermission("planning.approvaldate.edit");
+  const canSetRedStatus = hasPermission("planning.colorstatusred.edit");
+  const canSetGreenStatus = hasPermission("planning.colorstatusgreen.edit");
 
   const [searchParams, setSearchParams] = useSearchParams();
   const [sheets, setSheets] = useState<PlanningSheet[]>([]);
@@ -2768,6 +2838,17 @@ export function PlanningPage() {
     customTagId: string | null
   ) {
     if (!activeSheetId) return;
+    if (statusColor !== null) {
+      const targetCell = (grid?.rows.find((r) => r.id === rowId)?.cells ?? []).find((c) => c.column_id === columnId);
+      const cellVal = (targetCell?.value ?? "").trim();
+      const num = Number(cellVal);
+      const hasActiveNumber = cellVal !== "" && cellVal !== "0" && (!isNaN(num) ? num > 0 : true);
+      if (!hasActiveNumber) {
+        showToast("Cannot set status color on an empty cell. Enter a quantity first.", "warning");
+        setStatusPicker(null);
+        return;
+      }
+    }
     try {
       await apiPut(`/planning/sheets/${activeSheetId}/rows/${rowId}/columns/${columnId}/status`, {
         status_color: statusColor,
@@ -3009,17 +3090,19 @@ export function PlanningPage() {
         {activeSheetId && (
           <>
             <div style={{ display: "flex", gap: 8, marginBottom: 12, alignItems: "center", flexWrap: "wrap" }}>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={() => {
-                  setGroupLabelDraft(grid?.sheet?.mum_group_label || "Mum");
-                  setColumnsPanelOpen(true);
-                }}
-                disabled={columns.length === 0}
-              >
-                Configuration{hiddenCount > 0 ? ` (${hiddenCount} hidden)` : ""}
-              </button>
+              <Can permission="planning.column.manage">
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => {
+                    setGroupLabelDraft(grid?.sheet?.mum_group_label || "Mum");
+                    setColumnsPanelOpen(true);
+                  }}
+                  disabled={columns.length === 0}
+                >
+                  Configuration{hiddenCount > 0 ? ` (${hiddenCount} hidden)` : ""}
+                </button>
+              </Can>
               <Can permission="planning.column.manage">
                 <button
                   type="button"
@@ -3136,7 +3219,20 @@ export function PlanningPage() {
                               statusColor={cell?.status_color}
                               customStatusTagId={cell?.custom_status_tag_id}
                               customTags={customTags}
-                              canEdit={canEditCells}
+                              canEdit={
+                                isTestColumn(col.name)
+                                  ? canEditTestYN
+                                  : isApprovalDateColumn(col.name)
+                                    ? canEditApprovalDate
+                                    : canEditCells
+                              }
+                              canSetStatus={
+                                isPureMumColumn(col.name, grid?.sheet?.mum_group_label)
+                                  ? (canEditCells || canSetRedStatus || canSetGreenStatus)
+                                  : col.enable_status_color
+                                    ? (canEditCells || canSetRedStatus || canSetGreenStatus)
+                                    : false
+                              }
                               sourceType={col.source_type}
                               enableStatusColor={col.enable_status_color}
                               showMumHistory={isApprovalDateColumn(col.name)}
@@ -3456,6 +3552,11 @@ export function PlanningPage() {
             customTags={customTags}
             onClose={() => setStatusPicker(null)}
             onPick={(color, tagId) => handleSetCellStatus(statusPicker.rowId, statusPicker.columnId, color, tagId)}
+            canPickRed={canSetRedStatus}
+            canPickGreen={canSetGreenStatus}
+            canPickBlue={canEditCells}
+            canPickCustom={canEditCells}
+            canClearStatus={canEditCells}
           />
         )}
 
@@ -4063,10 +4164,10 @@ function EditableRowLabel({
             title={
               label
                 ? (!isManual
-                    ? `${label} (Auto-filled from Product Master)`
-                    : canEdit
-                      ? `${label} (Click to edit Item label)`
-                      : label)
+                  ? `${label} (Auto-filled from Product Master)`
+                  : canEdit
+                    ? `${label} (Click to edit Item label)`
+                    : label)
                 : undefined
             }
             style={{

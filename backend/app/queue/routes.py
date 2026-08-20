@@ -22,6 +22,7 @@ import uuid
 from fastapi import APIRouter, Depends, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.dependencies import get_current_user
 from app.auth.service import CurrentUser
 from app.core.responses import build_success_response
 from app.queue.constants import JobStatus
@@ -38,7 +39,6 @@ from app.queue.schemas import (
 )
 from app.queue.service import QueueService
 from app.queue.worker import BackgroundWorker
-from app.rbac.dependencies import require_permission
 
 router = APIRouter(prefix="/queue", tags=["Queue"])
 
@@ -63,7 +63,7 @@ async def create_job(
     payload: JobCreate,
     request: Request,
     service: QueueService = Depends(get_queue_service),
-    current_user: CurrentUser = Depends(require_permission("settings.manage")),
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> dict:
     """
     Create and enqueue a new background job.
@@ -93,7 +93,7 @@ async def list_jobs(
     limit: int = Query(default=50, ge=1, le=200, description="Maximum number of results."),
     offset: int = Query(default=0, ge=0, description="Number of results to skip."),
     service: QueueService = Depends(get_queue_service),
-    _current_user: CurrentUser = Depends(require_permission("settings.manage")),
+    _current_user: CurrentUser = Depends(get_current_user),
 ) -> dict:
     """
     List background jobs with optional filtering by status and/or module.
@@ -127,7 +127,7 @@ async def get_job(
     job_id: uuid.UUID,
     request: Request,
     service: QueueService = Depends(get_queue_service),
-    _current_user: CurrentUser = Depends(require_permission("settings.manage")),
+    _current_user: CurrentUser = Depends(get_current_user),
 ) -> dict:
     """Fetch the full details of a single background job."""
     job = await service.get_job_or_raise(job_id)
@@ -144,7 +144,7 @@ async def cancel_job(
     job_id: uuid.UUID,
     request: Request,
     service: QueueService = Depends(get_queue_service),
-    _current_user: CurrentUser = Depends(require_permission("settings.manage")),
+    _current_user: CurrentUser = Depends(get_current_user),
 ) -> dict:
     """
     Cancel a PENDING job so it will never be executed.
@@ -170,7 +170,7 @@ async def retry_job(
     payload: JobRetry,
     request: Request,
     service: QueueService = Depends(get_queue_service),
-    _current_user: CurrentUser = Depends(require_permission("settings.manage")),
+    _current_user: CurrentUser = Depends(get_current_user),
 ) -> dict:
     """
     Re-queue a FAILED or CANCELLED job.
@@ -198,7 +198,7 @@ async def retry_job(
 async def queue_stats(
     request: Request,
     service: QueueService = Depends(get_queue_service),
-    _current_user: CurrentUser = Depends(require_permission("settings.manage")),
+    _current_user: CurrentUser = Depends(get_current_user),
 ) -> dict:
     """Return job counts grouped by status (PENDING, RUNNING, COMPLETED, FAILED, CANCELLED)."""
     counts = await service.get_queue_stats()
@@ -217,7 +217,7 @@ async def queue_stats(
 @router.get("/registered-jobs", summary="List all registered job handler names")
 async def list_registered(
     request: Request,
-    _current_user: CurrentUser = Depends(require_permission("settings.manage")),
+    _current_user: CurrentUser = Depends(get_current_user),
 ) -> dict:
     """
     Return the names of every job handler currently registered in the registry.
@@ -239,7 +239,7 @@ async def list_registered(
 async def worker_status(
     request: Request,
     worker: BackgroundWorker = Depends(get_background_worker),
-    _current_user: CurrentUser = Depends(require_permission("settings.manage")),
+    _current_user: CurrentUser = Depends(get_current_user),
 ) -> dict:
     """
     Return the current state of the background worker task.

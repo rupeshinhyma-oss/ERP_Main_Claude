@@ -119,7 +119,7 @@ async def list_countrys(
     request: Request,
     query: ListQueryParams = Depends(get_list_query_params),
     service: CountryService = Depends(get_country_service),
-    _current_user: CurrentUser = Depends(require_permission("country.read")),
+    _current_user: CurrentUser = Depends(require_permission("country.view")),
 ) -> dict:
     """List countrys, with search/sort/filter/pagination."""
     countrys, total = await service.list_paginated(query)
@@ -133,7 +133,7 @@ async def export_countrys(
     request: Request,
     format: str = "csv",
     service: CountryService = Depends(get_country_service),
-    current_user: CurrentUser = Depends(require_permission("country.read")),
+    current_user: CurrentUser = Depends(require_permission("country.export")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> Response:
     """Export every country as a CSV or XLSX file."""
@@ -156,7 +156,7 @@ async def import_countrys(
     request: Request,
     file: UploadFile = File(...),
     service: CountryService = Depends(get_country_service),
-    current_user: CurrentUser = Depends(require_permission("country.create")),
+    current_user: CurrentUser = Depends(require_permission("country.import")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     """Import countrys from an uploaded CSV/XLSX file, validating every row."""
@@ -177,7 +177,7 @@ async def get_country(
     country_id: uuid.UUID,
     request: Request,
     service: CountryService = Depends(get_country_service),
-    _current_user: CurrentUser = Depends(require_permission("country.read")),
+    _current_user: CurrentUser = Depends(require_permission("country.view")),
 ) -> dict:
     """Fetch a single country by ID."""
     country = await service.get_by_id_or_raise(country_id)

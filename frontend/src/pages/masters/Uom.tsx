@@ -13,6 +13,8 @@ export function UomPage() {
       activeKey="masters-uom"
       apiBase="/masters/uom"
       permissionPrefix="uom"
+      exportPermission="uom.export"
+      bulkActionPermission="uom.bulk_action"
       liveModule="uom"
       entityName="unit of measurement"
       heading="Units of Measurement"

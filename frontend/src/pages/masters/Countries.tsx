@@ -20,6 +20,8 @@ export function CountriesPage() {
       activeKey="masters-countries"
       apiBase="/masters/countries"
       permissionPrefix="country"
+      exportPermission="country.export"
+      bulkActionPermission="country.bulk_action"
       liveModule="countries"
       entityName="country"
       heading="Countries (National Level)"

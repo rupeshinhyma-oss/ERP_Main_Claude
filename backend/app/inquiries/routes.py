@@ -28,6 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.audit.constants import AuditAction
 from app.audit.dependencies import get_audit_service
 from app.audit.service import AuditService
+from app.auth.dependencies import get_current_user
 from app.auth.service import CurrentUser
 from app.core.responses import build_success_response
 from app.database.session import get_db_session
@@ -48,7 +49,6 @@ from app.inquiries.schemas import (
     InquiryRead,
 )
 from app.inquiries.service import InquiryService
-from app.rbac.dependencies import require_permission
 
 router = APIRouter(prefix="/inquiries", tags=["Inquiries"])
 
@@ -125,7 +125,7 @@ async def create_consignment_code(
     payload: ConsignmentCodeCreate,
     request: Request,
     service: InquiryService = Depends(get_inquiry_service),
-    current_user: CurrentUser = Depends(require_permission("inquiry.consignment_code.manage")),
+    current_user: CurrentUser = Depends(get_current_user),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     """Document: "Master to create and choose from dropdown menu"."""
@@ -150,7 +150,7 @@ async def list_consignment_codes(
     request: Request,
     buyer_id: uuid.UUID | None = None,
     service: InquiryService = Depends(get_inquiry_service),
-    _current_user: CurrentUser = Depends(require_permission("inquiry.read")),
+    _current_user: CurrentUser = Depends(get_current_user),
 ) -> dict:
     """
     List consignment codes, optionally scoped to one buyer (for the create-inquiry dropdown).
@@ -165,7 +165,7 @@ async def deactivate_consignment_code(
     consignment_code_id: uuid.UUID,
     request: Request,
     service: InquiryService = Depends(get_inquiry_service),
-    current_user: CurrentUser = Depends(require_permission("inquiry.consignment_code.manage")),
+    current_user: CurrentUser = Depends(get_current_user),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     code = await service.deactivate_consignment_code(consignment_code_id)
@@ -190,7 +190,7 @@ async def deactivate_consignment_code(
 async def list_companies_summary(
     request: Request,
     service: InquiryService = Depends(get_inquiry_service),
-    _current_user: CurrentUser = Depends(require_permission("inquiry.read")),
+    _current_user: CurrentUser = Depends(get_current_user),
 ) -> dict:
     """Document: "1st layer summary is company wise (for example, F&B, One Stop, Inhyma etc)"."""
     summaries = await service.list_companies_summary()
@@ -203,7 +203,7 @@ async def list_consignments_for_buyer(
     buyer_id: uuid.UUID,
     request: Request,
     service: InquiryService = Depends(get_inquiry_service),
-    _current_user: CurrentUser = Depends(require_permission("inquiry.read")),
+    _current_user: CurrentUser = Depends(get_current_user),
 ) -> dict:
     """Document: "once we click company, then it opens ... with all columns" (FB1, FB2, ...)."""
     inquiries = await service.list_consignments_for_buyer(buyer_id)
@@ -216,7 +216,7 @@ async def delete_consignment(
     inquiry_id: uuid.UUID,
     request: Request,
     service: InquiryService = Depends(get_inquiry_service),
-    current_user: CurrentUser = Depends(require_permission("inquiry.delete")),
+    current_user: CurrentUser = Depends(get_current_user),
     audit_service: AuditService = Depends(get_audit_service),
     db: AsyncSession = Depends(get_db_session),
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
@@ -252,7 +252,7 @@ async def create_item(
     payload: InquiryItemCreate,
     request: Request,
     service: InquiryService = Depends(get_inquiry_service),
-    current_user: CurrentUser = Depends(require_permission("inquiry.create")),
+    current_user: CurrentUser = Depends(get_current_user),
     audit_service: AuditService = Depends(get_audit_service),
     db: AsyncSession = Depends(get_db_session),
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
@@ -300,7 +300,7 @@ async def list_items(
     inquiry_id: uuid.UUID,
     request: Request,
     service: InquiryService = Depends(get_inquiry_service),
-    _current_user: CurrentUser = Depends(require_permission("inquiry.read")),
+    _current_user: CurrentUser = Depends(get_current_user),
 ) -> dict:
     """Document: "go inside and see all items of that consignment with details"."""
     items = await service.list_items(inquiry_id)
@@ -313,7 +313,7 @@ async def get_inquiry(
     inquiry_id: uuid.UUID,
     request: Request,
     service: InquiryService = Depends(get_inquiry_service),
-    _current_user: CurrentUser = Depends(require_permission("inquiry.read")),
+    _current_user: CurrentUser = Depends(get_current_user),
 ) -> dict:
     inquiry = await service.get_inquiry_or_raise(inquiry_id)
     items = await service.list_items(inquiry_id)
@@ -329,7 +329,7 @@ async def update_item(
     payload: InquiryItemUpdate,
     request: Request,
     service: InquiryService = Depends(get_inquiry_service),
-    current_user: CurrentUser = Depends(require_permission("inquiry.update")),
+    current_user: CurrentUser = Depends(get_current_user),
     audit_service: AuditService = Depends(get_audit_service),
     db: AsyncSession = Depends(get_db_session),
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
@@ -364,7 +364,7 @@ async def shift_item(
     payload: InquiryItemShift,
     request: Request,
     service: InquiryService = Depends(get_inquiry_service),
-    current_user: CurrentUser = Depends(require_permission("inquiry.update")),
+    current_user: CurrentUser = Depends(get_current_user),
     audit_service: AuditService = Depends(get_audit_service),
     db: AsyncSession = Depends(get_db_session),
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
@@ -399,7 +399,7 @@ async def approve_item(
     item_id: uuid.UUID,
     request: Request,
     service: InquiryService = Depends(get_inquiry_service),
-    current_user: CurrentUser = Depends(require_permission("inquiry.approve")),
+    current_user: CurrentUser = Depends(get_current_user),
     audit_service: AuditService = Depends(get_audit_service),
     db: AsyncSession = Depends(get_db_session),
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
@@ -432,7 +432,7 @@ async def revert_item(
     item_id: uuid.UUID,
     request: Request,
     service: InquiryService = Depends(get_inquiry_service),
-    current_user: CurrentUser = Depends(require_permission("inquiry.approve")),
+    current_user: CurrentUser = Depends(get_current_user),
     audit_service: AuditService = Depends(get_audit_service),
     db: AsyncSession = Depends(get_db_session),
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
@@ -465,7 +465,7 @@ async def set_procurement_remarks(
     payload: InquiryItemProcurementRemarksUpdate,
     request: Request,
     service: InquiryService = Depends(get_inquiry_service),
-    current_user: CurrentUser = Depends(require_permission("inquiry.update")),
+    current_user: CurrentUser = Depends(get_current_user),
     audit_service: AuditService = Depends(get_audit_service),
     db: AsyncSession = Depends(get_db_session),
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
@@ -499,7 +499,7 @@ async def delete_item(
     item_id: uuid.UUID,
     request: Request,
     service: InquiryService = Depends(get_inquiry_service),
-    current_user: CurrentUser = Depends(require_permission("inquiry.delete")),
+    current_user: CurrentUser = Depends(get_current_user),
     audit_service: AuditService = Depends(get_audit_service),
     db: AsyncSession = Depends(get_db_session),
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
@@ -534,7 +534,7 @@ async def bulk_mark_tally_posted(
     payload: BulkTallyPostRequest,
     request: Request,
     service: InquiryService = Depends(get_inquiry_service),
-    current_user: CurrentUser = Depends(require_permission("inquiry.update")),
+    current_user: CurrentUser = Depends(get_current_user),
     audit_service: AuditService = Depends(get_audit_service),
     db: AsyncSession = Depends(get_db_session),
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),

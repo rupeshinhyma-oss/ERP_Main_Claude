@@ -119,7 +119,7 @@ async def list_hsns(
     request: Request,
     query: ListQueryParams = Depends(get_list_query_params),
     service: HsnService = Depends(get_hsn_service),
-    _current_user: CurrentUser = Depends(require_permission("hsn.read")),
+    _current_user: CurrentUser = Depends(require_permission("hsn.view")),
 ) -> dict:
     """List hsns, with search/sort/filter/pagination."""
     hsns, total = await service.list_paginated(query)
@@ -133,7 +133,7 @@ async def export_hsns(
     request: Request,
     format: str = "csv",
     service: HsnService = Depends(get_hsn_service),
-    current_user: CurrentUser = Depends(require_permission("hsn.read")),
+    current_user: CurrentUser = Depends(require_permission("hsn.export")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> Response:
     """Export every hsn as a CSV or XLSX file."""
@@ -156,7 +156,7 @@ async def import_hsns(
     request: Request,
     file: UploadFile = File(...),
     service: HsnService = Depends(get_hsn_service),
-    current_user: CurrentUser = Depends(require_permission("hsn.create")),
+    current_user: CurrentUser = Depends(require_permission("hsn.import")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     """Import hsns from an uploaded CSV/XLSX file, validating every row."""
@@ -177,7 +177,7 @@ async def get_hsn(
     hsn_id: uuid.UUID,
     request: Request,
     service: HsnService = Depends(get_hsn_service),
-    _current_user: CurrentUser = Depends(require_permission("hsn.read")),
+    _current_user: CurrentUser = Depends(require_permission("hsn.view")),
 ) -> dict:
     """Fetch a single hsn by ID."""
     hsn = await service.get_by_id_or_raise(hsn_id)

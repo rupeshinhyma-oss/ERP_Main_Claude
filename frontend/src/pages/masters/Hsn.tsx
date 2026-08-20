@@ -19,6 +19,8 @@ export function HsnPage() {
       activeKey="masters-hsn"
       apiBase="/masters/hsn"
       permissionPrefix="hsn"
+      exportPermission="hsn.export"
+      bulkActionPermission="hsn.bulk_action"
       liveModule="hsn"
       entityName="HSN code"
       heading="HSN Codes"

@@ -119,7 +119,7 @@ async def list_states(
     request: Request,
     query: ListQueryParams = Depends(get_list_query_params),
     service: StateService = Depends(get_state_service),
-    _current_user: CurrentUser = Depends(require_permission("state.read")),
+    _current_user: CurrentUser = Depends(require_permission("state.view")),
 ) -> dict:
     """List states, with search/sort/filter/pagination."""
     states, total = await service.list_paginated(query)
@@ -133,7 +133,7 @@ async def export_states(
     request: Request,
     format: str = "csv",
     service: StateService = Depends(get_state_service),
-    current_user: CurrentUser = Depends(require_permission("state.read")),
+    current_user: CurrentUser = Depends(require_permission("state.export")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> Response:
     """Export every state as a CSV or XLSX file."""
@@ -156,7 +156,7 @@ async def import_states(
     request: Request,
     file: UploadFile = File(...),
     service: StateService = Depends(get_state_service),
-    current_user: CurrentUser = Depends(require_permission("state.create")),
+    current_user: CurrentUser = Depends(require_permission("state.import")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     """Import states from an uploaded CSV/XLSX file, validating every row."""
@@ -177,7 +177,7 @@ async def get_state(
     state_id: uuid.UUID,
     request: Request,
     service: StateService = Depends(get_state_service),
-    _current_user: CurrentUser = Depends(require_permission("state.read")),
+    _current_user: CurrentUser = Depends(require_permission("state.view")),
 ) -> dict:
     """Fetch a single state by ID."""
     state = await service.get_by_id_or_raise(state_id)

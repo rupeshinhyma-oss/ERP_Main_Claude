@@ -3021,12 +3021,37 @@ class PlanningService:
         value: str | None,
         user_id: uuid.UUID,
         username: str,
+        user_permissions: "frozenset[str] | set[str] | None" = None,
     ) -> PlanningCell:
         row = await self._get_row_or_raise(sheet_id, row_id)
         column = await self._get_column_or_raise(sheet_id, column_id)
         if column.is_locked:
             raise ForbiddenException(f"Column '{column.name}' is locked and cannot be edited directly.")
         await self.check_column_role_lock(column_id, user_id=user_id)
+
+        # Two of the sheet's default columns -- TEST(Y/N) and APPROVAL DATE --
+        # each have their OWN, fully independent permission, with ZERO
+        # dependency on the general planning.cell.edit. planning.cell.edit
+        # itself means editing Mum group value cells and their Remarks cells,
+        # or can act as an administrative super-permission for cell edits.
+        col_name_check = column.name.strip().lower()
+        is_test_yn_column = col_name_check.startswith("test") or ("test" in col_name_check and "y/n" in col_name_check)
+        is_approval_date_column = col_name_check in ("approval date", "approval_date") or "approval" in col_name_check
+
+        if user_permissions is not None:
+            if is_test_yn_column:
+                if "planning.textyn.edit" not in user_permissions and "planning.cell.edit" not in user_permissions:
+                    raise ForbiddenException("This action requires the 'planning.textyn.edit' permission.")
+            elif is_approval_date_column:
+                if "planning.approvaldate.edit" not in user_permissions and "planning.cell.edit" not in user_permissions:
+                    raise ForbiddenException("This action requires the 'planning.approvaldate.edit' permission.")
+            else:
+                # Every other column -- the Mum group value cells and their
+                # Remarks cells -- is what planning.cell.edit actually means.
+                # A user holding only planning.textyn.edit and/or
+                # planning.approvaldate.edit must NOT be able to edit these.
+                if "planning.cell.edit" not in user_permissions:
+                    raise ForbiddenException("This action requires the 'planning.cell.edit' permission.")
 
         mum_label = await self._get_mum_group_label(sheet_id)
 
@@ -3056,7 +3081,7 @@ class PlanningService:
 
         cell = await self.cell_repository.get_by_row_and_column(row_id, column_id)
         col_name_cleaned = column.name.strip().lower()
-        if col_name_cleaned.startswith("test") and "y/n" in col_name_cleaned:
+        if col_name_cleaned.startswith("test") and ("y/n" in col_name_cleaned or "(y/n)" in col_name_cleaned or col_name_cleaned == "test"):
             if value is not None and value.strip():
                 val_upper = value.strip().upper()
                 if val_upper not in ("Y", "N"):
@@ -3110,8 +3135,10 @@ class PlanningService:
                             custom_status_tag_id=None,
                             user_id=user_id,
                             username=username,
+                            user_permissions=user_permissions,
+                            check_permissions=False,
                         )
-                    except BadRequestException:
+                    except (BadRequestException, ForbiddenException):
                         pass
                     mum_num = mum_num_from_column_name(column.name, label=mum_label)
                     sibling_columns = await self.column_repository.list_for_sheet(sheet_id)
@@ -3148,22 +3175,27 @@ class PlanningService:
                                 custom_status_tag_id=None,
                                 user_id=user_id,
                                 username=username,
+                                user_permissions=user_permissions,
+                                check_permissions=False,
                             )
-                        except BadRequestException:
+                        except (BadRequestException, ForbiddenException):
                             pass
             elif value is not None and value.strip() and column.enable_status_color and not cell.status_color:
-                try:
-                    cell = await self.set_cell_status(
-                        sheet_id,
-                        row_id,
-                        column_id,
-                        status_color=PlanningCellStatusColor.BLUE_ORDERED,
-                        custom_status_tag_id=None,
-                        user_id=user_id,
-                        username=username,
-                    )
-                except BadRequestException:
-                    pass
+                if not is_test_yn_column and not is_approval_date_column:
+                    try:
+                        cell = await self.set_cell_status(
+                            sheet_id,
+                            row_id,
+                            column_id,
+                            status_color=PlanningCellStatusColor.BLUE_ORDERED,
+                            custom_status_tag_id=None,
+                            user_id=user_id,
+                            username=username,
+                            user_permissions=user_permissions,
+                            check_permissions=False,
+                        )
+                    except (BadRequestException, ForbiddenException):
+                        pass
 
             await self.recompute_and_store_row(sheet_id, row_id)
         return cell
@@ -3178,6 +3210,8 @@ class PlanningService:
         custom_status_tag_id: uuid.UUID | None,
         user_id: uuid.UUID,
         username: str,
+        user_permissions: "frozenset[str] | set[str] | None" = None,
+        check_permissions: bool = True,
     ) -> PlanningCell:
         """
         Attach/clear a CRM-style status tag on any cell (admin's choice of cell, not restricted to a fixed column).
@@ -3188,7 +3222,26 @@ class PlanningService:
         """
         row = await self._get_row_or_raise(sheet_id, row_id)
         column = await self._get_column_or_raise(sheet_id, column_id)
-        await self.check_column_role_lock(column_id, user_id=user_id)
+
+        if check_permissions:
+            await self.check_column_role_lock(column_id, user_id=user_id)
+
+            # Red and Green each have their OWN, fully independent permission,
+            # with ZERO dependency on the general planning.cell.edit. Blue,
+            # CUSTOM, and clearing a status (status_color=None) are what
+            # planning.cell.edit governs -- only Red/Green were split into their
+            # own standalone permissions.
+            if user_permissions is not None:
+                if status_color == PlanningCellStatusColor.RED_REQUIREMENT:
+                    if "planning.colorstatusred.edit" not in user_permissions:
+                        raise ForbiddenException("This action requires the 'planning.colorstatusred.edit' permission.")
+                elif status_color == PlanningCellStatusColor.GREEN_PURCHASED:
+                    if "planning.colorstatusgreen.edit" not in user_permissions:
+                        raise ForbiddenException("This action requires the 'planning.colorstatusgreen.edit' permission.")
+                else:
+                    # Blue, CUSTOM, or clearing the tag entirely (status_color=None).
+                    if "planning.cell.edit" not in user_permissions:
+                        raise ForbiddenException("This action requires the 'planning.cell.edit' permission.")
 
         mum_label = await self._get_mum_group_label(sheet_id)
         is_mum_col = _is_pure_mum_column(column.name, label=mum_label)
@@ -3211,6 +3264,23 @@ class PlanningService:
             custom_status_tag_id = None
 
         cell = await self.cell_repository.get_by_row_and_column(row_id, column_id)
+
+        if status_color is not None:
+            has_active_value = False
+            if cell is not None and cell.value is not None and cell.value.strip():
+                val_str = cell.value.strip()
+                if val_str != "0":
+                    try:
+                        num_val = float(val_str)
+                        if num_val > 0:
+                            has_active_value = True
+                    except ValueError:
+                        has_active_value = True
+            if not has_active_value:
+                raise BadRequestException(
+                    f"Cannot set a status color for '{column.name}' because this cell has no quantity or value entered."
+                )
+
         old_status = cell.status_color.value if (cell and cell.status_color) else None
         new_status = status_color.value if status_color else None
 

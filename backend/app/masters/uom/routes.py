@@ -119,7 +119,7 @@ async def list_uoms(
     request: Request,
     query: ListQueryParams = Depends(get_list_query_params),
     service: UomService = Depends(get_uom_service),
-    _current_user: CurrentUser = Depends(require_permission("uom.read")),
+    _current_user: CurrentUser = Depends(require_permission("uom.view")),
 ) -> dict:
     """List uoms, with search/sort/filter/pagination."""
     uoms, total = await service.list_paginated(query)
@@ -133,7 +133,7 @@ async def export_uoms(
     request: Request,
     format: str = "csv",
     service: UomService = Depends(get_uom_service),
-    current_user: CurrentUser = Depends(require_permission("uom.read")),
+    current_user: CurrentUser = Depends(require_permission("uom.export")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> Response:
     """Export every uom as a CSV or XLSX file."""
@@ -156,7 +156,7 @@ async def import_uoms(
     request: Request,
     file: UploadFile = File(...),
     service: UomService = Depends(get_uom_service),
-    current_user: CurrentUser = Depends(require_permission("uom.create")),
+    current_user: CurrentUser = Depends(require_permission("uom.import")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     """Import uoms from an uploaded CSV/XLSX file, validating every row."""
@@ -177,7 +177,7 @@ async def get_uom(
     uom_id: uuid.UUID,
     request: Request,
     service: UomService = Depends(get_uom_service),
-    _current_user: CurrentUser = Depends(require_permission("uom.read")),
+    _current_user: CurrentUser = Depends(require_permission("uom.view")),
 ) -> dict:
     """Fetch a single uom by ID."""
     uom = await service.get_by_id_or_raise(uom_id)

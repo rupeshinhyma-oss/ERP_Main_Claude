@@ -19,13 +19,13 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Request
 
+from app.auth.dependencies import get_current_user
 from app.auth.service import CurrentUser
 from app.cache.base import CacheBackend
 from app.cache.dependency import get_cache
 from app.cache.in_memory import InMemoryCacheBackend
 from app.core.exceptions import BadRequestException, NotFoundException
 from app.core.responses import build_success_response
-from app.rbac.dependencies import require_permission
 
 router = APIRouter(prefix="/cache", tags=["Cache (admin)"])
 
@@ -51,7 +51,7 @@ def _require_in_memory_backend(cache: CacheBackend) -> InMemoryCacheBackend:
 async def get_cache_stats(
     request: Request,
     cache: CacheBackend = Depends(get_cache),
-    _current_user: CurrentUser = Depends(require_permission("settings.manage")),
+    _current_user: CurrentUser = Depends(get_current_user),
 ) -> dict:
     """Return hit/miss counters, current item count, and estimated memory usage."""
     backend = _require_in_memory_backend(cache)
@@ -62,7 +62,7 @@ async def get_cache_stats(
 async def list_cache_keys(
     request: Request,
     cache: CacheBackend = Depends(get_cache),
-    _current_user: CurrentUser = Depends(require_permission("settings.manage")),
+    _current_user: CurrentUser = Depends(get_current_user),
 ) -> dict:
     """List every currently non-expired key in the cache. A debugging/inspection aid."""
     backend = _require_in_memory_backend(cache)
@@ -76,7 +76,7 @@ async def inspect_cache_key(
     key: str,
     request: Request,
     cache: CacheBackend = Depends(get_cache),
-    _current_user: CurrentUser = Depends(require_permission("settings.manage")),
+    _current_user: CurrentUser = Depends(get_current_user),
 ) -> dict:
     """Return TTL/size metadata for one key, without exposing its cached value."""
     backend = _require_in_memory_backend(cache)
@@ -90,7 +90,7 @@ async def inspect_cache_key(
 async def flush_cache(
     request: Request,
     cache: CacheBackend = Depends(get_cache),
-    _current_user: CurrentUser = Depends(require_permission("settings.manage")),
+    _current_user: CurrentUser = Depends(get_current_user),
 ) -> dict:
     """
     Clear every entry from the cache and reset statistics.
@@ -109,7 +109,7 @@ async def flush_cache_namespace(
     name: str,
     request: Request,
     cache: CacheBackend = Depends(get_cache),
-    _current_user: CurrentUser = Depends(require_permission("settings.manage")),
+    _current_user: CurrentUser = Depends(get_current_user),
 ) -> dict:
     """
     Clear every key belonging to a single namespace (e.g. ``permissions``, ``departments``).

@@ -13,6 +13,8 @@ export function CurrenciesPage() {
       activeKey="masters-currencies"
       apiBase="/masters/currencies"
       permissionPrefix="currency"
+      exportPermission="currency.export"
+      bulkActionPermission="currency.bulk_action"
       liveModule="currencies"
       entityName="currency"
       heading="Currencies"

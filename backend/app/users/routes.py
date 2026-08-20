@@ -176,7 +176,7 @@ async def list_users(
     user_service: UserService = Depends(get_user_service),
     rbac_service: RBACService = Depends(get_rbac_service),
     db: AsyncSession = Depends(get_db_session),
-    _current_user: CurrentUser = Depends(require_permission("user.read")),
+    _current_user: CurrentUser = Depends(require_permission("user.view")),
 ) -> dict:
     """List users, paginated, with optional query and status search filters."""
     users, total = await user_service.list_users(
@@ -213,7 +213,7 @@ async def get_user(
     user_service: UserService = Depends(get_user_service),
     rbac_service: RBACService = Depends(get_rbac_service),
     db: AsyncSession = Depends(get_db_session),
-    _current_user: CurrentUser = Depends(require_permission("user.read")),
+    _current_user: CurrentUser = Depends(require_permission("user.view")),
 ) -> dict:
     """Fetch a single user, with assigned role names expanded."""
     user = await user_service.get_by_id_or_raise(user_id)
@@ -452,7 +452,7 @@ async def view_sessions(
     user_id: uuid.UUID,
     request: Request,
     user_service: UserService = Depends(get_user_service),
-    _current_user: CurrentUser = Depends(require_permission("user.read")),
+    _current_user: CurrentUser = Depends(require_permission("user.view")),
 ) -> dict:
     """List a user's currently active login sessions (device, IP, timestamps)."""
     sessions = await user_service.view_active_sessions(user_id)

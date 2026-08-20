@@ -119,7 +119,7 @@ async def list_currencys(
     request: Request,
     query: ListQueryParams = Depends(get_list_query_params),
     service: CurrencyService = Depends(get_currency_service),
-    _current_user: CurrentUser = Depends(require_permission("currency.read")),
+    _current_user: CurrentUser = Depends(require_permission("currency.view")),
 ) -> dict:
     """List currencys, with search/sort/filter/pagination."""
     currencys, total = await service.list_paginated(query)
@@ -133,7 +133,7 @@ async def export_currencys(
     request: Request,
     format: str = "csv",
     service: CurrencyService = Depends(get_currency_service),
-    current_user: CurrentUser = Depends(require_permission("currency.read")),
+    current_user: CurrentUser = Depends(require_permission("currency.export")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> Response:
     """Export every currency as a CSV or XLSX file."""
@@ -156,7 +156,7 @@ async def import_currencys(
     request: Request,
     file: UploadFile = File(...),
     service: CurrencyService = Depends(get_currency_service),
-    current_user: CurrentUser = Depends(require_permission("currency.create")),
+    current_user: CurrentUser = Depends(require_permission("currency.import")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     """Import currencys from an uploaded CSV/XLSX file, validating every row."""
@@ -177,7 +177,7 @@ async def get_currency(
     currency_id: uuid.UUID,
     request: Request,
     service: CurrencyService = Depends(get_currency_service),
-    _current_user: CurrentUser = Depends(require_permission("currency.read")),
+    _current_user: CurrentUser = Depends(require_permission("currency.view")),
 ) -> dict:
     """Fetch a single currency by ID."""
     currency = await service.get_by_id_or_raise(currency_id)

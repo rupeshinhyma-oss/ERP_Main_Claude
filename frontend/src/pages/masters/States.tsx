@@ -19,6 +19,8 @@ export function StatesPage() {
       activeKey="masters-states"
       apiBase="/masters/states"
       permissionPrefix="state"
+      exportPermission="state.export"
+      bulkActionPermission="state.bulk_action"
       liveModule="states"
       entityName="state"
       heading="Provinces (First Level Divisions)"

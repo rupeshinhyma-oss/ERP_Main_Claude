@@ -104,41 +104,17 @@ export const Auth = {
     const perms = profile.permissions;
     if (perms.includes(code)) return true;
 
-    // Check alias mapping (view <-> read)
-    if (code.endsWith(".view")) {
-      const readAlias = code.replace(/\.view$/, ".read");
-      if (perms.includes(readAlias)) return true;
-    } else if (code.endsWith(".read")) {
-      const viewAlias = code.replace(/\.read$/, ".view");
+    // Check export fallback to view
+    if (code.endsWith(".export")) {
+      const viewAlias = code.replace(/\.export$/, ".view");
       if (perms.includes(viewAlias)) return true;
     }
-
-    // Check export & import alias fallbacks
-    if (code.endsWith(".export")) {
-      const readAlias = code.replace(/\.export$/, ".read");
-      const viewAlias = code.replace(/\.export$/, ".view");
-      if (perms.includes(readAlias) || perms.includes(viewAlias)) return true;
-    }
+    // Check import fallback to create
     if (code.endsWith(".import")) {
       const createAlias = code.replace(/\.import$/, ".create");
       if (perms.includes(createAlias)) return true;
     }
 
-    // Check employee <-> user module alias fallback
-    if (code.startsWith("employee.")) {
-      const userAlias = code.replace(/^employee\./, "user.");
-      if (perms.includes(userAlias)) return true;
-    } else if (code.startsWith("user.")) {
-      const empAlias = code.replace(/^user\./, "employee.");
-      if (perms.includes(empAlias)) return true;
-    }
-
-    // Hierarchical or module fallback (e.g. masters.brand.create -> brand.create)
-    const parts = code.split(".");
-    if (parts.length > 2) {
-      const shortCode = parts.slice(1).join(".");
-      if (perms.includes(shortCode)) return true;
-    }
     return false;
   },
 

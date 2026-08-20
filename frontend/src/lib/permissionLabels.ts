@@ -18,7 +18,6 @@ export const MODULE_NAMES: Record<string, string> = {
   buyertype: "Buyer Types",
   supplier: "Suppliers",
   suppliertype: "Supplier Types",
-  inquiry: "Proforma & Inquiries",
   planning: "Shipment Planning",
   product: "Products Master",
   category: "Categories",
@@ -33,9 +32,6 @@ export const MODULE_NAMES: Record<string, string> = {
   user: "Users & Accounts",
   organization: "Organizations",
   audit: "System Audit Logs",
-  settings: "System Settings",
-  rbac: "Roles & Permissions",
-  crm: "Commercial (Buyers & Inquiries)",
 };
 
 const ACTION_LABELS: Record<string, string> = {
@@ -53,8 +49,22 @@ const ACTION_LABELS: Record<string, string> = {
   potential_edit: "Edit Potential",
 };
 
+/**
+ * A few permission codes have three dot-segments (e.g. "planning.textyn.edit")
+ * where the generic last-segment splitter in friendlyPermissionLabel would
+ * collapse them all down to the same unhelpful "Edit" label. These are
+ * special-cased by their exact, full code instead.
+ */
+const FULL_CODE_LABELS: Record<string, string> = {
+  "planning.textyn.edit": "Edit TEST(Y/N) Column",
+  "planning.approvaldate.edit": "Edit APPROVAL DATE Column",
+  "planning.colorstatusred.edit": "Set Status: Red",
+  "planning.colorstatusgreen.edit": "Set Status: Green",
+};
+
 /** "product.create" -> "Create"; unknown actions fall back to the raw code. */
 export function friendlyPermissionLabel(code: string): string {
+  if (FULL_CODE_LABELS[code]) return FULL_CODE_LABELS[code];
   const parts = code.split(".");
   const action = parts[parts.length - 1];
   return ACTION_LABELS[action] || parts.slice(1).join(" ") || code;

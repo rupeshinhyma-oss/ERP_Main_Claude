@@ -308,3 +308,281 @@ async def test_clearing_mum_column_clears_approval_date_when_no_active_numbers()
     appr_dates = await service.get_mum_group_approval_dates_for_row(sheet_id, row_id)
     assert appr_dates == {}
 
+
+@pytest.mark.asyncio
+async def test_textyn_permission_allows_editing_test_column_without_planning_cell_edit():
+    """A user holding only planning.textyn.edit can edit TEST(Y/N) without having planning.cell.edit."""
+    from app.core.exceptions import ForbiddenException
+
+    sheet_id = uuid.uuid4()
+    row_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    col_test_id = uuid.uuid4()
+    col_mum_id = uuid.uuid4()
+
+    mock_sheet = PlanningSheet(id=sheet_id, name="Mumbai", mum_group_label="Mumdarsh")
+    col_test = PlanningColumn(
+        id=col_test_id, sheet_id=sheet_id, name="TEST(Y/N)", position=1,
+        data_type=PlanningColumnDataType.TEXT, source_type=PlanningColumnSourceType.MANUAL,
+        is_locked=False, enable_status_color=False
+    )
+    col_mum = PlanningColumn(
+        id=col_mum_id, sheet_id=sheet_id, name="Mumdarsh 1", position=3,
+        data_type=PlanningColumnDataType.NUMBER, source_type=PlanningColumnSourceType.MANUAL,
+        is_locked=False, enable_status_color=True
+    )
+    mock_row = PlanningRow(id=row_id, sheet_id=sheet_id, label="Item Test", position=0)
+
+    cell_test = PlanningCell(id=uuid.uuid4(), row_id=row_id, column_id=col_test_id, value=None)
+    cell_mum = PlanningCell(id=uuid.uuid4(), row_id=row_id, column_id=col_mum_id, value=None)
+
+    mock_sheet_repo = AsyncMock()
+    mock_sheet_repo.get_by_id.return_value = mock_sheet
+    mock_col_repo = AsyncMock()
+    mock_col_repo.get_by_id.side_effect = lambda cid: col_test if cid == col_test_id else col_mum
+    mock_col_repo.list_for_sheet.return_value = [col_test, col_mum]
+    mock_row_repo = AsyncMock()
+    mock_row_repo.get_by_id.return_value = mock_row
+
+    mock_cell_repo = AsyncMock()
+    mock_cell_repo.get_by_row_and_column.side_effect = lambda r, c: cell_test if c == col_test_id else cell_mum
+
+    async def update_cell(c, **kwargs):
+        for k, v in kwargs.items():
+            setattr(c, k, v)
+        return c
+
+    mock_cell_repo.update.side_effect = update_cell
+    mock_cell_repo.list_for_rows.return_value = [cell_test, cell_mum]
+
+    service = PlanningService(
+        sheet_repository=mock_sheet_repo,
+        row_repository=mock_row_repo,
+        column_repository=mock_col_repo,
+        cell_repository=mock_cell_repo,
+        status_tag_repository=AsyncMock(),
+        change_log_repository=AsyncMock(),
+        audit_service=AsyncMock(),
+        column_role_lock_repository=AsyncMock(),
+    )
+
+    # 1. User with only planning.textyn.edit CAN edit TEST(Y/N)
+    user_perms = frozenset(["planning.textyn.edit", "planning.view"])
+    updated = await service.set_cell_value(
+        sheet_id, row_id, col_test_id, value="Y", user_id=user_id, username="planner",
+        user_permissions=user_perms
+    )
+    assert updated.value == "Y"
+
+    # 2. User with only planning.textyn.edit CANNOT edit Mumdarsh 1
+    with pytest.raises(ForbiddenException) as exc_info:
+        await service.set_cell_value(
+            sheet_id, row_id, col_mum_id, value="50", user_id=user_id, username="planner",
+            user_permissions=user_perms
+        )
+    assert "planning.cell.edit" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_approvaldate_permission_allows_editing_approval_date_without_planning_cell_edit():
+    """A user holding only planning.approvaldate.edit can edit APPROVAL DATE without having planning.cell.edit."""
+    from app.core.exceptions import ForbiddenException
+
+    sheet_id = uuid.uuid4()
+    row_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    col_appr_id = uuid.uuid4()
+    col_mum_id = uuid.uuid4()
+
+    mock_sheet = PlanningSheet(id=sheet_id, name="Mumbai", mum_group_label="Mumdarsh")
+    col_appr = PlanningColumn(
+        id=col_appr_id, sheet_id=sheet_id, name="APPROVAL DATE", position=2,
+        data_type=PlanningColumnDataType.DATE, source_type=PlanningColumnSourceType.MANUAL,
+        is_locked=False, enable_status_color=False
+    )
+    col_mum = PlanningColumn(
+        id=col_mum_id, sheet_id=sheet_id, name="Mumdarsh 1", position=3,
+        data_type=PlanningColumnDataType.NUMBER, source_type=PlanningColumnSourceType.MANUAL,
+        is_locked=False, enable_status_color=True
+    )
+    mock_row = PlanningRow(id=row_id, sheet_id=sheet_id, label="Item Appr", position=0)
+
+    cell_appr = PlanningCell(id=uuid.uuid4(), row_id=row_id, column_id=col_appr_id, value=None)
+    cell_mum = PlanningCell(id=uuid.uuid4(), row_id=row_id, column_id=col_mum_id, value=None)
+
+    mock_sheet_repo = AsyncMock()
+    mock_sheet_repo.get_by_id.return_value = mock_sheet
+    mock_col_repo = AsyncMock()
+    mock_col_repo.get_by_id.side_effect = lambda cid: col_appr if cid == col_appr_id else col_mum
+    mock_col_repo.list_for_sheet.return_value = [col_appr, col_mum]
+    mock_row_repo = AsyncMock()
+    mock_row_repo.get_by_id.return_value = mock_row
+
+    mock_cell_repo = AsyncMock()
+    mock_cell_repo.get_by_row_and_column.side_effect = lambda r, c: cell_appr if c == col_appr_id else cell_mum
+
+    async def update_cell(c, **kwargs):
+        for k, v in kwargs.items():
+            setattr(c, k, v)
+        return c
+
+    mock_cell_repo.update.side_effect = update_cell
+    mock_cell_repo.list_for_rows.return_value = [cell_appr, cell_mum]
+
+    service = PlanningService(
+        sheet_repository=mock_sheet_repo,
+        row_repository=mock_row_repo,
+        column_repository=mock_col_repo,
+        cell_repository=mock_cell_repo,
+        status_tag_repository=AsyncMock(),
+        change_log_repository=AsyncMock(),
+        audit_service=AsyncMock(),
+        column_role_lock_repository=AsyncMock(),
+    )
+
+    # 1. User with only planning.approvaldate.edit CAN edit APPROVAL DATE
+    user_perms = frozenset(["planning.approvaldate.edit", "planning.view"])
+    updated = await service.set_cell_value(
+        sheet_id, row_id, col_appr_id, value="20/08/2026", user_id=user_id, username="date_planner",
+        user_permissions=user_perms
+    )
+    assert updated.value == "20/08/2026"
+
+    # 2. User with only planning.approvaldate.edit CANNOT edit Mumdarsh 1
+    with pytest.raises(ForbiddenException) as exc_info:
+        await service.set_cell_value(
+            sheet_id, row_id, col_mum_id, value="50", user_id=user_id, username="date_planner",
+            user_permissions=user_perms
+        )
+    assert "planning.cell.edit" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_status_color_permission_isolation():
+    """Red and Green status colors require their specific permissions and are independent of planning.cell.edit."""
+    from app.core.exceptions import ForbiddenException
+
+    sheet_id = uuid.uuid4()
+    row_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    col_mum_id = uuid.uuid4()
+
+    mock_sheet = PlanningSheet(id=sheet_id, name="Mumbai", mum_group_label="Mumdarsh")
+    col_mum = PlanningColumn(
+        id=col_mum_id, sheet_id=sheet_id, name="Mumdarsh 1", position=3,
+        data_type=PlanningColumnDataType.NUMBER, source_type=PlanningColumnSourceType.MANUAL,
+        is_locked=False, enable_status_color=True
+    )
+    mock_row = PlanningRow(id=row_id, sheet_id=sheet_id, label="Item Status", position=0)
+    cell_mum = PlanningCell(id=uuid.uuid4(), row_id=row_id, column_id=col_mum_id, value="10", status_color=PlanningCellStatusColor.BLUE_ORDERED)
+
+    mock_sheet_repo = AsyncMock()
+    mock_sheet_repo.get_by_id.return_value = mock_sheet
+    mock_col_repo = AsyncMock()
+    mock_col_repo.get_by_id.return_value = col_mum
+    mock_col_repo.list_for_sheet.return_value = [col_mum]
+    mock_row_repo = AsyncMock()
+    mock_row_repo.get_by_id.return_value = mock_row
+
+    mock_cell_repo = AsyncMock()
+    mock_cell_repo.get_by_row_and_column.return_value = cell_mum
+
+    async def update_cell(c, **kwargs):
+        for k, v in kwargs.items():
+            setattr(c, k, v)
+        return c
+
+    mock_cell_repo.update.side_effect = update_cell
+    mock_cell_repo.list_for_rows.return_value = [cell_mum]
+
+    service = PlanningService(
+        sheet_repository=mock_sheet_repo,
+        row_repository=mock_row_repo,
+        column_repository=mock_col_repo,
+        cell_repository=mock_cell_repo,
+        status_tag_repository=AsyncMock(),
+        change_log_repository=AsyncMock(),
+        audit_service=AsyncMock(),
+        column_role_lock_repository=AsyncMock(),
+    )
+
+    # 1. User with ONLY planning.colorstatusred.edit CAN set Red
+    red_perms = frozenset(["planning.colorstatusred.edit", "planning.view"])
+    updated = await service.set_cell_status(
+        sheet_id, row_id, col_mum_id,
+        status_color=PlanningCellStatusColor.RED_REQUIREMENT,
+        custom_status_tag_id=None,
+        user_id=user_id, username="red_user",
+        user_permissions=red_perms
+    )
+    assert updated.status_color == PlanningCellStatusColor.RED_REQUIREMENT
+
+    # 2. User with ONLY planning.colorstatusred.edit CANNOT set Green or Blue
+    with pytest.raises(ForbiddenException) as exc_green:
+        await service.set_cell_status(
+            sheet_id, row_id, col_mum_id,
+            status_color=PlanningCellStatusColor.GREEN_PURCHASED,
+            custom_status_tag_id=None,
+            user_id=user_id, username="red_user",
+            user_permissions=red_perms
+        )
+    assert "planning.colorstatusgreen.edit" in str(exc_green.value)
+
+    with pytest.raises(ForbiddenException) as exc_blue:
+        await service.set_cell_status(
+            sheet_id, row_id, col_mum_id,
+            status_color=PlanningCellStatusColor.BLUE_ORDERED,
+            custom_status_tag_id=None,
+            user_id=user_id, username="red_user",
+            user_permissions=red_perms
+        )
+    assert "planning.cell.edit" in str(exc_blue.value)
+
+    # 3. User with ONLY planning.cell.edit (without red/green permissions) CANNOT set Red or Green directly
+    cell_edit_perms = frozenset(["planning.cell.edit", "planning.view"])
+    with pytest.raises(ForbiddenException) as exc_red_blocked:
+        await service.set_cell_status(
+            sheet_id, row_id, col_mum_id,
+            status_color=PlanningCellStatusColor.RED_REQUIREMENT,
+            custom_status_tag_id=None,
+            user_id=user_id, username="editor_user",
+            user_permissions=cell_edit_perms
+        )
+    assert "planning.colorstatusred.edit" in str(exc_red_blocked.value)
+
+    # 4. User with planning.cell.edit CAN clear status or set Blue
+    cleared = await service.set_cell_status(
+        sheet_id, row_id, col_mum_id,
+        status_color=None,
+        custom_status_tag_id=None,
+        user_id=user_id, username="editor_user",
+        user_permissions=cell_edit_perms
+    )
+    assert cleared.status_color is None
+
+    # 5. Cannot set status color on an EMPTY or ZERO-value cell
+    cell_mum.value = None
+    from app.core.exceptions import BadRequestException
+    with pytest.raises(BadRequestException) as exc_empty:
+        await service.set_cell_status(
+            sheet_id, row_id, col_mum_id,
+            status_color=PlanningCellStatusColor.RED_REQUIREMENT,
+            custom_status_tag_id=None,
+            user_id=user_id, username="red_user",
+            user_permissions=red_perms
+        )
+    assert "no quantity or value entered" in str(exc_empty.value)
+
+    cell_mum.value = "0"
+    with pytest.raises(BadRequestException) as exc_zero:
+        await service.set_cell_status(
+            sheet_id, row_id, col_mum_id,
+            status_color=PlanningCellStatusColor.GREEN_PURCHASED,
+            custom_status_tag_id=None,
+            user_id=user_id, username="admin_user",
+            user_permissions=frozenset(["planning.colorstatusgreen.edit"])
+        )
+    assert "no quantity or value entered" in str(exc_zero.value)
+
+
+

@@ -544,7 +544,7 @@ export function UsersPage() {
     }
   }
 
-  const canViewUser = hasPermission("user.view") || hasPermission("user.read") || isSuperAdmin;
+  const canViewUser = hasPermission("user.view") || isSuperAdmin;
   const canUpdateUser = hasPermission("user.update") || isSuperAdmin;
   const canDeleteUser = hasPermission("user.delete") || isSuperAdmin;
   const canManage = hasPermission("settings.manage") || isSuperAdmin;

@@ -61,7 +61,7 @@ from app.planning.schemas import (
     SourceModuleInfo,
 )
 from app.planning.service import PlanningService
-from app.rbac.dependencies import require_permission
+from app.rbac.dependencies import require_any_permission, require_permission
 
 router = APIRouter(prefix="/planning", tags=["Shipment Planning"])
 logger = get_logger(__name__)
@@ -355,7 +355,7 @@ async def duplicate_sheet(
 async def list_sheets(
     request: Request,
     service: PlanningService = Depends(get_planning_service),
-    _current_user: CurrentUser = Depends(require_permission("planning.read")),
+    _current_user: CurrentUser = Depends(require_permission("planning.view")),
 ) -> dict:
     sheets = await service.list_sheets()
     data = [PlanningSheetRead.model_validate(s).model_dump(mode="json") for s in sheets]
@@ -524,7 +524,7 @@ async def get_grid(
         "keeps the route a real GET.",
     ),
     service: PlanningService = Depends(get_planning_service),
-    _current_user: CurrentUser = Depends(require_permission("planning.read")),
+    _current_user: CurrentUser = Depends(require_permission("planning.view")),
 ) -> dict:
     search_column_filters = _parse_search_query_param(search)
     grid = await service.get_grid(
@@ -758,7 +758,7 @@ async def get_column_history(
     column_id: uuid.UUID,
     request: Request,
     service: PlanningService = Depends(get_planning_service),
-    _current_user: CurrentUser = Depends(require_permission("planning.read")),
+    _current_user: CurrentUser = Depends(require_permission("planning.view")),
 ) -> dict:
     entries = await service.get_column_history(sheet_id, column_id)
     data = [PlanningChangeLogRead.model_validate(e).model_dump(mode="json") for e in entries]
@@ -1190,7 +1190,7 @@ async def get_row_history(
     row_id: uuid.UUID,
     request: Request,
     service: PlanningService = Depends(get_planning_service),
-    _current_user: CurrentUser = Depends(require_permission("planning.read")),
+    _current_user: CurrentUser = Depends(require_permission("planning.view")),
 ) -> dict:
     entries = await service.get_row_history(sheet_id, row_id)
     data = [PlanningChangeLogRead.model_validate(e).model_dump(mode="json") for e in entries]
@@ -1206,7 +1206,7 @@ async def get_mum_column_status_history(
     row_id: uuid.UUID,
     request: Request,
     service: PlanningService = Depends(get_planning_service),
-    _current_user: CurrentUser = Depends(require_permission("planning.read")),
+    _current_user: CurrentUser = Depends(require_permission("planning.view")),
 ) -> dict:
     """
     Document: "When Mum 45 was blue and when Mum 46 was blue and other
@@ -1230,10 +1230,19 @@ async def set_cell_value(
     payload: PlanningCellValueUpdate,
     request: Request,
     service: PlanningService = Depends(get_planning_service),
-    current_user: CurrentUser = Depends(require_permission("planning.cell.edit")),
+    # Coarse gate: let through anyone with the general planning.cell.edit
+    # OR either of the two column-specific permissions. The FINE-GRAINED
+    # decision -- which permission actually covers THIS column -- happens
+    # in service.set_cell_value once the target column is resolved; e.g. a
+    # user with only planning.textyn.edit passes this gate but still gets
+    # rejected there if they try to edit a column that isn't TEST(Y/N).
+    current_user: CurrentUser = Depends(
+        require_any_permission("planning.cell.edit", "planning.textyn.edit", "planning.approvaldate.edit")
+    ),
 ) -> dict:
     cell = await service.set_cell_value(
-        sheet_id, row_id, column_id, value=payload.value, user_id=current_user.id, username=current_user.username
+        sheet_id, row_id, column_id, value=payload.value, user_id=current_user.id, username=current_user.username,
+        user_permissions=current_user.permissions,
     )
     data = PlanningCellRead.model_validate(cell).model_dump(mode="json")
     data["display_value"] = cell.value  # only MANUAL columns reach here; locked columns are rejected earlier
@@ -1285,7 +1294,17 @@ async def set_cell_status(
     payload: PlanningCellStatusUpdate,
     request: Request,
     service: PlanningService = Depends(get_planning_service),
-    current_user: CurrentUser = Depends(require_permission("planning.cell.edit")),
+    # Coarse gate: let through anyone with the general planning.cell.edit OR
+    # either color-specific permission. Which color the request is actually
+    # setting is only known once payload.status_color is inspected, so the
+    # real, specific check happens in service.set_cell_status -- e.g. a user
+    # with only planning.colorstatusred.edit passes this gate but is still
+    # rejected there if they try to set Green.
+    current_user: CurrentUser = Depends(
+        require_any_permission(
+            "planning.cell.edit", "planning.colorstatusred.edit", "planning.colorstatusgreen.edit"
+        )
+    ),
 ) -> dict:
     """
     Attach a status tag to any cell: red (requirement), blue (ordered to
@@ -1300,6 +1319,7 @@ async def set_cell_status(
         custom_status_tag_id=payload.custom_status_tag_id,
         user_id=current_user.id,
         username=current_user.username,
+        user_permissions=current_user.permissions,
     )
     data = PlanningCellRead.model_validate(cell).model_dump(mode="json")
     await _broadcast(sheet_id, "cell_status_changed", {"cell": data, "row_id": str(row_id)}, current_user=current_user, service=service)
@@ -1353,7 +1373,7 @@ async def create_status_tag(
 async def list_status_tags(
     request: Request,
     service: PlanningService = Depends(get_planning_service),
-    _current_user: CurrentUser = Depends(require_permission("planning.read")),
+    _current_user: CurrentUser = Depends(require_permission("planning.view")),
 ) -> dict:
     tags = await service.list_status_tags()
     data = [PlanningStatusTagRead.model_validate(t).model_dump(mode="json") for t in tags]
@@ -1370,7 +1390,7 @@ async def get_sheet_history(
     sheet_id: uuid.UUID,
     request: Request,
     service: PlanningService = Depends(get_planning_service),
-    _current_user: CurrentUser = Depends(require_permission("planning.read")),
+    _current_user: CurrentUser = Depends(require_permission("planning.view")),
 ) -> dict:
     entries = await service.get_sheet_history(sheet_id)
     data = [PlanningChangeLogRead.model_validate(e).model_dump(mode="json") for e in entries]

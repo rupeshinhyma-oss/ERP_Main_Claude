@@ -282,6 +282,105 @@ function MasterTableSkeletonRows<T extends MasterRecord>({
   );
 }
 
+function computeSearchRelevance<T>(
+  item: T,
+  term: string,
+  cleanTerm: string,
+  customMatcher?: (item: T, term: string, cleanTerm: string) => boolean
+): number {
+  const rec = item as Record<string, unknown>;
+  let maxScore = 0;
+
+  // 1. Primary Name & Code fields (Top Priority: 100 for prefix, 80 for substring)
+  const primaryKeys = [
+    "product_name",
+    "product_name_tally",
+    "product_name_invoice",
+    "name",
+    "company_name",
+    "title",
+    "product_code",
+    "code",
+    "hsn_code",
+  ];
+
+  for (const key of primaryKeys) {
+    const val = rec[key];
+    if (val != null && (typeof val === "string" || typeof val === "number")) {
+      const str = String(val).toLowerCase();
+      const norm = str.replace(/[\s-]/g, "");
+      if (str.startsWith(term) || norm.startsWith(cleanTerm)) {
+        maxScore = Math.max(maxScore, 100);
+      } else if (str.includes(term) || norm.includes(cleanTerm)) {
+        maxScore = Math.max(maxScore, 80);
+      }
+    }
+  }
+
+  // 2. Visible Secondary Columns: Category, Sub Category, Brand, UOM, Country, City, Type (Priority: 50-60)
+  const secondaryKeys = [
+    "brand",
+    "brand_name",
+    "category",
+    "category_name",
+    "sub_category",
+    "sub_category_name",
+    "uom",
+    "uom_name",
+    "country",
+    "city",
+    "supplier_type",
+    "buyer_type",
+  ];
+
+  for (const key of secondaryKeys) {
+    const val = rec[key];
+    if (val != null && (typeof val === "string" || typeof val === "number")) {
+      const str = String(val).toLowerCase();
+      const norm = str.replace(/[\s-]/g, "");
+      if (str.startsWith(term) || norm.startsWith(cleanTerm)) {
+        maxScore = Math.max(maxScore, 60);
+      } else if (str.includes(term) || norm.includes(cleanTerm)) {
+        maxScore = Math.max(maxScore, 50);
+      }
+    }
+  }
+
+  if (maxScore > 0) return maxScore;
+
+  // 3. Search other fields (Deep / hidden specification or description field: Priority 10)
+  for (const [key, val] of Object.entries(rec)) {
+    if (val == null) continue;
+    if (key === "id" || key.endsWith("_id") || key.endsWith("_ids") || key === "created_at" || key === "updated_at") {
+      continue;
+    }
+    if (typeof val === "string" || typeof val === "number") {
+      const str = String(val).toLowerCase();
+      const norm = str.replace(/[\s-]/g, "");
+      if (str.includes(term) || norm.includes(cleanTerm)) {
+        const score = (key === "specification" || key === "description" || key === "remarks" || key === "notes") ? 10 : 30;
+        maxScore = Math.max(maxScore, score);
+      }
+    } else if (Array.isArray(val)) {
+      for (const sub of val) {
+        if (sub == null) continue;
+        const sStr = String(sub).toLowerCase();
+        const sNorm = sStr.replace(/[\s-]/g, "");
+        if (sStr.includes(term) || sNorm.includes(cleanTerm)) {
+          maxScore = Math.max(maxScore, 20);
+        }
+      }
+    }
+  }
+
+  // 4. Custom matcher fallback (e.g. resolved category/brand lookups)
+  if (maxScore === 0 && customMatcher && customMatcher(item, term, cleanTerm)) {
+    return 15;
+  }
+
+  return maxScore;
+}
+
 export function MasterPage<T extends MasterRecord>({
   activeKey,
   apiBase,
@@ -339,7 +438,7 @@ export function MasterPage<T extends MasterRecord>({
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
   const [searchInput, setSearchInput] = useState("");
-  const [statusFilter, setStatusFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState("active");
   const [filterOpen, setFilterOpen] = useState(false);
   const [reloadCounter, setReloadCounter] = useState(0);
   const storageKey = `master_pinned_cols_${entityName}`;
@@ -619,12 +718,16 @@ export function MasterPage<T extends MasterRecord>({
     reloadToken,
   ]);
 
-  /* --- Client-side instant 0ms search & filter --- */
+  /* --- Client-side instant 0ms search & filter with relevance ranking --- */
   const filteredRecords = useMemo(() => {
     if (!clientSideSearch) return rows;
     let list = allRecords;
     if (statusFilter) {
-      list = list.filter((r) => (r as unknown as { status?: string }).status === statusFilter);
+      list = list.filter((r) => {
+        const rec = r as unknown as Record<string, unknown>;
+        const st = String(rec.status ?? (rec.is_active === true ? "active" : rec.is_active === false ? "inactive" : "")).toLowerCase();
+        return st === statusFilter.toLowerCase();
+      });
     }
     if (extraFilters) {
       for (const [k, v] of Object.entries(extraFilters)) {
@@ -636,30 +739,16 @@ export function MasterPage<T extends MasterRecord>({
     const term = searchInput.trim().toLowerCase();
     if (term) {
       const cleanTerm = term.replace(/[\s-]/g, "");
-      list = list.filter((item) => {
-        if (customSearchMatcher && customSearchMatcher(item, term, cleanTerm)) {
-          return true;
+      const scored: { item: T; score: number }[] = [];
+      for (const item of list) {
+        const score = computeSearchRelevance(item, term, cleanTerm, customSearchMatcher);
+        if (score > 0) {
+          scored.push({ item, score });
         }
-        for (const val of Object.values(item as Record<string, unknown>)) {
-          if (val == null) continue;
-          if (typeof val === "string" || typeof val === "number") {
-            const str = String(val).toLowerCase();
-            if (str.includes(term) || str.replace(/[\s-]/g, "").includes(cleanTerm)) {
-              return true;
-            }
-          }
-          if (Array.isArray(val)) {
-            for (const sub of val) {
-              if (sub == null) continue;
-              const sStr = String(sub).toLowerCase();
-              if (sStr.includes(term) || sStr.replace(/[\s-]/g, "").includes(cleanTerm)) {
-                return true;
-              }
-            }
-          }
-        }
-        return false;
-      });
+      }
+      // Sort by relevance score descending (Name/Code matches first, then category/brand, then hidden specs last)
+      scored.sort((a, b) => b.score - a.score);
+      list = scored.map((x) => x.item);
     }
     return list;
   }, [clientSideSearch, rows, allRecords, statusFilter, extraFiltersKey, searchInput, customSearchMatcher]);
@@ -1255,8 +1344,8 @@ export function MasterPage<T extends MasterRecord>({
               style={{
                 background: "none",
                 border: "none",
-                borderBottom: statusFilter !== "inactive" ? "2.5px solid #0061f2" : "2.5px solid transparent",
-                color: statusFilter !== "inactive" ? "#0061f2" : "#64748b",
+                borderBottom: statusFilter === "active" ? "2.5px solid #0061f2" : "2.5px solid transparent",
+                color: statusFilter === "active" ? "#0061f2" : "#64748b",
                 fontWeight: 700,
                 fontSize: "13.5px",
                 paddingBottom: "6px",
@@ -1264,7 +1353,7 @@ export function MasterPage<T extends MasterRecord>({
               }}
               onClick={() => {
                 setCurrentPage(1);
-                setStatusFilter("");
+                setStatusFilter("active");
               }}
             >
               Active

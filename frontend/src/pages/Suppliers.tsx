@@ -2031,9 +2031,9 @@ export function SuppliersPage() {
                         City <span style={{ color: "#ef4444" }}>*</span>
                       </label>
                       <SearchableDropdown
-                        key={`field-city-${formCountryId || ""}-${formStateId || formStateCustomText || ""}`}
+                        key={`field-city-${formCountryId || ""}-${formStateId || ""}`}
                         id="field-city"
-                        disabled={!formStateId && !formStateCustomText.trim()}
+                        disabled={!formStateId}
                         hasError={Boolean(validationErrors["field-city"])}
                         value={formCityId}
                         onChange={(v, label) => {
@@ -2041,13 +2041,7 @@ export function SuppliersPage() {
                           setFormCityCustomText(v ? label : "");
                           setValidationErrors((prev) => ({ ...prev, "field-city": "" }));
                         }}
-                        allowCustomText={true}
-                        onTextChange={(text) => {
-                          setFormCityCustomText(text);
-                          setFormCityId(null);
-                          setValidationErrors((prev) => ({ ...prev, "field-city": "" }));
-                        }}
-                        placeholder={formStateId || formStateCustomText.trim() ? "Search or type city..." : "Select a province first..."}
+                        placeholder={formStateId ? "Search city from Master..." : "Select a province first..."}
                         fetchOptions={
                           !formStateId
                             ? async () => []

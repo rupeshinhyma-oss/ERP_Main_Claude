@@ -90,7 +90,7 @@ class ProductRepository(BaseRepository[Product]):
         if not term:
             return stmt
 
-        from sqlalchemy import exists, func, or_
+        from sqlalchemy import case, exists, func, or_
         from app.masters.brands.models import Brand
         from app.masters.hsn.models import HsnCode
         from app.masters.product_categories.models import ProductCategory
@@ -149,7 +149,17 @@ class ProductRepository(BaseRepository[Product]):
             )
         )
 
-        return stmt.where(or_(*conditions))
+        # Priority relevance ranking: direct name/code prefix > substring > linked masters > hidden specs
+        relevance_rank = case(
+            (Product.product_name_tally.ilike(f"{term}%"), 1),
+            (Product.product_code.ilike(f"{term}%"), 2),
+            (Product.product_name_tally.ilike(pattern), 3),
+            (Product.product_name.ilike(pattern), 4),
+            (Product.product_code.ilike(pattern), 5),
+            else_=10,
+        )
+
+        return stmt.where(or_(*conditions)).order_by(relevance_rank)
 
     async def get_by_code(self, product_code: str) -> Product | None:
         """Fetch a product by its unique code."""

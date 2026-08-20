@@ -627,8 +627,17 @@ export function EmailTagInput({
   const [inputValue, setInputValue] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
   const [popoverOpen, setPopoverOpen] = useState(false);
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+
+  const handleCopy = (email: string, key: string) => {
+    void navigator.clipboard.writeText(email);
+    setCopiedKey(key);
+    setTimeout(() => {
+      setCopiedKey((current) => (current === key ? null : current));
+    }, 1500);
+  };
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -728,52 +737,103 @@ export function EmailTagInput({
           overflowX: "hidden",
         }}
       >
-        {visibleEmails.map((email, idx) => (
-          <span
-            key={`${email}-${idx}`}
-            style={{
-              background: "#2563eb",
-              color: "#ffffff",
-              borderRadius: "4px",
-              padding: "2px 6px 2px 8px",
-              fontSize: "12px",
-              fontWeight: 600,
-              display: "inline-flex",
-              alignItems: "center",
-              gap: "4px",
-              whiteSpace: "nowrap",
-              flexShrink: 0,
-              maxWidth: "130px",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-            }}
-          >
-            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              {email}
-            </span>
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                removeTag(idx);
-              }}
+        {visibleEmails.map((email, idx) => {
+          const isCopied = copiedKey === `vis-${idx}`;
+          return (
+            <span
+              key={`${email}-${idx}`}
               style={{
-                background: "none",
-                border: "none",
+                background: "#2563eb",
                 color: "#ffffff",
-                fontWeight: 700,
-                fontSize: "11px",
-                cursor: "pointer",
-                padding: "0 2px",
-                lineHeight: 1,
-                opacity: 0.85,
+                borderRadius: "4px",
+                padding: "2px 5px 2px 7px",
+                fontSize: "12px",
+                fontWeight: 600,
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "4px",
+                whiteSpace: "nowrap",
+                flexShrink: 0,
+                maxWidth: "160px",
+                boxShadow: "0 1px 2px rgba(0,0,0,0.08)",
               }}
-              title="Remove email"
             >
-              ✕
-            </button>
-          </span>
-        ))}
+              <a
+                href={`mailto:${email}`}
+                onClick={(e) => e.stopPropagation()}
+                title={`Send email to ${email} (Click to open in mail app)`}
+                style={{
+                  color: "#ffffff",
+                  textDecoration: "none",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                  cursor: "pointer",
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.textDecoration = "underline")}
+                onMouseLeave={(e) => (e.currentTarget.style.textDecoration = "none")}
+              >
+                {email}
+              </a>
+
+              {/* 1-Click Copy button */}
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleCopy(email, `vis-${idx}`);
+                }}
+                title={isCopied ? "Copied to clipboard!" : `Copy ${email}`}
+                style={{
+                  background: isCopied ? "#16a34a" : "rgba(255, 255, 255, 0.22)",
+                  border: "none",
+                  borderRadius: "3px",
+                  color: "#ffffff",
+                  cursor: "pointer",
+                  padding: "1px 3px",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  lineHeight: 1,
+                  fontSize: "10px",
+                  transition: "all 0.15s ease",
+                }}
+              >
+                {isCopied ? (
+                  <span style={{ fontSize: "10px", fontWeight: 700 }}>✓</span>
+                ) : (
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                  </svg>
+                )}
+              </button>
+
+              {/* Remove button */}
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  removeTag(idx);
+                }}
+                style={{
+                  background: "none",
+                  border: "none",
+                  color: "#ffffff",
+                  fontWeight: 700,
+                  fontSize: "11px",
+                  cursor: "pointer",
+                  padding: "0 1px",
+                  lineHeight: 1,
+                  opacity: 0.85,
+                }}
+                title="Remove email"
+              >
+                ✕
+              </button>
+            </span>
+          );
+        })}
 
         {hiddenCount > 0 && (
           <button
@@ -863,43 +923,93 @@ export function EmailTagInput({
             </button>
           </div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
-            {emails.map((email, idx) => (
-              <span
-                key={`all-${email}-${idx}`}
-                style={{
-                  background: "#2563eb",
-                  color: "#ffffff",
-                  borderRadius: "4px",
-                  padding: "4px 8px 4px 10px",
-                  fontSize: "12px",
-                  fontWeight: 600,
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "6px",
-                  boxShadow: "0 1px 2px rgba(0,0,0,0.1)",
-                }}
-              >
-                {email}
-                <button
-                  type="button"
-                  onClick={() => removeTag(idx)}
+            {emails.map((email, idx) => {
+              const isCopied = copiedKey === `pop-${idx}`;
+              return (
+                <span
+                  key={`all-${email}-${idx}`}
                   style={{
-                    background: "none",
-                    border: "none",
+                    background: "#2563eb",
                     color: "#ffffff",
-                    fontWeight: 700,
+                    borderRadius: "4px",
+                    padding: "4px 8px",
                     fontSize: "12px",
-                    cursor: "pointer",
-                    padding: "0 2px",
-                    lineHeight: 1,
-                    opacity: 0.85,
+                    fontWeight: 600,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    boxShadow: "0 1px 2px rgba(0,0,0,0.1)",
                   }}
-                  title="Remove email"
                 >
-                  ✕
-                </button>
-              </span>
-            ))}
+                  <a
+                    href={`mailto:${email}`}
+                    onClick={(e) => e.stopPropagation()}
+                    title={`Send email to ${email}`}
+                    style={{
+                      color: "#ffffff",
+                      textDecoration: "none",
+                      cursor: "pointer",
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.textDecoration = "underline")}
+                    onMouseLeave={(e) => (e.currentTarget.style.textDecoration = "none")}
+                  >
+                    {email}
+                  </a>
+
+                  {/* 1-Click Copy button */}
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleCopy(email, `pop-${idx}`);
+                    }}
+                    title={isCopied ? "Copied to clipboard!" : `Copy ${email}`}
+                    style={{
+                      background: isCopied ? "#16a34a" : "rgba(255, 255, 255, 0.22)",
+                      border: "none",
+                      borderRadius: "3px",
+                      color: "#ffffff",
+                      cursor: "pointer",
+                      padding: "2px 4px",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      lineHeight: 1,
+                      fontSize: "11px",
+                      transition: "all 0.15s ease",
+                    }}
+                  >
+                    {isCopied ? (
+                      <span style={{ fontSize: "10px", fontWeight: 700 }}>✓</span>
+                    ) : (
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                      </svg>
+                    )}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => removeTag(idx)}
+                    style={{
+                      background: "none",
+                      border: "none",
+                      color: "#ffffff",
+                      fontWeight: 700,
+                      fontSize: "12px",
+                      cursor: "pointer",
+                      padding: "0 2px",
+                      lineHeight: 1,
+                      opacity: 0.85,
+                    }}
+                    title="Remove email"
+                  >
+                    ✕
+                  </button>
+                </span>
+              );
+            })}
           </div>
         </div>
       )}

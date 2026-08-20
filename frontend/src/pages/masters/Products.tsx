@@ -307,12 +307,12 @@ function OrgPopoverCell({ orgNames }: { orgNames: string[] }) {
 }
 
 export function ProductsPage() {
-  const categories = useLookup<ProductCategory>("/masters/product-categories", 250);
-  const subCategories = useLookup<ProductSubCategory>("/masters/product-sub-categories", 500);
-  const brands = useLookup<Brand>("/masters/brands", 250);
-  const hsnCodes = useLookup<Hsn>("/masters/hsn", 250);
-  const uoms = useLookup<Uom>("/masters/uom", 250);
-  const organizations = useLookup<{ id: string; name: string }>("/masters/company-list", 250);
+  const categories = useLookup<ProductCategory>("/masters/product-categories", 250, true);
+  const subCategories = useLookup<ProductSubCategory>("/masters/product-sub-categories", 500, true);
+  const brands = useLookup<Brand>("/masters/brands", 250, true);
+  const hsnCodes = useLookup<Hsn>("/masters/hsn", 250, true);
+  const uoms = useLookup<Uom>("/masters/uom", 250, true);
+  const organizations = useLookup<{ id: string; name: string }>("/masters/company-list", 250, true);
   const [catalogProducts, setCatalogProducts] = useState<Product[]>([]);
 
 
@@ -562,7 +562,8 @@ export function ProductsPage() {
         {
           header: "Brand",
           render: (p) => {
-            const name = brands.items.find((x) => x.id === p.brand_id)?.name ?? "—";
+            const b = brands.items.find((x) => x.id === p.brand_id);
+            const name = b ? `${b.name}${b.status === "inactive" ? " (Inactive)" : ""}` : "—";
             return (
               <span className="cell-truncate" title={name} style={{ maxWidth: "130px" }}>
                 {name}
@@ -573,7 +574,8 @@ export function ProductsPage() {
         {
           header: "Sub-Category",
           render: (p) => {
-            const name = subCategories.items.find((x) => x.id === p.sub_category_id)?.name ?? "—";
+            const sc = subCategories.items.find((x) => x.id === p.sub_category_id);
+            const name = sc ? `${sc.name}${sc.status === "inactive" ? " (Inactive)" : ""}` : "—";
             return (
               <span className="cell-truncate" title={name} style={{ maxWidth: "180px", color: "#334155" }}>
                 {name}
@@ -818,8 +820,8 @@ export function ProductsPage() {
       }}
       renderFields={(f, set) => {
         const scopedSubCategories = f.category_id
-          ? subCategories.items.filter((sc) => sc.category_id === f.category_id)
-          : subCategories.items;
+          ? subCategories.items.filter((sc) => sc.category_id === f.category_id && (sc.status === "active" || sc.id === f.sub_category_id))
+          : subCategories.items.filter((sc) => sc.status === "active" || sc.id === f.sub_category_id);
 
         /** Dimension change also refreshes the read-only CBM preview. */
         const setDimension = (id: "length_cm" | "width_cm" | "height_cm", value: string) => {
@@ -860,23 +862,52 @@ export function ProductsPage() {
                     return pName === cleanTyped || pCode === cleanTyped;
                   });
 
+                  if (matches.length === 0) return null;
+
                   return (
                     <>
                       {exact && (
                         <div style={{ marginTop: "4px", fontSize: "12px", color: "#dc2626", fontWeight: 600, display: "flex", alignItems: "center", gap: "4px" }}>
-                          <span>⚠️</span> Product "{exact.product_name_tally || exact.product_name}" (Code: {exact.product_code || "—"}) already exists!
+                          <span>⚠️</span> Product Name "{exact.product_name_tally || exact.product_name}" already exists!
                         </div>
                       )}
-                      {matches.length > 0 && !exact && (
-                        <div style={{ position: "absolute", top: "100%", left: 0, right: 0, zIndex: 100, background: "#ffffff", border: "1px solid #cbd5e0", borderRadius: "6px", boxShadow: "0 4px 12px rgba(0,0,0,0.15)", maxHeight: "160px", overflowY: "auto", marginTop: "2px" }}>
-                          <div style={{ padding: "6px 12px", fontSize: "11px", fontWeight: 700, color: "#64748b", background: "#f8fafc", borderBottom: "1px solid #f1f5f9" }}>
-                            Existing Similar Products:
+                      {!exact && matches.length > 0 && (
+                        <div
+                          style={{
+                            position: "absolute",
+                            top: "calc(100% + 2px)",
+                            left: 0,
+                            right: 0,
+                            zIndex: 100,
+                            background: "#ffffff",
+                            border: "1px solid #cbd5e1",
+                            borderRadius: "6px",
+                            boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.1)",
+                            maxHeight: "150px",
+                            overflowY: "auto",
+                            padding: "4px",
+                          }}
+                        >
+                          <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748b", padding: "4px 8px", borderBottom: "1px solid #f1f5f9" }}>
+                            Similar Products ({matches.length})
                           </div>
                           {matches.map((p) => (
                             <div
                               key={p.id}
-                              style={{ padding: "8px 12px", fontSize: "12.5px", cursor: "pointer", borderBottom: "1px solid #f8fafc", display: "flex", justifyContent: "space-between", background: "#fff" }}
-                              onClick={() => set("product_name_tally", p.product_name_tally || p.product_name || "")}
+                              style={{
+                                padding: "6px 8px",
+                                fontSize: "12.5px",
+                                cursor: "pointer",
+                                borderRadius: "4px",
+                                display: "flex",
+                                justifyContent: "space-between",
+                                alignItems: "center",
+                              }}
+                              onMouseEnter={(e) => (e.currentTarget.style.background = "#f8fafc")}
+                              onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                              onClick={() => {
+                                set("product_name_tally", p.product_name_tally || p.product_name || "");
+                              }}
                             >
                               <span style={{ fontWeight: 600, color: "#1e293b" }}>{p.product_name_tally || p.product_name}</span>
                               <span style={{ color: "#64748b", fontSize: "11.5px" }}>Code: {p.product_code || "—"}</span>
@@ -915,11 +946,13 @@ export function ProductsPage() {
               {/* Row 2: Brand, Category, Sub-Category */}
               <SelectField id="brand_id" label="Brand" value={f.brand_id} onChange={(v) => set("brand_id", v)}>
                 <option value="">-- Select Brand --</option>
-                {brands.items.map((b) => (
-                  <option key={b.id} value={b.id}>
-                    {b.name}
-                  </option>
-                ))}
+                {brands.items
+                  .filter((b) => b.status === "active" || b.id === f.brand_id)
+                  .map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.name}{b.status === "inactive" ? " (Inactive)" : ""}
+                    </option>
+                  ))}
               </SelectField>
               <SelectField
                 id="category_id"
@@ -932,17 +965,19 @@ export function ProductsPage() {
                 }}
               >
                 <option value="">-- Select Category --</option>
-                {categories.items.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
+                {categories.items
+                  .filter((c) => c.status === "active" || c.id === f.category_id)
+                  .map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}{c.status === "inactive" ? " (Inactive)" : ""}
+                    </option>
+                  ))}
               </SelectField>
               <SelectField id="sub_category_id" label="Sub-Category *" value={f.sub_category_id} onChange={(v) => set("sub_category_id", v)}>
                 <option value="">-- Select Sub-Category --</option>
                 {scopedSubCategories.map((sc) => (
                   <option key={sc.id} value={sc.id}>
-                    {sc.name}
+                    {sc.name}{sc.status === "inactive" ? " (Inactive)" : ""}
                   </option>
                 ))}
               </SelectField>
@@ -1325,9 +1360,9 @@ export function ProductsPage() {
                   value: p.product_name_tally || p.product_name || "—",
                   fullWidth: true,
                 },
-                { label: "Brand", value: brand ? brand.name : "—" },
-                { label: "Category", value: cat ? cat.name : "—" },
-                { label: "Sub Category", value: subCat ? subCat.name : "—" },
+                { label: "Brand", value: brand ? `${brand.name}${brand.status === "inactive" ? " (Inactive)" : ""}` : "—" },
+                { label: "Category", value: cat ? `${cat.name}${cat.status === "inactive" ? " (Inactive)" : ""}` : "—" },
+                { label: "Sub Category", value: subCat ? `${subCat.name}${subCat.status === "inactive" ? " (Inactive)" : ""}` : "—" },
                 { label: "HSN Code", value: hsn ? hsn.code : "—" },
                 {
                   label: "Organization",

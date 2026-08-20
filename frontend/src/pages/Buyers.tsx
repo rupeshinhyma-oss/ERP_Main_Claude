@@ -794,6 +794,23 @@ export function BuyersPage() {
     setCategoryIds(buyer.category_ids || []);
     setSubCategoryIds(buyer.sub_category_ids || []);
     setFormCityId(null);
+    if (buyer.city && buyer.country_id) {
+      void (async () => {
+        try {
+          const res = await apiGet<Array<{ id: string; name: string }>>(
+            `/masters/cities${toQueryString({ search: buyer.city, country_id: buyer.country_id, page: 1, page_size: 5 })}`
+          );
+          const matched = res.data?.find(
+            (c) => c.name.toLowerCase() === buyer.city?.toLowerCase() || c.id === buyer.city
+          );
+          if (matched) {
+            setFormCityId(matched.id);
+          }
+        } catch {
+          // ignore
+        }
+      })();
+    }
     setShowCompanySuggestions(false);
     try {
       const { data } = await apiGet<BuyerContact[]>(`/buyers/${buyer.id}/contacts`);
@@ -1548,21 +1565,18 @@ export function BuyersPage() {
                       ))}
                     </SelectField>
                     <div>
-                      <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155", display: "block", marginBottom: "6px" }}>City</label>
+                      <label style={{ fontSize: "13px", fontWeight: 600, color: "#334155", display: "block", marginBottom: "6px" }}>
+                        City <span style={{ fontSize: "11.5px", fontWeight: 400, color: "#64748b" }}>(Optional)</span>
+                      </label>
                       <SearchableDropdown
                         key={`buyer-city-${form.country_id}`}
                         value={formCityId}
                         onChange={(v, label) => {
                           setFormCityId(v);
-                          setField("city", label || v || "");
-                        }}
-                        allowCustomText={true}
-                        onTextChange={(text) => {
-                          setField("city", text);
-                          setFormCityId(null);
+                          setField("city", v ? (label || "") : "");
                         }}
                         disabled={!form.country_id}
-                        placeholder={form.country_id ? "Search or type city..." : "Select a country first..."}
+                        placeholder={form.country_id ? "Search city from Master..." : "Select a country first..."}
                         fetchOptions={searchFetcher("/masters/cities", (): Record<string, string> => {
                           return form.country_id ? { country_id: form.country_id } : {};
                         })}

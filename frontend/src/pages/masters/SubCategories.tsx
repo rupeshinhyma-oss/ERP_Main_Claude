@@ -20,8 +20,8 @@ const EMPTY: FormState = {
 };
 
 export function SubCategoriesPage() {
-  const categories = useLookup<ProductCategory>("/masters/product-categories", 250);
-  const categoryName = useNameMap(categories.items, (c) => c.name);
+  const categories = useLookup<ProductCategory>("/masters/product-categories", 250, true);
+  const categoryName = useNameMap(categories.items, (c) => `${c.name}${c.status === "inactive" ? " (Inactive)" : ""}`);
   const [categoryFilter, setCategoryFilter] = useState("");
 
   return (
@@ -46,7 +46,7 @@ export function SubCategoriesPage() {
           <option value="">All categories</option>
           {categories.items.map((c) => (
             <option key={c.id} value={c.id}>
-              {c.name}
+              {c.name}{c.status === "inactive" ? " (Inactive)" : ""}
             </option>
           ))}
         </select>
@@ -96,20 +96,22 @@ export function SubCategoriesPage() {
                 ? "-- Select Category --"
                 : "-- No Categories Found! Create Category First --"}
             </option>
-            {categories.items.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
+            {categories.items
+              .filter((c) => c.status === "active" || c.id === f.category_id)
+              .map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}{c.status === "inactive" ? " (Inactive)" : ""}
+                </option>
+              ))}
           </SearchableSelectField>
-          <TextField id="name" label="Sub-Category Name *" required maxLength={150} placeholder="e.g. Band Sealer, Citric Acid" value={f.name} onChange={(v) => set("name", v)} />
+          <TextField id="name" label="Sub-Category Name *" required maxLength={150} value={f.name} onChange={(v) => set("name", v)} />
           <StatusSelectField value={f.status} onChange={(v) => set("status", v)} />
         </div>
       )}
       detailFields={(s) => [
         { label: "Sub-Category Name", value: s.name, fullWidth: true },
+        { label: "Category", value: categoryName(s.category_id) },
         { label: "Sub-Category Code", value: s.code },
-        { label: "Parent Category", value: categoryName(s.category_id) },
         { label: "Current Status", value: <StatusBadge status={s.status} /> },
         { label: "Description", value: dash(s.description), fullWidth: true },
       ]}

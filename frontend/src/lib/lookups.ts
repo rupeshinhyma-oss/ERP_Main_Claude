@@ -96,8 +96,8 @@ export function invalidateLookupCache(apiBase?: string) {
   }
 }
 
-export function useLookup<T>(apiBase: string, pageSize = 250): LookupResult<T> {
-  const cacheKey = `${apiBase}?page=1&page_size=${pageSize}&sort_order=asc&status=active`;
+export function useLookup<T>(apiBase: string, pageSize = 250, includeInactive = false): LookupResult<T> {
+  const cacheKey = `${apiBase}?page=1&page_size=${pageSize}&sort_order=asc${includeInactive ? "" : "&status=active"}`;
   const cached = lookupCache.get(cacheKey);
   const isFresh = cached && Date.now() - cached.timestamp < CACHE_TTL_MS;
 
@@ -116,9 +116,16 @@ export function useLookup<T>(apiBase: string, pageSize = 250): LookupResult<T> {
     // Check if an identical request is already in-flight (Promise Deduplication)
     let promise = inFlightRequests.get(cacheKey);
     if (!promise) {
+      const queryParams: Record<string, string | number> = {
+        page: 1,
+        page_size: pageSize,
+        sort_order: "asc",
+      };
+      if (!includeInactive) {
+        queryParams.status = "active";
+      }
       promise = apiGet<T[]>(
-        apiBase +
-        toQueryString({ page: 1, page_size: pageSize, sort_order: "asc", status: "active" })
+        apiBase + toQueryString(queryParams)
       ).then(({ data }) => {
         const result = data || [];
         lookupCache.set(cacheKey, { items: result, timestamp: Date.now() });
@@ -145,7 +152,7 @@ export function useLookup<T>(apiBase: string, pageSize = 250): LookupResult<T> {
     return () => {
       cancelled = true;
     };
-  }, [apiBase, pageSize, cacheKey, isFresh]);
+  }, [apiBase, pageSize, cacheKey, isFresh, includeInactive]);
 
   return useMemo(() => ({ items, loaded }), [items, loaded]);
 }

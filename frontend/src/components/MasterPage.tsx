@@ -153,6 +153,10 @@ export interface MasterPageProps<T extends MasterRecord> {
    * for instant client-side multi-field searching.
    */
   customSearchMatcher?: (item: T, term: string, cleanTerm: string) => boolean;
+  /**
+   * Callback fired whenever records are loaded into MasterPage.
+   */
+  onItemsLoaded?: (items: T[]) => void;
 }
 
 export interface MasterPageHandle {
@@ -312,6 +316,7 @@ export function MasterPage<T extends MasterRecord>({
   bulkActionPermission,
   clientSideSearch = false,
   customSearchMatcher,
+  onItemsLoaded,
 }: MasterPageProps<T>) {
   const { hasPermission } = useAuth();
 
@@ -546,6 +551,7 @@ export function MasterPage<T extends MasterRecord>({
         }
         setAllRecords(items);
         setRows(items);
+        onItemsLoaded?.(items);
         setError(null);
       } catch (err) {
         if (cancelled) return;
@@ -1036,8 +1042,8 @@ export function MasterPage<T extends MasterRecord>({
                 title="Edit"
                 onClick={() => handleEdit(item.id)}
                 style={{
-                  width: "32px",
-                  height: "32px",
+                  width: "28px",
+                  height: "28px",
                   borderRadius: "4px",
                   border: "none",
                   background: "#0061f2",
@@ -1049,7 +1055,7 @@ export function MasterPage<T extends MasterRecord>({
                   boxShadow: "0 1px 2px rgba(0,0,0,0.1)",
                 }}
               >
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
                   <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
                 </svg>
@@ -1061,8 +1067,8 @@ export function MasterPage<T extends MasterRecord>({
                 title="Delete"
                 onClick={() => handleDelete(item.id)}
                 style={{
-                  width: "32px",
-                  height: "32px",
+                  width: "28px",
+                  height: "28px",
                   borderRadius: "4px",
                   border: "none",
                   background: "#ef4444",
@@ -1074,7 +1080,7 @@ export function MasterPage<T extends MasterRecord>({
                   boxShadow: "0 1px 2px rgba(0,0,0,0.1)",
                 }}
               >
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <polyline points="3 6 5 6 21 6"></polyline>
                   <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
                 </svg>
@@ -1113,7 +1119,7 @@ export function MasterPage<T extends MasterRecord>({
 
       <main className="page">
         <Breadcrumb trail={breadcrumbTrail} />
-        <div className="page-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "16px", marginBottom: "16px" }}>
+        <div className="page-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "12px", marginBottom: "8px" }}>
           <div style={{ flex: 1, minWidth: 0 }}>
             <h1>{heading}</h1>
             <div className="page-subtitle">{subtitle}</div>
@@ -1125,7 +1131,7 @@ export function MasterPage<T extends MasterRecord>({
               style={{
                 background: filterOpen ? "#0061f2" : "#475569",
                 color: "#ffffff",
-                padding: "8px 14px",
+                padding: "6px 12px",
                 borderRadius: "6px",
                 border: "none",
                 display: "flex",
@@ -1137,7 +1143,7 @@ export function MasterPage<T extends MasterRecord>({
               onClick={() => setFilterOpen((v) => !v)}
               title="Toggle Filter Options"
             >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
               </svg>
             </button>
@@ -1182,8 +1188,8 @@ export function MasterPage<T extends MasterRecord>({
           <div
             className="card"
             style={{
-              padding: "16px 20px",
-              marginBottom: "16px",
+              padding: "12px 16px",
+              marginBottom: "10px",
               background: "#ffffff",
               borderRadius: "8px",
               border: "1px solid #e2e8f0",
@@ -1191,24 +1197,24 @@ export function MasterPage<T extends MasterRecord>({
               display: "flex",
               alignItems: "center",
               justifyContent: "space-between",
-              gap: "16px",
+              gap: "14px",
               flexWrap: "wrap",
             }}
           >
-            <div style={{ display: "flex", gap: "14px", alignItems: "center", flexWrap: "wrap", flex: 1 }}>
+            <div style={{ display: "flex", gap: "12px", alignItems: "center", flexWrap: "wrap", flex: 1 }}>
               {toolbarExtras}
             </div>
             <div style={{ display: "flex", gap: "10px", alignItems: "flex-end" }}>
               <button
                 type="button"
                 style={{
-                  padding: "8px 20px",
+                  padding: "6px 16px",
                   borderRadius: "6px",
                   border: "none",
                   background: "#64748b",
                   color: "#ffffff",
                   fontWeight: 600,
-                  fontSize: "13.5px",
+                  fontSize: "13px",
                   cursor: "pointer",
                 }}
                 onClick={() => {
@@ -1222,13 +1228,13 @@ export function MasterPage<T extends MasterRecord>({
               <button
                 type="button"
                 style={{
-                  padding: "8px 20px",
+                  padding: "6px 16px",
                   borderRadius: "6px",
                   border: "none",
                   background: "#f59e0b",
                   color: "#ffffff",
                   fontWeight: 600,
-                  fontSize: "13.5px",
+                  fontSize: "13px",
                   cursor: "pointer",
                 }}
                 onClick={() => {
@@ -1243,7 +1249,7 @@ export function MasterPage<T extends MasterRecord>({
         )}
 
         <div className="card">
-          <div className="card-tabs" style={{ display: "flex", gap: "24px", padding: "14px 20px 0", borderBottom: "1px solid #e2e8f0" }}>
+          <div className="card-tabs" style={{ display: "flex", gap: "20px", padding: "6px 16px 0", borderBottom: "1px solid #e2e8f0" }}>
             <button
               type="button"
               style={{
@@ -1252,8 +1258,8 @@ export function MasterPage<T extends MasterRecord>({
                 borderBottom: statusFilter !== "inactive" ? "2.5px solid #0061f2" : "2.5px solid transparent",
                 color: statusFilter !== "inactive" ? "#0061f2" : "#64748b",
                 fontWeight: 700,
-                fontSize: "14px",
-                paddingBottom: "10px",
+                fontSize: "13.5px",
+                paddingBottom: "6px",
                 cursor: "pointer",
               }}
               onClick={() => {
@@ -1271,8 +1277,8 @@ export function MasterPage<T extends MasterRecord>({
                 borderBottom: statusFilter === "inactive" ? "2.5px solid #0061f2" : "2.5px solid transparent",
                 color: statusFilter === "inactive" ? "#0061f2" : "#64748b",
                 fontWeight: 700,
-                fontSize: "14px",
-                paddingBottom: "10px",
+                fontSize: "13.5px",
+                paddingBottom: "6px",
                 cursor: "pointer",
               }}
               onClick={() => {
@@ -1284,7 +1290,7 @@ export function MasterPage<T extends MasterRecord>({
             </button>
           </div>
 
-          <div className="toolbar" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 20px", gap: "12px", flexWrap: "wrap" }}>
+          <div className="toolbar" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 14px", gap: "10px", flexWrap: "wrap" }}>
             <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
               <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                 <select

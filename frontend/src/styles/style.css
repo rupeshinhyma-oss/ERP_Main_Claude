@@ -434,7 +434,7 @@ svg {
   max-width: 100%;
   width: 100%;
   margin: 0;
-  padding: 20px 28px;
+  padding: 12px 20px;
 }
 
 .breadcrumb {
@@ -442,8 +442,8 @@ svg {
   align-items: center;
   gap: 6px;
   color: var(--color-muted);
-  font-size: 12.5px;
-  margin-bottom: var(--space-2);
+  font-size: 12px;
+  margin-bottom: 2px;
 }
 
 .breadcrumb a {
@@ -463,13 +463,13 @@ svg {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  margin-bottom: var(--space-4);
-  gap: var(--space-3);
+  margin-bottom: 8px;
+  gap: 8px;
   flex-wrap: wrap;
 }
 
 .page-header h1 {
-  font-size: 22px;
+  font-size: 19px;
   font-weight: 700;
   margin: 0 0 2px;
   letter-spacing: -0.01em;
@@ -477,7 +477,7 @@ svg {
 
 .page-header .page-subtitle {
   color: var(--color-muted);
-  font-size: 13.5px;
+  font-size: 12.5px;
 }
 
 .page-header-actions {
@@ -491,7 +491,7 @@ svg {
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
   padding: var(--space-4);
-  margin-bottom: var(--space-4);
+  margin-bottom: 12px;
   box-shadow: var(--shadow-card);
 }
 
@@ -919,12 +919,13 @@ table {
 th,
 td {
   text-align: left;
-  padding: 10px 14px;
+  padding: 6px 11px;
   border-bottom: 1px solid #cbd5e1;
   border-right: 1px solid #cbd5e1;
   vertical-align: middle;
-  font-size: 13.5px;
-  height: 48px;
+  font-size: 13px;
+  height: 38px;
+  line-height: 1.35;
   white-space: nowrap;
 }
 
@@ -934,11 +935,13 @@ td:last-child {
 }
 
 th {
-  color: #0f172a;
-  font-size: 11.5px;
+  color: #1e293b;
+  font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.04em;
+  padding: 6px 11px;
+  height: 36px;
   border-bottom: 2px solid #94a3b8;
   background: #f1f5f9;
   white-space: nowrap;
@@ -1024,6 +1027,24 @@ td .cell-secondary {
 
 .toolbar .spacer {
   flex: 1;
+}
+
+.inline-select {
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  padding: 3px 6px;
+  font-size: 12px;
+  background: #ffffff;
+  color: #1e293b;
+  cursor: pointer;
+  outline: none;
+  font-family: inherit;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.inline-select:focus {
+  border-color: #0061f2;
+  box-shadow: 0 0 0 2px rgba(0, 97, 242, 0.15);
 }
 
 /* ==========================================================================

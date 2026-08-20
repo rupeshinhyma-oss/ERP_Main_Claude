@@ -520,7 +520,7 @@ class SupplierService:
 
         # Pre-fetch existing suppliers for duplicate detection
         existing_suppliers = await self.repository.list_all()
-        existing_names = {s.company_name.strip().lower() for s in existing_suppliers}
+        existing_map = {s.company_name.strip().lower(): s for s in existing_suppliers}
 
         all_countries = await self.country_repository.list_all()
         all_states = await self.state_repository.list_all()
@@ -528,13 +528,34 @@ class SupplierService:
         all_cats = await self.category_repository.list_all()
         all_sub_cats = await self.sub_category_repository.list_all()
 
+        country_name_map = {str(c.id): c.name for c in all_countries}
+        state_name_map = {str(s.id): s.name for s in all_states}
+        city_name_map = {str(ct.id): ct.name for ct in all_cities}
+
+        def _serialize_supplier_for_compare(s: Supplier) -> dict[str, Any]:
+            return {
+                "Company Name": s.company_name,
+                "Country": country_name_map.get(str(s.country_id), "—"),
+                "State": state_name_map.get(str(s.state_id), "—"),
+                "City": city_name_map.get(str(s.city_id), "—"),
+                "Calling Number": s.contact_calling_number or "—",
+                "WhatsApp Number": s.contact_whatsapp_number or "—",
+                "WeChat Number": s.contact_wechat_number or "—",
+                "Email": s.emails[0].email if s.emails else (getattr(s, "email", "—") or "—"),
+                "Tax ID Number": s.tax_id_number or "—",
+                "Primary Website": s.primary_website or "—",
+                "Status": (s.current_status.value if hasattr(s.current_status, "value") else str(s.current_status or "active")).capitalize(),
+            }
+
         async def _create(field_values: dict[str, Any]) -> Supplier:
             company_name = field_values["company_name"].strip()
 
             # Duplicate check on Company Name
-            if company_name.lower() in existing_names:
+            if company_name.lower() in existing_map:
+                dup_supplier = existing_map[company_name.lower()]
                 raise ConflictException(
-                    f"Supplier '{company_name}' already exists (duplicate company name)."
+                    f"Supplier '{company_name}' already exists in Supplier Master (duplicate company name).",
+                    details={"existing": _serialize_supplier_for_compare(dup_supplier)},
                 )
 
             country_raw = field_values.pop("country_code", "").strip()
@@ -639,7 +660,7 @@ class SupplierService:
                 )
 
             # Prevent duplicate within the same batch file
-            existing_names.add(company_name.lower())
+            existing_map[company_name.lower()] = supplier
             return supplier
 
         summary = await run_import(

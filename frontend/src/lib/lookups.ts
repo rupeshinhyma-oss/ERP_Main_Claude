@@ -82,29 +82,70 @@ export function useSearchableLookup<T>(
   return useMemo(() => ({ items, loaded }), [items, loaded]);
 }
 
+const lookupCache = new Map<string, { items: any[]; timestamp: number }>();
+const inFlightRequests = new Map<string, Promise<any[]>>();
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes in-memory cache
+
+export function invalidateLookupCache(apiBase?: string) {
+  if (apiBase) {
+    for (const key of lookupCache.keys()) {
+      if (key.startsWith(apiBase)) lookupCache.delete(key);
+    }
+  } else {
+    lookupCache.clear();
+  }
+}
+
 export function useLookup<T>(apiBase: string, pageSize = 250): LookupResult<T> {
-  const [items, setItems] = useState<T[]>([]);
-  const [loaded, setLoaded] = useState(false);
+  const cacheKey = `${apiBase}?page=1&page_size=${pageSize}&sort_order=asc&status=active`;
+  const cached = lookupCache.get(cacheKey);
+  const isFresh = cached && Date.now() - cached.timestamp < CACHE_TTL_MS;
+
+  const [items, setItems] = useState<T[]>(isFresh ? (cached.items as T[]) : []);
+  const [loaded, setLoaded] = useState<boolean>(Boolean(isFresh));
 
   useEffect(() => {
+    if (isFresh) {
+      setItems(cached.items as T[]);
+      setLoaded(true);
+      return;
+    }
+
     let cancelled = false;
-    (async () => {
-      try {
-        const { data } = await apiGet<T[]>(
-          apiBase +
-          toQueryString({ page: 1, page_size: pageSize, sort_order: "asc", status: "active" })
-        );
-        if (!cancelled) setItems(data || []);
-      } catch {
-        /* filters and dropdowns degrade gracefully without lookups */
-      } finally {
+
+    // Check if an identical request is already in-flight (Promise Deduplication)
+    let promise = inFlightRequests.get(cacheKey);
+    if (!promise) {
+      promise = apiGet<T[]>(
+        apiBase +
+        toQueryString({ page: 1, page_size: pageSize, sort_order: "asc", status: "active" })
+      ).then(({ data }) => {
+        const result = data || [];
+        lookupCache.set(cacheKey, { items: result, timestamp: Date.now() });
+        inFlightRequests.delete(cacheKey);
+        return result;
+      }).catch((err) => {
+        inFlightRequests.delete(cacheKey);
+        throw err;
+      });
+      inFlightRequests.set(cacheKey, promise);
+    }
+
+    promise
+      .then((data) => {
+        if (!cancelled) {
+          setItems(data as T[]);
+          setLoaded(true);
+        }
+      })
+      .catch(() => {
         if (!cancelled) setLoaded(true);
-      }
-    })();
+      });
+
     return () => {
       cancelled = true;
     };
-  }, [apiBase, pageSize]);
+  }, [apiBase, pageSize, cacheKey, isFresh]);
 
   return useMemo(() => ({ items, loaded }), [items, loaded]);
 }

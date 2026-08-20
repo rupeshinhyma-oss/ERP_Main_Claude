@@ -391,27 +391,100 @@ interface DiffRow {
   differs: boolean;
 }
 
+function formatVal(v: unknown): string {
+  if (v === undefined || v === null || v === "") return "—";
+  if (typeof v === "boolean") return v ? "Active" : "Inactive";
+  if (Array.isArray(v)) {
+    if (!v.length) return "—";
+    return v.join(", ");
+  }
+  const s = String(v).trim();
+  return s ? s : "—";
+}
+
 function fieldDiffRows(
   importedRow: Record<string, unknown>,
   existingRow: Record<string, unknown>
 ): DiffRow[] {
-  const keys = new Set([
-    ...Object.keys(importedRow || {}),
-    ...Object.keys(existingRow || {}),
+  const skipColumns = new Set([
+    "id",
+    "created_at",
+    "updated_at",
+    "deleted_at",
+    "version",
+    "organization_id",
+    "organization_ids",
+    "organization_ids_json",
+    "branch_ids",
+    "branch_ids_json",
+    "images_json",
+    "image_url",
+    "current_stock",
+    "is_active_for_inventory",
+    "is_purchasable",
+    "is_sellable",
+    "category_links",
+    "sub_category_links",
+    "product_links",
   ]);
-  // Skip internal/bookkeeping columns that aren't meaningful to compare.
-  const skip = new Set(["id", "created_at", "updated_at", "deleted_at"]);
-  const rows: DiffRow[] = [];
-  for (const key of keys) {
-    if (skip.has(key)) continue;
-    const a = importedRow ? importedRow[key] : undefined;
-    const b = existingRow ? existingRow[key] : undefined;
-    const aStr = a === undefined || a === null || a === "" ? "—" : String(a);
-    const bStr = b === undefined || b === null || b === "" ? "—" : String(b);
-    rows.push({ key, aStr, bStr, differs: aStr !== bStr });
+
+  // Build a normalized lookup map for existingRow: cleanKey -> { originalKey, val }
+  const existingMap = new Map<string, { key: string; val: unknown }>();
+  for (const [k, v] of Object.entries(existingRow || {})) {
+    if (skipColumns.has(k.toLowerCase().trim())) continue;
+    const cleanK = k.toLowerCase().replace(/[\s\-_()./&%?]/g, "");
+    existingMap.set(cleanK, { key: k, val: v });
   }
-  // Differing fields first, so what's actually different is visible without
-  // scrolling through a long list of identical values.
+
+  // Build a normalized lookup map for importedRow: cleanKey -> { originalKey, val }
+  const importedMap = new Map<string, { key: string; val: unknown }>();
+  for (const [k, v] of Object.entries(importedRow || {})) {
+    if (skipColumns.has(k.toLowerCase().trim())) continue;
+    const cleanK = k.toLowerCase().replace(/[\s\-_()./&%?]/g, "");
+    importedMap.set(cleanK, { key: k, val: v });
+  }
+
+  // Preserve the visual ordering: imported keys in order first, then any extra keys from existing
+  const orderedCleanKeys: string[] = [];
+  const added = new Set<string>();
+
+  for (const cleanK of importedMap.keys()) {
+    if (!added.has(cleanK)) {
+      added.add(cleanK);
+      orderedCleanKeys.push(cleanK);
+    }
+  }
+
+  for (const cleanK of existingMap.keys()) {
+    if (!added.has(cleanK)) {
+      added.add(cleanK);
+      orderedCleanKeys.push(cleanK);
+    }
+  }
+
+  const rows: DiffRow[] = [];
+  for (const cleanK of orderedCleanKeys) {
+    const imp = importedMap.get(cleanK);
+    const ext = existingMap.get(cleanK);
+
+    // Display label: prioritize the clean title from import, fallback to existing key
+    const displayLabel = imp?.key || ext?.key || cleanK;
+
+    const aStr = formatVal(imp?.val);
+    const bStr = formatVal(ext?.val);
+
+    if (aStr === "—" && bStr === "—") continue;
+
+    const differs = aStr.toLowerCase().trim() !== bStr.toLowerCase().trim();
+    rows.push({
+      key: displayLabel,
+      aStr,
+      bStr,
+      differs,
+    });
+  }
+
+  // Differing fields first
   rows.sort((a, b) => Number(b.differs) - Number(a.differs));
   return rows;
 }

@@ -255,6 +255,34 @@ class ProductService:
         """Validate and import products from an uploaded CSV/XLSX file."""
         rows = parse_rows_from_file(filename, raw_bytes)
 
+        # Lookup maps for clean human-readable duplicate comparison (resolved names, zero UUIDs)
+        categories_map = {str(c.id): c.name for c in await self.category_repository.list(limit=2000)}
+        sub_categories_map = {str(sc.id): sc.name for sc in await self.sub_category_repository.list(limit=3000)}
+        brands_map = {str(b.id): b.name for b in await self.brand_repository.list(limit=2000)}
+        hsns_map = {str(h.id): h.code for h in await self.hsn_repository.list(limit=2000)}
+        uoms_map = {str(u.id): (u.short_name or u.name or u.code) for u in await self.uom_repository.list(limit=2000)}
+
+        def _serialize_for_compare(p: Product) -> dict[str, Any]:
+            return {
+                "Product Name (As Per Tally)": p.product_name_tally or p.product_name or "—",
+                "Product Code": p.product_code or "—",
+                "Brand": brands_map.get(str(p.brand_id), "—") if p.brand_id else "—",
+                "Category": categories_map.get(str(p.category_id), "—") if p.category_id else "—",
+                "Sub Category": sub_categories_map.get(str(p.sub_category_id), "—") if p.sub_category_id else "—",
+                "HSN Code": hsns_map.get(str(p.hsn_id), "—") if p.hsn_id else "—",
+                "UOM": uoms_map.get(str(p.uom_id), "—") if p.uom_id else "—",
+                "Pack. Qty": p.packaging_quantity if p.packaging_quantity is not None else "—",
+                "Pack. Net Weight": p.packaging_net_weight if p.packaging_net_weight is not None else "—",
+                "Pack. Gross Weight": p.packaging_gross_weight if p.packaging_gross_weight is not None else "—",
+                "Length (cm)": getattr(p, "length_cm", None) or getattr(p, "length", "—") or "—",
+                "Width (cm)": getattr(p, "width_cm", None) or getattr(p, "width", "—") or "—",
+                "Height (cm)": getattr(p, "height_cm", None) or getattr(p, "height", "—") or "—",
+                "Pack. Unit CBM": p.packaging_unit_cbm if p.packaging_unit_cbm is not None else "—",
+                "Refund VAT %": p.refund_vat_percent if p.refund_vat_percent is not None else "—",
+                "Compliance & License Requirements": p.license_certificate_required or "—",
+                "Status": (p.status.value if hasattr(p.status, "value") else str(p.status or "active")).capitalize(),
+            }
+
         async def _create(field_values: dict[str, Any]) -> Product:
             category_code = field_values.pop("category_code")
             sub_category_code = field_values.pop("sub_category_code", None)
@@ -308,48 +336,54 @@ class ProductService:
 
             raw_product_code = field_values.get("product_code")
             product_name = (field_values.get("product_name_tally") or field_values.get("product_name") or "").strip()
-            prod_key = product_name.lower()
+            clean_name_key = product_name.lower().replace(" ", "").replace("-", "")
+            clean_code_key = (raw_product_code or "").strip().lower()
 
-            if prod_key in seen_in_batch:
+            if clean_name_key in seen_names:
                 raise ConflictException(
-                    f"Product '{product_name}' appears multiple times in the import file (duplicate)."
+                    f"Product '{product_name}' appears multiple times in the import file (in-file duplicate)."
+                )
+            if clean_code_key and clean_code_key in seen_codes:
+                raise ConflictException(
+                    f"Product Code '{raw_product_code}' appears multiple times in the import file (in-file duplicate)."
                 )
 
-            # Check if already exists in DB
+            # Check if Product Name already exists in DB
             if product_name:
-                from sqlalchemy import select
+                from sqlalchemy import select, or_
                 stmt_dup = select(Product).where(
-                    Product.product_name_tally.ilike(product_name)
+                    or_(
+                        Product.product_name_tally.ilike(product_name),
+                        Product.product_name.ilike(product_name),
+                    )
                 )
                 res_dup = await self.repository.session.execute(stmt_dup)
-                existing_dup = res_dup.scalar_one_or_none()
+                existing_dup = res_dup.scalars().first()
                 if existing_dup is not None:
-                    # If same product code or no code, flag as duplicate
-                    if not raw_product_code or raw_product_code == existing_dup.product_code:
-                        raise ConflictException(
-                            f"Product '{product_name}' already exists (Code: {existing_dup.product_code}) — skipped duplicate."
-                        )
+                    raise ConflictException(
+                        f"Product '{product_name}' already exists in Product Master (Code: {existing_dup.product_code}) — duplicate skipped.",
+                        details={"existing": _serialize_for_compare(existing_dup)},
+                    )
 
-            product_code = field_values["product_code"]
-            existing = await self.repository.get_by_code(product_code)
-            if existing is not None:
-                # Auto-append counter to make unique if code collided
-                base_code = product_code
-                attempt = 1
-                while True:
-                    candidate = f"{base_code}-{attempt}"
-                    if await self.repository.get_by_code(candidate) is None:
-                        field_values["product_code"] = candidate
-                        break
-                    attempt += 1
+            # Check if Product Code already exists in DB
+            if raw_product_code:
+                existing_code = await self.repository.get_by_code(raw_product_code)
+                if existing_code is not None:
+                    raise ConflictException(
+                        f"Product Code '{raw_product_code}' already exists in Product Master (used by '{existing_code.product_name_tally or existing_code.product_name}') — duplicate skipped.",
+                        details={"existing": _serialize_for_compare(existing_code)},
+                    )
 
             created_prod = await self.repository.create(**field_values)
-            seen_in_batch.add(prod_key)
+            seen_names.add(clean_name_key)
+            if clean_code_key:
+                seen_codes.add(clean_code_key)
             return created_prod
 
-        seen_in_batch = set()
+        seen_names: set[str] = set()
+        seen_codes: set[str] = set()
         summary = await run_import(
-            rows, row_validator=validate_product_row, row_creator=_create, dedupe_keys=("product_code",)
+            rows, row_validator=validate_product_row, row_creator=_create
         )
         await self._invalidate_cache()
         return summary

@@ -480,13 +480,24 @@ class BuyerService:
     async def import_file(self, filename: str, raw_bytes: bytes) -> Any:
         """Validate and import buyers from an uploaded CSV/XLSX file with 3-way duplicate detection."""
         from app.buyers.validators import validate_buyer_row
-        from app.masters.import_export import parse_rows_from_file, run_import
+        from app.masters.import_export import model_to_dict, parse_rows_from_file, run_import
 
         rows = parse_rows_from_file(filename, raw_bytes)
 
         all_countries = await self.country_repository.list_all()
         all_cats = await self.category_repository.list_all()
         all_sub_cats = await self.sub_category_repository.list_all()
+
+        country_name_map = {str(c.id): c.name for c in all_countries}
+
+        def _serialize_buyer_for_compare(b: Buyer) -> dict[str, Any]:
+            return {
+                "Company Name": b.company_name,
+                "Country": country_name_map.get(str(b.country_id), "—"),
+                "Calling Number": getattr(b, "contact_calling_number", "—") or "—",
+                "WhatsApp Number": getattr(b, "contact_whatsapp_number", "—") or "—",
+                "Status": "Active" if b.is_active else "Inactive",
+            }
 
         seen_in_batch = set()
 
@@ -510,7 +521,10 @@ class BuyerService:
                 whatsapp_number=wa_num,
             )
             if dup is not None:
-                raise ConflictException(f"Buyer '{company_name}' already exists (duplicate check: Company Name / Calling / WhatsApp Number).")
+                raise ConflictException(
+                    f"Buyer '{company_name}' already exists (duplicate check: Company Name / Calling / WhatsApp Number).",
+                    details={"existing": _serialize_buyer_for_compare(dup)},
+                )
 
             # Resolve Country
             country = next(

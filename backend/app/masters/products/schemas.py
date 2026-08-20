@@ -37,8 +37,8 @@ class ProductCreate(BaseModel):
     images: list[str] | None = None
 
     packaging_quantity: float = Field(..., ge=0, description="Packaging Quantity (unit) is mandatory")
-    packaging_net_weight: float = Field(..., ge=0, description="Packaging Net Weight (kg) is mandatory")
-    packaging_gross_weight: float = Field(..., ge=0, description="Packaging Gross Weight (kg) is mandatory")
+    packaging_net_weight: float | None = Field(default=None, ge=0)
+    packaging_gross_weight: float | None = Field(default=None, ge=0)
 
     weight: float | None = Field(default=None, ge=0)
     length: float | None = Field(default=None, ge=0)

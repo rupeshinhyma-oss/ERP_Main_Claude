@@ -4,7 +4,14 @@ RBAC Management Routes.
 Implements the admin-facing role & permission management API: list
 permissions, system roles CRUD, department permission CRUD, designation permission
 CRUD, individual user permission CRUD, user effective permission breakdown, and
-clone permission sets. Every route is gated by the ``settings.manage`` permission.
+clone permission sets. Gated by the roles_permissions.* permissions:
+roles_permissions.view (list/read routes), roles_permissions.create (create a
+role, including via Clone Role Permissions), roles_permissions.action
+(per-role delete, grant/revoke a permission on a role, and manage a single
+user's individual permission overrides), and roles_permissions.bulk_action
+(reserved for a future bulk-role-delete API endpoint; today's bulk delete in
+the frontend loops per-role DELETE calls, each already covered by
+roles_permissions.action).
 """
 
 from __future__ import annotations
@@ -16,7 +23,6 @@ from fastapi import APIRouter, Depends, Request, status
 from app.audit.constants import AuditAction
 from app.audit.dependencies import get_audit_service
 from app.audit.service import AuditService
-from app.auth.dependencies import get_current_user
 from app.auth.service import CurrentUser
 from app.core.responses import build_success_response
 from app.rbac.dependencies import get_rbac_service, require_permission
@@ -49,7 +55,7 @@ async def _role_with_permissions(role, rbac_service: RBACService) -> RoleWithPer
 async def list_permissions(
     request: Request,
     rbac_service: RBACService = Depends(get_rbac_service),
-    _current_user: CurrentUser = Depends(get_current_user),
+    _current_user: CurrentUser = Depends(require_permission("roles_permissions.view")),
 ) -> dict:
     """List every permission in the system."""
     permissions = await rbac_service.list_permissions()
@@ -63,7 +69,7 @@ async def create_role(
     payload: RoleCreate,
     request: Request,
     rbac_service: RBACService = Depends(get_rbac_service),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission("roles_permissions.create")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     """Create a new role, optionally granting it an initial set of permission codes."""
@@ -95,7 +101,7 @@ async def create_role(
 async def list_roles(
     request: Request,
     rbac_service: RBACService = Depends(get_rbac_service),
-    _current_user: CurrentUser = Depends(get_current_user),
+    _current_user: CurrentUser = Depends(require_permission("roles_permissions.view")),
 ) -> dict:
     """List every role, with each role's granted permission codes expanded."""
     roles = await rbac_service.list_roles()
@@ -108,7 +114,7 @@ async def get_role(
     role_id: uuid.UUID,
     request: Request,
     rbac_service: RBACService = Depends(get_rbac_service),
-    _current_user: CurrentUser = Depends(get_current_user),
+    _current_user: CurrentUser = Depends(require_permission("roles_permissions.view")),
 ) -> dict:
     """Fetch a single role, with its granted permission codes expanded."""
     role = await rbac_service.get_role_or_raise(role_id)
@@ -122,7 +128,7 @@ async def update_role(
     payload: RoleUpdate,
     request: Request,
     rbac_service: RBACService = Depends(get_rbac_service),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission("roles_permissions.action")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     """Update a role's name/description. System roles cannot be renamed."""
@@ -153,7 +159,7 @@ async def get_role_deletion_impact(
     role_id: uuid.UUID,
     request: Request,
     rbac_service: RBACService = Depends(get_rbac_service),
-    _current_user: CurrentUser = Depends(get_current_user),
+    _current_user: CurrentUser = Depends(require_permission("roles_permissions.view")),
 ) -> dict:
     """
     Show how many users are currently assigned to a role, and who they are,
@@ -170,7 +176,7 @@ async def delete_role(
     role_id: uuid.UUID,
     request: Request,
     rbac_service: RBACService = Depends(get_rbac_service),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission("roles_permissions.action")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     """
@@ -212,7 +218,7 @@ async def delete_role_with_reassignment(
     payload: DeleteRoleRequest,
     request: Request,
     rbac_service: RBACService = Depends(get_rbac_service),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission("roles_permissions.action")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     """
@@ -257,7 +263,7 @@ async def grant_permission(
     payload: GrantPermissionRequest,
     request: Request,
     rbac_service: RBACService = Depends(get_rbac_service),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission("roles_permissions.action")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     """Grant a permission to a role, if not already granted."""
@@ -288,7 +294,7 @@ async def revoke_permission(
     permission_id: uuid.UUID,
     request: Request,
     rbac_service: RBACService = Depends(get_rbac_service),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission("roles_permissions.action")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     """Revoke a permission from a role."""
@@ -319,7 +325,7 @@ async def list_user_permissions(
     user_id: uuid.UUID,
     request: Request,
     rbac_service: RBACService = Depends(get_rbac_service),
-    _current_user: CurrentUser = Depends(get_current_user),
+    _current_user: CurrentUser = Depends(require_permission("roles_permissions.view")),
 ) -> dict:
     links = await rbac_service.list_user_permissions(user_id)
     data = [
@@ -338,7 +344,7 @@ async def assign_user_permission(
     payload: AssignUserPermissionRequest,
     request: Request,
     rbac_service: RBACService = Depends(get_rbac_service),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission("roles_permissions.action")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     await rbac_service.assign_user_permission(
@@ -370,7 +376,7 @@ async def remove_user_permission(
     permission_id: uuid.UUID,
     request: Request,
     rbac_service: RBACService = Depends(get_rbac_service),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission("roles_permissions.action")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     await rbac_service.remove_user_permission(user_id, permission_id)
@@ -400,7 +406,7 @@ async def set_user_permissions_bulk(
     payload: BulkUserPermissionsRequest,
     request: Request,
     rbac_service: RBACService = Depends(get_rbac_service),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission("roles_permissions.action")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     overrides_tuples = [(item.permission_id, item.is_granted) for item in payload.overrides]
@@ -433,7 +439,7 @@ async def get_user_effective_permissions(
     user_id: uuid.UUID,
     request: Request,
     rbac_service: RBACService = Depends(get_rbac_service),
-    _current_user: CurrentUser = Depends(get_current_user),
+    _current_user: CurrentUser = Depends(require_permission("roles_permissions.view")),
 ) -> dict:
     data = await rbac_service.get_user_effective_permissions(user_id)
     return build_success_response(data=data, request_id=request.state.request_id)
@@ -445,7 +451,7 @@ async def clone_permission_set(
     payload: ClonePermissionSetRequest,
     request: Request,
     rbac_service: RBACService = Depends(get_rbac_service),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permission("roles_permissions.create")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     cloned_count = await rbac_service.clone_permission_set(

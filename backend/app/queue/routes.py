@@ -11,8 +11,11 @@ Provides admin endpoints for managing background jobs:
   GET    /queue/registered-jobs — List all job names that have a handler.
   GET    /queue/worker/status   — Worker heartbeat / running status.
 
-All endpoints require the ``settings.manage`` permission, keeping queue
-management restricted to system administrators.
+Open to any authenticated user by design -- no permission code gates these
+routes. The background queue is invisible, automatic infrastructure that
+should keep working the same way for everyone regardless of what's been
+granted to their role; it deliberately isn't part of the RBAC permission
+system.
 """
 
 from __future__ import annotations

@@ -9,10 +9,10 @@ A small monitoring/management API for the built-in memory cache:
     DELETE /cache/flush              Clear the entire cache.
     DELETE /cache/namespace/{name}   Clear every key in one namespace (e.g. "permissions").
 
-Every route is gated by the ``settings.manage`` permission, consistent with
-the rest of the admin-facing API (see ``app.rbac.routes``), since cache
-introspection can reveal internal data shapes and flushing it can cause a
-temporary load spike on the database.
+Open to any authenticated user by design -- no permission code gates these
+routes. Cache is invisible, automatic infrastructure that should keep
+working the same way for everyone regardless of what's been granted to
+their role; it deliberately isn't part of the RBAC permission system.
 """
 
 from __future__ import annotations

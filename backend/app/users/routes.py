@@ -231,7 +231,7 @@ async def update_user(
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     """Update a user's non-credential profile fields."""
-    if current_user.id != user_id and "user.update" not in current_user.permissions:
+    if current_user.id != user_id and "user.action" not in current_user.permissions and not current_user.is_super_admin:
         from app.core.exceptions import ForbiddenException
         raise ForbiddenException("You do not have permission to modify this user account.")
 
@@ -260,7 +260,7 @@ async def reset_password(
     request: Request,
     payload: ResetPasswordRequest | None = None,
     user_service: UserService = Depends(get_user_service),
-    current_user: CurrentUser = Depends(require_permission("user.update")),
+    current_user: CurrentUser = Depends(require_permission("user.action")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     """Set a custom password or generate a new temporary password for a user."""
@@ -286,7 +286,7 @@ async def activate_user(
     user_id: uuid.UUID,
     request: Request,
     user_service: UserService = Depends(get_user_service),
-    current_user: CurrentUser = Depends(require_permission("user.update")),
+    current_user: CurrentUser = Depends(require_permission("user.action")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     """Activate a pending or inactive user account."""
@@ -309,7 +309,7 @@ async def deactivate_user(
     user_id: uuid.UUID,
     request: Request,
     user_service: UserService = Depends(get_user_service),
-    current_user: CurrentUser = Depends(require_permission("user.update")),
+    current_user: CurrentUser = Depends(require_permission("user.action")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     """Deactivate a user account and force-logout all of their active sessions."""
@@ -332,7 +332,7 @@ async def suspend_user(
     user_id: uuid.UUID,
     request: Request,
     user_service: UserService = Depends(get_user_service),
-    current_user: CurrentUser = Depends(require_permission("user.update")),
+    current_user: CurrentUser = Depends(require_permission("user.action")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     """Suspend a user account and force-logout all of their active sessions."""
@@ -355,7 +355,7 @@ async def unsuspend_user(
     user_id: uuid.UUID,
     request: Request,
     user_service: UserService = Depends(get_user_service),
-    current_user: CurrentUser = Depends(require_permission("user.update")),
+    current_user: CurrentUser = Depends(require_permission("user.action")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     """Unsuspend a suspended user account and restore Active status."""
@@ -378,7 +378,7 @@ async def unlock_user(
     user_id: uuid.UUID,
     request: Request,
     user_service: UserService = Depends(get_user_service),
-    current_user: CurrentUser = Depends(require_permission("user.update")),
+    current_user: CurrentUser = Depends(require_permission("user.action")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     """Clear a user's failed-login lockout state."""
@@ -402,7 +402,7 @@ async def assign_role(
     request: Request,
     user_service: UserService = Depends(get_user_service),
     rbac_service: RBACService = Depends(get_rbac_service),
-    current_user: CurrentUser = Depends(require_permission("user.update")),
+    current_user: CurrentUser = Depends(require_permission("user.action")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     """Assign a role to a user."""
@@ -428,7 +428,7 @@ async def remove_role(
     request: Request,
     user_service: UserService = Depends(get_user_service),
     rbac_service: RBACService = Depends(get_rbac_service),
-    current_user: CurrentUser = Depends(require_permission("user.update")),
+    current_user: CurrentUser = Depends(require_permission("user.action")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     """Remove a role assignment from a user."""
@@ -465,7 +465,7 @@ async def force_logout(
     user_id: uuid.UUID,
     request: Request,
     user_service: UserService = Depends(get_user_service),
-    current_user: CurrentUser = Depends(require_permission("user.update")),
+    current_user: CurrentUser = Depends(require_permission("user.action")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     """Revoke every active session for a user, immediately invalidating their refresh tokens."""
@@ -489,7 +489,7 @@ async def delete_user(
     user_id: uuid.UUID,
     request: Request,
     user_service: UserService = Depends(get_user_service),
-    current_user: CurrentUser = Depends(require_permission("user.delete")),
+    current_user: CurrentUser = Depends(require_permission("user.action")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     """Delete (soft-delete) a user account, revoking active sessions and role assignments."""

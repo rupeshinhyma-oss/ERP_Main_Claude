@@ -24,7 +24,9 @@ export function CompanyListPage() {
     <MasterPage<MasterCompanyItem>
       activeKey="masters-company-list"
       apiBase="/masters/company-list"
-      permissionPrefix="company"
+      permissionPrefix="organizationlist"
+      exportPermission="organizationlist.export"
+      bulkActionPermission="organizationlist.bulk_action"
       entityName="organization"
       heading="Organization List"
       subtitle="Manage group operating entities, companies (e.g. Inhyma, FNB Solution), and their branches."

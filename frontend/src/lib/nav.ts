@@ -40,7 +40,7 @@ export const NAV_SECTIONS: NavSection[] = [
     label: "INVENTORY",
     items: [
       { key: "masters-products", label: "Product Master", path: "/masters/products", icon: "box", permission: "product.view" },
-      { key: "product-gallery", label: "Product Gallery", path: "/product-gallery", icon: "image", permission: "product.view" },
+      { key: "product-gallery", label: "Product Gallery", path: "/product-gallery", icon: "image", permission: "productgallery.view" },
       { key: "masters-categories", label: "Categories", path: "/masters/categories", icon: "layers", permission: "category.view" },
       { key: "masters-subcategories", label: "Sub Categories", path: "/masters/subcategories", icon: "folderTree", permission: "subcategory.view" },
       { key: "masters-brands", label: "Brands", path: "/masters/brands", icon: "award", permission: "brand.view" },
@@ -73,7 +73,7 @@ export const NAV_SECTIONS: NavSection[] = [
     label: "USER MANAGEMENT",
     items: [
       { key: "users", label: "Users", path: "/users", icon: "user", permission: "user.view" },
-      { key: "rbac", label: "Roles & Permissions", path: "/rbac", icon: "shield", superAdminOnly: true },
+      { key: "rbac", label: "Roles & Permissions", path: "/rbac", icon: "shield", permission: "roles_permissions.view" },
     ],
   },
   {
@@ -85,10 +85,10 @@ export const NAV_SECTIONS: NavSection[] = [
       { key: "masters-cities", label: "City", path: "/masters/cities", icon: "pin", permission: "city.view" },
       { key: "masters-currencies", label: "Currencies", path: "/masters/currencies", icon: "coins", permission: "currency.view" },
       { key: "masters-uom", label: "Units of Measurement", path: "/masters/uom", icon: "ruler", permission: "uom.view" },
-      { key: "organization", label: "Organization Settings", path: "/organization", icon: "settings", permission: "organization.manage", superAdminOnly: true },
-      { key: "masters-company-list", label: "Organization List", path: "/masters/company-list", icon: "building", permission: "company.view" },
+      { key: "organization", label: "Organization Settings", path: "/organization", icon: "settings", permission: "organization.manage" },
+      { key: "masters-company-list", label: "Organization List", path: "/masters/company-list", icon: "building", permission: "organizationlist.view" },
       { key: "audit", label: "Audit Log", path: "/audit", icon: "clock", permission: "audit.view" },
-      { key: "trash", label: "Trash", path: "/trash", icon: "trash" },
+      { key: "trash", label: "Trash", path: "/trash", icon: "trash", permission: "trash.view" },
     ],
   },
 ];

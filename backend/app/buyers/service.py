@@ -482,11 +482,20 @@ class BuyerService:
         from app.buyers.validators import validate_buyer_row
         from app.masters.import_export import model_to_dict, parse_rows_from_file, run_import
 
+        from app.masters.buyer_types.models import BuyerType
+        from sqlalchemy import select
+
         rows = parse_rows_from_file(filename, raw_bytes)
 
         all_countries = await self.country_repository.list_all()
         all_cats = await self.category_repository.list_all()
         all_sub_cats = await self.sub_category_repository.list_all()
+
+        bt_result = await self.repository.session.execute(select(BuyerType))
+        all_buyer_types = list(bt_result.scalars().all())
+        valid_buyer_type_map = {bt.name.strip().lower(): bt.name for bt in all_buyer_types}
+        for builtin in ("manufacturer", "trader", "dealer / trader", "dealer", "agent", "importer"):
+            valid_buyer_type_map.setdefault(builtin, "Dealer / Trader" if "trader" in builtin and "dealer" in builtin else builtin.title())
 
         country_name_map = {str(c.id): c.name for c in all_countries}
 
@@ -526,35 +535,51 @@ class BuyerService:
                     details={"existing": _serialize_buyer_for_compare(dup)},
                 )
 
-            # Resolve Country
+            # Strict Buyer Type validation
+            buyer_type_raw = field_values.get("buyer_type")
+            if buyer_type_raw:
+                bt_clean = buyer_type_raw.strip().lower()
+                matched_bt = valid_buyer_type_map.get(bt_clean)
+                if not matched_bt:
+                    valid_list_str = ", ".join(sorted(set(valid_buyer_type_map.values())))
+                    raise BadRequestException(
+                        f"Buyer Type '{buyer_type_raw}' does not exist in Buyer Type Master. Must be one of: {valid_list_str}."
+                    )
+                field_values["buyer_type"] = matched_bt
+
+            # Strict Country validation
             country = next(
                 (c for c in all_countries if c.code.upper() == country_raw.upper() or c.name.lower() == country_raw.lower()),
                 None
             )
             if country is None:
-                country = all_countries[0] if all_countries else None
-                if not country:
-                    raise ValueError(f"Country '{country_raw}' does not exist.")
+                raise BadRequestException(f"Country '{country_raw}' does not exist in Country Master.")
             field_values["country_id"] = country.id
 
-            # Resolve Category IDs if provided
+            # Strict Category validation
             category_ids = []
             if cat_names_raw:
                 for cn in cat_names_raw.split(","):
                     cn_clean = cn.strip().lower()
+                    if not cn_clean:
+                        continue
                     matched_cat = next((c for c in all_cats if c.name.lower() == cn_clean), None)
-                    if matched_cat:
-                        category_ids.append(matched_cat.id)
+                    if not matched_cat:
+                        raise BadRequestException(f"Product Category '{cn.strip()}' does not exist in Category Master.")
+                    category_ids.append(matched_cat.id)
             field_values["category_ids"] = category_ids
 
-            # Resolve Sub-Category IDs if provided
+            # Strict Sub-Category validation
             sub_category_ids = []
             if sub_cat_names_raw:
                 for scn in sub_cat_names_raw.split(","):
                     scn_clean = scn.strip().lower()
+                    if not scn_clean:
+                        continue
                     matched_sc = next((sc for sc in all_sub_cats if sc.name.lower() == scn_clean), None)
-                    if matched_sc:
-                        sub_category_ids.append(matched_sc.id)
+                    if not matched_sc:
+                        raise BadRequestException(f"Product Sub Category '{scn.strip()}' does not exist in Sub Category Master.")
+                    sub_category_ids.append(matched_sc.id)
             field_values["sub_category_ids"] = sub_category_ids
 
             buyer = await self.create(**field_values)

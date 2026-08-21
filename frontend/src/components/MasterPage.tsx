@@ -24,7 +24,15 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { AppShell } from "./AppShell";
 import { Banner, Can, ModalAlert, StatusBadge, TableMessageRow } from "./ui";
 import { Pagination } from "./Pagination";
-import { ImpExpDropdown, BulkActionsDropdown, ImportSummaryPanel } from "./ImportWizard";
+import {
+  ImpExpDropdown,
+  BulkActionsDropdown,
+  ImportSummaryPanel,
+  WizardModal,
+  downloadSampleCsv,
+  parseFile,
+  type SheetRow,
+} from "./ImportWizard";
 import { SideDrawer, DetailFieldGrid, type DetailField } from "./SideDrawer";
 import { Breadcrumb } from "./Breadcrumb";
 import {
@@ -33,6 +41,7 @@ import {
   apiPatch,
   apiPost,
   downloadExport,
+  errorMessage,
   toQueryString,
 } from "@/lib/api";
 import { useAuth, useSrNoJump, useModalHistorySync } from "@/lib/hooks";
@@ -488,6 +497,35 @@ export function MasterPage<T extends MasterRecord>({
 
   const [importSummary, setImportSummary] = useState<ImportSummary | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
+  const [isImportOpen, setIsImportOpen] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [wizardPending, setWizardPending] = useState<{
+    file: File;
+    rows: SheetRow[];
+    sheetColumns: string[];
+  } | null>(null);
+  const [importLoading, setImportLoading] = useState(false);
+  const importFileInputRef = useRef<HTMLInputElement>(null);
+
+  useModalHistorySync(isImportOpen, () => setIsImportOpen(false));
+
+  const handleImportSubmit = async () => {
+    if (!importFile) return;
+    setImportLoading(true);
+    setImportError(null);
+    try {
+      const rows = await parseFile(importFile);
+      if (!rows.length) {
+        throw new Error("The file appears to be empty or has no data rows.");
+      }
+      setWizardPending({ file: importFile, rows, sheetColumns: Object.keys(rows[0]) });
+    } catch (err) {
+      setImportError(errorMessage(err) || "Could not read that file.");
+    } finally {
+      setImportLoading(false);
+    }
+  };
+
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [effectiveSearch, setEffectiveSearch] = useState("");
   const [alertPopup, setAlertPopup] = useState<{ title: string; message: string } | null>(null);
@@ -966,6 +1004,286 @@ export function MasterPage<T extends MasterRecord>({
   // page -- so page 2 continues at 21, 22, 23... rather than restarting at 1.
   const startingSrNo = (currentPage - 1) * pageSize + 1;
 
+  if (isImportOpen) {
+    return (
+      <AppShell activeKey={activeKey}>
+        <main className="page" style={{ padding: "20px", maxWidth: "1600px", margin: "0 auto" }}>
+          <Breadcrumb trail={[...breadcrumbTrail, `Import ${entityName}s`]} />
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
+            <div>
+              <h1 style={{ fontSize: "22px", fontWeight: 700, color: "#0F172A", margin: 0, textTransform: "capitalize" }}>
+                Import {entityName}s
+              </h1>
+              <div style={{ fontSize: "13px", color: "#64748b", marginTop: "4px" }}>
+                Upload bulk {entityName} records from Excel (.xlsx, .xls) or CSV.
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setIsImportOpen(false);
+                setImportFile(null);
+                setImportError(null);
+              }}
+              style={{
+                padding: "8px 16px",
+                borderRadius: "6px",
+                border: "1px solid #cbd5e1",
+                background: "#ffffff",
+                color: "#1e293b",
+                fontWeight: 600,
+                fontSize: "13px",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
+              }}
+            >
+              ← BACK
+            </button>
+          </div>
+
+          <Banner error={importError} />
+
+          {importSummary && (
+            <div style={{ marginBottom: "20px" }}>
+              <ImportSummaryPanel summary={importSummary} error={importError} />
+            </div>
+          )}
+
+          <div
+            style={{
+              background: "#ffffff",
+              borderRadius: "8px",
+              border: "1px solid #e2e8f0",
+              boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
+              padding: "28px 36px",
+            }}
+          >
+            {/* Import File Section */}
+            <div style={{ marginBottom: "24px" }}>
+              <label style={{ display: "block", fontSize: "14px", fontWeight: 600, color: "#1e293b", marginBottom: "8px" }}>
+                Import File
+              </label>
+              <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    border: "1px solid #cbd5e1",
+                    borderRadius: "6px",
+                    background: "#f8fafc",
+                    padding: "4px 8px",
+                    minWidth: "320px",
+                    maxWidth: "500px",
+                    flex: 1,
+                  }}
+                >
+                  <button
+                    type="button"
+                    onClick={() => importFileInputRef.current?.click()}
+                    style={{
+                      background: "#ffffff",
+                      border: "1px solid #cbd5e1",
+                      borderRadius: "4px",
+                      padding: "6px 14px",
+                      fontSize: "13px",
+                      fontWeight: 600,
+                      color: "#334155",
+                      cursor: "pointer",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    Choose File
+                  </button>
+                  <span
+                    style={{
+                      paddingLeft: "12px",
+                      fontSize: "13px",
+                      color: importFile ? "#0f172a" : "#64748b",
+                      fontWeight: importFile ? 600 : 400,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                      flex: 1,
+                    }}
+                  >
+                    {importFile ? importFile.name : "No file chosen"}
+                  </span>
+                  {importFile && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setImportFile(null);
+                        if (importFileInputRef.current) importFileInputRef.current.value = "";
+                      }}
+                      style={{
+                        background: "none",
+                        border: "none",
+                        color: "#ef4444",
+                        cursor: "pointer",
+                        fontSize: "14px",
+                        padding: "4px 8px",
+                      }}
+                      title="Clear selected file"
+                    >
+                      ✕
+                    </button>
+                  )}
+                  <input
+                    ref={importFileInputRef}
+                    type="file"
+                    accept=".csv,.xlsx,.xls"
+                    style={{ display: "none" }}
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) {
+                        setImportFile(f);
+                        setImportError(null);
+                      }
+                    }}
+                  />
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => downloadSampleCsv(entityName, importHeaders)}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    background: "#f8fafc",
+                    border: "1px dashed #94a3b8",
+                    borderRadius: "6px",
+                    padding: "8px 14px",
+                    color: "#475569",
+                    fontSize: "13px",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }}
+                >
+                  📥 Download Sample CSV Template
+                </button>
+              </div>
+              <div style={{ fontSize: "12px", color: "#64748b", marginTop: "6px" }}>
+                Only CSV, XLS, And XLSX Files Are Allowed. Maximum File Size: 8MB.
+              </div>
+            </div>
+
+            {/* Notes Section */}
+            <div style={{ borderTop: "1px solid #f1f5f9", paddingTop: "20px" }}>
+              <div style={{ fontSize: "14px", fontWeight: 700, color: "#1e293b", marginBottom: "12px" }}>
+                Notes:
+              </div>
+              <ul
+                style={{
+                  margin: 0,
+                  paddingLeft: "20px",
+                  fontSize: "13px",
+                  lineHeight: "1.9",
+                  color: "#334155",
+                }}
+              >
+                <li>Upload Up To <strong>5,000 Rows</strong> Per File.</li>
+                <li>Avoid Special Characters (Like @ # $ % ^ & * ( ) ) In Text Fields.</li>
+                <li>Maximum Allowed File Size: <strong>8 MB</strong>.</li>
+                <li>Only <strong>.Csv</strong>, <strong>.Xls</strong>, And <strong>.Xlsx</strong> Files Are Accepted.</li>
+                {entityName.toLowerCase().includes("product") ? (
+                  <>
+                    <li>Mandatory Columns: <strong>Product Name (As Per Tally)</strong>, <strong>Category</strong>, <strong>UOM</strong>, <strong>Packaging Quantity</strong>, <strong>Packaging Gross Weight (kg)</strong>, and <strong>Packaging Unit CBM</strong>.</li>
+                    <li><strong>Product Name (As Per Tally)</strong> and <strong>Product Code</strong> (if provided) Must Be Unique.</li>
+                    <li><strong>Category, Sub Category, Brand, HSN Code, and UOM</strong> Must Already Exist In The System.</li>
+                    <li><strong>Sub Category</strong> Must Belong To The Selected <strong>Category</strong>.</li>
+                    <li><strong>Packaging Unit CBM</strong> can be entered directly or automatically calculated from Length, Width, Height in cm: <code>(L × W × H) / 1,000,000</code>.</li>
+                    <li><strong>Packaging Gross Weight (kg)</strong> Must Be Greater Than 0.</li>
+                    <li><strong>Refund VAT %</strong> Must Be A Number Between 0 and 100.</li>
+                  </>
+                ) : (
+                  <>
+                    <li>Required fields must be mapped to existing columns in the file.</li>
+                    <li>Foreign-key referenced fields must already exist in their respective master tables.</li>
+                  </>
+                )}
+                <li>No Blank Rows, Merged Cells, Or Excel Formulas Allowed.</li>
+                <li>Import May Take <strong>Several Seconds</strong> Depending On File Size. Please Do Not Refresh The Page During Import.</li>
+              </ul>
+            </div>
+
+            {/* Action Buttons */}
+            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "32px", borderTop: "1px solid #f1f5f9", paddingTop: "20px", gap: "12px" }}>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsImportOpen(false);
+                  setImportFile(null);
+                  setImportError(null);
+                }}
+                style={{
+                  padding: "9px 20px",
+                  borderRadius: "6px",
+                  border: "1px solid #cbd5e1",
+                  background: "#ffffff",
+                  color: "#475569",
+                  fontWeight: 600,
+                  fontSize: "13.5px",
+                  cursor: "pointer",
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={!importFile || importLoading}
+                onClick={handleImportSubmit}
+                style={{
+                  padding: "9px 28px",
+                  borderRadius: "6px",
+                  border: "none",
+                  background: !importFile || importLoading ? "#94a3b8" : "#2563eb",
+                  color: "#ffffff",
+                  fontWeight: 700,
+                  fontSize: "13.5px",
+                  cursor: !importFile || importLoading ? "not-allowed" : "pointer",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  boxShadow: !importFile || importLoading ? "none" : "0 2px 4px rgba(37,99,235,0.25)",
+                }}
+              >
+                {importLoading ? "Parsing..." : "Next: Map Columns →"}
+              </button>
+            </div>
+          </div>
+
+          {/* Wizard Modal */}
+          {wizardPending && (
+            <WizardModal
+              file={wizardPending.file}
+              rows={wizardPending.rows}
+              sheetColumns={wizardPending.sheetColumns}
+              apiBase={apiBase}
+              entityName={entityName}
+              importHeaders={importHeaders}
+              onClose={() => setWizardPending(null)}
+              onComplete={(summary) => {
+                setWizardPending(null);
+                setImportFile(null);
+                if (importFileInputRef.current) importFileInputRef.current.value = "";
+                if (summary) {
+                  setImportSummary(summary);
+                }
+                reload();
+              }}
+              onError={(msg) => {
+                setImportError(msg);
+              }}
+            />
+          )}
+        </main>
+      </AppShell>
+    );
+  }
+
   if (useFullPageForm && modalOpen) {
     return (
       <AppShell activeKey={activeKey}>
@@ -1270,6 +1588,12 @@ export function MasterPage<T extends MasterRecord>({
                 onExportCsv={() => handleExport("csv")}
                 showImport={canImport}
                 showExport={canExport}
+                onOpenImportPage={() => {
+                  setImportError(null);
+                  setImportSummary(null);
+                  setImportFile(null);
+                  setIsImportOpen(true);
+                }}
               />
             )}
             {canBulkAction && (

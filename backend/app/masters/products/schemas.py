@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field, computed_field
+from pydantic import BaseModel, ConfigDict, Field, computed_field, model_validator
 
 from app.core.constants import RecordStatus
 
@@ -61,6 +61,23 @@ class ProductCreate(BaseModel):
     is_active_for_inventory: bool = True
 
     status: RecordStatus = RecordStatus.ACTIVE
+
+    @model_validator(mode="after")
+    def validate_packaging_and_cbm(self) -> ProductCreate:
+        if self.packaging_gross_weight is None or self.packaging_gross_weight <= 0:
+            raise ValueError("Packaging Gross Weight (kg) is required and must be greater than 0.")
+
+        # Compute CBM if dimensions are given and CBM is missing or 0
+        l = self.length_cm or self.length
+        w = self.width_cm or self.width
+        h = self.height_cm or self.height
+        if (self.packaging_unit_cbm is None or self.packaging_unit_cbm <= 0) and (l and w and h and l > 0 and w > 0 and h > 0):
+            self.packaging_unit_cbm = round((float(l) * float(w) * float(h)) / 1_000_000.0, 6)
+
+        if self.packaging_unit_cbm is None or self.packaging_unit_cbm <= 0:
+            raise ValueError("Packaging Unit CBM is required (enter Length, Width, Height to auto-calculate or enter Packaging Unit CBM directly).")
+
+        return self
 
 
 class ProductUpdate(BaseModel):

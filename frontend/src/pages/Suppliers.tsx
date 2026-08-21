@@ -20,7 +20,7 @@ import { Breadcrumb } from "@/components/Breadcrumb";
 import { Banner, ModalAlert, TableMessageRow } from "@/components/ui";
 import { SideDrawer, DetailFieldGrid } from "@/components/SideDrawer";
 import { Pagination } from "@/components/Pagination";
-import { ImpExpDropdown, BulkActionsDropdown, ImportSummaryPanel } from "@/components/ImportWizard";
+import { ImpExpDropdown, BulkActionsDropdown, ImportSummaryPanel, downloadSampleCsv, parseFile, WizardModal, type SheetRow } from "@/components/ImportWizard";
 import {
   SearchableDropdown,
   SearchableDropdownMultiPanel,
@@ -437,6 +437,15 @@ export function SuppliersPage() {
 
   const [importSummary, setImportSummary] = useState<ImportSummary | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
+  const [isImportPageOpen, setIsImportPageOpen] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importLoading, setImportLoading] = useState(false);
+  const importFileInputRef = useRef<HTMLInputElement>(null);
+  const [wizardPending, setWizardPending] = useState<{
+    file: File;
+    rows: SheetRow[];
+    sheetColumns: string[];
+  } | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   // Phase 7: keyed so deleting one row/contact, or the bulk delete, never
   // disables an unrelated row's controls.
@@ -599,6 +608,7 @@ export function SuppliersPage() {
   // navigating back to Dashboard.
   useModalHistorySync(modalOpen, () => setModalOpen(false));
   useModalHistorySync(Boolean(drawerSupplier), () => setDrawerSupplier(null));
+  useModalHistorySync(isImportPageOpen, () => setIsImportPageOpen(false));
   const [modalMode, setModalMode] = useState<"quick" | "full">("full");
   const [modalTab, setModalTab] = useState<ModalTab>("first");
   const [currentSupplierId, setCurrentSupplierId] = useState<string | null>(null);
@@ -1771,6 +1781,306 @@ export function SuppliersPage() {
     } catch (err) {
       setError(err);
     }
+  }
+
+  async function handleImportSubmit() {
+    if (!importFile || importLoading) return;
+    setImportLoading(true);
+    setImportError(null);
+
+    try {
+      const rows = await parseFile(importFile);
+      if (!rows.length) {
+        throw new Error("The file appears to be empty or has no data rows.");
+      }
+      setWizardPending({
+        file: importFile,
+        rows,
+        sheetColumns: Object.keys(rows[0]),
+      });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setImportError(msg || "Failed to read file. Please check file format and try again.");
+    } finally {
+      setImportLoading(false);
+    }
+  }
+
+  /* ------------------------------------------------------------------------- */
+  /* RENDER: DEDICATED FULL-PAGE IMPORT SUPPLIERS VIEW                         */
+  /* ------------------------------------------------------------------------- */
+  if (isImportPageOpen) {
+    return (
+      <AppShell activeKey="suppliers" pageClassName="page-suppliers">
+        <main className="page" style={{ padding: "20px", maxWidth: "1600px", margin: "0 auto" }}>
+          <Breadcrumb trail={["Supplier Profiles", "Import Suppliers"]} />
+
+          {/* Header */}
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
+            <div>
+              <h1 style={{ fontSize: "22px", fontWeight: 700, color: "#0F172A", margin: 0 }}>Import Suppliers</h1>
+              <div style={{ fontSize: "13px", color: "#64748b", marginTop: "4px" }}>
+                Upload bulk supplier accounts, contacts, and sourcing capabilities from Excel (.xlsx, .xls) or CSV.
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setIsImportPageOpen(false);
+                setImportFile(null);
+                setImportError(null);
+              }}
+              style={{
+                padding: "8px 16px",
+                borderRadius: "6px",
+                border: "1px solid #cbd5e1",
+                background: "#ffffff",
+                color: "#1e293b",
+                fontWeight: 600,
+                fontSize: "13px",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
+              }}
+            >
+              ← BACK
+            </button>
+          </div>
+
+          <Banner error={importError} />
+
+          {/* Import Summary Results Panel if completed */}
+          {importSummary && (
+            <div style={{ marginBottom: "20px" }}>
+              <ImportSummaryPanel summary={importSummary} error={importError} />
+            </div>
+          )}
+
+          {/* Main Workspace Card */}
+          <div
+            style={{
+              background: "#ffffff",
+              borderRadius: "8px",
+              border: "1px solid #e2e8f0",
+              boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
+              padding: "28px 36px",
+            }}
+          >
+            {/* Import File Section */}
+            <div style={{ marginBottom: "24px" }}>
+              <label style={{ display: "block", fontSize: "14px", fontWeight: 600, color: "#1e293b", marginBottom: "8px" }}>
+                Import File
+              </label>
+              <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    border: "1px solid #cbd5e1",
+                    borderRadius: "6px",
+                    background: "#f8fafc",
+                    padding: "4px 8px",
+                    minWidth: "320px",
+                    maxWidth: "500px",
+                    flex: 1,
+                  }}
+                >
+                  <button
+                    type="button"
+                    onClick={() => importFileInputRef.current?.click()}
+                    style={{
+                      background: "#ffffff",
+                      border: "1px solid #cbd5e1",
+                      borderRadius: "4px",
+                      padding: "6px 14px",
+                      fontSize: "13px",
+                      fontWeight: 600,
+                      color: "#334155",
+                      cursor: "pointer",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    Choose File
+                  </button>
+                  <span
+                    style={{
+                      paddingLeft: "12px",
+                      fontSize: "13px",
+                      color: importFile ? "#0f172a" : "#64748b",
+                      fontWeight: importFile ? 600 : 400,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                      flex: 1,
+                    }}
+                  >
+                    {importFile ? importFile.name : "No file chosen"}
+                  </span>
+                  {importFile && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setImportFile(null);
+                        if (importFileInputRef.current) importFileInputRef.current.value = "";
+                      }}
+                      style={{
+                        background: "none",
+                        border: "none",
+                        color: "#ef4444",
+                        cursor: "pointer",
+                        fontSize: "14px",
+                        padding: "4px 8px",
+                      }}
+                      title="Clear selected file"
+                    >
+                      ✕
+                    </button>
+                  )}
+                  <input
+                    ref={importFileInputRef}
+                    type="file"
+                    accept=".csv,.xlsx,.xls"
+                    style={{ display: "none" }}
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) {
+                        setImportFile(f);
+                        setImportError(null);
+                      }
+                    }}
+                  />
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => downloadSampleCsv("supplier", SUPPLIER_IMPORT_HEADERS)}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    background: "#f8fafc",
+                    border: "1px dashed #94a3b8",
+                    borderRadius: "6px",
+                    padding: "8px 14px",
+                    color: "#475569",
+                    fontSize: "13px",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }}
+                >
+                  📥 Download Sample CSV Template
+                </button>
+              </div>
+              <div style={{ fontSize: "12px", color: "#64748b", marginTop: "6px" }}>
+                Only CSV, XLS, And XLSX Files Are Allowed. Maximum File Size: 8MB.
+              </div>
+            </div>
+
+            {/* Notes Section */}
+            <div style={{ borderTop: "1px solid #f1f5f9", paddingTop: "20px" }}>
+              <div style={{ fontSize: "14px", fontWeight: 700, color: "#1e293b", marginBottom: "12px" }}>
+                Notes:
+              </div>
+              <ul
+                style={{
+                  margin: 0,
+                  paddingLeft: "20px",
+                  fontSize: "13px",
+                  lineHeight: "1.9",
+                  color: "#334155",
+                }}
+              >
+                <li>Upload Up To <strong>5,000 Rows</strong> Per File.</li>
+                <li>Avoid Special Characters (Like @ # $ % ^ & * ( ) ) In Text Fields.</li>
+                <li>Maximum Allowed File Size: <strong>8 MB</strong>.</li>
+                <li>Only <strong>.Csv</strong>, <strong>.Xls</strong>, And <strong>.Xlsx</strong> Files Are Accepted.</li>
+                <li>Mandatory Columns: <strong>Company Name</strong>, <strong>Country</strong>, <strong>Province / State</strong>, And <strong>City</strong>.</li>
+                <li><strong>Company Name</strong> Must Be Unique.</li>
+                <li><strong>Country, Province / State, City, Product Category, Key Strength Sub Category, And Supplier Type</strong> Must Already Exist In The System.</li>
+                <li><strong>Key Strength Sub Category</strong> Must Belong To The Selected <strong>Product Category</strong>.</li>
+                <li><strong>Calling Number</strong>, <strong>WhatsApp Number</strong>, And <strong>WeChat Number</strong> Must Include Country Code (Maximum 15 Digits Total).</li>
+                <li>Multiple <strong>Emails</strong>, <strong>Product Categories</strong>, And <strong>Key Strength Sub Categories</strong> Can Be Separated By Comma (,).</li>
+                <li><strong>Visited Factory/Office</strong> Must Be <em>Yes</em> Or <em>No</em>; If <em>Yes</em>, <strong>Visit Remarks</strong> Can Be Provided.</li>
+                <li><strong>Current Status</strong> Must Be <em>Existing</em> Or <em>New</em>; <strong>Potential</strong> Must Be <em>Yes</em> Or <em>No</em>; <strong>Supplier Grade</strong> Must Be <em>A</em>, <em>B</em>, Or <em>C</em>.</li>
+                <li>No Blank Rows, Merged Cells, Or Excel Formulas Allowed.</li>
+                <li>Supplier Import May Take <strong>Several Seconds</strong> Depending On The Number Of Rows And Server Load. Please Do Not Refresh The Page During Import.</li>
+              </ul>
+            </div>
+
+            {/* Action Buttons */}
+            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "32px", borderTop: "1px solid #f1f5f9", paddingTop: "20px", gap: "12px" }}>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsImportPageOpen(false);
+                  setImportFile(null);
+                  setImportError(null);
+                }}
+                style={{
+                  padding: "9px 20px",
+                  borderRadius: "6px",
+                  border: "1px solid #cbd5e1",
+                  background: "#ffffff",
+                  color: "#475569",
+                  fontWeight: 600,
+                  fontSize: "13.5px",
+                  cursor: "pointer",
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={!importFile || importLoading}
+                onClick={handleImportSubmit}
+                style={{
+                  padding: "9px 28px",
+                  borderRadius: "6px",
+                  border: "none",
+                  background: !importFile || importLoading ? "#94a3b8" : "#2563eb",
+                  color: "#ffffff",
+                  fontWeight: 700,
+                  fontSize: "13.5px",
+                  cursor: !importFile || importLoading ? "not-allowed" : "pointer",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  boxShadow: !importFile || importLoading ? "none" : "0 2px 4px rgba(37,99,235,0.25)",
+                }}
+              >
+                {importLoading ? "Importing..." : "Import"}
+              </button>
+            </div>
+          </div>
+
+          {/* Column Mapping Wizard Modal (Matches Supplier & Buyer Master) */}
+          {wizardPending && (
+            <WizardModal
+              file={wizardPending.file}
+              rows={wizardPending.rows}
+              sheetColumns={wizardPending.sheetColumns}
+              apiBase="/suppliers"
+              entityName="supplier"
+              importHeaders={SUPPLIER_IMPORT_HEADERS}
+              onClose={() => setWizardPending(null)}
+              onComplete={(summary) => {
+                setWizardPending(null);
+                setImportFile(null);
+                if (importFileInputRef.current) importFileInputRef.current.value = "";
+                if (summary) {
+                  setImportSummary(summary);
+                }
+                reload();
+              }}
+              onError={(msg) => {
+                setImportError(msg);
+              }}
+            />
+          )}
+        </main>
+      </AppShell>
+    );
   }
 
   const startSrNo = (currentPage - 1) * pageSize + 1;
@@ -3138,6 +3448,12 @@ export function SuppliersPage() {
                 onExportCsv={() => handleExport("csv")}
                 showImport={canImport}
                 showExport={canExport}
+                onOpenImportPage={() => {
+                  setImportError(null);
+                  setImportSummary(null);
+                  setImportFile(null);
+                  setIsImportPageOpen(true);
+                }}
               />
               {canBulkAction && (
                 <BulkActionsDropdown

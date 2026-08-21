@@ -133,7 +133,7 @@ async function parseXlsxFile(file: File): Promise<SheetRow[]> {
   return XLSX.utils.sheet_to_json<SheetRow>(sheet, { defval: "" });
 }
 
-async function parseFile(file: File): Promise<SheetRow[]> {
+export async function parseFile(file: File): Promise<SheetRow[]> {
   const lower = file.name.toLowerCase();
   if (lower.endsWith(".csv")) return parseCsvFile(file);
   if (lower.endsWith(".xlsx")) return parseXlsxFile(file);
@@ -712,7 +712,7 @@ export function ImportSummaryPanel({
 /* The wizard modal                                                   */
 /* ------------------------------------------------------------------ */
 
-interface WizardModalProps {
+export interface WizardModalProps {
   file: File;
   rows: SheetRow[];
   sheetColumns: string[];
@@ -724,7 +724,7 @@ interface WizardModalProps {
   onError: (message: string) => void;
 }
 
-function WizardModal({
+export function WizardModal({
   file,
   rows,
   sheetColumns,
@@ -1167,9 +1167,121 @@ export interface ImpExpDropdownProps {
   showImport?: boolean;
   /** Show the EXPORT menu item. Defaults to true. */
   showExport?: boolean;
+  /** Optional callback to open a dedicated full-page import view instead of the inline modal */
+  onOpenImportPage?: () => void;
 }
 
-const REALISTIC_SAMPLES: Record<string, string> = {
+const SUPPLIER_SAMPLES: Record<string, string> = {
+  "Company Name": "Yinglima Packaging Machinery Co., Ltd.",
+  "company_name": "Yinglima Packaging Machinery Co., Ltd.",
+  "Supplier Type": "Manufacturer",
+  "supplier_type": "Manufacturer",
+  "Product Categories": "Machines",
+  "category_names": "Machines",
+  "Key Strength Sub-Categories": "Band Sealer",
+  "sub_category_names": "Band Sealer",
+  "Products Supplied": "FR900 Continuous Band Sealer",
+  "Secondary Products": "Vacuum packaging machines, carton sealers, shrink tunnels",
+  "Brand Description": "Yinglima",
+  "Country": "China",
+  "country": "China",
+  "State / Province": "Zhejiang",
+  "State": "Zhejiang",
+  "Province": "Zhejiang",
+  "state": "Zhejiang",
+  "City": "Wenzhou",
+  "city": "Wenzhou",
+  "Address": "No. 88, Binhai Industrial Park, Longwan District",
+  "address": "No. 88, Binhai Industrial Park, Longwan District",
+  "Town": "Longwan",
+  "town": "Longwan",
+  "Contact Person": "Chen Wei",
+  "Contact Salutation": "Mr.",
+  "contact_full_name": "Chen Wei",
+  "Designation": "Export Sales Director",
+  "contact_designation": "Export Sales Director",
+  "Calling Number": "+86 13800138000",
+  "contact_calling_number": "+86 13800138000",
+  "WhatsApp Number": "+86 13800138000",
+  "contact_whatsapp_number": "+86 13800138000",
+  "WeChat Number": "+86 13800138000",
+  "contact_wechat_number": "+86 13800138000",
+  "Emails": "sales@yinglima.com, info@yinglima.com",
+  "emails": "sales@yinglima.com, info@yinglima.com",
+  "Tax ID / GST Number": "91330300MA2XXXXX",
+  "tax_id_number": "91330300MA2XXXXX",
+  "Primary Website": "https://www.yinglima.com",
+  "primary_website": "https://www.yinglima.com",
+  "Secondary Website": "https://yinglima.en.alibaba.com",
+  "secondary_website": "https://yinglima.en.alibaba.com",
+  "Current Status": "New",
+  "current_status": "New",
+  "Supplier Grade": "A",
+  "supplier_grade": "A",
+  "Potential": "Yes",
+  "potential": "Yes",
+  "Potential Reason": "",
+  "potential_reason": "",
+  "Visited Factory/Office": "Yes",
+  "visited_factory_office": "Yes",
+  "Visit Remarks": "Inspected automated CNC assembly line and testing facilities",
+  "visit_remarks": "Inspected automated CNC assembly line and testing facilities",
+  "Overall Remarks": "Top tier manufacturer of continuous band sealers with CE and ISO certifications",
+  "overall_remarks": "Top tier manufacturer of continuous band sealers with CE and ISO certifications",
+  "Status": "Active",
+  "status": "Active",
+};
+
+const BUYER_SAMPLES: Record<string, string> = {
+  "Company Name": "Nile Agro Industries Ltd.",
+  "company_name": "Nile Agro Industries Ltd.",
+  "Buyer Type": "Manufacturer",
+  "buyer_type": "Manufacturer",
+  "Product Categories": "Machines",
+  "category_names": "Machines",
+  "Product Sub Categories": "Band Sealer",
+  "sub_category_names": "Band Sealer",
+  "Country": "Uganda",
+  "country": "Uganda",
+  "City": "Jinja",
+  "city": "Jinja",
+  "Address": "Plot 45, Factory Road, Industrial Area",
+  "address": "Plot 45, Factory Road, Industrial Area",
+  "Contact Salutation": "Mr.",
+  "contact_salutation": "Mr.",
+  "Contact Person Name": "Robert Mukasa",
+  "contact_full_name": "Robert Mukasa",
+  "Designation": "Procurement Manager",
+  "contact_designation": "Procurement Manager",
+  "Calling Number": "+256 772123456",
+  "contact_calling_number": "+256 772123456",
+  "WhatsApp Number": "+256 772123456",
+  "contact_whatsapp_number": "+256 772123456",
+  "Emails": "robert@nileagro.com, info@nileagro.com",
+  "emails": "robert@nileagro.com, info@nileagro.com",
+  "Tax ID / GST Number": "TIN-1000123456",
+  "tax_id_number": "TIN-1000123456",
+  "Website": "https://www.nileagro.com",
+  "website": "https://www.nileagro.com",
+  "Current Status": "New",
+  "current_status": "New",
+  "Buyer Grade": "A",
+  "buyer_grade": "A",
+  "Potential": "Yes",
+  "potential": "Yes",
+  "Potential Reason": "",
+  "potential_reason": "",
+  "Product Range": "Grain Milling & Food Processing",
+  "product_range": "Grain Milling & Food Processing",
+  "Currently Buying From": "Local Distributors",
+  "currently_buying_from": "Local Distributors",
+  "Overall Remarks": "Interested in automated packaging and sealing machinery",
+  "overall_remarks": "Interested in automated packaging and sealing machinery",
+  "Status": "Active",
+  "status": "Active",
+};
+
+const PRODUCT_SAMPLES: Record<string, string> = {
   "Product Name (As Per Tally)": "FR900 Continuous Band Sealer",
   "product_name": "FR900 Continuous Band Sealer",
   "Product Code": "INH-00101",
@@ -1217,34 +1329,43 @@ const REALISTIC_SAMPLES: Record<string, string> = {
   "refund_vat_percent": "13",
   "Compliance & License Requirements": "Import Certificate",
   "license_certificate_required": "Import Certificate",
-  "Specification": "Standard 220V Motor, 50Hz, Teflon Sealing Belt",
-  "specification": "Standard 220V Motor, 50Hz, Teflon Sealing Belt",
-  "Description": "High speed continuous band sealer",
-  "description": "High speed continuous band sealer",
-  "Status": "active",
-  "Status (active/inactive)": "active",
-  "status": "active",
-  "Company Name": "Yinglima Packaging Machinery Co., Ltd.",
-  "company_name": "Yinglima Packaging Machinery Co., Ltd.",
-  "Country": "China",
-  "State": "Zhejiang",
-  "City": "Wenzhou",
+  "Specification": "Voltage: 220V/50Hz, Power: 500W, Sealing Speed: 0-12m/min, Sealing Width: 6-12mm",
+  "specification": "Voltage: 220V/50Hz, Power: 500W, Sealing Speed: 0-12m/min, Sealing Width: 6-12mm",
+  "Description": "Horizontal continuous band sealing machine for plastic bags and pouches",
+  "description": "Horizontal continuous band sealing machine for plastic bags and pouches",
+  "Status": "Active",
+  "Status (active/inactive)": "Active",
+  "status": "Active",
 };
 
-function downloadSampleCsv(entityName: string, headers: ImportHeader[]) {
-  const headerKeys = headers.map((h) => h.key || h.label);
+export function downloadSampleCsv(entityName: string, headers: ImportHeader[]) {
+  const ent = entityName.toLowerCase();
+  let sampleMap: Record<string, string> = PRODUCT_SAMPLES;
+  if (ent.includes("buyer")) {
+    sampleMap = BUYER_SAMPLES;
+  } else if (ent.includes("supplier")) {
+    sampleMap = SUPPLIER_SAMPLES;
+  }
+
+  const headerKeys = headers.map((h) => h.label || h.key);
   const sampleRow = headers.map((h) => {
     const key = h.key || h.label || "";
-    let val = REALISTIC_SAMPLES[key] || (h.label ? REALISTIC_SAMPLES[h.label] : "");
-    if (!val) {
+    let val: string | undefined = undefined;
+    if (h.label && h.label in sampleMap) {
+      val = sampleMap[h.label];
+    } else if (key && key in sampleMap) {
+      val = sampleMap[key];
+    }
+
+    if (val === undefined) {
       const k = key.toLowerCase();
       if (k.includes("code")) val = "SAMPLE-001";
       else if (k.includes("name")) val = "Sample Name";
-      else if (k.includes("status")) val = "active";
+      else if (k.includes("status")) val = "Active";
       else if (k.includes("quantity") || k.includes("qty")) val = "1";
       else if (k.includes("weight")) val = "10.0";
       else if (k.includes("price") || k.includes("cost")) val = "100.00";
-      else val = "Sample Value";
+      else val = "";
     }
     return `"${val.replace(/"/g, '""')}"`;
   });
@@ -1262,6 +1383,47 @@ function downloadSampleCsv(entityName: string, headers: ImportHeader[]) {
   URL.revokeObjectURL(url);
 }
 
+export async function downloadSampleExcel(entityName: string, headers: ImportHeader[]) {
+  const XLSX = await import("xlsx");
+  const ent = entityName.toLowerCase();
+  let sampleMap: Record<string, string> = PRODUCT_SAMPLES;
+  if (ent.includes("buyer")) {
+    sampleMap = BUYER_SAMPLES;
+  } else if (ent.includes("supplier")) {
+    sampleMap = SUPPLIER_SAMPLES;
+  }
+
+  const headerKeys = headers.map((h) => h.label || h.key);
+  const rowObj: Record<string, string> = {};
+  headers.forEach((h) => {
+    const key = h.key || h.label || "";
+    let val: string | undefined = undefined;
+    if (h.label && h.label in sampleMap) {
+      val = sampleMap[h.label];
+    } else if (key && key in sampleMap) {
+      val = sampleMap[key];
+    }
+
+    if (val === undefined) {
+      const k = key.toLowerCase();
+      if (k.includes("code")) val = "SAMPLE-001";
+      else if (k.includes("name")) val = "Sample Name";
+      else if (k.includes("status")) val = "Active";
+      else if (k.includes("quantity") || k.includes("qty")) val = "1";
+      else if (k.includes("weight")) val = "10.0";
+      else if (k.includes("price") || k.includes("cost")) val = "100.00";
+      else val = "";
+    }
+    rowObj[h.label || h.key] = val;
+  });
+
+  const ws = XLSX.utils.json_to_sheet([rowObj], { header: headerKeys });
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Sample");
+  const capEntity = entityName.charAt(0).toUpperCase() + entityName.slice(1);
+  XLSX.writeFile(wb, `Sample_${capEntity.replace(/\s+/g, "_")}_Template.xlsx`);
+}
+
 export function ImpExpDropdown({
   apiBase,
   entityName,
@@ -1272,6 +1434,7 @@ export function ImpExpDropdown({
   onExportCsv,
   showImport = true,
   showExport = true,
+  onOpenImportPage,
 }: ImpExpDropdownProps) {
   const [open, setOpen] = useState(false);
   const [pending, setPending] = useState<{
@@ -1376,7 +1539,32 @@ export function ImpExpDropdown({
               📄 SAMPLE FILE
             </button>
           )}
-          {showImport && (
+          {showImport && onOpenImportPage ? (
+            <button
+              type="button"
+              onClick={() => {
+                setOpen(false);
+                onOpenImportPage();
+              }}
+              style={{
+                width: "100%",
+                textAlign: "left",
+                padding: "10px 14px",
+                fontSize: "13.5px",
+                color: "#334155",
+                fontWeight: 600,
+                background: "none",
+                border: "none",
+                borderTop: "1px solid #f1f5f9",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
+              }}
+            >
+              📥 IMPORT
+            </button>
+          ) : showImport ? (
             <label
               style={{
                 display: "flex",
@@ -1400,7 +1588,7 @@ export function ImpExpDropdown({
                 style={{ display: "none" }}
               />
             </label>
-          )}
+          ) : null}
           {showExport && (
             <button
               type="button"

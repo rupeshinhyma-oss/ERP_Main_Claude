@@ -979,12 +979,17 @@ export function ProductGalleryPage() {
             ? p.images
             : (p.image_url ? [p.image_url] : []);
 
-          const handleDeletePhoto = async (indexToDelete: number) => {
-            if (!p) return;
-            if (!window.confirm("Are you sure you want to delete this media from the product?")) return;
+          const handleDeletePhoto = async (indicesToDelete: number[]) => {
+            if (!p || !indicesToDelete.length) return;
+            const count = indicesToDelete.length;
+            const confirmMsg = count === 1
+              ? "Are you sure you want to delete this media from the product?"
+              : `Are you sure you want to delete ${count} selected media files from the product?`;
+            if (!window.confirm(confirmMsg)) return;
 
-            await guardPhotoDelete(`${p.id}:${indexToDelete}`, async () => {
-              const updatedImages = detailImgList.filter((_, idx) => idx !== indexToDelete);
+            const deleteKey = count === 1 ? `${p.id}:${indicesToDelete[0]}` : `${p.id}:bulk-delete`;
+            await guardPhotoDelete(deleteKey, async () => {
+              const updatedImages = detailImgList.filter((_, idx) => !indicesToDelete.includes(idx));
               const updatedPayload = {
                 images: updatedImages,
                 image_url: updatedImages[0] || null,
@@ -1119,8 +1124,11 @@ export function ProductGalleryPage() {
                       {canDeleteProductMedia && (
                         <button
                           type="button"
-                          onClick={() => handleDeletePhoto(selectedImageIndex)}
-                          disabled={isPhotoDeletePending(`${p.id}:${selectedImageIndex}`)}
+                          onClick={() => {
+                            const toDelete = selectedMediaIndices.length > 0 ? selectedMediaIndices : [selectedImageIndex];
+                            handleDeletePhoto(toDelete);
+                          }}
+                          disabled={isPhotoDeletePending(`${p.id}:bulk-delete`) || isPhotoDeletePending(`${p.id}:${selectedImageIndex}`)}
                           style={{
                             background: "#fee2e2",
                             color: "#dc2626",
@@ -1129,15 +1137,19 @@ export function ProductGalleryPage() {
                             padding: "4px 10px",
                             fontSize: "12px",
                             fontWeight: 600,
-                            cursor: isPhotoDeletePending(`${p.id}:${selectedImageIndex}`) ? "default" : "pointer",
-                            opacity: isPhotoDeletePending(`${p.id}:${selectedImageIndex}`) ? 0.6 : 1,
+                            cursor: isPhotoDeletePending(`${p.id}:bulk-delete`) || isPhotoDeletePending(`${p.id}:${selectedImageIndex}`) ? "default" : "pointer",
+                            opacity: isPhotoDeletePending(`${p.id}:bulk-delete`) || isPhotoDeletePending(`${p.id}:${selectedImageIndex}`) ? 0.6 : 1,
                             display: "inline-flex",
                             alignItems: "center",
                             gap: "4px",
                           }}
-                          title="Delete this media from product"
+                          title={selectedMediaIndices.length > 0 ? `Delete ${selectedMediaIndices.length} selected photos` : "Delete this media from product"}
                         >
-                          {isPhotoDeletePending(`${p.id}:${selectedImageIndex}`) ? "Deleting…" : "🗑️ Delete"}
+                          {isPhotoDeletePending(`${p.id}:bulk-delete`) || isPhotoDeletePending(`${p.id}:${selectedImageIndex}`)
+                            ? "Deleting…"
+                            : selectedMediaIndices.length > 0
+                            ? `🗑️ Delete Selected (${selectedMediaIndices.length})`
+                            : "🗑️ Delete"}
                         </button>
                       )}
                     </div>
@@ -1285,30 +1297,17 @@ export function ProductGalleryPage() {
           const activeSuppMedia = suppMedia[selectedImageIndex] || suppMedia[0];
           const activeSuppIsVideo = isVideoUrl(activeSuppMedia);
 
-          const handleDeleteSupplierPhoto = async (indexToDelete: number) => {
-            if (!supp) return;
-            if (!window.confirm("Are you sure you want to delete this visit photo from the supplier?")) return;
+          const handleDeleteSupplierPhotos = async (indicesToDelete: number[]) => {
+            if (!supp || !indicesToDelete.length) return;
+            const count = indicesToDelete.length;
+            const confirmMsg = count === 1
+              ? "Are you sure you want to delete this visit photo from the supplier?"
+              : `Are you sure you want to delete ${count} selected visit media files from the supplier?`;
+            if (!window.confirm(confirmMsg)) return;
 
-            const photoToDelete = suppMedia[indexToDelete];
-            if (!photoToDelete) return;
-
-            let rawAll: string[] = [];
-            if (Array.isArray(supp.visit_media)) {
-              rawAll = supp.visit_media.map(String);
-            } else if (typeof supp.visit_media === "string") {
-              try {
-                const parsed = JSON.parse(supp.visit_media);
-                rawAll = Array.isArray(parsed) ? parsed.map(String) : [supp.visit_media];
-              } catch {
-                rawAll = (supp.visit_media as string).split(",");
-              }
-            }
-
-            const updatedRaw = rawAll
-              .map((s) => s.trim())
-              .filter((s) => Boolean(s) && s !== photoToDelete);
-
-            await guardPhotoDelete(`supp:${supp.id}:${indexToDelete}`, async () => {
+            const deleteKey = count === 1 ? `supp:${supp.id}:${indicesToDelete[0]}` : `supp:${supp.id}:bulk-delete`;
+            await guardPhotoDelete(deleteKey, async () => {
+              const updatedRaw = suppMedia.filter((_, idx) => !indicesToDelete.includes(idx));
               try {
                 const updatedPayload = {
                   visit_media: updatedRaw.length ? updatedRaw : null,
@@ -1444,8 +1443,11 @@ export function ProductGalleryPage() {
                       {canDeleteSupplierMedia && (
                         <button
                           type="button"
-                          onClick={() => handleDeleteSupplierPhoto(selectedImageIndex)}
-                          disabled={isPhotoDeletePending(`supp:${supp.id}:${selectedImageIndex}`)}
+                          onClick={() => {
+                            const toDelete = selectedMediaIndices.length > 0 ? selectedMediaIndices : [selectedImageIndex];
+                            handleDeleteSupplierPhotos(toDelete);
+                          }}
+                          disabled={isPhotoDeletePending(`supp:${supp.id}:bulk-delete`) || isPhotoDeletePending(`supp:${supp.id}:${selectedImageIndex}`)}
                           style={{
                             background: "#fee2e2",
                             color: "#dc2626",
@@ -1454,15 +1456,19 @@ export function ProductGalleryPage() {
                             padding: "4px 10px",
                             fontSize: "12px",
                             fontWeight: 600,
-                            cursor: isPhotoDeletePending(`supp:${supp.id}:${selectedImageIndex}`) ? "default" : "pointer",
-                            opacity: isPhotoDeletePending(`supp:${supp.id}:${selectedImageIndex}`) ? 0.6 : 1,
+                            cursor: isPhotoDeletePending(`supp:${supp.id}:bulk-delete`) || isPhotoDeletePending(`supp:${supp.id}:${selectedImageIndex}`) ? "default" : "pointer",
+                            opacity: isPhotoDeletePending(`supp:${supp.id}:bulk-delete`) || isPhotoDeletePending(`supp:${supp.id}:${selectedImageIndex}`) ? 0.6 : 1,
                             display: "inline-flex",
                             alignItems: "center",
                             gap: "4px",
                           }}
-                          title="Delete this visit photo from supplier"
+                          title={selectedMediaIndices.length > 0 ? `Delete ${selectedMediaIndices.length} selected photos` : "Delete this visit photo from supplier"}
                         >
-                          {isPhotoDeletePending(`supp:${supp.id}:${selectedImageIndex}`) ? "Deleting…" : "🗑️ Delete"}
+                          {isPhotoDeletePending(`supp:${supp.id}:bulk-delete`) || isPhotoDeletePending(`supp:${supp.id}:${selectedImageIndex}`)
+                            ? "Deleting…"
+                            : selectedMediaIndices.length > 0
+                            ? `🗑️ Delete Selected (${selectedMediaIndices.length})`
+                            : "🗑️ Delete"}
                         </button>
                       )}
                     </div>

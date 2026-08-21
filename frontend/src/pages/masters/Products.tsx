@@ -160,9 +160,8 @@ function BranchPopoverCell({ branches }: { branches: string[] }) {
         <div
           style={{
             position: "absolute",
-            bottom: "100%",
+            top: "calc(100% + 4px)",
             left: 0,
-            marginBottom: "8px",
             background: "#ffffff",
             border: "1px solid #cbd5e1",
             borderRadius: "8px",
@@ -176,9 +175,27 @@ function BranchPopoverCell({ branches }: { branches: string[] }) {
           }}
           onClick={(e) => e.stopPropagation()}
         >
-          <div style={{ fontSize: "11.5px", fontWeight: 700, color: "#475569", marginBottom: "6px", borderBottom: "1px solid #f1f5f9", paddingBottom: "4px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div style={{ fontSize: "11.5px", fontWeight: 700, color: "#334155", marginBottom: "8px", borderBottom: "1px solid #f1f5f9", paddingBottom: "5px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <span>📍 Assigned Branches ({branches.length})</span>
-            <span style={{ fontSize: "11px", color: "#2563eb", fontWeight: 600 }}>👁️ View</span>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setIsOpen(false);
+              }}
+              style={{
+                background: "transparent",
+                border: "none",
+                color: "#94a3b8",
+                fontSize: "13px",
+                cursor: "pointer",
+                padding: "0 4px",
+                lineHeight: 1,
+              }}
+              title="Close"
+            >
+              ✕
+            </button>
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
             {branches.map((b, i) => (
@@ -191,7 +208,7 @@ function BranchPopoverCell({ branches }: { branches: string[] }) {
                   display: "flex",
                   alignItems: "center",
                   gap: "6px",
-                  padding: "4px 8px",
+                  padding: "5px 8px",
                   borderRadius: "4px",
                   background: "#f8fafc",
                 }}
@@ -262,9 +279,8 @@ function OrgPopoverCell({ orgNames }: { orgNames: string[] }) {
         <div
           style={{
             position: "absolute",
-            bottom: "100%",
+            top: "calc(100% + 4px)",
             left: 0,
-            marginBottom: "8px",
             background: "#ffffff",
             border: "1px solid #cbd5e1",
             borderRadius: "8px",
@@ -278,9 +294,27 @@ function OrgPopoverCell({ orgNames }: { orgNames: string[] }) {
           }}
           onClick={(e) => e.stopPropagation()}
         >
-          <div style={{ fontSize: "11.5px", fontWeight: 700, color: "#475569", marginBottom: "6px", borderBottom: "1px solid #f1f5f9", paddingBottom: "4px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div style={{ fontSize: "11.5px", fontWeight: 700, color: "#334155", marginBottom: "8px", borderBottom: "1px solid #f1f5f9", paddingBottom: "5px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <span>🏢 Organizations ({orgNames.length})</span>
-            <span style={{ fontSize: "11px", color: "#059669", fontWeight: 600 }}>👁️ View</span>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setIsOpen(false);
+              }}
+              style={{
+                background: "transparent",
+                border: "none",
+                color: "#94a3b8",
+                fontSize: "13px",
+                cursor: "pointer",
+                padding: "0 4px",
+                lineHeight: 1,
+              }}
+              title="Close"
+            >
+              ✕
+            </button>
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
             {orgNames.map((name, i) => (
@@ -293,7 +327,7 @@ function OrgPopoverCell({ orgNames }: { orgNames: string[] }) {
                   display: "flex",
                   alignItems: "center",
                   gap: "6px",
-                  padding: "4px 8px",
+                  padding: "5px 8px",
                   borderRadius: "4px",
                   background: "#f8fafc",
                 }}
@@ -876,13 +910,13 @@ export function ProductsPage() {
         { key: "Sub Category", label: "Sub Category" },
         { key: "HSN Code", label: "HSN Code" },
         { key: "UOM", label: "UOM", required: true },
-        { key: "Pack. Qty", label: "Packaging Quantity" },
+        { key: "Pack. Qty", label: "Packaging Quantity", required: true },
         { key: "Pack. Net Weight", label: "Packaging Net Weight (kg)" },
-        { key: "Pack. Gross Weight", label: "Packaging Gross Weight (kg)" },
+        { key: "Pack. Gross Weight", label: "Packaging Gross Weight (kg)", required: true },
         { key: "Length (cm)", label: "Length (cm)" },
         { key: "Width (cm)", label: "Width (cm)" },
         { key: "Height (cm)", label: "Height (cm)" },
-        { key: "Pack. Unit CBM", label: "Packaging Unit CBM" },
+        { key: "Pack. Unit CBM", label: "Packaging Unit CBM", required: true },
         { key: "Refund VAT %", label: "Refund VAT %" },
         { key: "Compliance & License Requirements", label: "Compliance & License Requirements" },
         { key: "Specification", label: "Specification" },
@@ -944,7 +978,7 @@ export function ProductsPage() {
         const w = numOrNull(f.width_cm);
         const h = numOrNull(f.height_cm);
         const cbm =
-          l && w && h
+          l && w && h && l > 0 && w > 0 && h > 0
             ? Number(((l * w * h) / 1000000).toFixed(6))
             : numOrNull(f.packaging_unit_cbm);
 
@@ -953,6 +987,15 @@ export function ProductsPage() {
         if (!f.hsn_id) throw new Error("Please select a HSN Code.");
         if (!f.uom_id) throw new Error("Please select a Primary UOM.");
         if (numOrNull(f.packaging_quantity) === null) throw new Error("Packaging Quantity (unit) is required.");
+
+        const grossWeight = numOrNull(f.packaging_gross_weight);
+        if (grossWeight === null || grossWeight <= 0) {
+          throw new Error("Packaging Gross Weight (kg) is required and must be greater than 0.");
+        }
+
+        if (cbm === null || cbm <= 0) {
+          throw new Error("Packaging Unit CBM is required (enter Length, Width, Height to auto-calculate, or enter Packaging Unit CBM directly).");
+        }
 
         // A secondary UOM identical to the primary carries no information.
         let secUomId: string | null = f.secondary_uom_id || null;
@@ -1341,7 +1384,7 @@ export function ProductsPage() {
               </SelectField>
               <TextField id="packaging_quantity" label="Packaging Quantity (unit) *" required type="number" step="0.001" min={0} value={f.packaging_quantity} onChange={(v) => set("packaging_quantity", v)} />
               <TextField id="packaging_net_weight" label="Packaging Net Weight (kg)" type="number" step="0.001" min={0} value={f.packaging_net_weight} onChange={(v) => set("packaging_net_weight", v)} />
-              <TextField id="packaging_gross_weight" label="Packaging Gross Weight (kg)" type="number" step="0.001" min={0} value={f.packaging_gross_weight} onChange={(v) => set("packaging_gross_weight", v)} />
+              <TextField id="packaging_gross_weight" label="Packaging Gross Weight (kg) *" required type="number" step="0.001" min={0.001} value={f.packaging_gross_weight} onChange={(v) => set("packaging_gross_weight", v)} />
             </div>
 
 
@@ -1352,10 +1395,11 @@ export function ProductsPage() {
               <TextField id="height_cm" label="Height (cm)" type="number" step="0.001" min={0} className="cbm-calc" value={f.height_cm} onChange={(v) => setDimension("height_cm", v)} />
               <TextField
                 id="packaging_unit_cbm"
-                label="Packaging Unit CBM"
+                label="Packaging Unit CBM *"
+                required
                 type="number"
                 step="0.000001"
-                min={0}
+                min={0.000001}
                 placeholder="Auto-calculated or enter directly"
                 value={f.packaging_unit_cbm}
                 onChange={(v) => set("packaging_unit_cbm", v)}

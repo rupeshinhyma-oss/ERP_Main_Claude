@@ -142,12 +142,26 @@ class ProductService:
         elif p_name and not p_tally:
             field_values["product_name_tally"] = p_name
 
-        # Auto-compute CBM if dimensions present
+        # Validate Packaging Gross Weight (kg) is mandatory and > 0
+        gross_wt = field_values.get("packaging_gross_weight")
+        if gross_wt is None or float(gross_wt) <= 0:
+            raise BadRequestException("Packaging Gross Weight (kg) is required and must be greater than 0.")
+
+        if field_values.get("weight") is None:
+            field_values["weight"] = gross_wt
+
+        # Auto-compute CBM if dimensions present, or validate explicit CBM
         l = field_values.get("length_cm") or field_values.get("length")
         w = field_values.get("width_cm") or field_values.get("width")
         h = field_values.get("height_cm") or field_values.get("height")
-        if l is not None and w is not None and h is not None:
+        if (field_values.get("packaging_unit_cbm") is None or float(field_values.get("packaging_unit_cbm", 0) or 0) <= 0) and (
+            l is not None and w is not None and h is not None and float(l) > 0 and float(w) > 0 and float(h) > 0
+        ):
             field_values["packaging_unit_cbm"] = round((float(l) * float(w) * float(h)) / 1000000.0, 6)
+
+        cbm = field_values.get("packaging_unit_cbm")
+        if cbm is None or float(cbm) <= 0:
+            raise BadRequestException("Packaging Unit CBM is required (provide Length, Width, Height to calculate automatically or provide Packaging Unit CBM directly).")
 
         # Auto-inherit refund_vat_percent from HSN if not explicitly set
         hsn_id = field_values.get("hsn_id")
@@ -296,7 +310,7 @@ class ProductService:
                 cat_list = await self.category_repository.list(limit=500)
                 category = next((c for c in cat_list if c.code.lower() == category_code.lower() or c.name.lower() == category_code.lower()), None)
             if category is None:
-                raise ValueError(f"Category '{category_code}' does not exist.")
+                raise BadRequestException(f"Category '{category_code}' does not exist in Category Master.")
             field_values["category_id"] = category.id
 
             if sub_category_code:
@@ -304,35 +318,37 @@ class ProductService:
                 if sub_category is None:
                     sub_cats = await self.sub_category_repository.list(limit=1000)
                     sub_category = next((sc for sc in sub_cats if sc.code.lower() == sub_category_code.lower() or sc.name.lower() == sub_category_code.lower()), None)
-                if sub_category is not None:
-                    field_values["sub_category_id"] = sub_category.id
+                if sub_category is None:
+                    raise BadRequestException(f"Sub Category '{sub_category_code}' does not exist in Sub Category Master.")
+                if sub_category.category_id != category.id:
+                    raise BadRequestException(f"Sub Category '{sub_category.name}' does not belong to Category '{category.name}'.")
+                field_values["sub_category_id"] = sub_category.id
 
             if brand_code:
                 brand = await self.brand_repository.get_by_code(brand_code)
                 if brand is None:
                     brands = await self.brand_repository.list(limit=500)
                     brand = next((b for b in brands if b.code.lower() == brand_code.lower() or b.name.lower() == brand_code.lower()), None)
-                if brand is not None:
-                    field_values["brand_id"] = brand.id
+                if brand is None:
+                    raise BadRequestException(f"Brand '{brand_code}' does not exist in Brand Master.")
+                field_values["brand_id"] = brand.id
 
             if hsn_code:
                 hsn = await self.hsn_repository.get_by_code(hsn_code)
                 if hsn is None:
                     hsns = await self.hsn_repository.list(limit=1000)
                     hsn = next((h for h in hsns if h.code.lower() == str(hsn_code).lower()), None)
-                if hsn is not None:
-                    field_values["hsn_id"] = hsn.id
+                if hsn is None:
+                    raise BadRequestException(f"HSN Code '{hsn_code}' does not exist in HSN Master.")
+                field_values["hsn_id"] = hsn.id
 
             uom = await self.uom_repository.get_by_code(uom_code)
             if uom is None:
                 uoms = await self.uom_repository.list(limit=500)
                 uom = next((u for u in uoms if u.code.lower() == uom_code.lower() or u.name.lower() == uom_code.lower() or (u.short_name and u.short_name.lower() == uom_code.lower())), None)
             if uom is None:
-                # Fallback to first available UOM
-                uoms = await self.uom_repository.list(limit=1)
-                uom = uoms[0] if uoms else None
-            if uom is not None:
-                field_values["uom_id"] = uom.id
+                raise BadRequestException(f"UOM '{uom_code}' does not exist in UOM Master.")
+            field_values["uom_id"] = uom.id
 
             raw_product_code = field_values.get("product_code")
             product_name = (field_values.get("product_name_tally") or field_values.get("product_name") or "").strip()

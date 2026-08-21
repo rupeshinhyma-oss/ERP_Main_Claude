@@ -26,7 +26,7 @@ import { Pagination } from "@/components/Pagination";
 import { SearchableDropdown, SearchableDropdownMultiPanel, type DropdownOption } from "@/components/SearchableDropdown";
 import { EmailTagInput, PhoneGroupField, SelectField, TextAreaField, TextField, WebsiteTagInput } from "@/components/fields";
 import { SideDrawer, DetailFieldGrid } from "@/components/SideDrawer";
-import { ImpExpDropdown, BulkActionsDropdown, ImportSummaryPanel } from "@/components/ImportWizard";
+import { ImpExpDropdown, BulkActionsDropdown, ImportSummaryPanel, downloadSampleCsv, parseFile, WizardModal, type SheetRow } from "@/components/ImportWizard";
 import { apiDelete, apiGet, apiPatch, apiPost, downloadExport, toQueryString } from "@/lib/api";
 import { useLookup } from "@/lib/lookups";
 import { usePendingGuard, useModalHistorySync, useAuth } from "@/lib/hooks";
@@ -63,8 +63,8 @@ const BUYER_IMPORT_HEADERS: ImportHeader[] = [
 
 const EMPTY_BUYER_FORM = {
   company_name: "",
-  buyer_type: "",
   country_id: "",
+  buyer_type: "",
   city: "",
   address: "",
   contact_salutation: "",
@@ -89,13 +89,13 @@ const EMPTY_CONTACT_FORM = {
   salutation: "",
   person_name: "",
   designation: "",
-  country_id: "",
   calling_number: "",
   whatsapp_number: "",
+  country_id: "",
   email: "",
 };
 
-type ModalMode = "create" | "edit" | null;
+type ModalMode = "create" | "edit" | "import" | null;
 
 const selectFilterStyle: React.CSSProperties = {
   padding: "8px 12px",
@@ -344,6 +344,14 @@ export function BuyersPage() {
   /* Import / Export State */
   const [importSummary, setImportSummary] = useState<ImportSummary | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importLoading, setImportLoading] = useState(false);
+  const [wizardPending, setWizardPending] = useState<{
+    file: File;
+    rows: SheetRow[];
+    sheetColumns: string[];
+  } | null>(null);
+  const importFileInputRef = useRef<HTMLInputElement>(null);
 
   /* Lookups for filter labels & options */
   const countries = useLookup<Country>("/masters/countries", 250);
@@ -368,8 +376,6 @@ export function BuyersPage() {
   const [countryFilter, setCountryFilter] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("");
   const [subCategoryFilter, setSubCategoryFilter] = useState("");
-  const [dateFromFilter, setDateFromFilter] = useState("");
-  const [dateToFilter, setDateToFilter] = useState("");
   const [isFilterPanelOpen, setIsFilterPanelOpen] = useState(false);
 
   /* Selection & Detail View */
@@ -523,8 +529,6 @@ export function BuyersPage() {
           category_id: categoryFilter || undefined,
           sub_category_id: subCategoryFilter || undefined,
         };
-        if (dateFromFilter) params["created_from"] = dateFromFilter;
-        if (dateToFilter) params["created_to"] = dateToFilter;
 
         const { data, meta } = await apiGet<Buyer[]>("/buyers" + toQueryString(params));
         if (!cancelled) {
@@ -552,8 +556,6 @@ export function BuyersPage() {
     countryFilter,
     categoryFilter,
     subCategoryFilter,
-    dateFromFilter,
-    dateToFilter,
     reloadCounter,
   ]);
 
@@ -567,8 +569,6 @@ export function BuyersPage() {
     setCountryFilter("");
     setCategoryFilter("");
     setSubCategoryFilter("");
-    setDateFromFilter("");
-    setDateToFilter("");
     setCurrentPage(1);
   };
 
@@ -592,9 +592,7 @@ export function BuyersPage() {
     Boolean(gradeFilter) ||
     Boolean(countryFilter) ||
     Boolean(categoryFilter) ||
-    Boolean(subCategoryFilter) ||
-    Boolean(dateFromFilter) ||
-    Boolean(dateToFilter);
+    Boolean(subCategoryFilter);
 
   useLiveList<Buyer>({
     moduleName: "buyers",
@@ -1019,6 +1017,29 @@ export function BuyersPage() {
     }
   }
 
+  async function handleImportSubmit() {
+    if (!importFile || importLoading) return;
+    setImportLoading(true);
+    setImportError(null);
+
+    try {
+      const rows = await parseFile(importFile);
+      if (!rows.length) {
+        throw new Error("The file appears to be empty or has no data rows.");
+      }
+      setWizardPending({
+        file: importFile,
+        rows,
+        sheetColumns: Object.keys(rows[0]),
+      });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setImportError(msg || "Failed to read file. Please check file format and try again.");
+    } finally {
+      setImportLoading(false);
+    }
+  }
+
   async function handleDelete(buyer: Buyer) {
     const isExisting = buyer.current_status === "existing";
     const isPotentialYes = buyer.potential === "yes";
@@ -1300,6 +1321,283 @@ export function BuyersPage() {
   }, [form.company_name, form.contact_calling_number, form.contact_whatsapp_number, rows, modalMode, editingId]);
 
   /* ------------------------------------------------------------------------- */
+  /* RENDER: DEDICATED FULL-PAGE IMPORT BUYERS VIEW (Matching Image 1)         */
+  /* ------------------------------------------------------------------------- */
+  if (modalMode === "import") {
+    return (
+      <AppShell activeKey="buyers">
+        <main className="page" style={{ padding: "20px", maxWidth: "1600px", margin: "0 auto" }}>
+          <Breadcrumb trail={["Buyer Profiles", "Import Buyers"]} />
+
+          {/* Header */}
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
+            <div>
+              <h1 style={{ fontSize: "22px", fontWeight: 700, color: "#0F172A", margin: 0 }}>Import Buyers</h1>
+              <div style={{ fontSize: "13px", color: "#64748b", marginTop: "4px" }}>
+                Upload bulk client accounts and contact profiles from Excel (.xlsx, .xls) or CSV.
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setModalMode(null);
+                setImportFile(null);
+                setImportError(null);
+              }}
+              style={{
+                padding: "8px 16px",
+                borderRadius: "6px",
+                border: "1px solid #cbd5e1",
+                background: "#ffffff",
+                color: "#1e293b",
+                fontWeight: 600,
+                fontSize: "13px",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
+              }}
+            >
+              ← BACK
+            </button>
+          </div>
+
+          <Banner error={importError} />
+
+          {/* Import Summary Results Panel if completed */}
+          {importSummary && (
+            <div style={{ marginBottom: "20px" }}>
+              <ImportSummaryPanel summary={importSummary} error={importError} />
+            </div>
+          )}
+
+          {/* Main Workspace Card */}
+          <div
+            style={{
+              background: "#ffffff",
+              borderRadius: "8px",
+              border: "1px solid #e2e8f0",
+              boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
+              padding: "28px 36px",
+            }}
+          >
+            {/* Import File Section */}
+            <div style={{ marginBottom: "24px" }}>
+              <label style={{ display: "block", fontSize: "14px", fontWeight: 600, color: "#1e293b", marginBottom: "8px" }}>
+                Import File
+              </label>
+              <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    border: "1px solid #cbd5e1",
+                    borderRadius: "6px",
+                    background: "#f8fafc",
+                    padding: "4px 8px",
+                    minWidth: "320px",
+                    maxWidth: "500px",
+                    flex: 1,
+                  }}
+                >
+                  <button
+                    type="button"
+                    onClick={() => importFileInputRef.current?.click()}
+                    style={{
+                      background: "#ffffff",
+                      border: "1px solid #cbd5e1",
+                      borderRadius: "4px",
+                      padding: "6px 14px",
+                      fontSize: "13px",
+                      fontWeight: 600,
+                      color: "#334155",
+                      cursor: "pointer",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    Choose File
+                  </button>
+                  <span
+                    style={{
+                      paddingLeft: "12px",
+                      fontSize: "13px",
+                      color: importFile ? "#0f172a" : "#64748b",
+                      fontWeight: importFile ? 600 : 400,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                      flex: 1,
+                    }}
+                  >
+                    {importFile ? importFile.name : "No file chosen"}
+                  </span>
+                  {importFile && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setImportFile(null);
+                        if (importFileInputRef.current) importFileInputRef.current.value = "";
+                      }}
+                      style={{
+                        background: "none",
+                        border: "none",
+                        color: "#ef4444",
+                        cursor: "pointer",
+                        fontSize: "14px",
+                        padding: "4px 8px",
+                      }}
+                      title="Clear selected file"
+                    >
+                      ✕
+                    </button>
+                  )}
+                  <input
+                    ref={importFileInputRef}
+                    type="file"
+                    accept=".csv,.xlsx,.xls"
+                    style={{ display: "none" }}
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) {
+                        setImportFile(f);
+                        setImportError(null);
+                      }
+                    }}
+                  />
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => downloadSampleCsv("buyer", BUYER_IMPORT_HEADERS)}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    background: "#f8fafc",
+                    border: "1px dashed #94a3b8",
+                    borderRadius: "6px",
+                    padding: "8px 14px",
+                    color: "#475569",
+                    fontSize: "13px",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }}
+                >
+                  📥 Download Sample CSV Template
+                </button>
+              </div>
+              <div style={{ fontSize: "12px", color: "#64748b", marginTop: "6px" }}>
+                Only CSV, XLS, And XLSX Files Are Allowed. Maximum File Size: 8MB.
+              </div>
+            </div>
+
+            {/* Notes Section */}
+            <div style={{ borderTop: "1px solid #f1f5f9", paddingTop: "20px" }}>
+              <div style={{ fontSize: "14px", fontWeight: 700, color: "#1e293b", marginBottom: "12px" }}>
+                Notes:
+              </div>
+              <ul
+                style={{
+                  margin: 0,
+                  paddingLeft: "20px",
+                  fontSize: "13px",
+                  lineHeight: "1.9",
+                  color: "#334155",
+                }}
+              >
+                <li>Upload Up To <strong>5,000 Rows</strong> Per File.</li>
+                <li>Avoid Special Characters (Like @ # $ % ^ & * ( ) ) In Text Fields.</li>
+                <li>Maximum Allowed File Size: <strong>8 MB</strong>.</li>
+                <li>Only <strong>.Csv</strong>, <strong>.Xls</strong>, And <strong>.Xlsx</strong> Files Are Accepted.</li>
+                <li>Mandatory Columns: <strong>Company Name</strong> And <strong>Country</strong>.</li>
+                <li><strong>Company Name</strong> Must Be Unique.</li>
+                <li><strong>Country, Product Category, Product Sub Category, And Buyer Type</strong> Must Already Exist In The System.</li>
+                <li><strong>Product Sub Category</strong> Must Belong To The Selected <strong>Product Category</strong>.</li>
+                <li><strong>3-Way Duplicate Check:</strong> Duplicate rows are detected by <strong>Company Name</strong>, <strong>Calling Number</strong>, And <strong>WhatsApp Number</strong>.</li>
+                <li><strong>Calling Number</strong> And <strong>WhatsApp Number</strong> Must Include Country Code (Maximum 15 Digits Total).</li>
+                <li>Multiple <strong>Emails</strong>, <strong>Product Categories</strong>, And <strong>Product Sub Categories</strong> Can Be Separated By Comma (,).</li>
+                <li><strong>Current Status</strong> Must Be <em>Existing</em> Or <em>New</em>; <strong>Potential</strong> Must Be <em>Yes</em> Or <em>No</em>; <strong>Client Grade</strong> Must Be <em>A</em>, <em>B</em>, Or <em>C</em>.</li>
+                <li>No Blank Rows, Merged Cells, Or Excel Formulas Allowed.</li>
+                <li>Buyer Import May Take <strong>Several Seconds</strong> Depending On The Number Of Rows And Server Load. Please Do Not Refresh The Page During Import.</li>
+              </ul>
+            </div>
+
+            {/* Action Buttons */}
+            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "32px", borderTop: "1px solid #f1f5f9", paddingTop: "20px", gap: "12px" }}>
+              <button
+                type="button"
+                onClick={() => {
+                  setModalMode(null);
+                  setImportFile(null);
+                  setImportError(null);
+                }}
+                style={{
+                  padding: "9px 20px",
+                  borderRadius: "6px",
+                  border: "1px solid #cbd5e1",
+                  background: "#ffffff",
+                  color: "#475569",
+                  fontWeight: 600,
+                  fontSize: "13.5px",
+                  cursor: "pointer",
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={!importFile || importLoading}
+                onClick={handleImportSubmit}
+                style={{
+                  padding: "9px 28px",
+                  borderRadius: "6px",
+                  border: "none",
+                  background: !importFile || importLoading ? "#94a3b8" : "#2563eb",
+                  color: "#ffffff",
+                  fontWeight: 700,
+                  fontSize: "13.5px",
+                  cursor: !importFile || importLoading ? "not-allowed" : "pointer",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  boxShadow: !importFile || importLoading ? "none" : "0 2px 4px rgba(37,99,235,0.25)",
+                }}
+              >
+                {importLoading ? "Importing..." : "Import"}
+              </button>
+            </div>
+          </div>
+
+          {/* Column Mapping Wizard Modal (Matches Supplier Master) */}
+          {wizardPending && (
+            <WizardModal
+              file={wizardPending.file}
+              rows={wizardPending.rows}
+              sheetColumns={wizardPending.sheetColumns}
+              apiBase="/buyers"
+              entityName="buyer"
+              importHeaders={BUYER_IMPORT_HEADERS}
+              onClose={() => setWizardPending(null)}
+              onComplete={(summary) => {
+                setWizardPending(null);
+                setImportFile(null);
+                if (importFileInputRef.current) importFileInputRef.current.value = "";
+                if (summary) {
+                  setImportSummary(summary);
+                }
+                reload();
+              }}
+              onError={(msg) => {
+                setImportError(msg);
+              }}
+            />
+          )}
+        </main>
+      </AppShell>
+    );
+  }
+
+  /* ------------------------------------------------------------------------- */
   /* RENDER: TABBED ADD / EDIT BUYER FORM (Supplier & Product Master Style)    */
   /* ------------------------------------------------------------------------- */
   if (modalMode) {
@@ -1505,6 +1803,11 @@ export function BuyersPage() {
                       {!buyerTypes.items.some((bt) => bt.name.toLowerCase() === "importer") && (
                         <option value="importer">Importer</option>
                       )}
+                      {form.buyer_type &&
+                        !buyerTypes.items.some((bt) => bt.name.toLowerCase() === form.buyer_type.toLowerCase()) &&
+                        !["manufacturer", "trader", "dealer / trader", "dealer", "agent", "importer"].includes(form.buyer_type.toLowerCase()) && (
+                          <option value={form.buyer_type.toLowerCase()}>{form.buyer_type.toUpperCase()}</option>
+                        )}
                     </SelectField>
 
                     <TextField id="tax_id_number" label="Tax ID Number (TIN / GST)" placeholder="e.g. Tax / GST / TIN Number" value={form.tax_id_number} onChange={(v) => setField("tax_id_number", v)} />
@@ -2101,6 +2404,12 @@ export function BuyersPage() {
               onExportCsv={() => handleExport("csv")}
               showImport={canImport}
               showExport={canExport}
+              onOpenImportPage={() => {
+                setImportError(null);
+                setImportSummary(null);
+                setImportFile(null);
+                setModalMode("import");
+              }}
             />
 
             {/* Bulk Actions Dropdown (Bulk Activate, Bulk Deactivate, Bulk Delete) */}
@@ -2213,14 +2522,6 @@ export function BuyersPage() {
                       </option>
                     ))}
                 </select>
-              </div>
-              <div>
-                <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", display: "block", marginBottom: "4px" }}>Date From</label>
-                <input type="date" value={dateFromFilter} onChange={(e) => { setCurrentPage(1); setDateFromFilter(e.target.value); }} style={{ ...selectFilterStyle, width: "100%" }} />
-              </div>
-              <div>
-                <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", display: "block", marginBottom: "4px" }}>Date To</label>
-                <input type="date" value={dateToFilter} onChange={(e) => { setCurrentPage(1); setDateToFilter(e.target.value); }} style={{ ...selectFilterStyle, width: "100%" }} />
               </div>
             </div>
           </div>

@@ -566,68 +566,62 @@ class SupplierService:
             sub_cat_names_raw = field_values.pop("sub_category_names_raw", None)
             _prod_names_raw = field_values.pop("product_names_raw", None)
 
-            # 1. Resolve Country (by code or name)
+            # 1. Strict Country validation (by code or name)
             country = next(
                 (c for c in all_countries if c.code.upper() == country_raw.upper() or c.name.lower() == country_raw.lower()),
                 None
             )
             if country is None:
-                country = next((c for c in all_countries if c.code.upper() in ("CN", "IN")), all_countries[0] if all_countries else None)
-                if not country:
-                    raise ValueError(f"Country '{country_raw}' does not exist.")
+                raise BadRequestException(f"Country '{country_raw}' does not exist in Country Master.")
 
-            # 2. Resolve State
+            # 2. Strict State validation
             state = next(
-                (s for s in all_states if s.country_id == country.id and s.name.lower() == state_raw.lower()),
+                (s for s in all_states if s.country_id == country.id and (s.name.lower() == state_raw.lower() or s.code.lower() == state_raw.lower())),
                 None
             )
             if state is None:
-                state = next((s for s in all_states if s.name.lower() == state_raw.lower()), None)
-                if not state:
-                    state = await self.state_repository.create(
-                        country_id=country.id,
-                        name=state_raw,
-                        code=state_raw[:3].upper()
-                    )
-                    all_states.append(state)
+                state = next((s for s in all_states if s.name.lower() == state_raw.lower() or s.code.lower() == state_raw.lower()), None)
+            if state is None:
+                raise BadRequestException(f"State '{state_raw}' does not exist in State Master for Country '{country.name}'.")
 
-            # 3. Resolve City
+            # 3. Strict City validation
             city = next(
                 (c for c in all_cities if c.state_id == state.id and c.name.lower() == city_raw.lower()),
                 None
             )
             if city is None:
                 city = next((c for c in all_cities if c.name.lower() == city_raw.lower()), None)
-                if not city:
-                    city = await self.city_repository.create(
-                        state_id=state.id,
-                        name=city_raw,
-                        code=city_raw[:3].upper()
-                    )
-                    all_cities.append(city)
+            if city is None:
+                raise BadRequestException(f"City '{city_raw}' does not exist in City Master for State '{state.name}'.")
 
             field_values["country_id"] = country.id
             field_values["state_id"] = state.id
             field_values["city_id"] = city.id
 
-            # Resolve Category IDs if provided
+            # Strict Category validation
             category_ids = []
             if cat_names_raw:
                 for cn in cat_names_raw.split(","):
                     cn_clean = cn.strip().lower()
+                    if not cn_clean:
+                        continue
                     matched_cat = next((c for c in all_cats if c.name.lower() == cn_clean), None)
-                    if matched_cat:
-                        category_ids.append(matched_cat.id)
+                    if not matched_cat:
+                        raise BadRequestException(f"Product Category '{cn.strip()}' does not exist in Category Master.")
+                    category_ids.append(matched_cat.id)
             field_values["category_ids"] = category_ids
 
-            # Resolve Sub-Category IDs if provided
+            # Strict Sub-Category validation
             sub_category_ids = []
             if sub_cat_names_raw:
                 for scn in sub_cat_names_raw.split(","):
                     scn_clean = scn.strip().lower()
+                    if not scn_clean:
+                        continue
                     matched_sc = next((sc for sc in all_sub_cats if sc.name.lower() == scn_clean), None)
-                    if matched_sc:
-                        sub_category_ids.append(matched_sc.id)
+                    if not matched_sc:
+                        raise BadRequestException(f"Product Sub Category '{scn.strip()}' does not exist in Sub Category Master.")
+                    sub_category_ids.append(matched_sc.id)
             field_values["sub_category_ids"] = sub_category_ids
 
             self._validate_visit_remarks(

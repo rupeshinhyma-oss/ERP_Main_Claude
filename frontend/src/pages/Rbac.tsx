@@ -12,7 +12,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { ActionDropdown, type ActionDropdownEntry } from "@/components/ActionDropdown";
-import { Banner, Can, Modal } from "@/components/ui";
+import { Banner, Modal } from "@/components/ui";
 import { TextField } from "@/components/fields";
 import { apiDelete, apiGet, apiPatch, apiPost } from "@/lib/api";
 import { useAuth, usePendingGuard } from "@/lib/hooks";
@@ -100,7 +100,18 @@ function RolesTableSkeletonRows({ count = 6 }: { count?: number }) {
 export function RbacPage() {
   const { hasPermission } = useAuth();
   const showToast = useToast();
-  const canManage = hasPermission("settings.manage");
+  const canManage = hasPermission("roles_permissions.action");
+  const canCreateRole = hasPermission("roles_permissions.create");
+  const canBulkDeleteRoles = hasPermission("roles_permissions.bulk_action");
+  // The role-detail modal below is shared by both the "+ ADD NEW" (create)
+  // and per-row "View"/edit flows: handleSaveRoleView() branches internally
+  // into POST /rbac/roles (needs roles_permissions.create) when opened fresh,
+  // or PATCH /rbac/roles/{id} (needs roles_permissions.action) when opened on
+  // an existing role. The backend enforces the real, specific permission on
+  // each of those two endpoints regardless of what the frontend shows; this
+  // combined flag just decides whether to show the editable fields/Save
+  // button at all, for either case.
+  const canManageOrCreate = canManage || canCreateRole;
 
   const [allPermissions, setAllPermissions] = useState<Permission[]>([]);
   const [allRoles, setAllRoles] = useState<Role[]>([]);
@@ -470,7 +481,7 @@ export function RbacPage() {
                 <button type="button" className="btn btn-secondary" onClick={closeRoleView}>
                   Cancel
                 </button>
-                {canManage && (
+                {canManageOrCreate && (
                   <button
                     type="button"
                     className="btn btn-primary"
@@ -496,7 +507,7 @@ export function RbacPage() {
                       label="Role Name *"
                       value={roleName}
                       onChange={setRoleName}
-                      readOnly={!canManage || viewingRole.is_system}
+                      readOnly={!canManageOrCreate || viewingRole.is_system}
                     />
                     {viewingRole.is_system && (
                       <span className="muted" style={{ fontSize: "12px", marginTop: "4px", display: "block" }}>
@@ -510,7 +521,7 @@ export function RbacPage() {
                       label="Description"
                       value={roleDescription}
                       onChange={setRoleDescription}
-                      readOnly={!canManage}
+                      readOnly={!canManageOrCreate}
                     />
                   </div>
                 </div>
@@ -526,7 +537,7 @@ export function RbacPage() {
                       </span>
                     </div>
 
-                    {canManage && (
+                    {canManageOrCreate && (
                       <div style={{ display: "flex", gap: "8px", marginBottom: "16px", alignItems: "center", width: "100%" }}>
                         <select
                           id="add-user-to-role-select"
@@ -632,7 +643,7 @@ export function RbacPage() {
                                     </div>
                                   </div>
                                 </div>
-                                {canManage && (
+                                {canManageOrCreate && (
                                   <button
                                     type="button"
                                     className="btn btn-small"
@@ -686,7 +697,7 @@ export function RbacPage() {
                       Toggle permissions granted to anyone holding this role.
                     </span>
                   </div>
-                  {canManage && (
+                  {canManageOrCreate && (
                     <button
                       type="button"
                       className="btn btn-secondary btn-small"
@@ -716,7 +727,7 @@ export function RbacPage() {
                                 {checkedCountInMod} / {items.length} active
                               </span>
                             </div>
-                            {canManage && (
+                            {canManageOrCreate && (
                               <button
                                 type="button"
                                 className="toggle-btn"
@@ -732,7 +743,7 @@ export function RbacPage() {
                                 <input
                                   type="checkbox"
                                   checked={checkedCodes.has(p.code)}
-                                  disabled={!canManage}
+                                  disabled={!canManageOrCreate}
                                   onChange={() => toggleCode(p.code)}
                                 />
                                 <div style={{ flex: 1, minWidth: 0 }}>
@@ -762,7 +773,7 @@ export function RbacPage() {
                 <div className="page-subtitle">Configure user access roles, system privileges, and permissions.</div>
               </div>
               <div className="page-header-actions">
-                <Can permission="settings.manage">
+                {canCreateRole && (
                   <button
                     type="button"
                     className="btn btn-add-new"
@@ -770,6 +781,8 @@ export function RbacPage() {
                   >
                     + ADD NEW
                   </button>
+                )}
+                {canBulkDeleteRoles && (
                   <button
                     type="button"
                     className="btn btn-bulk-actions"
@@ -816,6 +829,8 @@ export function RbacPage() {
                   >
                     {bulkDeleting ? "Deleting…" : "DELETE"}
                   </button>
+                )}
+                {canCreateRole && (
                   <button
                     type="button"
                     className="btn btn-secondary"
@@ -827,7 +842,7 @@ export function RbacPage() {
                   >
                     Clone Role Permissions
                   </button>
-                </Can>
+                )}
               </div>
             </div>
             <Banner error={error} />
@@ -897,21 +912,22 @@ export function RbacPage() {
                           (role as unknown as Record<string, unknown>).created_at
                         );
 
-                        const rowActions: ActionDropdownEntry[] = [
-                          {
+                        const rowActions: ActionDropdownEntry[] = [];
+                        if (canManage) {
+                          rowActions.push({
                             key: "view",
                             label: "📝 View",
                             onClick: () => openRoleView(role),
-                          },
-                        ];
-
-                        if (canDeleteThisRole) {
-                          rowActions.push({
-                            key: "delete",
-                            label: deleteImpactLoading ? "🗑️ Checking…" : "🗑️ Delete",
-                            danger: true,
-                            onClick: () => handleDeleteRole(role.id, role.name),
                           });
+
+                          if (canDeleteThisRole) {
+                            rowActions.push({
+                              key: "delete",
+                              label: deleteImpactLoading ? "🗑️ Checking…" : "🗑️ Delete",
+                              danger: true,
+                              onClick: () => handleDeleteRole(role.id, role.name),
+                            });
+                          }
                         }
 
                         return (
@@ -953,7 +969,9 @@ export function RbacPage() {
                             </td>
                             <td style={{ color: "#64748b", fontSize: "13px" }}>{formattedCreated}</td>
                             <td style={{ textAlign: "center" }}>
-                              <ActionDropdown items={rowActions} iconOnly={true} />
+                              {canManage && rowActions.length > 0 ? (
+                                <ActionDropdown items={rowActions} iconOnly={true} />
+                              ) : null}
                             </td>
                           </tr>
                         );

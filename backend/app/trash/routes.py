@@ -9,6 +9,7 @@ from app.auth.dependencies import get_current_user
 from app.auth.service import CurrentUser
 from app.core.responses import build_success_response
 from app.database.session import get_db_session
+from app.rbac.dependencies import require_permission
 from app.trash.schemas import TrashItemResponse, TrashRestoreRequest, TrashPermanentDeleteRequest
 from app.trash.service import TrashService
 
@@ -18,7 +19,11 @@ router = APIRouter(prefix="/trash", tags=["Trash Management"])
 @router.get("", summary="List all soft-deleted items")
 async def list_trash(
     request: Request,
-    current_user: CurrentUser = Depends(get_current_user),
+    # Deliberately view-only: restore/permanent-delete/empty below are NOT
+    # gated by this or any other permission, by explicit design choice --
+    # this single check only controls whether the Trash list itself is
+    # visible.
+    current_user: CurrentUser = Depends(require_permission("trash.view")),
     db: AsyncSession = Depends(get_db_session),
 ) -> dict:
     """Fetch soft-deleted items across all modules."""

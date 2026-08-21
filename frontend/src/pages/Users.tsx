@@ -544,10 +544,7 @@ export function UsersPage() {
     }
   }
 
-  const canViewUser = hasPermission("user.view") || isSuperAdmin;
-  const canUpdateUser = hasPermission("user.update") || isSuperAdmin;
-  const canDeleteUser = hasPermission("user.delete") || isSuperAdmin;
-  const canManage = hasPermission("settings.manage") || isSuperAdmin;
+  const canManage = hasPermission("user.action") || isSuperAdmin;
 
   return (
     <AppShell activeKey="users" pageClassName="page-users">
@@ -621,135 +618,118 @@ export function UsersPage() {
                   rows.map((u) => {
                     const statusUpper = (u.status || "").toUpperCase();
                     const isTargetSuperAdmin = Boolean(u.roles?.includes("super_admin"));
-                    // The old duplicate "admin" role no longer exists in a freshly
-                    // seeded system, but a not-yet-migrated database might still
-                    // have users on it -- treat it the same as "super_admin" for
-                    // the purposes of the row-level admin toggle so it still shows
-                    // correctly and doesn't offer to "Set Admin" on top of it.
                     const hasAdminRole = Boolean(u.roles?.includes("super_admin") || u.roles?.includes("admin"));
-                    // Only the Admin (super_admin) account itself may act on another Admin account.
-                    const canModifyTarget =
-                      canUpdateUser && (!isTargetSuperAdmin || isSuperAdmin);
+                    const canActOnTarget = !isTargetSuperAdmin || isSuperAdmin;
                     const displayName =
                       u.full_name || u.display_name || u.employee_name || u.username;
 
                     const actions: ActionDropdownEntry[] = [];
-                    if (canViewUser) {
+                    if (canManage) {
                       actions.push({
                         key: "view",
                         label: "👁️ View Details",
                         onClick: () => openViewUser(u.id),
                       });
-                    }
-                    if (canModifyTarget && !isTargetSuperAdmin) {
-                      actions.push({
-                        key: "edit",
-                        label: "✏️ Edit Profile",
-                        onClick: () => openEditUser(u),
-                      });
-                    }
-                    if (canModifyTarget && canManage) {
-                      const resettingPassword = isRowActionPending(`reset-password:${u.id}`);
-                      actions.push({
-                        key: "reset-password",
-                        label: resettingPassword ? "🔑 Resetting..." : "🔑 Reset Password",
-                        onClick: () => handleResetPassword(u.id, u.username),
-                      });
-                      const changingAdminRole = isRowActionPending(`admin-role:${u.id}`);
-                      // The Admin (super_admin) role can now only ever belong to
-                      // the single hardcoded bootstrap admin account -- it is not
-                      // grantable to anyone else, so there is no "Set Admin"
-                      // action to offer here anymore. "Remove Admin" is kept only
-                      // as an escape hatch in case a not-yet-migrated database
-                      // still has the old duplicate "admin" role on some other
-                      // user; removing it downgrades them back to a normal role.
-                      if (hasAdminRole && !isTargetSuperAdmin) {
+                      if (canActOnTarget) {
                         actions.push({
-                          key: "remove-admin",
-                          label: changingAdminRole ? "🛡️ Removing..." : "🛡️ Remove Legacy Admin Role",
+                          key: "edit",
+                          label: "✏️ Edit Profile",
+                          onClick: () => openEditUser(u),
+                        });
+                        const resettingPassword = isRowActionPending(`reset-password:${u.id}`);
+                        actions.push({
+                          key: "reset-password",
+                          label: resettingPassword ? "🔑 Resetting..." : "🔑 Reset Password",
+                          onClick: () => handleResetPassword(u.id, u.username),
+                        });
+                        const changingAdminRole = isRowActionPending(`admin-role:${u.id}`);
+                        if (hasAdminRole && !isTargetSuperAdmin) {
+                          actions.push({
+                            key: "remove-admin",
+                            label: changingAdminRole ? "🛡️ Removing..." : "🛡️ Remove Legacy Admin Role",
+                            danger: true,
+                            onClick: () => removeAdminRole(u.id, u.username),
+                          });
+                        }
+                        actions.push({
+                          key: "assign-role",
+                          label: "🛡️ Assign Role",
+                          onClick: () => {
+                            setRoleModalUserId(u.id);
+                            setAssignRoleId("");
+                          },
+                        });
+                        actions.push({
+                          key: "permission-overrides",
+                          label: "🔑 Permission Overrides",
+                          onClick: () => openUserOverridesModal(u.id, u.username),
+                        });
+
+                        actions.push("divider");
+                        if (statusUpper === "ACTIVE") {
+                          actions.push({
+                            key: "deactivate",
+                            label: "⏸️ Inactive",
+                            onClick: () =>
+                              runAction(
+                                `/users/${u.id}/deactivate`,
+                                `Set user '${u.username}' to Inactive? This will block their login and revoke all active sessions.`
+                              ),
+                          });
+                        }
+                        if (statusUpper === "INACTIVE" || statusUpper === "PENDING") {
+                          actions.push({
+                            key: "activate",
+                            label: "▶️ Activate",
+                            onClick: () => runAction(`/users/${u.id}/activate`),
+                          });
+                        }
+                        if (statusUpper === "SUSPENDED") {
+                          actions.push({
+                            key: "unsuspend",
+                            label: "⚡ Unsuspend Account",
+                            onClick: () =>
+                              runAction(
+                                `/users/${u.id}/unsuspend`,
+                                `Unsuspend account for user '${u.username}'? This will restore active login status.`
+                              ),
+                          });
+                        } else {
+                          actions.push({
+                            key: "suspend",
+                            label: "⚡ Suspend Account",
+                            onClick: () =>
+                              runAction(
+                                `/users/${u.id}/suspend`,
+                                `Suspend account for user '${u.username}'? This will block login and revoke all sessions.`
+                              ),
+                          });
+                        }
+                        if (statusUpper === "LOCKED") {
+                          actions.push({
+                            key: "unlock",
+                            label: "🔓 Unlock Account",
+                            onClick: () => runAction(`/users/${u.id}/unlock`),
+                          });
+                        }
+                        actions.push({
+                          key: "force-logout",
+                          label: isRowActionPending(`force-logout:${u.id}`)
+                            ? "🚪 Logging out..."
+                            : "🚪 Force Logout All",
                           danger: true,
-                          onClick: () => removeAdminRole(u.id, u.username),
+                          onClick: () => handleForceLogout(u.id, u.username),
                         });
-                      }
-                      actions.push({
-                        key: "assign-role",
-                        label: "🛡️ Assign Role",
-                        onClick: () => {
-                          setRoleModalUserId(u.id);
-                          setAssignRoleId("");
-                        },
-                      });
-                      actions.push({
-                        key: "permission-overrides",
-                        label: "🔑 Permission Overrides",
-                        onClick: () => openUserOverridesModal(u.id, u.username),
-                      });
-                    }
-                    if (canModifyTarget && canManage) {
-                      actions.push("divider");
-                      if (statusUpper === "ACTIVE") {
-                        actions.push({
-                          key: "deactivate",
-                          label: "⏸️ Inactive",
-                          onClick: () =>
-                            runAction(
-                              `/users/${u.id}/deactivate`,
-                              `Set user '${u.username}' to Inactive? This will block their login and revoke all active sessions.`
-                            ),
-                        });
-                      }
-                      if (statusUpper === "INACTIVE" || statusUpper === "PENDING") {
-                        actions.push({
-                          key: "activate",
-                          label: "▶️ Activate",
-                          onClick: () => runAction(`/users/${u.id}/activate`),
-                        });
-                      }
-                      if (statusUpper === "SUSPENDED") {
-                        actions.push({
-                          key: "unsuspend",
-                          label: "⚡ Unsuspend Account",
-                          onClick: () =>
-                            runAction(
-                              `/users/${u.id}/unsuspend`,
-                              `Unsuspend account for user '${u.username}'? This will restore active login status.`
-                            ),
-                        });
-                      } else {
-                        actions.push({
-                          key: "suspend",
-                          label: "⚡ Suspend Account",
-                          onClick: () =>
-                            runAction(
-                              `/users/${u.id}/suspend`,
-                              `Suspend account for user '${u.username}'? This will block login and revoke all sessions.`
-                            ),
-                        });
-                      }
-                      if (statusUpper === "LOCKED") {
-                        actions.push({
-                          key: "unlock",
-                          label: "🔓 Unlock Account",
-                          onClick: () => runAction(`/users/${u.id}/unlock`),
-                        });
-                      }
-                      actions.push({
-                        key: "force-logout",
-                        label: isRowActionPending(`force-logout:${u.id}`)
-                          ? "🚪 Logging out..."
-                          : "🚪 Force Logout All",
-                        danger: true,
-                        onClick: () => handleForceLogout(u.id, u.username),
-                      });
-                      if (canDeleteUser && !isTargetSuperAdmin) {
-                        actions.push({
-                          key: "delete-user",
-                          label: isRowActionPending(`delete:${u.id}`)
-                            ? "🗑️ Deleting..."
-                            : "🗑️ Delete User",
-                          danger: true,
-                          onClick: () => handleDeleteUser(u.id, u.username, u.email),
-                        });
+                        if (!isTargetSuperAdmin) {
+                          actions.push({
+                            key: "delete-user",
+                            label: isRowActionPending(`delete:${u.id}`)
+                              ? "🗑️ Deleting..."
+                              : "🗑️ Delete User",
+                            danger: true,
+                            onClick: () => handleDeleteUser(u.id, u.username, u.email),
+                          });
+                        }
                       }
                     }
 
@@ -795,7 +775,9 @@ export function UsersPage() {
                           {u.last_login_at ? new Date(u.last_login_at).toLocaleString() : "Never"}
                         </td>
                         <td className="actions" style={{ textAlign: "right" }}>
-                          <ActionDropdown items={actions} />
+                          {canManage && actions.length > 0 ? (
+                            <ActionDropdown items={actions} />
+                          ) : null}
                         </td>
                       </tr>
                     );

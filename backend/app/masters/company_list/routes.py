@@ -4,15 +4,17 @@ from __future__ import annotations
 
 import uuid
 from typing import Any
-from fastapi import APIRouter, Depends, Query, Request, status
+from fastapi import APIRouter, Depends, File, Request, UploadFile, status
 from fastapi.responses import Response
 
+from app.auth.service import CurrentUser
 from app.common.list_query import ListQueryParams, get_list_query_params
 from app.common.pagination import PageMeta
 from app.core.responses import build_success_response
 from app.masters.company_list.dependencies import get_company_service
-from app.masters.company_list.schemas import CompanyCreate, CompanyRead, CompanyUpdate
+from app.masters.company_list.schemas import CompanyCreate, CompanyRead, CompanyUpdate, ImportSummaryRead
 from app.masters.company_list.service import CompanyService
+from app.rbac.dependencies import require_permission
 
 router = APIRouter(prefix="/masters/company-list", tags=["Masters - Company List"])
 
@@ -22,6 +24,7 @@ async def list_companies(
     request: Request,
     query: ListQueryParams = Depends(get_list_query_params),
     service: CompanyService = Depends(get_company_service),
+    _current_user: CurrentUser = Depends(require_permission("organizationlist.view")),
 ) -> dict:
     """List companies with search/pagination."""
     companies, total = await service.list_paginated(query)
@@ -34,10 +37,46 @@ async def list_companies(
 async def list_companies_dropdown(
     request: Request,
     service: CompanyService = Depends(get_company_service),
+    _current_user: CurrentUser = Depends(require_permission("organizationlist.view")),
 ) -> dict:
     """Return all active companies for dropdown options."""
     companies = await service.list_all_dropdown()
     data = [{"id": str(c.id), "name": c.name, "code": c.code, "branches": c.branches or []} for c in companies]
+    return build_success_response(data=data, request_id=request.state.request_id)
+
+
+@router.get("/export", summary="Export companies to CSV/Excel")
+async def export_companies(
+    request: Request,
+    format: str = "csv",
+    service: CompanyService = Depends(get_company_service),
+    _current_user: CurrentUser = Depends(require_permission("organizationlist.export")),
+) -> Response:
+    """Export every organization/company as a CSV or XLSX file."""
+    file_format = format.lower()
+    if file_format not in ("csv", "xlsx"):
+        file_format = "csv"
+    content = await service.export_file(file_format)
+    media_type = (
+        "text/csv" if file_format == "csv" else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+    filename = f"organization-list.{file_format}"
+    return Response(
+        content=content, media_type=media_type, headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
+
+
+@router.post("/import", summary="Import companies from CSV/Excel")
+async def import_companies(
+    request: Request,
+    file: UploadFile = File(...),
+    service: CompanyService = Depends(get_company_service),
+    _current_user: CurrentUser = Depends(require_permission("organizationlist.import")),
+) -> dict:
+    """Import organizations/companies from an uploaded CSV/XLSX file, validating every row."""
+    raw_bytes = await file.read()
+    summary = await service.import_file(file.filename or "import.csv", raw_bytes)
+    data = ImportSummaryRead(**summary.as_dict()).model_dump(mode="json")
     return build_success_response(data=data, request_id=request.state.request_id)
 
 
@@ -46,6 +85,7 @@ async def get_company(
     request: Request,
     company_id: uuid.UUID,
     service: CompanyService = Depends(get_company_service),
+    _current_user: CurrentUser = Depends(require_permission("organizationlist.view")),
 ) -> dict:
     """Get a single company by ID."""
     company = await service.get_by_id_or_raise(company_id)
@@ -58,6 +98,7 @@ async def create_company(
     request: Request,
     payload: CompanyCreate,
     service: CompanyService = Depends(get_company_service),
+    _current_user: CurrentUser = Depends(require_permission("organizationlist.create")),
 ) -> dict:
     """Create a new master company."""
     company = await service.create(**payload.model_dump(exclude_unset=True))
@@ -71,6 +112,7 @@ async def update_company(
     company_id: uuid.UUID,
     payload: CompanyUpdate,
     service: CompanyService = Depends(get_company_service),
+    _current_user: CurrentUser = Depends(require_permission("organizationlist.update")),
 ) -> dict:
     """Update an existing master company."""
     company = await service.update(company_id, **payload.model_dump(exclude_unset=True))
@@ -82,6 +124,7 @@ async def update_company(
 async def delete_company(
     company_id: uuid.UUID,
     service: CompanyService = Depends(get_company_service),
+    _current_user: CurrentUser = Depends(require_permission("organizationlist.delete")),
 ) -> Response:
     """Delete a company."""
     await service.delete(company_id)
@@ -93,6 +136,7 @@ async def activate_company(
     request: Request,
     company_id: uuid.UUID,
     service: CompanyService = Depends(get_company_service),
+    _current_user: CurrentUser = Depends(require_permission("organizationlist.update")),
 ) -> dict:
     """Activate a company."""
     company = await service.activate(company_id)
@@ -105,6 +149,7 @@ async def deactivate_company(
     request: Request,
     company_id: uuid.UUID,
     service: CompanyService = Depends(get_company_service),
+    _current_user: CurrentUser = Depends(require_permission("organizationlist.update")),
 ) -> dict:
     """Deactivate a company."""
     company = await service.deactivate(company_id)

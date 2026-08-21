@@ -13,13 +13,14 @@ import type { Permission } from "@/types";
 /** Friendly category names for permission modules. */
 export const MODULE_NAMES: Record<string, string> = {
   dashboard: "Dashboard",
-  company: "Companies",
+  organizationlist: "Organization List",
   buyer: "Agents & Buyers",
   buyertype: "Buyer Types",
   supplier: "Suppliers",
   suppliertype: "Supplier Types",
   planning: "Shipment Planning",
   product: "Products Master",
+  productgallery: "Product Gallery",
   category: "Categories",
   subcategory: "Sub-Categories",
   brand: "Brands",
@@ -32,6 +33,8 @@ export const MODULE_NAMES: Record<string, string> = {
   user: "Users & Accounts",
   organization: "Organizations",
   audit: "System Audit Logs",
+  trash: "Trash",
+  roles_permissions: "Roles & Permissions",
 };
 
 const ACTION_LABELS: Record<string, string> = {
@@ -44,6 +47,7 @@ const ACTION_LABELS: Record<string, string> = {
   import: "Import",
   approve: "Approve",
   manage: "Manage All",
+  action: "Actions",
   bulk_action: "Bulk Actions",
   grade_edit: "Edit Grade",
   potential_edit: "Edit Potential",

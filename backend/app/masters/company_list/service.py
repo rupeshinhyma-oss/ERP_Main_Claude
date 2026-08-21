@@ -6,11 +6,21 @@ import uuid
 from typing import Any, Sequence
 
 from app.cache.manager import CacheManager
+from app.common.list_query import ListQueryParams
 from app.core.constants import RecordStatus
 from app.core.exceptions import ConflictException, NotFoundException
 from app.masters.company_list.constants import DROPDOWN_CACHE_NAME, EXPORT_HEADERS
 from app.masters.company_list.models import MasterCompany
 from app.masters.company_list.repository import CompanyRepository
+from app.masters.company_list.validators import validate_company_row
+from app.masters.import_export import (
+    ImportSummary,
+    build_csv_export,
+    build_excel_export,
+    model_to_dict,
+    parse_rows_from_file,
+    run_import,
+)
 
 
 class CompanyService:
@@ -111,3 +121,52 @@ class CompanyService:
     async def deactivate(self, company_id: uuid.UUID) -> MasterCompany:
         """Deactivate a company."""
         return await self.update(company_id, status=RecordStatus.INACTIVE)
+
+    # ------------------------------------------------------------------
+    # Import / Export
+    # ------------------------------------------------------------------
+
+    async def import_file(self, filename: str, raw_bytes: bytes) -> ImportSummary:
+        """Validate and import companies from an uploaded CSV/XLSX file."""
+        rows = parse_rows_from_file(filename, raw_bytes)
+
+        async def _create(field_values: dict[str, Any]) -> MasterCompany:
+            name = field_values["name"]
+            existing_by_name = await self.repository.get_by_name(name)
+            if existing_by_name is not None:
+                raise ConflictException(
+                    f"Company name {name!r} already exists.", details={"existing": model_to_dict(existing_by_name)}
+                )
+            code = field_values.get("code")
+            if code:
+                existing_by_code = await self.repository.get_by_code(code)
+                if existing_by_code is not None:
+                    raise ConflictException(
+                        f"Company code {code!r} already exists.",
+                        details={"existing": model_to_dict(existing_by_code)},
+                    )
+            return await self.create(**field_values)
+
+        summary = await run_import(rows, row_validator=validate_company_row, row_creator=_create, dedupe_keys=("name",))
+        await self._invalidate_cache()
+        return summary
+
+    async def export_file(self, file_format: str) -> bytes:
+        """Export every company to CSV or XLSX bytes."""
+        companies = await self.repository.list_all()
+        rows = [
+            {
+                "id": str(c.id),
+                "name": c.name,
+                "code": c.code,
+                "description": c.description,
+                "branch_count": len(c.branches) if c.branches else 0,
+                "status": c.status.value,
+                "created_at": c.created_at.isoformat(),
+                "updated_at": c.updated_at.isoformat(),
+            }
+            for c in companies
+        ]
+        if file_format == "csv":
+            return build_csv_export(EXPORT_HEADERS, rows)
+        return build_excel_export(EXPORT_HEADERS, rows, sheet_title="Organization List")

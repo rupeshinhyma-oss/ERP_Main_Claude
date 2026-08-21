@@ -1,8 +1,11 @@
 """
 One-time data migration: remove cache.* and queue.* permissions from the database.
 
-Cache and background queues work automatically for all users by default in the backend,
-and admin monitoring endpoints are guarded by 'settings.manage'.
+Cache and background queues work automatically for all users by default in the
+backend -- no permission code gates any cache/queue route (see
+app.cache.routes / app.queue.routes), by deliberate design, so these are
+inert, orphaned permission rows with nothing checking for them anywhere in
+the codebase.
 
 Usage:
     python -m scripts.cleanup_cache_queue_permissions           # apply

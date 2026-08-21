@@ -55,14 +55,39 @@ logger = get_logger(__name__)
 BOOTSTRAP_PERMISSIONS: list[tuple[str, str, str, str, str, str]] = [
     # (code, module, page, action, scope, description)
     # Users
+    ("user.view", "user", "users", "view", "ALL", "View user accounts; use search and the Active/Inactive tabs."),
     ("user.create", "user", "users", "create", "ALL", "Create user accounts."),
-    ("user.view", "user", "users", "view", "ALL", "View user accounts."),
-    ("user.update", "user", "users", "update", "ALL", "Update, activate/deactivate, unlock, and reset passwords for users."),
-    ("user.delete", "user", "users", "delete", "ALL", "Delete user accounts."),
-    ("user.export", "user", "users", "export", "ALL", "Export user accounts data."),
-    ("user.import", "user", "users", "import", "ALL", "Import user accounts data."),
+    ("user.action", "user", "users", "manage", "ALL", "Use the Actions menu on a user row: view details, edit profile, reset password, assign role, permission overrides, activate/deactivate, suspend/unsuspend, unlock, force logout, and delete."),
     # Organization Settings (Super Admin system-level)
     ("organization.manage", "organization", "organization", "manage", "ALL", "View and manage system organization profile."),
+    # Organization List (Configurations > Organization List; distinct page from
+    # Organization Settings above -- lists group entities/companies and their
+    # branches). Previously referenced a "company.view" permission in
+    # frontend/src/lib/nav.ts that was never actually seeded, and the entire
+    # backend module (create/update/delete/activate/deactivate) had NO
+    # permission check at all.
+    ("organizationlist.view", "organizationlist", "masters-company-list", "view", "ALL", "View the Organization List; use search and the Active/Inactive tabs."),
+    ("organizationlist.create", "organizationlist", "masters-company-list", "create", "ALL", "Create organizations/companies."),
+    ("organizationlist.update", "organizationlist", "masters-company-list", "update", "ALL", "Edit and activate/deactivate organizations/companies."),
+    ("organizationlist.delete", "organizationlist", "masters-company-list", "delete", "ALL", "Delete organizations/companies."),
+    ("organizationlist.export", "organizationlist", "masters-company-list", "export", "ALL", "Export Organization List data."),
+    ("organizationlist.import", "organizationlist", "masters-company-list", "import", "ALL", "Import Organization List data."),
+    ("organizationlist.bulk_action", "organizationlist", "masters-company-list", "manage", "ALL", "Use Bulk Actions in the Organization List."),
+    # Trash (System > Trash). Deliberately view-only by design: restoring,
+    # permanently deleting, and emptying trash are NOT gated by this or any
+    # other permission -- that matches how this module already behaves today
+    # and is an intentional, explicit choice, not an oversight.
+    ("trash.view", "trash", "trash", "view", "ALL", "View the Trash (list of soft-deleted items)."),
+    # Roles & Permissions (User Management > Roles & Permissions). This page
+    # is currently superAdminOnly in the frontend nav, and every backend route
+    # in app.rbac.routes has NO permission check at all -- it relies entirely
+    # on that frontend-only gate. Adding real permissions here, enforced on
+    # the backend, is what actually makes this page grantable to a
+    # non-super-admin role for the first time.
+    ("roles_permissions.view", "roles_permissions", "rbac", "view", "ALL", "View roles and their permission assignments."),
+    ("roles_permissions.create", "roles_permissions", "rbac", "create", "ALL", "Create a new role (+ ADD NEW), including via Clone Role Permissions."),
+    ("roles_permissions.action", "roles_permissions", "rbac", "manage", "ALL", "Per-role actions: delete a single role, grant/revoke a permission on a role, and manage a user's individual permission overrides."),
+    ("roles_permissions.bulk_action", "roles_permissions", "rbac", "manage", "ALL", "Bulk-delete selected roles (the green DELETE button)."),
     # Suppliers
     ("supplier.view", "supplier", "suppliers", "view", "ALL", "View the supplier list and contacts; use search, filters, and the Active/Inactive tabs."),
     ("supplier.create", "supplier", "suppliers", "create", "ALL", "Create suppliers via Quick Add or Add New, and add supplier contacts."),
@@ -169,8 +194,12 @@ BOOTSTRAP_PERMISSIONS: list[tuple[str, str, str, str, str, str]] = [
     ("product.export", "product", "masters-products", "export", "ALL", "Export product records."),
     ("product.import", "product", "masters-products", "import", "ALL", "Import product records."),
     ("product.bulk_action", "product", "masters-products", "manage", "ALL", "Use Bulk Actions in the Product Master list."),
-    ("product.approve", "product", "masters-products", "approve", "ALL", "Approve product listings."),
-    ("product.print", "product", "masters-products", "print", "ALL", "Print product details."),
+    # Product Gallery (Inventory > Product Gallery; separate page from Product
+    # Master above). Deliberately view-only: this page has no create/edit/
+    # delete/bulk actions of its own to gate (the two photo-delete buttons it
+    # does have are already separately gated on product.update /
+    # supplier.update).
+    ("productgallery.view", "productgallery", "product-gallery", "view", "ALL", "View the Product & Supplier Gallery."),
     # Audit Log
     ("audit.view", "audit", "audit", "view", "ALL", "View audit log entries."),
     # Shipment Planning (dynamic branch-sheet grid: Mum Branch, MP Branch, ...)

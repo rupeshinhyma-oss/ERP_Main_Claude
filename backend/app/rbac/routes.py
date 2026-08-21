@@ -25,7 +25,7 @@ from app.audit.dependencies import get_audit_service
 from app.audit.service import AuditService
 from app.auth.service import CurrentUser
 from app.core.responses import build_success_response
-from app.rbac.dependencies import get_rbac_service, require_permission
+from app.rbac.dependencies import get_rbac_service, require_any_permission, require_permission
 from app.rbac.schemas import (
     AssignUserPermissionRequest,
     BulkUserPermissionsRequest,
@@ -45,8 +45,8 @@ from app.rbac.service import RBACService
 router = APIRouter(prefix="/rbac", tags=["Roles & Permissions"])
 
 
-async def _role_with_permissions(role, rbac_service: RBACService) -> RoleWithPermissions:  # type: ignore[no-untyped-def]
-    """Shape a ``Role`` ORM instance into the response schema, with permission codes expanded."""
+async def _role_with_permissions(role: Role, rbac_service: RBACService) -> RoleWithPermissions:
+    """Shape a ``Role`` ORM instance into the response schema, with granted permission codes expanded."""
     codes = await rbac_service.get_permission_codes_for_role(role.id)
     return RoleWithPermissions(**RoleRead.model_validate(role).model_dump(), permissions=codes)
 
@@ -55,7 +55,7 @@ async def _role_with_permissions(role, rbac_service: RBACService) -> RoleWithPer
 async def list_permissions(
     request: Request,
     rbac_service: RBACService = Depends(get_rbac_service),
-    _current_user: CurrentUser = Depends(require_permission("roles_permissions.view")),
+    _current_user: CurrentUser = Depends(require_any_permission("roles_permissions.view", "user.action", "user.view")),
 ) -> dict:
     """List every permission in the system."""
     permissions = await rbac_service.list_permissions()
@@ -325,7 +325,7 @@ async def list_user_permissions(
     user_id: uuid.UUID,
     request: Request,
     rbac_service: RBACService = Depends(get_rbac_service),
-    _current_user: CurrentUser = Depends(require_permission("roles_permissions.view")),
+    _current_user: CurrentUser = Depends(require_any_permission("roles_permissions.view", "user.action", "user.view")),
 ) -> dict:
     links = await rbac_service.list_user_permissions(user_id)
     data = [
@@ -344,7 +344,7 @@ async def assign_user_permission(
     payload: AssignUserPermissionRequest,
     request: Request,
     rbac_service: RBACService = Depends(get_rbac_service),
-    current_user: CurrentUser = Depends(require_permission("roles_permissions.action")),
+    current_user: CurrentUser = Depends(require_any_permission("roles_permissions.action", "user.action")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     await rbac_service.assign_user_permission(
@@ -376,7 +376,7 @@ async def remove_user_permission(
     permission_id: uuid.UUID,
     request: Request,
     rbac_service: RBACService = Depends(get_rbac_service),
-    current_user: CurrentUser = Depends(require_permission("roles_permissions.action")),
+    current_user: CurrentUser = Depends(require_any_permission("roles_permissions.action", "user.action")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     await rbac_service.remove_user_permission(user_id, permission_id)
@@ -406,7 +406,7 @@ async def set_user_permissions_bulk(
     payload: BulkUserPermissionsRequest,
     request: Request,
     rbac_service: RBACService = Depends(get_rbac_service),
-    current_user: CurrentUser = Depends(require_permission("roles_permissions.action")),
+    current_user: CurrentUser = Depends(require_any_permission("roles_permissions.action", "user.action")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     overrides_tuples = [(item.permission_id, item.is_granted) for item in payload.overrides]
@@ -439,7 +439,7 @@ async def get_user_effective_permissions(
     user_id: uuid.UUID,
     request: Request,
     rbac_service: RBACService = Depends(get_rbac_service),
-    _current_user: CurrentUser = Depends(require_permission("roles_permissions.view")),
+    _current_user: CurrentUser = Depends(require_any_permission("roles_permissions.view", "user.action", "user.view")),
 ) -> dict:
     data = await rbac_service.get_user_effective_permissions(user_id)
     return build_success_response(data=data, request_id=request.state.request_id)

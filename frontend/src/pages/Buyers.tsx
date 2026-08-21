@@ -666,7 +666,7 @@ export function BuyersPage() {
       async (term: string, signal: AbortSignal): Promise<DropdownOption[]> => {
         const extra = extraParamsFn ? extraParamsFn() : {};
         const { data } = await apiGet<{ id: string; name: string }[]>(
-          apiBase + toQueryString({ search: term, page: 1, page_size: 50, sort_order: "asc", status: "active", ...extra }),
+          apiBase + toQueryString({ search: term, page: 1, page_size: 250, sort_order: "asc", status: "active", ...extra }),
           { signal }
         );
         return (data || []).map((d) => ({ value: d.id, label: d.name }));

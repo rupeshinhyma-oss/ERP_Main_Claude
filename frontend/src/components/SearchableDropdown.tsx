@@ -158,14 +158,31 @@ export function SearchableDropdown({
     }, 150);
   }
 
-  function handleFocus() {
+  function handleFocus(e: React.FocusEvent<HTMLInputElement>) {
     if (disabled) return;
+    try {
+      e.target.select();
+    } catch {
+      /* ignore */
+    }
     void search.run(async (signal) => {
-      const found = await fetchOptions(inputValue.trim(), signal);
+      const found = await fetchOptions("", signal);
       setOptions(found || []);
       setActiveIndex(-1);
       setOpen(true);
-    }, 100);
+    }, 50);
+  }
+
+  function handleClick() {
+    if (disabled) return;
+    if (!open) {
+      void search.run(async (signal) => {
+        const found = await fetchOptions("", signal);
+        setOptions(found || []);
+        setActiveIndex(-1);
+        setOpen(true);
+      }, 50);
+    }
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
@@ -176,7 +193,18 @@ export function SearchableDropdown({
       selectOption({ value: inputValue.trim(), label: inputValue.trim() });
       return;
     }
-    if (!open) return;
+    if (!open) {
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        void search.run(async (signal) => {
+          const found = await fetchOptions("", signal);
+          setOptions(found || []);
+          setActiveIndex(0);
+          setOpen(true);
+        }, 0);
+      }
+      return;
+    }
     if (e.key === "ArrowDown") {
       e.preventDefault();
       setActiveIndex((i) => Math.min(i + 1, options.length - 1));
@@ -211,7 +239,7 @@ export function SearchableDropdown({
     !options.some((o) => o.label.toLowerCase() === inputValue.trim().toLowerCase());
 
   return (
-    <div className="sd-wrap">
+    <div className="sd-wrap" style={{ position: "relative" }}>
       <input
         type="text"
         id={id}
@@ -220,6 +248,7 @@ export function SearchableDropdown({
         style={{
           border: hasError ? "1.5px solid #ef4444" : undefined,
           boxShadow: hasError ? "0 0 0 3px rgba(239, 68, 68, 0.15)" : undefined,
+          paddingRight: "30px",
           ...(disabled
             ? {
                 background: "#f8fafc",
@@ -235,27 +264,97 @@ export function SearchableDropdown({
         value={inputValue}
         onChange={(e) => handleInput(e.target.value)}
         onFocus={handleFocus}
+        onClick={handleClick}
         onKeyDown={handleKeyDown}
         onBlur={handleBlur}
       />
+      <button
+        type="button"
+        tabIndex={-1}
+        aria-label="Toggle options"
+        disabled={disabled}
+        onMouseDown={(e) => {
+          e.preventDefault();
+        }}
+        onClick={(e) => {
+          e.preventDefault();
+          if (disabled) return;
+          if (open) {
+            closeResults();
+          } else {
+            void search.run(async (signal) => {
+              const found = await fetchOptions("", signal);
+              setOptions(found || []);
+              setActiveIndex(-1);
+              setOpen(true);
+            }, 0);
+          }
+        }}
+        style={{
+          position: "absolute",
+          right: "8px",
+          top: "50%",
+          transform: "translateY(-50%)",
+          background: "transparent",
+          border: "none",
+          cursor: disabled ? "not-allowed" : "pointer",
+          color: "#94a3b8",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: "4px",
+          lineHeight: 1,
+        }}
+      >
+        <svg
+          width="12"
+          height="12"
+          viewBox="0 0 20 20"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          style={{
+            transition: "transform 0.15s ease",
+            transform: open ? "rotate(180deg)" : "rotate(0deg)",
+          }}
+        >
+          <polyline points="6 9 12 15 18 9" />
+        </svg>
+      </button>
       {open && (
         <div className="sd-results">
           {options.length === 0 && !showCustomOption ? (
             <div className="sd-empty">No matches.</div>
           ) : (
             <>
-              {options.map((opt, i) => (
-                <div
-                  key={opt.value}
-                  className={`sd-option ${i === activeIndex ? "sd-active" : ""}`.trim()}
-                  onMouseDown={(e) => {
-                    e.preventDefault();
-                    selectOption(opt);
-                  }}
-                >
-                  {opt.label}
-                </div>
-              ))}
+              {options.map((opt, i) => {
+                const isSelected = opt.value === value || (label && opt.label.toLowerCase() === label.toLowerCase());
+                return (
+                  <div
+                    key={opt.value}
+                    className={`sd-option ${i === activeIndex ? "sd-active" : ""}`.trim()}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      fontWeight: isSelected ? 600 : 400,
+                      background: isSelected && i !== activeIndex ? "#f0fdf4" : undefined,
+                      color: isSelected && i !== activeIndex ? "#166534" : undefined,
+                    }}
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      selectOption(opt);
+                    }}
+                  >
+                    <span>{opt.label}</span>
+                    {isSelected && (
+                      <span style={{ fontSize: "12px", color: "#16a34a", fontWeight: 700 }}>✓</span>
+                    )}
+                  </div>
+                );
+              })}
               {showCustomOption && (
                 <div
                   className="sd-option"
@@ -387,12 +486,12 @@ export function SearchableDropdownMulti({
 
   function handleFocus() {
     void search.run(async (signal) => {
-      const found = (await fetchOptions(inputValue.trim(), signal)) || [];
+      const found = (await fetchOptions("", signal)) || [];
       const selectedValues = new Set(selected.map((s) => s.value));
       setOptions(found.filter((o) => !selectedValues.has(o.value)));
       setActiveIndex(-1);
       setOpen(true);
-    }, 100);
+    }, 50);
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {

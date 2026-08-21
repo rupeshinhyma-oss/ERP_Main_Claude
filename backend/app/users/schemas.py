@@ -113,6 +113,7 @@ class UserUpdate(BaseModel):
     """Payload to update a user's non-credential profile fields."""
 
     version: int | None = None
+    username: str | None = Field(default=None, min_length=3, max_length=100)
     first_name: str | None = Field(default=None, max_length=100)
     middle_name: str | None = Field(default=None, max_length=100)
     last_name: str | None = Field(default=None, max_length=100)

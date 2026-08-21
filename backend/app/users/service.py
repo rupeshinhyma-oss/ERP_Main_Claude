@@ -15,7 +15,7 @@ import secrets
 import uuid
 from datetime import datetime, timezone
 
-from app.auth.security import hash_password
+from app.auth.security import generate_temporary_password, hash_password
 from app.auth.service import AuthService
 from app.core.config import settings
 from app.core.exceptions import ConflictException, ForbiddenException, NotFoundException
@@ -263,20 +263,28 @@ class UserService:
         return user, password_to_set
 
     async def update_user(self, user_id: uuid.UUID, *, updated_by: uuid.UUID, **fields: object) -> User:
-        """Update a user's profile fields, ignoring unset (None) values."""
+        """Update a user's profile fields."""
         user = await self.get_by_id_or_raise(user_id)
         if await self.is_super_admin(user_id) and not await self.is_super_admin(updated_by):
             raise ForbiddenException("Only Super Administrators can modify Super Administrator accounts.")
+
+        username = fields.get("username")
+        if username and isinstance(username, str) and await self.user_repository.username_exists(username, exclude_user_id=user_id):
+            raise ConflictException("A user with that username already exists.")
 
         email = fields.get("email")
         if email and isinstance(email, str) and await self.user_repository.email_exists(email, exclude_user_id=user_id):
             raise ConflictException("A user with that email already exists.")
 
+        phone = fields.get("phone")
+        if phone and isinstance(phone, str) and await self.user_repository.phone_exists(phone, exclude_user_id=user_id):
+            raise ConflictException("A user with that phone number already exists.")
+
         employee_code = fields.get("employee_code")
         if employee_code and isinstance(employee_code, str) and await self.user_repository.employee_code_exists(employee_code, exclude_user_id=user_id):
             raise ConflictException("An account is already linked to that employee code.")
 
-        changes = {k: v for k, v in fields.items() if v is not None}
+        changes = dict(fields)
         if changes:
             changes["updated_by"] = updated_by
             await self.user_repository.update(user, **changes)

@@ -902,7 +902,7 @@ export function SuppliersPage() {
           toQueryString({
             search: term,
             page: 1,
-            page_size: 50,
+            page_size: 250,
             sort_order: "asc",
             status: "active",
             ...extra,

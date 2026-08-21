@@ -51,10 +51,31 @@ export function Banner({
 /* Badges                                                             */
 /* ------------------------------------------------------------------ */
 
-/** active/inactive status pill, as MasterPage.badge() produced. */
-export function StatusBadge({ status }: { status: string }) {
-  const cls = status === "active" ? "badge-active" : "badge-inactive";
-  return <span className={`badge ${cls}`}>{status}</span>;
+/** active/inactive/suspended/locked status pill */
+export function StatusBadge({ status, isActive }: { status?: string; isActive?: boolean }) {
+  const s = (status || "").toLowerCase();
+  let cls = "badge-inactive";
+  let display = status || "Inactive";
+  if (s === "active" || (isActive === true && !s)) {
+    cls = "badge-active";
+    display = "Active";
+  } else if (s === "suspended") {
+    cls = "badge-danger";
+    display = "Suspended";
+  } else if (s === "locked") {
+    cls = "badge-warning";
+    display = "Locked";
+  } else if (s === "pending") {
+    cls = "badge-info";
+    display = "Pending";
+  } else if (s === "password_change_required") {
+    cls = "badge-warning";
+    display = "Password Change Req.";
+  } else if (s === "inactive" || isActive === false) {
+    cls = "badge-inactive";
+    display = "Inactive";
+  }
+  return <span className={`badge ${cls}`}>{display}</span>;
 }
 
 /* ------------------------------------------------------------------ */

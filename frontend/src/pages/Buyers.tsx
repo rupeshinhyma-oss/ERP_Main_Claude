@@ -116,10 +116,33 @@ const sectionTitleStyle: React.CSSProperties = {
   marginBottom: "14px",
 };
 
+function extractSubscriberNumber(val: string | undefined | null): string {
+  if (!val) return "";
+  const trimmed = val.trim();
+  if (trimmed.startsWith("+")) {
+    const spaceIdx = trimmed.indexOf(" ");
+    if (spaceIdx !== -1) {
+      return trimmed.slice(spaceIdx + 1).replace(/\D/g, "");
+    }
+    return ""; // Only prefix (e.g. "+256" or "+91") with no actual number!
+  }
+  return trimmed.replace(/\D/g, "");
+}
+
+function normalizePhoneValue(val: string | undefined | null): string | null {
+  if (!val) return null;
+  const subscriber = extractSubscriberNumber(val);
+  if (!subscriber) return null; // Blank / empty if only country prefix exists
+  return val.trim();
+}
+
 function validatePhoneNumber(val: string | undefined | null, fieldLabel = "Phone number"): string | null {
   if (!val) return null;
+  const subscriber = extractSubscriberNumber(val);
+  // If the subscriber digits are empty (only country prefix exists), it is valid/blank (optional).
+  if (!subscriber) return null;
+
   const digits = val.replace(/\D/g, "");
-  if (!digits) return null;
   if (digits.length < 7) {
     return `${fieldLabel} must have at least 7 digits (including country code).`;
   }
@@ -952,8 +975,8 @@ export function BuyersPage() {
       contact_salutation: form.contact_salutation.trim() || null,
       contact_full_name: form.contact_full_name.trim() || null,
       contact_designation: form.contact_designation.trim() || null,
-      contact_calling_number: form.contact_calling_number.trim() || null,
-      contact_whatsapp_number: form.contact_whatsapp_number.trim() || null,
+      contact_calling_number: normalizePhoneValue(form.contact_calling_number),
+      contact_whatsapp_number: normalizePhoneValue(form.contact_whatsapp_number),
       emails: form.emails,
       tax_id_number: form.tax_id_number.trim() || null,
       website: form.website.trim() || null,
@@ -1070,8 +1093,8 @@ export function BuyersPage() {
       salutation: contactForm.salutation?.trim() || null,
       person_name: contactForm.person_name.trim(),
       designation: contactForm.designation?.trim() || null,
-      calling_number: contactForm.calling_number?.trim() || null,
-      whatsapp_number: contactForm.whatsapp_number?.trim() || null,
+      calling_number: normalizePhoneValue(contactForm.calling_number),
+      whatsapp_number: normalizePhoneValue(contactForm.whatsapp_number),
       email: contactForm.email?.trim() || null,
       country_id: contactForm.country_id || form.country_id || null,
     };
@@ -1235,8 +1258,8 @@ export function BuyersPage() {
   /* Real-time Field-level Duplicate Warnings */
   const fieldDuplicates = useMemo(() => {
     const cleanCompany = form.company_name.trim().toLowerCase().replace(/[\s-]/g, "");
-    const cleanCalling = form.contact_calling_number.trim().replace(/\D/g, "");
-    const cleanWhatsapp = form.contact_whatsapp_number.trim().replace(/\D/g, "");
+    const cleanCalling = extractSubscriberNumber(form.contact_calling_number) ? form.contact_calling_number.trim().replace(/\D/g, "") : "";
+    const cleanWhatsapp = extractSubscriberNumber(form.contact_whatsapp_number) ? form.contact_whatsapp_number.trim().replace(/\D/g, "") : "";
 
     let companyWarning: string | null = null;
     let callingWarning: string | null = null;

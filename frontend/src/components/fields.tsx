@@ -189,17 +189,23 @@ export function PhoneGroupField({
     number = "";
   }
 
+  const prefixDigits = prefix.replace(/\D/g, "").length;
+  const maxSubscriberDigits = Math.max(1, 15 - prefixDigits);
+
   const handlePrefixChange = (newPrefix: string) => {
     let cleanPrefix = newPrefix.trim();
     if (cleanPrefix && !cleanPrefix.startsWith("+")) {
       cleanPrefix = "+" + cleanPrefix;
     }
-    const combined = number ? `${cleanPrefix} ${number}` : cleanPrefix;
+    const pDigits = cleanPrefix.replace(/\D/g, "").length;
+    const maxSub = Math.max(1, 15 - pDigits);
+    const trimmedNum = number.slice(0, maxSub);
+    const combined = trimmedNum ? `${cleanPrefix} ${trimmedNum}` : cleanPrefix;
     onChange(combined);
   };
 
   const handleNumberChange = (newNumber: string) => {
-    const cleanNum = newNumber.replace(/[^\d\s-]/g, "");
+    const cleanNum = newNumber.replace(/[^\d\s-]/g, "").slice(0, maxSubscriberDigits);
     const combined = prefix ? `${prefix} ${cleanNum}` : cleanNum;
     onChange(combined);
   };
@@ -233,7 +239,7 @@ export function PhoneGroupField({
           id={id}
           type="text"
           value={number}
-          maxLength={15}
+          maxLength={maxSubscriberDigits}
           placeholder={placeholder}
           onChange={(e) => handleNumberChange(e.target.value)}
           style={{

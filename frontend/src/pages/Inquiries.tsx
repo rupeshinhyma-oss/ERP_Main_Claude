@@ -11,7 +11,7 @@
  * continuous drill-down rather than distinct pages.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { Banner, Can, TableMessageRow } from "@/components/ui";
 import { SearchableDropdown, type DropdownOption, type FetchOptions } from "@/components/SearchableDropdown";
@@ -140,51 +140,8 @@ export function InquiriesPage() {
   const [quickAddOpen, setQuickAddOpen] = useState(false);
   const [quickAddInitialBuyerId, setQuickAddInitialBuyerId] = useState("");
 
-  const isPopStateRef = useRef(false);
-
-  // Sync quick add drawer opening with browser back button
-  useEffect(() => {
-    if (!quickAddOpen) return;
-
-    window.history.pushState({ quickAddOpen: true }, "");
-
-    const handlePopState = () => {
-      isPopStateRef.current = true;
-      setQuickAddOpen(false);
-    };
-
-    window.addEventListener("popstate", handlePopState);
-    return () => {
-      window.removeEventListener("popstate", handlePopState);
-      if (!isPopStateRef.current) {
-        window.history.back();
-      }
-      isPopStateRef.current = false;
-    };
-  }, [quickAddOpen]);
-
-  // Handle browser back button for Layer 1/2/3 navigation
-  useEffect(() => {
-    const handlePopState = (e: PopStateEvent) => {
-      if (e.state && e.state.inquiryView) {
-        setView(e.state.inquiryView);
-      } else {
-        setView({ layer: "companies" });
-      }
-    };
-    window.addEventListener("popstate", handlePopState);
-    return () => {
-      window.removeEventListener("popstate", handlePopState);
-    };
-  }, []);
-
   const navigateToView = useCallback((nextView: View) => {
     setView(nextView);
-    if (nextView.layer === "consignments") {
-      window.history.pushState({ inquiryView: nextView }, "");
-    } else if (nextView.layer === "items") {
-      window.history.pushState({ inquiryView: nextView }, "");
-    }
   }, []);
 
   // Name caches, resolved lazily as ids appear (bounded to what's on screen).
@@ -519,7 +476,7 @@ export function InquiriesPage() {
           <ConsignmentsView
             buyerId={view.buyerId}
             buyerName={buyerNames[view.buyerId]}
-            onBack={() => window.history.back()}
+            onBack={() => setView({ layer: "companies" })}
             onOpenConsignment={(inquiryId) => navigateToView({ layer: "items", inquiryId, buyerId: view.buyerId })}
             resolveCodeName={resolveCodeName}
             codeNames={codeNames}
@@ -531,7 +488,7 @@ export function InquiriesPage() {
             inquiryId={view.inquiryId}
             buyerId={view.buyerId}
             buyerName={buyerNames[view.buyerId]}
-            onBack={() => window.history.back()}
+            onBack={() => setView({ layer: "consignments", buyerId: view.buyerId })}
             resolveProductAndUom={resolveProductAndUom}
             productNames={productNames}
             uomNames={uomNames}

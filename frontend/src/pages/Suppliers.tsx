@@ -164,8 +164,32 @@ function StatusPill({ value }: { value?: string | null }) {
   return <span className={`badge ${cls}`}>{label}</span>;
 }
 
-function validatePhoneNumber(val: string, fieldLabel = "Phone number"): string | null {
+function extractSubscriberNumber(val: string | undefined | null): string {
+  if (!val) return "";
+  const trimmed = val.trim();
+  if (trimmed.startsWith("+")) {
+    const spaceIdx = trimmed.indexOf(" ");
+    if (spaceIdx !== -1) {
+      return trimmed.slice(spaceIdx + 1).replace(/\D/g, "");
+    }
+    return ""; // Only prefix (e.g. "+86" or "+91") with no actual number!
+  }
+  return trimmed.replace(/\D/g, "");
+}
+
+function normalizePhoneValue(val: string | undefined | null): string | null {
+  if (!val) return null;
+  const subscriber = extractSubscriberNumber(val);
+  if (!subscriber) return null; // Blank / empty if only country prefix exists
+  return val.trim();
+}
+
+function validatePhoneNumber(val: string | undefined | null, fieldLabel = "Phone number"): string | null {
   if (!val || !val.trim()) return null;
+  const subscriber = extractSubscriberNumber(val);
+  // If the subscriber digits are empty (only country prefix exists), it is valid/blank (optional).
+  if (!subscriber) return null;
+
   const digits = val.replace(/\D/g, "");
   if (digits.length < 7 || digits.length > 15) {
     return `${fieldLabel} must have between 7 and 15 digits (including country code).`;
@@ -1326,9 +1350,9 @@ export function SuppliersPage() {
       contact_salutation: form.contact_salutation || null,
       contact_full_name: form.contact_full_name.trim() || null,
       contact_designation: form.contact_designation.trim() || null,
-      contact_calling_number: form.contact_calling_number.trim() || null,
-      contact_whatsapp_number: form.contact_whatsapp_number.trim() || null,
-      contact_wechat_number: form.contact_wechat_number.trim() || null,
+      contact_calling_number: normalizePhoneValue(form.contact_calling_number),
+      contact_whatsapp_number: normalizePhoneValue(form.contact_whatsapp_number),
+      contact_wechat_number: normalizePhoneValue(form.contact_wechat_number),
       emails,
       tax_id_number: form.tax_id_number.trim() || null,
       address: form.address.trim() || null,

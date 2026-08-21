@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useLocation } from "react-router-dom";
 import { Auth } from "./auth";
 import { isAbortError } from "./api";
 import type { Profile } from "@/types";
@@ -224,40 +225,57 @@ export function usePendingGuard<K extends string = string>(): {
 /**
  * Syncs browser back-button with a modal / drawer's open state.
  *
- * When `isOpen` becomes true a dummy history entry is pushed so the browser
- * has something to "go back" to.  If the user presses the browser's Back
- * arrow the `popstate` handler calls `onClose` and the page stays put.
- * If the modal closes normally (save / cancel / X click) the dummy entry is
- * removed automatically via `window.history.back()`.
+ * When `isOpen` becomes true a dummy history entry is pushed so that pressing
+ * the browser's Back button (left arrow) smoothly closes the modal/form and keeps
+ * the user on the current page's table list.
  *
- * Usage:
- *   useModalHistorySync(modalOpen, () => setModalOpen(false));
+ * Route navigation safety: If the user clicks a sidebar link or navigates away to
+ * another route, unmount cleanup detects the pathname change and skips history.back(),
+ * ensuring instant 1-click navigation without cancelled routes.
  */
 export function useModalHistorySync(isOpen: boolean, onClose: () => void): void {
   const isPopStateRef = useRef(false);
+  const hasPushedRef = useRef(false);
+  const location = useLocation();
+  const currentPathRef = useRef(location.pathname);
+  currentPathRef.current = location.pathname;
 
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen) {
+      if (hasPushedRef.current && !isPopStateRef.current) {
+        hasPushedRef.current = false;
+        if (window.location.pathname === currentPathRef.current) {
+          window.history.back();
+        }
+      }
+      isPopStateRef.current = false;
+      return;
+    }
 
+    // Modal just opened: push dummy history state
     window.history.pushState({ modalHistorySync: true }, "");
+    hasPushedRef.current = true;
+    isPopStateRef.current = false;
 
     const handlePopState = () => {
       isPopStateRef.current = true;
+      hasPushedRef.current = false;
       onClose();
     };
 
     window.addEventListener("popstate", handlePopState);
+
     return () => {
       window.removeEventListener("popstate", handlePopState);
-      // If the modal was closed by user action (not back button), clean up
-      // the dummy history entry we pushed.
-      if (!isPopStateRef.current) {
-        window.history.back();
+      // Clean up dummy entry ONLY if unmounting on the exact same page without popstate
+      if (hasPushedRef.current && !isPopStateRef.current) {
+        if (window.location.pathname === currentPathRef.current) {
+          window.history.back();
+        }
+        hasPushedRef.current = false;
       }
       isPopStateRef.current = false;
     };
-  // onClose is intentionally NOT in deps — it could be a new arrow function
-  // every render; we only care about the isOpen flip.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
 }

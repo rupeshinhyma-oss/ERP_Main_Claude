@@ -38,7 +38,7 @@ export function BuyerTypesPage() {
       ]}
       importHeaders={[
         { key: "name", label: "Buyer Type Name", required: true },
-        { key: "status", label: "Status (active/inactive)" },
+        { key: "status", label: "Status" },
       ]}
       emptyForm={EMPTY}
       fillForm={(item) => ({

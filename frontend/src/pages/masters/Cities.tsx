@@ -48,7 +48,7 @@ export function CitiesPage() {
         { key: "country_code", label: "Country Code", required: true },
         { key: "state_name", label: "Province / Region Name", required: true },
         { key: "name", label: "City Name", required: true },
-        { key: "status", label: "Status (active/inactive)" },
+        { key: "status", label: "Status" },
       ]}
       emptyForm={EMPTY}
       fillForm={(item) => ({

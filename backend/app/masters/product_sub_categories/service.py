@@ -169,10 +169,23 @@ class ProductSubCategoryService:
             category_code = field_values.pop("category_code")
             category = await self.category_repository.get_by_code(category_code)
             if category is None:
-                raise ValueError(f"Category code {category_code!r} does not exist.")
+                category = await self.category_repository.get_by_name(category_code)
+            if category is None:
+                raise ValueError(f"Category '{category_code}' does not exist.")
             field_values["category_id"] = category.id
-            code = field_values["code"]
+
             name = field_values["name"]
+            code = field_values.get("code")
+            if not code and name:
+                clean_name = "".join(c if c.isalnum() else "-" for c in name.upper())
+                base_code = "-".join(filter(None, clean_name.split("-")))[:45] or "SUB-CAT"
+                code = base_code
+                counter = 1
+                while await self.repository.get_by_code(code):
+                    code = f"{base_code}-{counter}"
+                    counter += 1
+                field_values["code"] = code
+
             existing_by_code = await self.repository.get_by_code(code)
             if existing_by_code is not None:
                 raise ConflictException(
@@ -182,7 +195,7 @@ class ProductSubCategoryService:
             existing_by_name = await self.repository.get_by_name_in_category(category.id, name)
             if existing_by_name is not None:
                 raise ConflictException(
-                    f"Sub-category {name!r} already exists in category {category_code!r}.",
+                    f"Sub-category {name!r} already exists in category '{category.name}'.",
                     details={"existing": model_to_dict(existing_by_name)},
                 )
             return await self.repository.create(**field_values)
@@ -191,7 +204,7 @@ class ProductSubCategoryService:
             rows,
             row_validator=validate_product_sub_category_row,
             row_creator=_create,
-            dedupe_keys=("code", "category_code"),
+            dedupe_keys=("name", "category_code"),
         )
         await self._invalidate_cache()
         return summary

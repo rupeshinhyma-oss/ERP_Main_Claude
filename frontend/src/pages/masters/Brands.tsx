@@ -1,7 +1,7 @@
 /** Brands master. Ported from masters-brands.html. */
 
 import { MasterPage, type FormState } from "@/components/MasterPage";
-import { StatusBadge, dash } from "@/components/ui";
+import { StatusBadge } from "@/components/ui";
 import { StatusSelectField, TextField, nullIfBlank } from "@/components/fields";
 import type { Brand } from "@/types";
 
@@ -30,10 +30,7 @@ export function BrandsPage() {
       ]}
       importHeaders={[
         { key: "name", label: "Brand Name", required: true },
-        { key: "code", label: "Brand Code" },
-        { key: "description", label: "Description" },
-        { key: "logo_url", label: "Logo URL" },
-        { key: "status", label: "Status (active/inactive)" },
+        { key: "status", label: "Status" },
       ]}
       emptyForm={EMPTY}
       fillForm={(item) => ({
@@ -54,9 +51,7 @@ export function BrandsPage() {
       )}
       detailFields={(b) => [
         { label: "Brand Name", value: b.name, fullWidth: true },
-        { label: "Brand Code", value: b.code },
         { label: "Current Status", value: <StatusBadge status={b.status} /> },
-        { label: "Description", value: dash(b.description), fullWidth: true },
       ]}
     />
   );

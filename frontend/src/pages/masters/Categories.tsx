@@ -1,7 +1,7 @@
 /** Product Categories master. Ported from masters-categories.html. */
 
 import { MasterPage, type FormState } from "@/components/MasterPage";
-import { StatusBadge, dash } from "@/components/ui";
+import { StatusBadge } from "@/components/ui";
 import { StatusSelectField, TextField, nullIfBlank } from "@/components/fields";
 import type { ProductCategory } from "@/types";
 
@@ -29,10 +29,8 @@ export function CategoriesPage() {
         { header: "Status", render: (c) => <StatusBadge status={c.status} /> },
       ]}
       importHeaders={[
-        { key: "code", label: "Category Code" },
         { key: "name", label: "Category Name", required: true },
-        { key: "description", label: "Description" },
-        { key: "status", label: "Status (active/inactive)" },
+        { key: "status", label: "Status" },
       ]}
       emptyForm={EMPTY}
       fillForm={(item) => ({
@@ -53,9 +51,7 @@ export function CategoriesPage() {
       )}
       detailFields={(c) => [
         { label: "Category Name", value: c.name, fullWidth: true },
-        { label: "Category Code", value: c.code },
         { label: "Current Status", value: <StatusBadge status={c.status} /> },
-        { label: "Description", value: dash(c.description), fullWidth: true },
       ]}
     />
   );

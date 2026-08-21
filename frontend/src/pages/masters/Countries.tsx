@@ -44,7 +44,7 @@ export function CountriesPage() {
         { key: "phone_code", label: "Phone Code" },
         { key: "nationality", label: "Nationality" },
         { key: "currency", label: "Currency Code" },
-        { key: "status", label: "Status (active/inactive)" },
+        { key: "status", label: "Status" },
       ]}
       emptyForm={EMPTY}
       fillForm={(item) => ({

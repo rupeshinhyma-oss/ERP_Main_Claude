@@ -52,7 +52,7 @@ export function StatesPage() {
         { key: "country_code", label: "Country Code", required: true },
         { key: "name", label: "Province / Region Name", required: true },
         { key: "code", label: "Province Code" },
-        { key: "status", label: "Status (active/inactive)" },
+        { key: "status", label: "Status" },
       ]}
       emptyForm={EMPTY}
       fillForm={(item) => ({

@@ -39,9 +39,10 @@ export function HsnPage() {
       ]}
       importHeaders={[
         { key: "code", label: "HSN Code", required: true },
-        { key: "description", label: "Description" },
         { key: "gst_percent", label: "GST %" },
-        { key: "status", label: "Status (active/inactive)" },
+        { key: "refund_vat_percent", label: "Refund VAT %" },
+        { key: "description", label: "Description" },
+        { key: "status", label: "Status" },
       ]}
       emptyForm={EMPTY}
       fillForm={(item) => ({

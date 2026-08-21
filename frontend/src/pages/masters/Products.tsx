@@ -920,7 +920,7 @@ export function ProductsPage() {
         { key: "Refund VAT %", label: "Refund VAT %" },
         { key: "Compliance & License Requirements", label: "Compliance & License Requirements" },
         { key: "Specification", label: "Specification" },
-        { key: "Status", label: "Status (active/inactive)" },
+        { key: "Status", label: "Status" },
       ]}
       emptyForm={EMPTY}
       fillForm={(item) => {

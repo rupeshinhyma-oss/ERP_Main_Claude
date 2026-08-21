@@ -68,7 +68,7 @@ export function CompanyListPage() {
       ]}
       importHeaders={[
         { key: "name", label: "Organization Name", required: true },
-        { key: "status", label: "Status (active/inactive)" },
+        { key: "status", label: "Status" },
       ]}
       emptyForm={EMPTY}
       fillForm={(item) => ({

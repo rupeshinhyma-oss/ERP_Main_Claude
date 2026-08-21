@@ -36,7 +36,7 @@ export function CurrenciesPage() {
         { key: "code", label: "Currency Code (ISO 4217)", required: true },
         { key: "symbol", label: "Symbol" },
         { key: "decimal_places", label: "Decimal Places" },
-        { key: "status", label: "Status (active/inactive)" },
+        { key: "status", label: "Status" },
       ]}
       emptyForm={EMPTY}
       fillForm={(item) => ({

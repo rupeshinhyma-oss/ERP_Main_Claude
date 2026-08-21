@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { MasterPage, type FormState } from "@/components/MasterPage";
-import { StatusBadge, dash } from "@/components/ui";
+import { StatusBadge } from "@/components/ui";
 import {
   SearchableSelectField,
   StatusSelectField,
@@ -58,11 +58,9 @@ export function SubCategoriesPage() {
         { header: "Status", render: (s) => <StatusBadge status={s.status} /> },
       ]}
       importHeaders={[
-        { key: "category_code", label: "Category Code", required: true },
-        { key: "code", label: "Sub-Category Code" },
+        { key: "category_code", label: "Category Name", required: true },
         { key: "name", label: "Sub-Category Name", required: true },
-        { key: "description", label: "Description" },
-        { key: "status", label: "Status (active/inactive)" },
+        { key: "status", label: "Status" },
       ]}
       emptyForm={EMPTY}
       fillForm={(item) => ({
@@ -111,9 +109,7 @@ export function SubCategoriesPage() {
       detailFields={(s) => [
         { label: "Sub-Category Name", value: s.name, fullWidth: true },
         { label: "Category", value: categoryName(s.category_id) },
-        { label: "Sub-Category Code", value: s.code },
         { label: "Current Status", value: <StatusBadge status={s.status} /> },
-        { label: "Description", value: dash(s.description), fullWidth: true },
       ]}
     />
   );

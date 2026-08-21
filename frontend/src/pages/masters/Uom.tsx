@@ -32,7 +32,7 @@ export function UomPage() {
       importHeaders={[
         { key: "name", label: "UOM Name", required: true },
         { key: "short_name", label: "Short Name" },
-        { key: "status", label: "Status (active/inactive)" },
+        { key: "status", label: "Status" },
       ]}
       emptyForm={EMPTY}
       fillForm={(item) => ({

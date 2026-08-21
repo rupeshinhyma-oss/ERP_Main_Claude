@@ -29,7 +29,7 @@ export function SupplierTypesPage() {
       ]}
       importHeaders={[
         { key: "name", label: "Supplier Type Name", required: true },
-        { key: "status", label: "Status (active/inactive)" },
+        { key: "status", label: "Status" },
       ]}
       emptyForm={EMPTY}
       fillForm={(item) => ({

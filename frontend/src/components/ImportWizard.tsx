@@ -1338,13 +1338,179 @@ const PRODUCT_SAMPLES: Record<string, string> = {
   "status": "Active",
 };
 
+const BRAND_SAMPLES: Record<string, string> = {
+  "Brand Name": "Yinglima",
+  name: "Yinglima",
+  Status: "Active",
+  status: "Active",
+  "Status (active/inactive)": "Active",
+};
+
+const CATEGORY_SAMPLES: Record<string, string> = {
+  "Category Name": "Machines",
+  name: "Machines",
+  Status: "Active",
+  status: "Active",
+  "Status (active/inactive)": "Active",
+};
+
+const SUB_CATEGORY_SAMPLES: Record<string, string> = {
+  "Category Name": "Machines",
+  category_name: "Machines",
+  "Category Code": "CAT-MACH",
+  category_code: "CAT-MACH",
+  "Sub-Category Name": "Band Sealer",
+  name: "Band Sealer",
+  Status: "Active",
+  status: "Active",
+  "Status (active/inactive)": "Active",
+};
+
+const UOM_SAMPLES: Record<string, string> = {
+  "UOM Name": "Pieces",
+  name: "Pieces",
+  "Short Name": "PCS",
+  short_name: "PCS",
+  Status: "Active",
+  status: "Active",
+  "Status (active/inactive)": "Active",
+};
+
+const HSN_SAMPLES: Record<string, string> = {
+  "HSN Code": "84229090",
+  code: "84229090",
+  "GST %": "18",
+  gst_percent: "18",
+  "Refund VAT %": "13",
+  refund_vat_percent: "13",
+  Description: "Parts of packing or wrapping machinery",
+  description: "Parts of packing or wrapping machinery",
+  Status: "Active",
+  status: "Active",
+  "Status (active/inactive)": "Active",
+};
+
+const BUYER_TYPE_SAMPLES: Record<string, string> = {
+  "Buyer Type Name": "Wholesaler",
+  name: "Wholesaler",
+  Status: "Active",
+  status: "Active",
+  "Status (active/inactive)": "Active",
+};
+
+const SUPPLIER_TYPE_SAMPLES: Record<string, string> = {
+  "Supplier Type Name": "Manufacturer",
+  name: "Manufacturer",
+  Status: "Active",
+  status: "Active",
+  "Status (active/inactive)": "Active",
+};
+
+const COUNTRY_SAMPLES: Record<string, string> = {
+  "Country Name": "India",
+  name: "India",
+  "ISO Code": "IN",
+  "Country Code (ISO)": "IN",
+  code: "IN",
+  "Phone Code": "+91",
+  phone_code: "+91",
+  Nationality: "Indian",
+  nationality: "Indian",
+  "Currency Code": "INR",
+  currency: "INR",
+  Status: "Active",
+  status: "Active",
+  "Status (active/inactive)": "Active",
+};
+
+const STATE_SAMPLES: Record<string, string> = {
+  "Country Name": "India",
+  country_name: "India",
+  "Country Code": "IN",
+  country_code: "IN",
+  "Province / Region Name": "Maharashtra",
+  "State Name": "Maharashtra",
+  name: "Maharashtra",
+  "Province Code": "MH",
+  "State Code": "MH",
+  code: "MH",
+  Status: "Active",
+  status: "Active",
+  "Status (active/inactive)": "Active",
+};
+
+const CITY_SAMPLES: Record<string, string> = {
+  "Country Name": "India",
+  country_name: "India",
+  "Country Code": "IN",
+  country_code: "IN",
+  "Province / Region Name": "Maharashtra",
+  "State Name": "Maharashtra",
+  state_name: "Maharashtra",
+  "City Name": "Mumbai",
+  name: "Mumbai",
+  Status: "Active",
+  status: "Active",
+  "Status (active/inactive)": "Active",
+};
+
+const CURRENCY_SAMPLES: Record<string, string> = {
+  "Currency Name": "Indian Rupee",
+  name: "Indian Rupee",
+  "Currency Code (ISO 4217)": "INR",
+  "Currency Code": "INR",
+  code: "INR",
+  Symbol: "₹",
+  symbol: "₹",
+  "Decimal Places": "2",
+  decimal_places: "2",
+  Status: "Active",
+  status: "Active",
+  "Status (active/inactive)": "Active",
+};
+
+const ORGANIZATION_SAMPLES: Record<string, string> = {
+  "Organization Name": "Inhyma",
+  "Company Name": "Inhyma",
+  name: "Inhyma",
+  Status: "Active",
+  status: "Active",
+  "Status (active/inactive)": "Active",
+};
+
 export function downloadSampleCsv(entityName: string, headers: ImportHeader[]) {
   const ent = entityName.toLowerCase();
   let sampleMap: Record<string, string> = PRODUCT_SAMPLES;
-  if (ent.includes("buyer")) {
+  if (ent.includes("buyer type") || ent === "buyertype") {
+    sampleMap = BUYER_TYPE_SAMPLES;
+  } else if (ent.includes("supplier type") || ent === "suppliertype") {
+    sampleMap = SUPPLIER_TYPE_SAMPLES;
+  } else if (ent.includes("buyer")) {
     sampleMap = BUYER_SAMPLES;
   } else if (ent.includes("supplier")) {
     sampleMap = SUPPLIER_SAMPLES;
+  } else if (ent.includes("sub-category") || ent.includes("subcategory")) {
+    sampleMap = SUB_CATEGORY_SAMPLES;
+  } else if (ent.includes("category")) {
+    sampleMap = CATEGORY_SAMPLES;
+  } else if (ent.includes("brand")) {
+    sampleMap = BRAND_SAMPLES;
+  } else if (ent.includes("uom") || ent.includes("unit of measurement")) {
+    sampleMap = UOM_SAMPLES;
+  } else if (ent.includes("hsn")) {
+    sampleMap = HSN_SAMPLES;
+  } else if (ent.includes("country")) {
+    sampleMap = COUNTRY_SAMPLES;
+  } else if (ent.includes("state") || ent.includes("province")) {
+    sampleMap = STATE_SAMPLES;
+  } else if (ent.includes("city")) {
+    sampleMap = CITY_SAMPLES;
+  } else if (ent.includes("currency")) {
+    sampleMap = CURRENCY_SAMPLES;
+  } else if (ent.includes("organization") || ent.includes("company")) {
+    sampleMap = ORGANIZATION_SAMPLES;
+  } else if (ent.includes("product")) {
+    sampleMap = PRODUCT_SAMPLES;
   }
 
   const headerKeys = headers.map((h) => h.label || h.key);
@@ -1387,10 +1553,36 @@ export async function downloadSampleExcel(entityName: string, headers: ImportHea
   const XLSX = await import("xlsx");
   const ent = entityName.toLowerCase();
   let sampleMap: Record<string, string> = PRODUCT_SAMPLES;
-  if (ent.includes("buyer")) {
+  if (ent.includes("buyer type") || ent === "buyertype") {
+    sampleMap = BUYER_TYPE_SAMPLES;
+  } else if (ent.includes("supplier type") || ent === "suppliertype") {
+    sampleMap = SUPPLIER_TYPE_SAMPLES;
+  } else if (ent.includes("buyer")) {
     sampleMap = BUYER_SAMPLES;
   } else if (ent.includes("supplier")) {
     sampleMap = SUPPLIER_SAMPLES;
+  } else if (ent.includes("sub-category") || ent.includes("subcategory")) {
+    sampleMap = SUB_CATEGORY_SAMPLES;
+  } else if (ent.includes("category")) {
+    sampleMap = CATEGORY_SAMPLES;
+  } else if (ent.includes("brand")) {
+    sampleMap = BRAND_SAMPLES;
+  } else if (ent.includes("uom") || ent.includes("unit of measurement")) {
+    sampleMap = UOM_SAMPLES;
+  } else if (ent.includes("hsn")) {
+    sampleMap = HSN_SAMPLES;
+  } else if (ent.includes("country")) {
+    sampleMap = COUNTRY_SAMPLES;
+  } else if (ent.includes("state") || ent.includes("province")) {
+    sampleMap = STATE_SAMPLES;
+  } else if (ent.includes("city")) {
+    sampleMap = CITY_SAMPLES;
+  } else if (ent.includes("currency")) {
+    sampleMap = CURRENCY_SAMPLES;
+  } else if (ent.includes("organization") || ent.includes("company")) {
+    sampleMap = ORGANIZATION_SAMPLES;
+  } else if (ent.includes("product")) {
+    sampleMap = PRODUCT_SAMPLES;
   }
 
   const headerKeys = headers.map((h) => h.label || h.key);

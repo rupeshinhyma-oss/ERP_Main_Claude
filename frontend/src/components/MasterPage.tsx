@@ -1188,7 +1188,26 @@ export function MasterPage<T extends MasterRecord>({
                 <li>Avoid Special Characters (Like @ # $ % ^ & * ( ) ) In Text Fields.</li>
                 <li>Maximum Allowed File Size: <strong>8 MB</strong>.</li>
                 <li>Only <strong>.Csv</strong>, <strong>.Xls</strong>, And <strong>.Xlsx</strong> Files Are Accepted.</li>
-                {entityName.toLowerCase().includes("product") ? (
+                {entityName.toLowerCase() === "brand" ? (
+                  <>
+                    <li>Mandatory Columns: <strong>Brand Name</strong>.</li>
+                    <li><strong>Brand Name</strong> must be unique.</li>
+                    <li><strong>Status</strong> must be <em>Active</em> or <em>Inactive</em>.</li>
+                  </>
+                ) : entityName.toLowerCase() === "category" ? (
+                  <>
+                    <li>Mandatory Columns: <strong>Category Name</strong>.</li>
+                    <li><strong>Category Name</strong> must be unique.</li>
+                    <li><strong>Status</strong> must be <em>Active</em> or <em>Inactive</em>.</li>
+                  </>
+                ) : entityName.toLowerCase() === "sub-category" || entityName.toLowerCase() === "subcategory" ? (
+                  <>
+                    <li>Mandatory Columns: <strong>Category Name</strong>, <strong>Sub-Category Name</strong>.</li>
+                    <li><strong>Category Name</strong> must already exist in the Category Master.</li>
+                    <li><strong>Sub-Category Name</strong> must be unique within its Category.</li>
+                    <li><strong>Status</strong> must be <em>Active</em> or <em>Inactive</em>.</li>
+                  </>
+                ) : entityName.toLowerCase().includes("product") ? (
                   <>
                     <li>Mandatory Columns: <strong>Product Name (As Per Tally)</strong>, <strong>Category</strong>, <strong>UOM</strong>, <strong>Packaging Quantity</strong>, <strong>Packaging Gross Weight (kg)</strong>, and <strong>Packaging Unit CBM</strong>.</li>
                     <li><strong>Product Name (As Per Tally)</strong> and <strong>Product Code</strong> (if provided) Must Be Unique.</li>
@@ -1197,6 +1216,12 @@ export function MasterPage<T extends MasterRecord>({
                     <li><strong>Packaging Unit CBM</strong> can be entered directly or automatically calculated from Length, Width, Height in cm: <code>(L × W × H) / 1,000,000</code>.</li>
                     <li><strong>Packaging Gross Weight (kg)</strong> Must Be Greater Than 0.</li>
                     <li><strong>Refund VAT %</strong> Must Be A Number Between 0 and 100.</li>
+                  </>
+                ) : entityName.toLowerCase().includes("hsn") ? (
+                  <>
+                    <li>Mandatory Columns: <strong>HSN Code</strong>.</li>
+                    <li><strong>HSN Code</strong> must be unique.</li>
+                    <li><strong>GST %</strong> and <strong>Refund VAT %</strong> must be valid numbers (e.g. 18, 13).</li>
                   </>
                 ) : (
                   <>

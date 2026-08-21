@@ -13,7 +13,7 @@
  *    `product_name`, exactly as before.
  */
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { MasterPage, type FormState, type MasterPageHandle } from "@/components/MasterPage";
 import { SideDrawer, DetailFieldGrid } from "@/components/SideDrawer";
 import { StatusBadge } from "@/components/ui";
@@ -74,6 +74,9 @@ const EMPTY: FormState = {
   status: "active",
   images_json: "[]",
   image_url: "",
+  _editing_id: "",
+  _initial_product_name_tally: "",
+  _initial_product_code: "",
 };
 
 
@@ -306,6 +309,192 @@ function OrgPopoverCell({ orgNames }: { orgNames: string[] }) {
   );
 }
 
+function ProductKpiPanel({
+  catalogProducts,
+  categories,
+}: {
+  catalogProducts: Product[];
+  categories: ProductCategory[];
+}) {
+  const kpis = useMemo(() => {
+    const total = catalogProducts.length;
+    const activeCount = catalogProducts.filter((p) => p.status === "active").length;
+    const inactiveCount = catalogProducts.filter((p) => p.status === "inactive").length;
+
+    const purchasableCount = catalogProducts.filter((p) => p.is_purchasable).length;
+    const sellableCount = catalogProducts.filter((p) => p.is_sellable).length;
+
+    // License / Certificate Required count
+    const licenseCount = catalogProducts.filter((p) => Boolean(p.license_certificate_required)).length;
+
+    // Packaging Specs configured
+    const withPackaging = catalogProducts.filter(
+      (p) => (p.packaging_gross_weight || 0) > 0 || (p.packaging_unit_cbm || 0) > 0
+    ).length;
+
+    // Missing Photos
+    const missingPhotos = catalogProducts.filter(
+      (p) => !p.image_url && (!p.images || p.images.length === 0)
+    ).length;
+
+    // Top Categories breakdown
+    const catCounts: Record<string, number> = {};
+    for (const p of catalogProducts) {
+      if (p.category_id) {
+        catCounts[p.category_id] = (catCounts[p.category_id] || 0) + 1;
+      }
+    }
+    const topCategories = Object.entries(catCounts)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([catId, count]) => {
+        const catObj = categories.find((c) => c.id === catId);
+        return { name: catObj ? catObj.name : "Unassigned", count };
+      });
+
+    return {
+      total,
+      activeCount,
+      inactiveCount,
+      purchasableCount,
+      sellableCount,
+      licenseCount,
+      withPackaging,
+      missingPhotos,
+      topCategories,
+    };
+  }, [catalogProducts, categories]);
+
+  return (
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))",
+        gap: "14px",
+        marginBottom: "14px",
+      }}
+    >
+      {/* 1. Total Catalog */}
+      <div
+        style={{
+          background: "#ffffff",
+          borderRadius: "8px",
+          padding: "14px 16px",
+          border: "1px solid #e2e8f0",
+          boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
+          borderLeft: "4px solid #0061f2",
+        }}
+      >
+        <div style={{ fontSize: "11.5px", fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+          📦 Total Products
+        </div>
+        <div style={{ fontSize: "22px", fontWeight: 800, color: "#1e293b", marginTop: "4px" }}>
+          {kpis.total}
+        </div>
+        <div style={{ fontSize: "12px", color: "#64748b", marginTop: "4px" }}>
+          <span style={{ color: "#16a34a", fontWeight: 600 }}>{kpis.activeCount} Active</span> • <span>{kpis.inactiveCount} Inactive</span>
+        </div>
+      </div>
+
+      {/* 2. Trade Availability */}
+      <div
+        style={{
+          background: "#ffffff",
+          borderRadius: "8px",
+          padding: "14px 16px",
+          border: "1px solid #e2e8f0",
+          boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
+          borderLeft: "4px solid #10b981",
+        }}
+      >
+        <div style={{ fontSize: "11.5px", fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+          🛒 Trade Status
+        </div>
+        <div style={{ fontSize: "22px", fontWeight: 800, color: "#1e293b", marginTop: "4px" }}>
+          {kpis.sellableCount}{" "}
+          <span style={{ fontSize: "13px", fontWeight: 500, color: "#64748b" }}>Sellable</span>
+        </div>
+        <div style={{ fontSize: "12px", color: "#64748b", marginTop: "4px" }}>
+          <span style={{ color: "#0061f2", fontWeight: 600 }}>{kpis.purchasableCount}</span> Purchasable items
+        </div>
+      </div>
+
+      {/* 3. Compliance & License Alerts */}
+      <div
+        style={{
+          background: kpis.licenseCount > 0 ? "#fffaf0" : "#ffffff",
+          borderRadius: "8px",
+          padding: "14px 16px",
+          border: kpis.licenseCount > 0 ? "1px solid #fed7aa" : "1px solid #e2e8f0",
+          boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
+          borderLeft: kpis.licenseCount > 0 ? "4px solid #f97316" : "4px solid #94a3b8",
+        }}
+      >
+        <div style={{ fontSize: "11.5px", fontWeight: 700, color: kpis.licenseCount > 0 ? "#c2410c" : "#64748b", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+          🚨 Compliance
+        </div>
+        <div style={{ fontSize: "22px", fontWeight: 800, color: kpis.licenseCount > 0 ? "#ea580c" : "#1e293b", marginTop: "4px" }}>
+          {kpis.licenseCount}
+        </div>
+        <div style={{ fontSize: "12px", color: kpis.licenseCount > 0 ? "#9a3412" : "#64748b", marginTop: "4px" }}>
+          Require License / Certificate
+        </div>
+      </div>
+
+      {/* 4. Packaging & Media Completeness */}
+      <div
+        style={{
+          background: "#ffffff",
+          borderRadius: "8px",
+          padding: "14px 16px",
+          border: "1px solid #e2e8f0",
+          boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
+          borderLeft: "4px solid #8b5cf6",
+        }}
+      >
+        <div style={{ fontSize: "11.5px", fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+          ⚖️ Specs &amp; Media
+        </div>
+        <div style={{ fontSize: "22px", fontWeight: 800, color: "#1e293b", marginTop: "4px" }}>
+          {kpis.withPackaging}{" "}
+          <span style={{ fontSize: "13px", fontWeight: 500, color: "#64748b" }}>w/ CBM / Wt</span>
+        </div>
+        <div style={{ fontSize: "12px", color: "#64748b", marginTop: "4px" }}>
+          <span style={{ color: kpis.missingPhotos > 0 ? "#e11d48" : "#16a34a", fontWeight: 600 }}>{kpis.missingPhotos}</span> items without image
+        </div>
+      </div>
+
+      {/* 5. Top Categories */}
+      <div
+        style={{
+          background: "#ffffff",
+          borderRadius: "8px",
+          padding: "14px 16px",
+          border: "1px solid #e2e8f0",
+          boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
+          borderLeft: "4px solid #3b82f6",
+        }}
+      >
+        <div style={{ fontSize: "11.5px", fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+          🏷️ Top Categories
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: "3px", marginTop: "6px" }}>
+          {kpis.topCategories.length === 0 ? (
+            <span style={{ color: "#94a3b8", fontSize: "12px" }}>None yet</span>
+          ) : (
+            kpis.topCategories.map((c) => (
+              <div key={c.name} style={{ display: "flex", justifyContent: "space-between", fontSize: "12px" }}>
+                <span style={{ color: "#334155", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "130px" }}>{c.name}</span>
+                <span style={{ fontWeight: 700, color: "#0061f2" }}>{c.count}</span>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function ProductsPage() {
   const categories = useLookup<ProductCategory>("/masters/product-categories", 250, true);
   const subCategories = useLookup<ProductSubCategory>("/masters/product-sub-categories", 500, true);
@@ -314,7 +503,7 @@ export function ProductsPage() {
   const uoms = useLookup<Uom>("/masters/uom", 250, true);
   const organizations = useLookup<{ id: string; name: string }>("/masters/company-list", 250, true);
   const [catalogProducts, setCatalogProducts] = useState<Product[]>([]);
-
+  const [showKpis, setShowKpis] = useState(false);
 
   const [categoryFilter, setCategoryFilter] = useState("");
   const [subCategoryFilter, setSubCategoryFilter] = useState("");
@@ -423,6 +612,39 @@ export function ProductsPage() {
       onItemsLoaded={setCatalogProducts}
       useFullPageForm={true}
       hideQuickAdd={true}
+      headerExtras={
+        <button
+          type="button"
+          style={{
+            background: showKpis ? "#0f172a" : "#ffffff",
+            color: showKpis ? "#ffffff" : "#334155",
+            border: "1px solid #cbd5e1",
+            borderRadius: "6px",
+            fontWeight: 600,
+            fontSize: "12.5px",
+            padding: "6px 12px",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "6px",
+            cursor: "pointer",
+            boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
+            transition: "all 0.15s ease-in-out",
+          }}
+          onClick={() => setShowKpis((v) => !v)}
+          title="Toggle Product KPIs"
+        >
+          <span>📊</span>
+          <span>{showKpis ? "Hide KPIs" : "KPI Summary"}</span>
+        </button>
+      }
+      bannerExtras={
+        showKpis ? (
+          <ProductKpiPanel
+            catalogProducts={catalogProducts}
+            categories={categories.items}
+          />
+        ) : null
+      }
       extraFilters={Object.keys(extraFilters).length ? extraFilters : undefined}
       toolbarExtras={
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "20px", width: "100%" }}>
@@ -712,7 +934,9 @@ export function ProductsPage() {
           is_purchasable: item ? String(item.is_purchasable) : "true",
           is_sellable: item ? String(item.is_sellable) : "true",
           status: item?.status ?? "active",
-          _editing_id: item?.id ?? "",
+          _editing_id: item?.id ? String(item.id) : "",
+          _initial_product_name_tally: str(item ? item.product_name_tally || item.product_name : ""),
+          _initial_product_code: str(item?.product_code),
         };
       }}
       toPayload={(f) => {
@@ -738,22 +962,31 @@ export function ProductsPage() {
         if (!tallyName) throw new Error("Product Name (As per Tally) is required.");
 
         const cleanTally = tallyName.toLowerCase().replace(/[\s-]/g, "");
-        const duplicate = catalogProducts.find((p) => {
-          const pName = (p.product_name_tally || p.product_name || "").toLowerCase().replace(/[\s-]/g, "");
-          return pName === cleanTally;
-        });
+        const editingId = (f._editing_id || "").trim().toLowerCase();
+        const initialClean = (f._initial_product_name_tally || "").trim().toLowerCase().replace(/[\s-]/g, "");
 
-        if (duplicate && (!f._editing_id || duplicate.id !== f._editing_id)) {
-          throw new Error(`Product "${tallyName}" already exists in Product Master! Duplicate products are not allowed.`);
+        if (!editingId || cleanTally !== initialClean) {
+          const duplicate = catalogProducts.find((p) => {
+            if (editingId && String(p.id).toLowerCase() === editingId) return false;
+            const pName = (p.product_name_tally || p.product_name || "").toLowerCase().replace(/[\s-]/g, "");
+            return pName === cleanTally;
+          });
+
+          if (duplicate) {
+            throw new Error(`Product "${tallyName}" already exists in Product Master! Duplicate products are not allowed.`);
+          }
         }
 
         const codeClean = (f.product_code || "").trim().toLowerCase();
-        if (codeClean) {
+        const initialCodeClean = (f._initial_product_code || "").trim().toLowerCase();
+
+        if (codeClean && (!editingId || codeClean !== initialCodeClean)) {
           const duplicateCode = catalogProducts.find((p) => {
+            if (editingId && String(p.id).toLowerCase() === editingId) return false;
             const pCode = (p.product_code || "").trim().toLowerCase();
             return pCode === codeClean;
           });
-          if (duplicateCode && (!f._editing_id || duplicateCode.id !== f._editing_id)) {
+          if (duplicateCode) {
             throw new Error(`Product Code "${f.product_code}" already exists in Product Master (used by "${duplicateCode.product_name_tally || duplicateCode.product_name}")! Duplicate Product Code is not allowed.`);
           }
         }
@@ -849,14 +1082,22 @@ export function ProductsPage() {
                 {(() => {
                   const cleanTyped = (f.product_name_tally || "").trim().toLowerCase().replace(/[\s-]/g, "");
                   if (!cleanTyped) return null;
+                  const editingId = (f._editing_id || "").trim().toLowerCase();
+                  const initialClean = (f._initial_product_name_tally || "").trim().toLowerCase().replace(/[\s-]/g, "");
+
+                  // When editing an existing product and name is unchanged, do not show duplicate warning
+                  if (editingId && cleanTyped === initialClean) {
+                    return null;
+                  }
+
                   const matches = catalogProducts.filter((p) => {
-                    if (f._editing_id && p.id === f._editing_id) return false;
+                    if (editingId && String(p.id).toLowerCase() === editingId) return false;
                     const pName = (p.product_name_tally || p.product_name || "").toLowerCase().replace(/[\s-]/g, "");
                     const pCode = (p.product_code || "").toLowerCase().replace(/[\s-]/g, "");
                     return pName.includes(cleanTyped) || pCode.includes(cleanTyped);
                   }).slice(0, 5);
                   const exact = catalogProducts.find((p) => {
-                    if (f._editing_id && p.id === f._editing_id) return false;
+                    if (editingId && String(p.id).toLowerCase() === editingId) return false;
                     const pName = (p.product_name_tally || p.product_name || "").toLowerCase().replace(/[\s-]/g, "");
                     const pCode = (p.product_code || "").toLowerCase().replace(/[\s-]/g, "");
                     return pName === cleanTyped || pCode === cleanTyped;
@@ -925,8 +1166,16 @@ export function ProductsPage() {
                 {(() => {
                   const cleanCode = (f.product_code || "").trim().toLowerCase();
                   if (!cleanCode) return null;
+                  const editingId = (f._editing_id || "").trim().toLowerCase();
+                  const initialCodeClean = (f._initial_product_code || "").trim().toLowerCase();
+
+                  // When editing and code is unchanged, do not show duplicate warning
+                  if (editingId && cleanCode === initialCodeClean) {
+                    return null;
+                  }
+
                   const exactCode = catalogProducts.find((p) => {
-                    if (f._editing_id && p.id === f._editing_id) return false;
+                    if (editingId && String(p.id).toLowerCase() === editingId) return false;
                     return (p.product_code || "").trim().toLowerCase() === cleanCode;
                   });
                   if (exactCode) {

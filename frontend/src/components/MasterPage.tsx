@@ -157,6 +157,14 @@ export interface MasterPageProps<T extends MasterRecord> {
    * Callback fired whenever records are loaded into MasterPage.
    */
   onItemsLoaded?: (items: T[]) => void;
+  /**
+   * Optional custom buttons/actions rendered on the left of the header action buttons.
+   */
+  headerExtras?: React.ReactNode;
+  /**
+   * Optional custom banner or KPI panel rendered above the main table card.
+   */
+  bannerExtras?: React.ReactNode;
 }
 
 export interface MasterPageHandle {
@@ -416,6 +424,8 @@ export function MasterPage<T extends MasterRecord>({
   clientSideSearch = false,
   customSearchMatcher,
   onItemsLoaded,
+  headerExtras,
+  bannerExtras,
 }: MasterPageProps<T>) {
   const { hasPermission } = useAuth();
 
@@ -1214,28 +1224,31 @@ export function MasterPage<T extends MasterRecord>({
             <div className="page-subtitle">{subtitle}</div>
           </div>
           <div className="page-header-actions" style={{ display: "flex", gap: "10px", alignItems: "center", flexShrink: 0 }}>
-            <button
-              type="button"
-              className="btn"
-              style={{
-                background: filterOpen ? "#0061f2" : "#475569",
-                color: "#ffffff",
-                padding: "6px 12px",
-                borderRadius: "6px",
-                border: "none",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                cursor: "pointer",
-                boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
-              }}
-              onClick={() => setFilterOpen((v) => !v)}
-              title="Toggle Filter Options"
-            >
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
-              </svg>
-            </button>
+            {headerExtras}
+            {Boolean(toolbarExtras) && (
+              <button
+                type="button"
+                className="btn"
+                style={{
+                  background: filterOpen ? "#0061f2" : "#475569",
+                  color: "#ffffff",
+                  padding: "6px 12px",
+                  borderRadius: "6px",
+                  border: "none",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  cursor: "pointer",
+                  boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
+                }}
+                onClick={() => setFilterOpen((v) => !v)}
+                title="Toggle Filter Options"
+              >
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
+                </svg>
+              </button>
+            )}
             {canCreate && !hideQuickAdd && (
               <button type="button" className="btn btn-quick-add" onClick={() => openModal(null)}>
                 + QUICK ADD
@@ -1271,9 +1284,10 @@ export function MasterPage<T extends MasterRecord>({
         </div>
         <Banner error={error} />
         <ImportSummaryPanel summary={importSummary} error={importError} />
+        {bannerExtras}
 
         {/* Expandable Filter Box matching Original INHYMA ERP Design (Above the main card) */}
-        {filterOpen && (
+        {Boolean(toolbarExtras) && filterOpen && (
           <div
             className="card"
             style={{

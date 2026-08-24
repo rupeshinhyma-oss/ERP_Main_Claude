@@ -75,7 +75,6 @@ function InquiriesConsignmentSkeletonRows({ count = 6 }: { count?: number }) {
   );
 }
 
-const InquiriesConsignmentsSkeletonRows = InquiriesConsignmentSkeletonRows;
 
 function InquiriesItemsSkeletonRows({ count = 6 }: { count?: number }) {
   const prodWidths = ["80%", "65%", "90%", "75%", "85%"];

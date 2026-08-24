@@ -28,7 +28,7 @@ import { EmailTagInput, PhoneGroupField, SelectField, TextAreaField, TextField, 
 import { SideDrawer, DetailFieldGrid } from "@/components/SideDrawer";
 import { ImpExpDropdown, BulkActionsDropdown, ImportSummaryPanel, downloadSampleCsv, parseFile, WizardModal, type SheetRow } from "@/components/ImportWizard";
 import { apiDelete, apiGet, apiPatch, apiPost, downloadExport, toQueryString } from "@/lib/api";
-import { useLookup } from "@/lib/lookups";
+import { useLookup, useLookupNames } from "@/lib/lookups";
 import { usePendingGuard, useModalHistorySync, useAuth } from "@/lib/hooks";
 import { useLiveConnectionStatus } from "@/lib/live/useLive";
 import { useLiveList } from "@/lib/live/useLiveList";
@@ -360,6 +360,14 @@ export function BuyersPage() {
   const countries = useLookup<Country>("/masters/countries", 250);
   const categories = useLookup<ProductCategory>("/masters/product-categories", 250);
   const subCategories = useLookup<ProductSubCategory>("/masters/product-sub-categories", 500);
+  // Permission-free name-only fallback: a user with access to Buyers but not
+  // to the Categories/Sub-Categories master modules still needs to see the
+  // NAME of a category already linked to a buyer they're allowed to view.
+  // The full lookups above return empty for that user (403 on ".view"), so
+  // renderChips falls back to these to avoid showing raw UUIDs. See
+  // app.masters.product_categories.routes.lookup_categories on the backend.
+  const categoryNamesFallback = useLookupNames("/masters/product-categories");
+  const subCategoryNamesFallback = useLookupNames("/masters/product-sub-categories");
   const buyerTypes = useLookup<{ id: string; name: string }>("/masters/buyer-types", 250);
 
   /* Modal state for viewing full list of categories/subcategories via Eye Icon */
@@ -687,10 +695,16 @@ export function BuyersPage() {
   function renderChips(
     ids: string[] | undefined,
     itemsList: Array<{ id: string; name: string }>,
-    fieldTitle = "Selected Items"
+    fieldTitle = "Selected Items",
+    fallbackItemsList?: Array<{ id: string; name: string }>
   ) {
     if (!ids || !ids.length) return <span style={{ color: "#94a3b8" }}>—</span>;
-    const names = ids.map((id) => itemsList.find((x) => x.id === id)?.name || id);
+    const names = ids.map(
+      (id) =>
+        itemsList.find((x) => x.id === id)?.name ||
+        fallbackItemsList?.find((x) => x.id === id)?.name ||
+        id
+    );
     const MAX_SHOW = 3;
     const shown = names.slice(0, MAX_SHOW);
     const remaining = names.length - shown.length;
@@ -2793,8 +2807,8 @@ export function BuyersPage() {
                         </a>
                       ),
                       3: r.buyer_type ? r.buyer_type.toUpperCase() : "—",
-                      4: renderChips(r.category_ids, categories.items, "Product Categories"),
-                      5: renderChips(r.sub_category_ids, subCategories.items, "Product Sub-Categories"),
+                      4: renderChips(r.category_ids, categories.items, "Product Categories", categoryNamesFallback.items),
+                      5: renderChips(r.sub_category_ids, subCategories.items, "Product Sub-Categories", subCategoryNamesFallback.items),
                       6: countryName,
                       7: canEditCurrentStatus ? (
                         <select
@@ -3026,12 +3040,12 @@ export function BuyersPage() {
                   { label: "Tax ID (TIN / GST)", value: detailBuyer.tax_id_number || "—" },
                   {
                     label: "Product Categories",
-                    value: renderChips(detailBuyer.category_ids, categories.items, "Product Categories"),
+                    value: renderChips(detailBuyer.category_ids, categories.items, "Product Categories", categoryNamesFallback.items),
                     fullWidth: true,
                   },
                   {
                     label: "Product Sub-Categories",
-                    value: renderChips(detailBuyer.sub_category_ids, subCategories.items, "Product Sub-Categories"),
+                    value: renderChips(detailBuyer.sub_category_ids, subCategories.items, "Product Sub-Categories", subCategoryNamesFallback.items),
                     fullWidth: true,
                   },
                   { label: "Currently Buying From", value: detailBuyer.currently_buying_from || "—", fullWidth: true },

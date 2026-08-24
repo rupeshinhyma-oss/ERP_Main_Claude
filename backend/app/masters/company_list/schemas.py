@@ -55,6 +55,17 @@ class CompanyRead(BaseModel):
     updated_at: datetime
 
 
+class CompanyLookupRead(BaseModel):
+    """Schema for permission-free organization/company lookup."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    name: str
+    code: str | None = None
+    branches: list[CompanyBranch] | None = None
+
+
 class ImportSummaryRead(BaseModel):
     """Summary response for bulk import operations."""
 

@@ -42,6 +42,15 @@ class ProductCategoryRead(BaseModel):
     updated_at: datetime
 
 
+class ProductCategoryLookupRead(BaseModel):
+    """Bare id/name pair, for the permission-free ``/lookup`` endpoint."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    name: str
+
+
 class ImportSummaryRead(BaseModel):
     """Result summary returned after a CSV/Excel import.
 

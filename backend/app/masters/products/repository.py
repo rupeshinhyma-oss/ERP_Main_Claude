@@ -39,39 +39,80 @@ class ProductRepository(BaseRepository[Product]):
         """
         Attach each product's supplier's name/city as transient attributes.
 
-        Resolved via ``Product.supplier_id`` -- the direct FK that's
-        actually shown as "Supplier" on the Product Master form itself
-        (see ``ProductRead.supplier_company_name``, populated the exact
-        same way in ``app.masters.products.routes.list_products``) -- NOT
-        via ``SupplierProductLink``, which is a SEPARATE many-to-many
-        table for a different purpose (a product can be linked to several
-        candidate/alternate suppliers there). An earlier version of this
-        method queried SupplierProductLink instead, which silently left
-        Supplier Name/City blank on Shipment Planning for every product
-        that only had its supplier set through the normal "Supplier"
-        field on the Product Master form (i.e. nearly every product),
-        even though Product Master's own list view showed that supplier
-        correctly the whole time.
+        ``Product`` has no direct supplier FK -- the only link between a
+        product and a supplier is ``SupplierProductLink``, a many-to-many
+        table (a product can have several candidate/alternate suppliers,
+        and a supplier can supply several products). Since Shipment
+        Planning's "Supplier Name"/"City" columns are single-value, we
+        need one deterministic choice when a product has more than one
+        linked supplier: the FIRST supplier ever linked to that product
+        (earliest ``SupplierProductLink.created_at``), so the column
+        stays stable over time rather than flipping if a new alternate
+        supplier is linked later.
 
         Sets ``_planning_supplier_name`` / ``_planning_supplier_city`` on
-        each product in place (``None`` when the product has no supplier
-        set, or that supplier has no city set); read back via
+        each product in place (``None`` when the product has no linked
+        supplier, or that supplier has no city set); read back via
         ``app.planning.source_registry``'s product value_getter.
 
-        One query total regardless of how many products are passed in,
-        so this is safe to call for a whole sheet's worth of rows without
-        turning "load the grid" into N+1 queries.
+        One query total regardless of how many products are passed in
+        (a ``DISTINCT ON``-style "earliest link per product" via window
+        function, then joined to Supplier/City), so this is safe to call
+        for a whole sheet's worth of rows without turning "load the
+        grid" into N+1 queries.
         """
         if not products:
             return
-        from sqlalchemy import select
-
-        from app.masters.cities.models import City
-        from app.suppliers.models import Supplier
 
         for product in products:
             product._planning_supplier_name = None
             product._planning_supplier_city = None
+
+        product_ids = [p.id for p in products]
+        if not product_ids:
+            return
+
+        from sqlalchemy import func, select
+
+        from app.masters.cities.models import City
+        from app.suppliers.models import Supplier, SupplierProductLink
+
+        # Rank each product's links by created_at (earliest = 1), then keep only rank 1.
+        ranked = (
+            select(
+                SupplierProductLink.product_id,
+                SupplierProductLink.supplier_id,
+                func.row_number()
+                .over(
+                    partition_by=SupplierProductLink.product_id,
+                    order_by=SupplierProductLink.created_at.asc(),
+                )
+                .label("rn"),
+            )
+            .where(SupplierProductLink.product_id.in_(product_ids))
+            .subquery()
+        )
+
+        stmt = (
+            select(
+                ranked.c.product_id,
+                Supplier.company_name,
+                City.name.label("city_name"),
+            )
+            .join(Supplier, Supplier.id == ranked.c.supplier_id)
+            .outerjoin(City, City.id == Supplier.city_id)
+            .where(ranked.c.rn == 1)
+        )
+        result = await self.session.execute(stmt)
+
+        supplier_info_by_product_id = {
+            row.product_id: (row.company_name, row.city_name) for row in result.all()
+        }
+
+        for product in products:
+            info = supplier_info_by_product_id.get(product.id)
+            if info is not None:
+                product._planning_supplier_name, product._planning_supplier_city = info
 
     def _apply_search(self, stmt, term: str | None):
         """

@@ -44,11 +44,15 @@ def validate_product_row(raw_row: dict[str, str], row_number: int) -> dict[str, 
     uom_code = _get_val(raw_row, "UOM", "uom_code", "Unit of Measure", "uom_name")
 
     if not product_name:
-        raise BadRequestException(f"Row {row_number}: Product Name is required.")
+        raise BadRequestException(f"Row {row_number}: Product Name (As Per Tally) is required.")
     if not category_code:
         raise BadRequestException(f"Row {row_number}: Category is required.")
+    if not sub_category_code:
+        raise BadRequestException(f"Row {row_number}: Sub Category is required.")
+    if not hsn_code:
+        raise BadRequestException(f"Row {row_number}: HSN Code is required.")
     if not uom_code:
-        uom_code = "PCS"  # Default fallback if blank
+        raise BadRequestException(f"Row {row_number}: UOM (Unit of Measure) is required.")
 
     # Auto-generate product code if omitted
     if not product_code:
@@ -73,6 +77,9 @@ def validate_product_row(raw_row: dict[str, str], row_number: int) -> dict[str, 
     cbm = _parse_optional_float_aliases(raw_row, "Pack. Unit CBM", "Packaging Unit CBM", "packaging_unit_cbm", "cbm", row_number=row_number)
     refund_vat = _parse_optional_float_aliases(raw_row, "Refund VAT %", "refund_vat_percent", "Refund VAT", row_number=row_number)
 
+    if pack_qty is None or pack_qty <= 0:
+        raise BadRequestException(f"Row {row_number}: Packaging Quantity (Pack. Qty) is required and must be greater than 0.")
+
     if gross_wt is None or gross_wt <= 0:
         raise BadRequestException(f"Row {row_number}: Packaging Gross Weight (kg) is required and must be greater than 0.")
 
@@ -93,9 +100,9 @@ def validate_product_row(raw_row: dict[str, str], row_number: int) -> dict[str, 
         "product_name": product_name,
         "product_name_tally": product_name,
         "category_code": category_code,
-        "sub_category_code": sub_category_code or None,
+        "sub_category_code": sub_category_code,
         "brand_code": brand_code or None,
-        "hsn_code": hsn_code or None,
+        "hsn_code": hsn_code,
         "uom_code": uom_code,
         "specification": spec or None,
         "description": desc or None,

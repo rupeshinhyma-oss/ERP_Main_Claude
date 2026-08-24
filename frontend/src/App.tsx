@@ -44,6 +44,7 @@ import { LiveConnectionIndicator } from "@/components/LiveConnectionIndicator";
 import { LiveConnectionLifecycle } from "@/lib/live/liveConnectionLifecycle";
 import { ProductGalleryPage } from "@/pages/ProductGallery";
 import { TrashPage } from "@/pages/Trash";
+import PublicSupplierQuotePage from "@/pages/PublicSupplierQuotePage";
 
 export function App() {
   const navigate = useNavigate();
@@ -62,6 +63,7 @@ export function App() {
       <LiveConnectionIndicator />
       <Routes>
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/quote/:token" element={<PublicSupplierQuotePage />} />
         <Route path="/" element={<Navigate to="/dashboard" replace />} />
         <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/403" element={<ForbiddenPage />} />

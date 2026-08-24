@@ -236,6 +236,17 @@ class Settings(BaseSettings):
     MAX_PAGE_SIZE: int = 10000
     DEFAULT_SORT_ORDER: str = "asc"
 
+    # -------------------------------------------------------------------
+    # SMTP / Automated Email Dispatch
+    # -------------------------------------------------------------------
+    SMTP_HOST: str = "smtp.gmail.com"
+    SMTP_PORT: int = 587
+    SMTP_USER: str = "om1inhyma@gmail.com"
+    SMTP_PASSWORD: str = "wmwdaqjhmqutizvr"
+    SMTP_FROM_EMAIL: str = "om1inhyma@gmail.com"
+    SMTP_FROM_NAME: str = "Yinglima Procurement Team"
+    SMTP_USE_TLS: bool = True
+
     @property
     def cors_allowed_origins_list(self) -> list[str]:
         """Parse CORS_ALLOWED_ORIGINS into a list, splitting on commas."""

@@ -23,6 +23,8 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, Depends, Request, status
+from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.constants import AuditAction
@@ -31,10 +33,14 @@ from app.audit.service import AuditService
 from app.auth.dependencies import get_current_user
 from app.auth.service import CurrentUser
 from app.core.responses import build_success_response
+from app.common.email import send_rfq_email
 from app.database.session import get_db_session
 from app.events.dependencies import get_event_dispatcher
 from app.events.dispatcher import EventDispatcher
 from app.inquiries.dependencies import get_inquiry_service
+from app.inquiries.public_quotes import generate_rfq_token
+from app.masters.products.models import Product
+from app.suppliers.models import Supplier
 from app.inquiries.schemas import (
     BulkTallyPostRequest,
     BulkInquiryItemCreate,
@@ -707,6 +713,41 @@ async def update_quotation_status(
     )
 
 
+@router.delete("/quotations/{quotation_id}", summary="Delete a quotation")
+async def delete_quotation(
+    quotation_id: uuid.UUID,
+    request: Request,
+    service: InquiryService = Depends(get_inquiry_service),
+    current_user: CurrentUser = Depends(get_current_user),
+    audit_service: AuditService = Depends(get_audit_service),
+    db: AsyncSession = Depends(get_db_session),
+    dispatcher: EventDispatcher = Depends(get_event_dispatcher),
+) -> dict:
+    """Soft delete a quotation and resync line item status."""
+    quote = await service.delete_quotation(quotation_id, user_id=current_user.id)
+    await _record_action(
+        audit_service=audit_service,
+        request=request,
+        action=AuditAction.DELETE,
+        actor=current_user,
+        entity_id=quotation_id,
+        description=f"Deleted quotation {quote.quote_number}.",
+    )
+    await _publish_inquiry_event(
+        db=db,
+        dispatcher=dispatcher,
+        event_type="quotation.deleted",
+        entity_id=quote.inquiry_item_id,
+        user_id=current_user.id,
+        changes={"quote_number": quote.quote_number, "quotation_id": str(quotation_id)},
+    )
+    return build_success_response(
+        data={"id": str(quotation_id), "quote_number": quote.quote_number},
+        request_id=request.state.request_id,
+        message=f"Quotation {quote.quote_number} deleted successfully.",
+    )
+
+
 @router.post("/items/{item_id}/rfqs", status_code=status.HTTP_201_CREATED, summary="Create an RFQ for an inquiry item")
 async def create_item_rfq(
     item_id: uuid.UUID,
@@ -737,8 +778,106 @@ async def create_item_rfq(
         user_id=current_user.id,
         changes={"rfq_id": str(rfq.id)},
     )
+
+    # Generate public supplier quotation links
+    supplier_uuids = [uuid.UUID(sid) for sid in (rfq.supplier_ids or []) if sid]
+    supplier_links = []
+    if supplier_uuids:
+        suppliers_res = (await db.execute(select(Supplier).where(Supplier.id.in_(supplier_uuids)))).scalars().all()
+        for sup in suppliers_res:
+            token = generate_rfq_token(rfq.id, item_id, sup.id)
+            phone = (sup.contact_whatsapp_number or sup.contact_calling_number or "").strip()
+            clean_phone = "".join(ch for ch in phone if ch.isdigit() or ch == "+")
+            all_emails = [e.email for e in sup.emails if getattr(e, "email", None)]
+            email_str = ", ".join(all_emails)
+            supplier_links.append({
+                "supplier_id": str(sup.id),
+                "company_name": sup.company_name,
+                "contact_name": sup.contact_full_name or "Valued Partner",
+                "phone": phone,
+                "clean_phone": clean_phone,
+                "email": email_str,
+                "emails": all_emails,
+                "token": token,
+                "quote_path": f"/quote/{token}",
+            })
+
+    # Fetch product information for automated email dispatch
+    item = await service.item_repository.get_by_id(item_id) if service.item_repository else None
+    prod = (await db.execute(select(Product).where(Product.id == item.product_id))).scalars().first() if item else None
+    product_name = (prod.product_name or prod.product_name_tally) if prod else "Product"
+    product_code = prod.product_code if prod else None
+    quantity = item.quantity if item else 1
+
+    # Automatically dispatch emails in the background for suppliers with email addresses
+    base_host = request.headers.get("origin") or "http://192.168.1.23:5173"
+    for link in supplier_links:
+        if link.get("emails"):
+            full_quote_url = f"{base_host}{link['quote_path']}"
+            import asyncio
+            asyncio.create_task(
+                send_rfq_email(
+                    to_emails=link["emails"],
+                    contact_name=link["contact_name"],
+                    company_name=link["company_name"],
+                    product_name=product_name,
+                    product_code=product_code,
+                    quantity=quantity,
+                    quote_url=full_quote_url,
+                    expected_receiving_date=str(rfq.expected_receiving_date) if rfq.expected_receiving_date else None,
+                    notes=rfq.notes,
+                )
+            )
+
+    rfq_data = RFQRead.model_validate(rfq).model_dump(mode="json")
+    rfq_data["supplier_links"] = supplier_links
+
     return build_success_response(
-        data=RFQRead.model_validate(rfq).model_dump(mode="json"),
+        data=rfq_data,
         request_id=request.state.request_id,
-        message="Request For Quotation dispatched successfully.",
+        message="Request For Quotation dispatched and automated emails sent successfully.",
+    )
+
+
+class RFQManualEmailSendPayload(BaseModel):
+    to_emails: list[str]
+    contact_name: str
+    company_name: str
+    product_name: str
+    product_code: str | None = None
+    quantity: float | int = 1
+    quote_url: str
+    expected_receiving_date: str | None = None
+    notes: str | None = None
+
+
+@router.post("/rfqs/send-email", status_code=status.HTTP_200_OK, summary="Manually trigger automated RFQ email to supplier")
+async def send_rfq_email_manual(
+    payload: RFQManualEmailSendPayload,
+    request: Request,
+    current_user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    """Send an automated RFQ email with the quotation link to a supplier via SMTP."""
+    success = await send_rfq_email(
+        to_emails=payload.to_emails,
+        contact_name=payload.contact_name,
+        company_name=payload.company_name,
+        product_name=payload.product_name,
+        product_code=payload.product_code,
+        quantity=payload.quantity,
+        quote_url=payload.quote_url,
+        expected_receiving_date=payload.expected_receiving_date,
+        notes=payload.notes,
+    )
+    if not success:
+        return build_success_response(
+            data={"sent": False},
+            request_id=request.state.request_id,
+            message="Failed to dispatch email. Please verify supplier email addresses.",
+        )
+
+    return build_success_response(
+        data={"sent": True, "recipients": payload.to_emails},
+        request_id=request.state.request_id,
+        message=f"RFQ email successfully sent to {', '.join(payload.to_emails)}.",
     )

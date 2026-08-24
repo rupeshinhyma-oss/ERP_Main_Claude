@@ -14,6 +14,7 @@
  */
 
 import { useState, useMemo } from "react";
+import { useLiveModule } from "@/lib/live/useLive";
 import { MasterPage, type FormState, type MasterPageHandle } from "@/components/MasterPage";
 import { SideDrawer, DetailFieldGrid } from "@/components/SideDrawer";
 import { StatusBadge } from "@/components/ui";
@@ -538,6 +539,12 @@ export function ProductsPage() {
   const organizations = useLookup<{ id: string; name: string }>("/masters/company-list", 250, true);
   const [catalogProducts, setCatalogProducts] = useState<Product[]>([]);
   const [showKpis, setShowKpis] = useState(false);
+  const [liveReloadToken, setLiveReloadToken] = useState(0);
+
+  /* Live Real-time cross-tab synchronization for Products */
+  useLiveModule("inventory", () => {
+    setLiveReloadToken((k) => k + 1);
+  });
 
   const [categoryFilter, setCategoryFilter] = useState("");
   const [subCategoryFilter, setSubCategoryFilter] = useState("");
@@ -642,7 +649,7 @@ export function ProductsPage() {
       breadcrumbTrail={["Master Data", "Products"]}
       newButtonLabel="+ New Product"
       searchPlaceholder="Search code, name, or barcode or Sr. No..."
-      reloadToken={lookupsReady}
+      reloadToken={`${lookupsReady}-${liveReloadToken}`}
       onItemsLoaded={setCatalogProducts}
       useFullPageForm={true}
       hideQuickAdd={true}
@@ -934,8 +941,8 @@ export function ProductsPage() {
         { key: "Product Code", label: "Product Code" },
         { key: "Brand", label: "Brand" },
         { key: "Category", label: "Category", required: true },
-        { key: "Sub Category", label: "Sub Category" },
-        { key: "HSN Code", label: "HSN Code" },
+        { key: "Sub Category", label: "Sub Category", required: true },
+        { key: "HSN Code", label: "HSN Code", required: true },
         { key: "UOM", label: "UOM", required: true },
         { key: "Pack. Qty", label: "Packaging Quantity", required: true },
         { key: "Pack. Net Weight", label: "Packaging Net Weight (kg)" },

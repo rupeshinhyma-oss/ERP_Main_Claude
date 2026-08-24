@@ -732,12 +732,14 @@ export interface SearchableDropdownMultiPanelProps extends SharedProps {
   values: string[];
   onChange: (values: string[]) => void;
   placeholder?: string;
+  chipsPlacement?: "inside" | "below";
 }
 
 export function SearchableDropdownMultiPanel({
   values,
   onChange,
   placeholder = "-- Select --",
+  chipsPlacement = "inside",
   fetchOptions,
   fetchLabelForValue,
 }: SearchableDropdownMultiPanelProps) {
@@ -849,7 +851,7 @@ export function SearchableDropdownMultiPanel({
       setOptions(found);
       setLoading(false);
     }, 150);
-  }, [open, searchTerm]);
+  }, [open, searchTerm, fetchOptions]);
 
   function toggleOpen() {
     const next = !open;
@@ -909,7 +911,11 @@ export function SearchableDropdownMultiPanel({
       >
         <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, display: "flex", alignItems: "center", gap: "6px" }}>
           {selected.length === 0 ? (
-            <span>{placeholder}</span>
+            <span style={{ color: "#94a3b8" }}>{placeholder}</span>
+          ) : chipsPlacement === "below" ? (
+            <span style={{ color: "#0f172a", fontWeight: 500 }}>
+              {selected.length === 1 ? selected[0].label : `${selected.length} Selected`}
+            </span>
           ) : (
             <div style={{ display: "flex", flexWrap: "nowrap", gap: "5px", overflow: "hidden", alignItems: "center" }}>
               {firstThree.map((s) => (
@@ -1209,6 +1215,52 @@ export function SearchableDropdownMultiPanel({
               ))}
             </div>
           </div>
+        </div>
+      )}
+
+      {chipsPlacement === "below" && selected.length > 0 && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginTop: "8px" }}>
+          {selected.map((s) => (
+            <span
+              key={s.value}
+              style={{
+                background: "#f1f5f9",
+                border: "1px solid #cbd5e1",
+                color: "#334155",
+                padding: "4px 9px",
+                borderRadius: "6px",
+                fontSize: "12px",
+                fontWeight: 500,
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+              }}
+            >
+              {s.label}
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  removeItem(s.value);
+                }}
+                style={{
+                  background: "none",
+                  border: "none",
+                  color: "#ef4444",
+                  fontSize: "12px",
+                  fontWeight: 700,
+                  cursor: "pointer",
+                  padding: 0,
+                  display: "flex",
+                  alignItems: "center",
+                  lineHeight: 1,
+                }}
+                title="Remove"
+              >
+                ✕
+              </button>
+            </span>
+          ))}
         </div>
       )}
     </div>

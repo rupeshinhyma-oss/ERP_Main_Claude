@@ -30,7 +30,7 @@ import { ImpExpDropdown, BulkActionsDropdown, ImportSummaryPanel, downloadSample
 import { apiDelete, apiGet, apiPatch, apiPost, downloadExport, toQueryString } from "@/lib/api";
 import { useLookup } from "@/lib/lookups";
 import { usePendingGuard, useModalHistorySync, useAuth } from "@/lib/hooks";
-import { useLiveConnectionStatus } from "@/lib/live/useLive";
+import { useLiveConnectionStatus, useLiveModule } from "@/lib/live/useLive";
 import { useLiveList } from "@/lib/live/useLiveList";
 import type { Country, ImportHeader, ImportSummary, ProductCategory, ProductSubCategory } from "@/types";
 import type { Buyer, BuyerContact } from "@/types/buyers";
@@ -328,6 +328,11 @@ export function BuyersPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const [reloadCounter, setReloadCounter] = useState(0);
+
+  /* Live Real-time cross-tab synchronization */
+  useLiveModule("buyers", () => {
+    setReloadCounter((k) => k + 1);
+  });
 
   const [statusTab, setStatusTab] = useState<"active" | "inactive">("active");
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});

@@ -37,12 +37,14 @@ import uuid
 from datetime import date, datetime, timezone
 from enum import Enum
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, String, Text, UniqueConstraint, and_
+from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, JSON, String, Text, UniqueConstraint, and_
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.constants import RecordStatus
 from app.database.base import GUID, Base, SoftDeleteMixin, TimestampMixin, UUIDPrimaryKeyMixin, VersionMixin
+from app.suppliers.models import Supplier  # noqa: F401 - registers suppliers table with metadata
+from app.users.models import User  # noqa: F401 - registers users table with metadata
 
 
 def _utcnow() -> datetime:
@@ -219,7 +221,88 @@ class InquiryItem(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
     )
 
     inquiry: Mapped[Inquiry] = relationship(back_populates="items")
+    quotations: Mapped[list["Quotation"]] = relationship(
+        back_populates="inquiry_item",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+        primaryjoin="and_(InquiryItem.id == Quotation.inquiry_item_id, Quotation.deleted_at.is_(None))",
+    )
+    rfqs: Mapped[list["RFQ"]] = relationship(
+        back_populates="inquiry_item",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+        primaryjoin="and_(InquiryItem.id == RFQ.inquiry_item_id, RFQ.deleted_at.is_(None))",
+    )
 
     def __repr__(self) -> str:
         """Return a debug-friendly representation."""
         return f"<InquiryItem id={self.id} inquiry_id={self.inquiry_id} product_id={self.product_id}>"
+
+
+class QuotationStatus(str, Enum):
+    """Quotation status lifecycle."""
+
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    PO_CREATED = "po_created"
+
+
+class Quotation(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
+    """
+    A supplier quotation received for a specific inquiry line item.
+    """
+
+    __tablename__ = "quotations"
+
+    quote_number: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    inquiry_item_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(), ForeignKey("inquiry_items.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    supplier_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(), ForeignKey("suppliers.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    quantity: Mapped[float] = mapped_column(Float, nullable=False)
+    unit_price: Mapped[float] = mapped_column(Float, nullable=False)
+    total_cost: Mapped[float] = mapped_column(Float, nullable=False)
+    currency: Mapped[str] = mapped_column(String(10), default="CNY", nullable=False)
+    expected_receiving_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    terms_and_conditions: Mapped[str | None] = mapped_column(Text, nullable=True)
+    remarks: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[QuotationStatus] = mapped_column(
+        SAEnum(QuotationStatus, name="quotation_status", native_enum=False, length=20),
+        default=QuotationStatus.PENDING,
+        nullable=False,
+        index=True,
+    )
+    created_by: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("users.id"), nullable=False)
+
+    inquiry_item: Mapped[InquiryItem] = relationship(back_populates="quotations")
+
+    def __repr__(self) -> str:
+        """Return a debug-friendly representation."""
+        return f"<Quotation id={self.id} quote_number={self.quote_number!r} status={self.status}>"
+
+
+class RFQ(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
+    """
+    Request For Quotation (RFQ) dispatched to suppliers for an inquiry line item.
+    """
+
+    __tablename__ = "rfqs"
+
+    inquiry_item_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(), ForeignKey("inquiry_items.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    expected_receiving_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    supplier_type: Mapped[str] = mapped_column(String(30), default="selected", nullable=False)
+    supplier_ids: Mapped[list | None] = mapped_column(JSON, nullable=True)  # list of supplier UUID strings
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(30), default="sent", nullable=False)
+    created_by: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("users.id"), nullable=False)
+
+    inquiry_item: Mapped[InquiryItem] = relationship(back_populates="rfqs")
+
+    def __repr__(self) -> str:
+        """Return a debug-friendly representation."""
+        return f"<RFQ id={self.id} inquiry_item_id={self.inquiry_item_id}>"

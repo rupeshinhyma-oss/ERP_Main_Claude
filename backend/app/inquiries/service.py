@@ -32,9 +32,26 @@ from typing import Any
 
 from app.buyers.repository import BuyerRepository
 from app.core.exceptions import BadRequestException, ConflictException, NotFoundException
-from app.inquiries.models import ConsignmentCode, Inquiry, InquiryConsignmentStatus, InquiryItem, InquiryItemStatus
-from app.inquiries.repository import ConsignmentCodeRepository, InquiryItemRepository, InquiryRepository
+from app.inquiries.models import (
+    ConsignmentCode,
+    Inquiry,
+    InquiryConsignmentStatus,
+    InquiryItem,
+    InquiryItemStatus,
+    Quotation,
+    QuotationStatus,
+    RFQ,
+)
+from app.inquiries.repository import (
+    ConsignmentCodeRepository,
+    InquiryItemRepository,
+    InquiryRepository,
+    QuotationRepository,
+    RFQRepository,
+)
+from app.inquiries.schemas import QuotationCreate, QuotationUpdate, RFQCreate
 from app.masters.products.repository import ProductRepository
+from app.suppliers.repository import SupplierRepository
 
 
 def _utcnow() -> datetime:
@@ -42,7 +59,7 @@ def _utcnow() -> datetime:
 
 
 class InquiryService:
-    """Orchestrates the Inquiry (Requirement) workflow on top of its three repositories."""
+    """Orchestrates the Inquiry (Requirement) workflow on top of its repositories."""
 
     def __init__(
         self,
@@ -51,12 +68,18 @@ class InquiryService:
         consignment_code_repository: ConsignmentCodeRepository,
         buyer_repository: BuyerRepository,
         product_repository: ProductRepository,
+        quotation_repository: QuotationRepository | None = None,
+        rfq_repository: RFQRepository | None = None,
+        supplier_repository: SupplierRepository | None = None,
     ) -> None:
         self.inquiry_repository = inquiry_repository
         self.item_repository = item_repository
         self.consignment_code_repository = consignment_code_repository
         self.buyer_repository = buyer_repository
         self.product_repository = product_repository
+        self.quotation_repository = quotation_repository
+        self.rfq_repository = rfq_repository
+        self.supplier_repository = supplier_repository
 
     # ------------------------------------------------------------------
     # Consignment Codes (admin-managed master)
@@ -128,63 +151,24 @@ class InquiryService:
     async def list_companies_summary(self) -> list[dict]:
         """
         Layer 1, company-wise: one row per buyer with at least one consignment.
-
-        Document: "1st layer summary is company wise (for example, F&B,
-        One Stop, Inhyma etc)".
-
-        Phase 8: computed via one grouped SQL query
-        (``InquiryRepository.get_company_summaries``) instead of a
-        per-buyer query loop -- see that method's docstring.
+        Computed via a single fast query across buyers, inquiries, and codes.
         """
-        buyer_ids = await self.inquiry_repository.list_distinct_buyer_ids()
-        summaries = []
-        for buyer_id in buyer_ids:
-            buyer = await self.buyer_repository.get_by_id(buyer_id)
-            consignments = await self.inquiry_repository.list_for_buyer(buyer_id)
-            if not consignments:
-                continue
-            code_list: list[str] = []
-            statuses: list[InquiryConsignmentStatus] = []
-            for c in consignments:
-                statuses.append(c.consignment_status)
-                if c.consignment_code_id:
-                    cc = await self.consignment_code_repository.get_by_id(c.consignment_code_id)
-                    if cc and cc.code:
-                        code_list.append(cc.code)
+        return await self.inquiry_repository.get_all_company_summaries()
 
-            if statuses and all(s == InquiryConsignmentStatus.FULLY_APPROVED for s in statuses):
-                overall_status = InquiryConsignmentStatus.FULLY_APPROVED
-            elif any(s in (InquiryConsignmentStatus.PARTIAL_APPROVED, InquiryConsignmentStatus.FULLY_APPROVED) for s in statuses):
-                overall_status = InquiryConsignmentStatus.PARTIAL_APPROVED
-            else:
-                overall_status = InquiryConsignmentStatus.PROPOSED
-
-            prop_cnt = sum(1 for s in statuses if s == InquiryConsignmentStatus.PROPOSED)
-            app_cnt = sum(1 for s in statuses if s in (InquiryConsignmentStatus.PARTIAL_APPROVED, InquiryConsignmentStatus.FULLY_APPROVED))
-
-            latest_updated = max([c.updated_at for c in consignments]) if consignments else None
-
-            summaries.append(
-                {
-                    "buyer_id": buyer_id,
-                    "company_name": buyer.company_name if buyer else "Unknown Company",
-                    "consignment_count": len(consignments),
-                    "proposed_count": prop_cnt,
-                    "approved_count": app_cnt,
-                    "total_cbm": sum(c.total_cbm for c in consignments),
-                    "total_weight": sum(c.total_weight for c in consignments),
-                    "consignment_status": overall_status,
-                    "consignment_codes": code_list,
-                    "updated_at": latest_updated,
-                }
-            )
-        return summaries
-
-    async def list_consignments_for_buyer(self, buyer_id: uuid.UUID) -> list[Inquiry]:
+    async def list_consignments_for_buyer(self, buyer_id: uuid.UUID) -> list[dict]:
         """Layer 1 inside one company: every consignment code for that buyer (document: "FB1, FB2...")."""
         if await self.buyer_repository.get_by_id(buyer_id) is None:
             raise NotFoundException("Buyer not found.")
-        return await self.inquiry_repository.list_for_buyer(buyer_id)
+        return await self.inquiry_repository.list_consignments_with_details_for_buyer(buyer_id)
+
+    async def get_inquiry_with_details(self, inquiry_id: uuid.UUID) -> dict:
+        """Fetch consignment with joined buyer, code, and enriched items."""
+        inquiry_dict = await self.inquiry_repository.get_inquiry_with_details(inquiry_id)
+        if inquiry_dict is None:
+            raise NotFoundException("Inquiry (consignment) not found.")
+        items = await self.item_repository.list_for_inquiry_with_details(inquiry_id)
+        inquiry_dict["items"] = items
+        return inquiry_dict
 
     async def _refresh_rollup(self, inquiry_id: uuid.UUID) -> Inquiry:
         """Recompute and persist one consignment's Layer-1 rollup fields from its current items."""
@@ -210,9 +194,9 @@ class InquiryService:
     # Layer 2: items within a consignment
     # ------------------------------------------------------------------
 
-    async def list_items(self, inquiry_id: uuid.UUID) -> list[InquiryItem]:
+    async def list_items(self, inquiry_id: uuid.UUID) -> list[dict]:
         await self.get_inquiry_or_raise(inquiry_id)
-        return await self.item_repository.list_for_inquiry(inquiry_id)
+        return await self.item_repository.list_for_inquiry_with_details(inquiry_id)
 
     async def get_item_or_raise(self, inquiry_id: uuid.UUID, item_id: uuid.UUID) -> InquiryItem:
         item = await self.item_repository.get_by_id(item_id)
@@ -234,10 +218,6 @@ class InquiryService:
     ) -> InquiryItem:
         """
         Add one product line to a consignment (creating the consignment header on first use).
-
-        UOM is copied from the Product master (never accepted as
-        caller input); the license-required highlight flag is set from
-        the Product master too, at creation time.
         """
         if quantity <= 0:
             raise BadRequestException("Quantity must be greater than zero.")
@@ -268,6 +248,51 @@ class InquiryService:
         )
         await self._refresh_rollup(inquiry.id)
         return item
+
+    async def add_items_bulk(
+        self,
+        *,
+        buyer_id: uuid.UUID,
+        consignment_code_id: uuid.UUID,
+        items_payload: list[dict],
+        user_id: uuid.UUID,
+    ) -> list[InquiryItem]:
+        """
+        Add multiple product lines to a consignment in a single roundtrip.
+        """
+        inquiry = await self.get_or_create_consignment(
+            buyer_id=buyer_id, consignment_code_id=consignment_code_id, user_id=user_id
+        )
+        now = _utcnow()
+        created_items = []
+        for p in items_payload:
+            prod_id = uuid.UUID(str(p["product_id"]))
+            qty = float(p["quantity"])
+            if qty <= 0:
+                continue
+            product = await self.product_repository.get_by_id(prod_id)
+            if not product:
+                continue
+            st = InquiryItemStatus(p.get("status", "proposed"))
+            item = await self.item_repository.create(
+                inquiry_id=inquiry.id,
+                product_id=prod_id,
+                uom_id=product.uom_id,
+                quantity=qty,
+                brand_preference=p.get("brand_preference"),
+                product_specs_remarks=p.get("product_specs_remarks"),
+                status=st,
+                proposed_at=now,
+                proposed_by=user_id,
+                approved_at=now if st == InquiryItemStatus.APPROVED else None,
+                approved_by=user_id if st == InquiryItemStatus.APPROVED else None,
+                tally_entry_posted=False,
+                requires_license=bool(getattr(product, "license_certificate_required", None)),
+            )
+            created_items.append(item)
+
+        await self._refresh_rollup(inquiry.id)
+        return created_items
 
     async def update_item(self, inquiry_id: uuid.UUID, item_id: uuid.UUID, **field_values: Any) -> InquiryItem:
         """
@@ -369,3 +394,132 @@ class InquiryService:
             await self.delete_consignment(inquiry_id)
         else:
             await self._refresh_rollup(inquiry_id)
+
+    # ------------------------------------------------------------------
+    # Quotations & RFQs
+    # ------------------------------------------------------------------
+
+    async def list_quotations_for_item(self, inquiry_item_id: uuid.UUID) -> list[dict]:
+        """List all quotations submitted for a specific inquiry item."""
+        if not self.quotation_repository:
+            raise BadRequestException("Quotation repository not initialized.")
+        return await self.quotation_repository.list_for_item_with_details(inquiry_item_id)
+
+    async def create_quotation(
+        self, inquiry_item_id: uuid.UUID, data: QuotationCreate, *, user_id: uuid.UUID
+    ) -> Quotation:
+        """Create a supplier quotation for an item."""
+        if not self.quotation_repository:
+            raise BadRequestException("Quotation repository not initialized.")
+        item = await self.item_repository.get_by_id(inquiry_item_id)
+        if item is None:
+            raise NotFoundException("Inquiry item not found.")
+
+        quote_number = await self.quotation_repository.generate_quote_number()
+
+        from datetime import date
+        exp_date = None
+        if data.expected_receiving_date:
+            try:
+                exp_date = date.fromisoformat(data.expected_receiving_date)
+            except ValueError:
+                exp_date = None
+
+        return await self.quotation_repository.create(
+            quote_number=quote_number,
+            inquiry_item_id=inquiry_item_id,
+            supplier_id=data.supplier_id,
+            quantity=data.quantity,
+            unit_price=data.unit_price,
+            total_cost=data.total_cost,
+            currency=data.currency or "CNY",
+            expected_receiving_date=exp_date,
+            terms_and_conditions=data.terms_and_conditions,
+            remarks=data.remarks,
+            status=QuotationStatus.PENDING,
+            created_by=user_id,
+        )
+
+    async def update_quotation_status(
+        self, quotation_id: uuid.UUID, status_str: str, *, user_id: uuid.UUID
+    ) -> Quotation:
+        """Update a quotation status (e.g. approve or reject)."""
+        if not self.quotation_repository:
+            raise BadRequestException("Quotation repository not initialized.")
+        quote = await self.quotation_repository.get_by_id(quotation_id)
+        if quote is None:
+            raise NotFoundException("Quotation not found.")
+
+        try:
+            status_enum = QuotationStatus(status_str.lower())
+        except ValueError:
+            raise BadRequestException(f"Invalid quotation status: {status_str}")
+
+        updated_quote = await self.quotation_repository.update(quote, status=status_enum)
+
+        # Sync inquiry item status with its quotations:
+        # If any approved quotation exists for this item -> item is APPROVED.
+        # If no approved quotations remain -> item reverts to PROPOSED.
+        approved_count = await self.quotation_repository.count_approved_for_item(quote.inquiry_item_id)
+        item = await self.item_repository.get_by_id(quote.inquiry_item_id)
+        if item:
+            if approved_count > 0:
+                await self.item_repository.update(
+                    item,
+                    status=InquiryItemStatus.APPROVED,
+                    approved_at=_utcnow(),
+                    approved_by=user_id,
+                )
+            else:
+                await self.item_repository.update(
+                    item,
+                    status=InquiryItemStatus.PROPOSED,
+                    approved_at=None,
+                    approved_by=None,
+                )
+            await self._refresh_rollup(item.inquiry_id)
+
+        return updated_quote
+
+    async def create_rfq(
+        self, inquiry_item_id: uuid.UUID, data: RFQCreate, *, user_id: uuid.UUID
+    ) -> RFQ:
+        """Create and dispatch an RFQ."""
+        if not self.rfq_repository:
+            raise BadRequestException("RFQ repository not initialized.")
+        item = await self.item_repository.get_by_id(inquiry_item_id)
+        if item is None:
+            raise NotFoundException("Inquiry item not found.")
+
+        from datetime import date
+        exp_date = None
+        if data.expected_receiving_date:
+            try:
+                exp_date = date.fromisoformat(data.expected_receiving_date)
+            except ValueError:
+                exp_date = None
+
+        supplier_ids_str = [str(s) for s in data.supplier_ids] if data.supplier_ids else []
+
+        return await self.rfq_repository.create(
+            inquiry_item_id=inquiry_item_id,
+            expected_receiving_date=exp_date,
+            supplier_type=data.supplier_type or "selected",
+            supplier_ids=supplier_ids_str,
+            notes=data.notes,
+            status="sent",
+            created_by=user_id,
+        )
+
+    async def list_rfqs_for_item(self, inquiry_item_id: uuid.UUID) -> list[RFQ]:
+        if not self.rfq_repository:
+            raise BadRequestException("RFQ repository not initialized.")
+        return await self.rfq_repository.list_for_item(inquiry_item_id)
+
+    async def get_last_purchase_for_product(self, product_id: uuid.UUID) -> dict | None:
+        """Fetch the latest approved quote or recent quotation for a product."""
+        if not self.quotation_repository:
+            return None
+        return await self.quotation_repository.get_last_purchase_for_product(product_id)
+
+

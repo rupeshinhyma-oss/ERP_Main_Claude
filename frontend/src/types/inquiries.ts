@@ -31,18 +31,63 @@ export interface InquiryItem {
   tally_posted_by?: string | null;
   procurement_remarks?: string | null;
   requires_license: boolean;
+  product_name?: string | null;
+  product_name_tally?: string | null;
+  product_code?: string | null;
+  uom_name?: string | null;
+  uom_code?: string | null;
+  license_details?: string | null;
+  packaging_quantity?: number | null;
+  packaging_gross_weight?: number | null;
+  packaging_unit_cbm?: number | null;
+  quotation_count?: number;
   created_at: string;
   updated_at: string;
+}
+
+export interface Quotation {
+  id: string;
+  quote_number: string;
+  inquiry_item_id: string;
+  supplier_id: string;
+  supplier_name?: string | null;
+  supplier_code?: string | null;
+  quantity: number;
+  unit_price: number;
+  total_cost: number;
+  currency: string;
+  expected_receiving_date?: string | null;
+  terms_and_conditions?: string | null;
+  remarks?: string | null;
+  status: "pending" | "approved" | "rejected" | "po_created";
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RFQ {
+  id: string;
+  inquiry_item_id: string;
+  expected_receiving_date?: string | null;
+  supplier_type: string;
+  supplier_ids?: string[] | null;
+  notes?: string | null;
+  status: string;
+  created_by: string;
+  created_at: string;
 }
 
 export interface Inquiry {
   id: string;
   buyer_id: string;
+  buyer_name?: string | null;
   branch_id?: string | null;
   consignment_code_id: string;
+  consignment_code?: string | null;
   consignment_status: InquiryConsignmentStatus;
   total_cbm: number;
   total_weight: number;
+  total_amount?: number;
   created_by: string;
   created_at: string;
   updated_at: string;
@@ -52,11 +97,14 @@ export interface Inquiry {
 export interface InquiryListItem {
   id: string;
   buyer_id: string;
+  buyer_name?: string | null;
   branch_id?: string | null;
   consignment_code_id: string;
+  consignment_code?: string | null;
   consignment_status: InquiryConsignmentStatus;
   total_cbm: number;
   total_weight: number;
+  total_amount?: number;
   created_at: string;
   updated_at: string;
 }
@@ -69,7 +117,9 @@ export interface CompanySummary {
   approved_count?: number;
   total_cbm: number;
   total_weight: number;
+  total_amount?: number;
   consignment_status: InquiryConsignmentStatus;
   consignment_codes: string[];
   updated_at?: string | null;
 }
+

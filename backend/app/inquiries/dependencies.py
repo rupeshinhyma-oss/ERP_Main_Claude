@@ -7,9 +7,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.buyers.repository import BuyerRepository
 from app.database.session import get_db_session
-from app.inquiries.repository import ConsignmentCodeRepository, InquiryItemRepository, InquiryRepository
+from app.inquiries.repository import (
+    ConsignmentCodeRepository,
+    InquiryItemRepository,
+    InquiryRepository,
+    QuotationRepository,
+    RFQRepository,
+)
 from app.inquiries.service import InquiryService
 from app.masters.products.repository import ProductRepository
+from app.suppliers.repository import SupplierRepository
 
 
 def get_inquiry_service(db: AsyncSession = Depends(get_db_session)) -> InquiryService:
@@ -20,4 +27,7 @@ def get_inquiry_service(db: AsyncSession = Depends(get_db_session)) -> InquirySe
         ConsignmentCodeRepository(db),
         BuyerRepository(db),
         ProductRepository(db),
+        QuotationRepository(db),
+        RFQRepository(db),
+        SupplierRepository(db),
     )

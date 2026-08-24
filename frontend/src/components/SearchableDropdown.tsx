@@ -47,6 +47,8 @@ export interface SearchableDropdownProps extends SharedProps {
   id?: string;
   hasError?: boolean;
   disabled?: boolean;
+  onCreateNew?: (typedText: string) => void;
+  createNewLabel?: (typedText: string) => string;
 }
 
 export function SearchableDropdown({
@@ -60,6 +62,8 @@ export function SearchableDropdown({
   id,
   hasError = false,
   disabled = false,
+  onCreateNew,
+  createNewLabel,
 }: SearchableDropdownProps) {
   const [inputValue, setInputValue] = useState("");
   const [label, setLabel] = useState("");
@@ -325,7 +329,7 @@ export function SearchableDropdown({
       </button>
       {open && (
         <div className="sd-results">
-          {options.length === 0 && !showCustomOption ? (
+          {options.length === 0 && !showCustomOption && !onCreateNew ? (
             <div className="sd-empty">No matches.</div>
           ) : (
             <>
@@ -365,6 +369,32 @@ export function SearchableDropdown({
                   }}
                 >
                   Use "{inputValue.trim()}"
+                </div>
+              )}
+              {onCreateNew && (
+                <div
+                  className="sd-option sd-create-option"
+                  style={{
+                    padding: "9px 12px",
+                    cursor: "pointer",
+                    color: "#2563eb",
+                    background: "#f0f7ff",
+                    fontWeight: 600,
+                    fontSize: "12.5px",
+                    borderTop: options.length > 0 ? "1px solid #e2e8f0" : "none",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px",
+                  }}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    const text = inputValue.trim();
+                    closeResults();
+                    onCreateNew(text);
+                  }}
+                >
+                  <span style={{ fontSize: "14px" }}>➕</span>
+                  <span>{createNewLabel ? createNewLabel(inputValue.trim()) : `Add "${inputValue.trim() || "New Item"}"`}</span>
                 </div>
               )}
             </>

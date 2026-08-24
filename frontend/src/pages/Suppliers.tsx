@@ -1250,6 +1250,7 @@ export function SuppliersPage() {
     setModalTab("first");
     setEditTab("profile");
     setError(null);
+    setAlertPopup(null);
     setContactFormOpen(false);
     setWhatsappSameAsCalling(false);
     setWechatSameAsCalling(false);
@@ -1333,6 +1334,7 @@ export function SuppliersPage() {
     setModalOpen(false);
     setCurrentSupplierId(null);
     setError(null);
+    setAlertPopup(null);
     setValidationErrors({});
   }
 
@@ -1475,6 +1477,12 @@ export function SuppliersPage() {
     if (!formCountryId) {
       initialErrors["field-country"] = "Country is required.";
     }
+    if (!formStateCustomText.trim()) {
+      initialErrors["field-province"] = "Province is required.";
+    }
+    if (!formCityCustomText.trim()) {
+      initialErrors["field-city"] = "City is required.";
+    }
     if (form.contact_calling_number) {
       const callingErr = validatePhoneNumber(form.contact_calling_number, "Calling number");
       if (callingErr) {
@@ -1497,6 +1505,7 @@ export function SuppliersPage() {
     }
 
     setError(null);
+    setAlertPopup(null);
     setSaving(true);
     try {
       const { stateId, cityId } = await resolveCustomGeography(formCountryId);
@@ -1555,6 +1564,8 @@ export function SuppliersPage() {
         ]).then(() => setNamesVersion((n) => n + 1));
       }
 
+      setError(null);
+      setAlertPopup(null);
       if (nextAction === "exit") {
         closeModal();
       } else if (nextAction === "continue") {
@@ -2184,7 +2195,7 @@ export function SuppliersPage() {
             )}
             {/* TAB 1: PROFILE FORM (SAME ORIGINAL DATA & FIELDS) */}
             {(editTab === "profile" || modalMode === "quick") && (
-              <form onSubmit={handleSubmit}>
+              <form onSubmit={handleSubmit} noValidate>
                 {/* SECTION 1: General & Primary Contact Info (First Data Form) */}
                 <div style={{ marginBottom: "24px" }}>
                   <h3 style={{ fontSize: "16px", fontWeight: 700, margin: "0 0 16px 0", color: "#0f172a" }}>

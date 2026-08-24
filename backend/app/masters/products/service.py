@@ -120,18 +120,19 @@ class ProductService:
                 raise BadRequestException("The secondary unit of measurement must differ from the primary unit.")
 
     async def create(self, **field_values: Any) -> Product:
-        """Create a new product, validating code uniqueness and every foreign-key reference."""
+        """Create a new product, validating code uniqueness if provided, and foreign-key references."""
         product_code = field_values.get("product_code")
-        if not product_code:
-            import random
-            field_values["product_code"] = f"PRD-{random.randint(100000, 999999)}"
-        else:
-            existing = await self.repository.get_by_code(product_code)
+        if product_code and str(product_code).strip():
+            clean_code = str(product_code).strip()
+            existing = await self.repository.get_by_code(clean_code)
             if existing is not None:
                 raise ConflictException(
-                    f"Product code {product_code!r} is already in use.",
+                    f"Product code {clean_code!r} is already in use.",
                     details={"existing": model_to_dict(existing)},
                 )
+            field_values["product_code"] = clean_code
+        else:
+            field_values["product_code"] = None
         await self._validate_references(field_values)
 
         # Handle Tally product name aliases
@@ -212,9 +213,8 @@ class ProductService:
         if "organization_ids" in field_values and field_values["organization_ids"] is not None:
             field_values["organization_ids"] = [str(x) for x in field_values["organization_ids"]]
 
-        changes = {k: v for k, v in field_values.items() if v is not None}
-        if changes:
-            await self.repository.update(product, **changes)
+        if field_values:
+            await self.repository.update(product, **field_values)
         await self._invalidate_cache()
         # Best-effort, never raises: tells any already-open Shipment
         # Planning tab whose ITEM column (or any other LINKED_LOOKUP/

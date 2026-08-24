@@ -138,7 +138,7 @@ class ProductRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
-    product_code: str
+    product_code: str | None = None
     product_name_tally: str | None = None
     product_name_invoice: str | None = None
     product_name: str

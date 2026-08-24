@@ -963,6 +963,16 @@ tbody tr:nth-child(even):hover td {
   background: #f0f7ff !important;
 }
 
+tbody tr.row-danger td,
+tbody tr.row-danger:nth-child(even) td {
+  background: #fff1f2 !important;
+}
+
+tbody tr.row-danger:hover td,
+tbody tr.row-danger:nth-child(even):hover td {
+  background: #ffe4e6 !important;
+}
+
 td.actions {
   white-space: nowrap;
   text-align: center;

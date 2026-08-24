@@ -765,6 +765,7 @@ export function BuyersPage() {
     setModalMode("create");
     setEditTab("profile");
     setEditingId(null);
+    setError(null);
     setWhatsappSameAsCalling(false);
     setValidationErrors({});
     setForm({
@@ -785,6 +786,7 @@ export function BuyersPage() {
     setModalMode("edit");
     setEditTab("profile");
     setEditingId(buyer.id);
+    setError(null);
     setWhatsappSameAsCalling(
       Boolean(buyer.contact_calling_number && buyer.contact_calling_number === buyer.contact_whatsapp_number)
     );
@@ -957,6 +959,7 @@ export function BuyersPage() {
 
     if (Object.keys(initialErrors).length > 0) {
       setValidationErrors((prev) => ({ ...prev, ...initialErrors }));
+      setError(Object.values(initialErrors)[0]);
       const firstField = Object.keys(initialErrors)[0];
       focusAndScrollField(firstField, initialErrors[firstField]);
       return;
@@ -1008,6 +1011,7 @@ export function BuyersPage() {
           reload();
         }
       }
+      setError(null);
       setModalMode(null);
     } catch (err) {
       setError(err);
@@ -1710,7 +1714,7 @@ export function BuyersPage() {
 
             {/* TAB 1: PROFILE FORM */}
             {editTab === "profile" && (
-              <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+              <form onSubmit={handleSubmit} noValidate style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
                 {/* 1. Identity & Business Profile */}
                 <div>
                   <div style={sectionTitleStyle}>Identity &amp; Business Profile</div>

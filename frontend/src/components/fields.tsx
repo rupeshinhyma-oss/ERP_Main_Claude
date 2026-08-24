@@ -15,6 +15,8 @@ interface BaseFieldProps {
   /** Inline overrides such as `grid-column: span 2`. */
   style?: React.CSSProperties;
   hasError?: boolean;
+  errorMessage?: ReactNode;
+  error?: ReactNode;
 }
 
 function renderLabel(label: ReactNode) {
@@ -54,6 +56,8 @@ export function TextField({
   autoComplete = "off",
   disableAutoCapitalize,
   hasError = false,
+  errorMessage,
+  error,
 }: BaseFieldProps & {
   value: string;
   onChange: (value: string) => void;
@@ -71,6 +75,9 @@ export function TextField({
   autoComplete?: string;
   disableAutoCapitalize?: boolean;
 }) {
+  const isErr = Boolean(hasError || errorMessage || error);
+  const errText = errorMessage || error;
+
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const raw = e.target.value;
     const formatted = disableAutoCapitalize ? raw : autoTitleCase(raw, id, type);
@@ -92,8 +99,9 @@ export function TextField({
         readOnly={readOnly}
         style={{
           ...inputStyle,
-          border: hasError ? "1.5px solid #ef4444" : inputStyle?.border,
-          boxShadow: hasError ? "0 0 0 3px rgba(239, 68, 68, 0.15)" : inputStyle?.boxShadow,
+          border: isErr ? "1.5px solid #ef4444" : inputStyle?.border,
+          boxShadow: isErr ? "0 0 0 3px rgba(239, 68, 68, 0.15)" : inputStyle?.boxShadow,
+          backgroundColor: isErr ? "#fff5f5" : inputStyle?.backgroundColor,
         }}
         step={step}
         min={min}
@@ -101,7 +109,12 @@ export function TextField({
         className={className}
         autoComplete={autoComplete}
       />
-      {hint && <span className="hint">{hint}</span>}
+      {errText && (
+        <div style={{ color: "#dc2626", fontSize: "11.5px", fontWeight: 600, marginTop: "4px", display: "flex", alignItems: "center", gap: "4px" }}>
+          <span>⚠️</span> {errText}
+        </div>
+      )}
+      {hint && !errText && <span className="hint">{hint}</span>}
     </div>
   );
 }
@@ -117,6 +130,8 @@ export function TextAreaField({
   style,
   disableAutoCapitalize,
   hasError = false,
+  errorMessage,
+  error,
 }: BaseFieldProps & {
   value: string;
   onChange: (value: string) => void;
@@ -124,6 +139,9 @@ export function TextAreaField({
   placeholder?: string;
   disableAutoCapitalize?: boolean;
 }) {
+  const isErr = Boolean(hasError || errorMessage || error);
+  const errText = errorMessage || error;
+
   const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const raw = e.target.value;
     const formatted = disableAutoCapitalize ? raw : autoTitleCase(raw, id, "textarea");
@@ -140,11 +158,17 @@ export function TextAreaField({
         onChange={handleChange}
         placeholder={placeholder}
         style={{
-          border: hasError ? "1.5px solid #ef4444" : undefined,
-          boxShadow: hasError ? "0 0 0 3px rgba(239, 68, 68, 0.15)" : undefined,
+          border: isErr ? "1.5px solid #ef4444" : undefined,
+          boxShadow: isErr ? "0 0 0 3px rgba(239, 68, 68, 0.15)" : undefined,
+          backgroundColor: isErr ? "#fff5f5" : undefined,
         }}
       />
-      {hint && <span className="hint">{hint}</span>}
+      {errText && (
+        <div style={{ color: "#dc2626", fontSize: "11.5px", fontWeight: 600, marginTop: "4px", display: "flex", alignItems: "center", gap: "4px" }}>
+          <span>⚠️</span> {errText}
+        </div>
+      )}
+      {hint && !errText && <span className="hint">{hint}</span>}
     </div>
   );
 }
@@ -1039,12 +1063,16 @@ export function SelectField({
   hint,
   style,
   hasError = false,
+  errorMessage,
+  error,
 }: BaseFieldProps & {
   value: string;
   onChange: (value: string) => void;
   required?: boolean;
   children: ReactNode;
 }) {
+  const isErr = Boolean(hasError || errorMessage || error);
+  const errText = errorMessage || error;
   const [open, setOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const containerRef = useRef<HTMLDivElement>(null);
@@ -1126,12 +1154,12 @@ export function SelectField({
           }
         }}
         style={{
-          border: hasError ? "1.5px solid #ef4444" : "1px solid var(--color-border-strong)",
-          boxShadow: hasError ? "0 0 0 3px rgba(239, 68, 68, 0.15)" : undefined,
+          border: isErr ? "1.5px solid #ef4444" : "1px solid var(--color-border-strong)",
+          boxShadow: isErr ? "0 0 0 3px rgba(239, 68, 68, 0.15)" : undefined,
+          backgroundColor: isErr ? "#fff5f5" : "var(--color-surface)",
           borderRadius: "var(--radius-sm)",
           padding: "9px 11px",
           fontSize: "13.5px",
-          background: "var(--color-surface)",
           color: "var(--color-text)",
           cursor: "pointer",
           display: "flex",
@@ -1178,8 +1206,11 @@ export function SelectField({
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && filteredOptions.length > 0) {
                     e.preventDefault();
-                    onChange(filteredOptions[0].value);
-                    setOpen(false);
+                    const first = filteredOptions[0];
+                    if (first && !first.disabled) {
+                      onChange(first.value);
+                      setOpen(false);
+                    }
                   }
                 }}
                 style={{
@@ -1196,11 +1227,9 @@ export function SelectField({
           )}
 
           {/* Options List */}
-          <div style={{ overflowY: "auto", flex: 1, maxHeight: "200px", padding: "4px 0" }}>
+          <div style={{ overflowY: "auto", flex: 1, padding: "4px 0" }}>
             {filteredOptions.length === 0 ? (
-              <div style={{ padding: "10px 12px", fontSize: "13px", color: "#94a3b8", textAlign: "center" }}>
-                No matching results
-              </div>
+              <div style={{ padding: "8px 12px", fontSize: "13px", color: "#64748b" }}>No matches found</div>
             ) : (
               filteredOptions.map((opt, idx) => {
                 const isSelected = opt.value === value;
@@ -1208,19 +1237,22 @@ export function SelectField({
                   <div
                     key={idx}
                     onClick={() => {
-                      onChange(opt.value);
-                      setOpen(false);
+                      if (!opt.disabled) {
+                        onChange(opt.value);
+                        setOpen(false);
+                      }
                     }}
                     style={{
                       padding: "8px 12px",
                       fontSize: "13.5px",
-                      cursor: "pointer",
+                      cursor: opt.disabled ? "not-allowed" : "pointer",
+                      opacity: opt.disabled ? 0.5 : 1,
                       background: isSelected ? "#0061f2" : "transparent",
                       color: isSelected ? "#ffffff" : "#1e293b",
                       fontWeight: isSelected ? 600 : 400,
                     }}
                     onMouseOver={(e) => {
-                      if (!isSelected) e.currentTarget.style.background = "#f1f5f9";
+                      if (!isSelected && !opt.disabled) e.currentTarget.style.background = "#f1f5f9";
                     }}
                     onMouseOut={(e) => {
                       if (!isSelected) e.currentTarget.style.background = "transparent";
@@ -1251,7 +1283,12 @@ export function SelectField({
         {children}
       </select>
 
-      {hint && <span className="hint">{hint}</span>}
+      {errText && (
+        <div style={{ color: "#dc2626", fontSize: "11.5px", fontWeight: 600, marginTop: "4px", display: "flex", alignItems: "center", gap: "4px" }}>
+          <span>⚠️</span> {errText}
+        </div>
+      )}
+      {hint && !errText && <span className="hint">{hint}</span>}
     </div>
   );
 }
@@ -1266,6 +1303,9 @@ export function SearchableSelectField({
   children,
   hint,
   style,
+  hasError = false,
+  errorMessage,
+  error,
 }: BaseFieldProps & {
   value: string;
   onChange: (value: string) => void;
@@ -1273,6 +1313,8 @@ export function SearchableSelectField({
   placeholder?: string;
   children: ReactNode;
 }) {
+  const isErr = Boolean(hasError || errorMessage || error);
+  const errText = errorMessage || error;
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const containerRef = useRef<HTMLDivElement>(null);
@@ -1309,13 +1351,14 @@ export function SearchableSelectField({
 
   return (
     <div className="field" style={{ ...style, position: "relative" }} ref={containerRef}>
-      <label htmlFor={id}>{label}</label>
+      <label htmlFor={id}>{renderLabel(label)}</label>
 
       <div
         style={{
-          border: "1px solid var(--color-border-strong)",
+          border: isErr ? "1.5px solid #ef4444" : "1px solid var(--color-border-strong)",
+          boxShadow: isErr ? "0 0 0 3px rgba(239, 68, 68, 0.15)" : undefined,
+          backgroundColor: isErr ? "#fff5f5" : "var(--color-surface)",
           borderRadius: "var(--radius-sm)",
-          background: "var(--color-surface)",
           display: "flex",
           alignItems: "center",
           position: "relative",
@@ -1426,7 +1469,12 @@ export function SearchableSelectField({
         {children}
       </select>
 
-      {hint && <span className="hint">{hint}</span>}
+      {errText && (
+        <div style={{ color: "#dc2626", fontSize: "11.5px", fontWeight: 600, marginTop: "4px", display: "flex", alignItems: "center", gap: "4px" }}>
+          <span>⚠️</span> {errText}
+        </div>
+      )}
+      {hint && !errText && <span className="hint">{hint}</span>}
     </div>
   );
 }
@@ -1456,12 +1504,17 @@ export function MultiSelectField({
   placeholder = "-- Select --",
   hint,
   style,
+  hasError = false,
+  errorMessage,
+  error,
 }: BaseFieldProps & {
   values: string[];
   options: { id: string; name: string }[];
   onChange: (newValues: string[]) => void;
   placeholder?: string;
 }) {
+  const isErr = Boolean(hasError || errorMessage || error);
+  const errText = errorMessage || error;
   const [open, setOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [showEyeModal, setShowEyeModal] = useState(false);
@@ -1500,13 +1553,14 @@ export function MultiSelectField({
         tabIndex={0}
         onClick={() => setOpen((prev) => !prev)}
         style={{
-          border: "1px solid var(--color-border-strong)",
+          border: isErr ? "1.5px solid #ef4444" : "1px solid var(--color-border-strong)",
+          boxShadow: isErr ? "0 0 0 3px rgba(239, 68, 68, 0.15)" : undefined,
+          backgroundColor: isErr ? "#fff5f5" : "var(--color-surface)",
           borderRadius: "var(--radius-sm)",
           padding: "6px 11px",
           minHeight: "40px",
           maxHeight: "40px",
           fontSize: "13.5px",
-          background: "var(--color-surface)",
           color: "var(--color-text)",
           cursor: "pointer",
           display: "flex",
@@ -1846,7 +1900,12 @@ export function MultiSelectField({
         </div>
       )}
 
-      {hint && <span className="hint">{hint}</span>}
+      {errText && (
+        <div style={{ color: "#dc2626", fontSize: "11.5px", fontWeight: 600, marginTop: "4px", display: "flex", alignItems: "center", gap: "4px" }}>
+          <span>⚠️</span> {errText}
+        </div>
+      )}
+      {hint && !errText && <span className="hint">{hint}</span>}
     </div>
   );
 }

@@ -85,7 +85,13 @@ export interface MasterPageProps<T extends MasterRecord> {
   emptyForm: FormState;
   fillForm: (item: T | null) => FormState;
   toPayload: (form: FormState) => unknown;
-  renderFields: (form: FormState, setField: (id: string, value: string) => void) => ReactNode;
+  renderFields: (
+    form: FormState,
+    setField: (id: string, value: string) => void,
+    errors?: Record<string, string>
+  ) => ReactNode;
+  /** Optional form-level validator that returns a map of fieldId -> errorMessage */
+  validateForm?: (form: FormState) => Record<string, string>;
   /** Extra query params from page-specific toolbar filters. */
   extraFilters?: Record<string, string>;
   /** Extra toolbar controls rendered after the search box. */
@@ -174,6 +180,14 @@ export interface MasterPageProps<T extends MasterRecord> {
    * Optional custom banner or KPI panel rendered above the main table card.
    */
   bannerExtras?: React.ReactNode;
+  /**
+   * Optional custom inline styles applied to each row <tr>.
+   */
+  getRowStyle?: (item: T, index: number) => React.CSSProperties;
+  /**
+   * Optional custom CSS class name applied to each row <tr>.
+   */
+  getRowClassName?: (item: T, index: number) => string;
 }
 
 export interface MasterPageHandle {
@@ -415,6 +429,7 @@ export function MasterPage<T extends MasterRecord>({
   emptyForm,
   fillForm,
   toPayload,
+  validateForm,
   renderFields,
   extraFilters,
   toolbarExtras,
@@ -435,6 +450,8 @@ export function MasterPage<T extends MasterRecord>({
   onItemsLoaded,
   headerExtras,
   bannerExtras,
+  getRowStyle,
+  getRowClassName,
 }: MasterPageProps<T>) {
   const { hasPermission } = useAuth();
 
@@ -529,6 +546,7 @@ export function MasterPage<T extends MasterRecord>({
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [effectiveSearch, setEffectiveSearch] = useState("");
   const [alertPopup, setAlertPopup] = useState<{ title: string; message: string } | null>(null);
+  const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
 
   const colCount = columns.length + 3; // +1 for Checkbox, +1 for Sr. No., +1 for actions
   const extraFiltersKey = JSON.stringify(extraFilters || {});
@@ -851,29 +869,83 @@ export function MasterPage<T extends MasterRecord>({
     setEditingId(item ? item.id : "");
     setEditingItem(item);
     setForm(fillForm(item));
+    setError(null);
+    setAlertPopup(null);
+    setValidationErrors({});
     setModalOpen(true);
   }
 
   function closeModal() {
+    setError(null);
+    setAlertPopup(null);
+    setValidationErrors({});
     setModalOpen(false);
   }
 
   const setField = useCallback((id: string, value: string) => {
     setForm((prev) => ({ ...prev, [id]: value }));
+    setValidationErrors((prev) => {
+      if (!prev[id]) return prev;
+      const copy = { ...prev };
+      delete copy[id];
+      return copy;
+    });
   }, []);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (submitting) return;
     setError(null);
+    setAlertPopup(null);
+
+    if (validateForm) {
+      const fieldErrors = validateForm(form);
+      if (fieldErrors && Object.keys(fieldErrors).length > 0) {
+        setValidationErrors(fieldErrors);
+        const firstMsg = Object.values(fieldErrors)[0];
+        setError(firstMsg);
+        const firstId = Object.keys(fieldErrors)[0];
+        const el = document.getElementById(firstId);
+        if (el) {
+          el.scrollIntoView({ behavior: "smooth", block: "center" });
+          setTimeout(() => el.focus(), 250);
+        } else {
+          window.scrollTo({ top: 0, behavior: "smooth" });
+        }
+        return;
+      }
+    }
 
     const triggerAlert = (err: unknown) => {
-      setError(err);
       const msg = err instanceof Error ? err.message : String(err);
-      const title = msg.toLowerCase().includes("duplicate") || msg.toLowerCase().includes("already exists")
-        ? "Duplicate Record Warning"
-        : "Validation Error";
-      setAlertPopup({ title, message: msg });
+      const msgLower = msg.toLowerCase();
+      let targetFieldId: string | null = null;
+      if (msgLower.includes("hsn")) targetFieldId = "hsn_id";
+      else if (msgLower.includes("sub-category") || msgLower.includes("subcategory")) targetFieldId = "sub_category_id";
+      else if (msgLower.includes("category")) targetFieldId = "category_id";
+      else if (msgLower.includes("uom")) targetFieldId = "uom_id";
+      else if (msgLower.includes("gross weight")) targetFieldId = "packaging_gross_weight";
+      else if (msgLower.includes("quantity")) targetFieldId = "packaging_quantity";
+      else if (msgLower.includes("cbm") || msgLower.includes("dimension")) targetFieldId = "packaging_unit_cbm";
+      else if (msgLower.includes("tally") || msgLower.includes("product name")) targetFieldId = "product_name_tally";
+      else if (msgLower.includes("product code") || msgLower.includes("code")) targetFieldId = "product_code";
+      else if (msgLower.includes("brand")) targetFieldId = "brand_id";
+
+      if (targetFieldId) {
+        setValidationErrors((prev) => ({ ...prev, [targetFieldId!]: msg }));
+        setError(msg);
+        const el = document.getElementById(targetFieldId);
+        if (el) {
+          el.scrollIntoView({ behavior: "smooth", block: "center" });
+          setTimeout(() => el.focus(), 250);
+          return;
+        }
+      }
+
+      setError(err);
+      if (!useFullPageForm && (msgLower.includes("duplicate") || msgLower.includes("already exists"))) {
+        setAlertPopup({ title: "Duplicate Record Warning", message: msg });
+      }
       window.scrollTo({ top: 0, behavior: "smooth" });
     };
 
@@ -913,6 +985,9 @@ export function MasterPage<T extends MasterRecord>({
           reload();
         }
       }
+      setError(null);
+      setAlertPopup(null);
+      setValidationErrors({});
       closeModal();
     } catch (err) {
       triggerAlert(err);
@@ -1331,8 +1406,8 @@ export function MasterPage<T extends MasterRecord>({
           </div>
           <Banner error={error} />
           <div className="card" style={{ padding: "24px", marginBottom: "500px" }}>
-            <form onSubmit={handleSubmit}>
-              {renderFields(form, setField)}
+            <form onSubmit={handleSubmit} noValidate>
+              {renderFields(form, setField, validationErrors)}
               <div
                 className="form-actions"
                 style={{
@@ -1366,6 +1441,12 @@ export function MasterPage<T extends MasterRecord>({
               </div>
             </form>
           </div>
+          <ModalAlert
+            isOpen={Boolean(alertPopup)}
+            title={alertPopup?.title}
+            message={alertPopup?.message || ""}
+            onClose={() => setAlertPopup(null)}
+          />
         </main>
       </AppShell>
     );
@@ -1446,9 +1527,18 @@ export function MasterPage<T extends MasterRecord>({
   };
 
   const renderBodyCell = (item: T, index: number, idx: number) => {
+    const rowCustomStyle = getRowStyle ? getRowStyle(item, index) : undefined;
+    const freezeStyle = getFreezeStyle(idx, false);
+    const cellStyle: React.CSSProperties = {
+      ...freezeStyle,
+      ...(rowCustomStyle?.backgroundColor
+        ? { backgroundColor: rowCustomStyle.backgroundColor }
+        : {}),
+    };
+
     if (idx === 0) {
       return (
-        <td key="cell-0" style={{ width: "40px", minWidth: "40px", maxWidth: "45px", textAlign: "center", ...getFreezeStyle(0, false) }}>
+        <td key="cell-0" style={{ width: "40px", minWidth: "40px", maxWidth: "45px", textAlign: "center", ...cellStyle }}>
           <input
             type="checkbox"
             checked={selectedIds.includes(String(item.id))}
@@ -1468,7 +1558,7 @@ export function MasterPage<T extends MasterRecord>({
 
     if (idx === 1) {
       return (
-        <td key="cell-1" className="cell-srno" style={{ width: "65px", minWidth: "65px", maxWidth: "75px", textAlign: "center", ...getFreezeStyle(1, false) }}>
+        <td key="cell-1" className="cell-srno" style={{ width: "65px", minWidth: "65px", maxWidth: "75px", textAlign: "center", ...cellStyle }}>
           {startingSrNo + index}
         </td>
       );
@@ -1476,7 +1566,7 @@ export function MasterPage<T extends MasterRecord>({
 
     if (idx === colCount - 1) {
       return (
-        <td key="cell-action" className="actions" style={{ textAlign: "center", ...getFreezeStyle(colCount - 1, false) }}>
+        <td key="cell-action" className="actions" style={{ textAlign: "center", ...cellStyle }}>
           <div style={{ display: "flex", gap: "6px", alignItems: "center", justifyContent: "center" }}>
             {canUpdate && (
               <button
@@ -1536,7 +1626,7 @@ export function MasterPage<T extends MasterRecord>({
     const mIdx = idx - 2;
     const col = columns[mIdx];
     return (
-      <td key={`cell-${mIdx}-${col?.header}`} style={getFreezeStyle(idx, false)}>
+      <td key={`cell-${mIdx}-${col?.header}`} style={cellStyle}>
         {mIdx === 0 && detailFields ? (
           <a
             href="#"
@@ -1907,7 +1997,11 @@ export function MasterPage<T extends MasterRecord>({
                   <TableMessageRow colSpan={colCount}>No records found.</TableMessageRow>
                 ) : (
                   displayedRows.map((item, index) => (
-                    <tr key={item.id}>
+                    <tr
+                      key={item.id}
+                      className={getRowClassName ? getRowClassName(item, index) : undefined}
+                      style={getRowStyle ? getRowStyle(item, index) : undefined}
+                    >
                       {displayOrder.map((idx) => renderBodyCell(item, index, idx))}
                     </tr>
                   ))
@@ -1947,9 +2041,9 @@ export function MasterPage<T extends MasterRecord>({
                 &times;
               </button>
             </div>
-            <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", height: "calc(100vh - 60px)", overflow: "hidden" }}>
+            <form onSubmit={handleSubmit} noValidate style={{ display: "flex", flexDirection: "column", height: "calc(100vh - 60px)", overflow: "hidden" }}>
               <div style={{ flex: 1, overflowY: "auto", padding: "20px 24px" }}>
-                {renderFields(form, setField)}
+                {renderFields(form, setField, validationErrors)}
               </div>
               <div className="form-actions" style={{ display: "flex", gap: "12px", width: "100%", padding: "16px 24px", background: "#ffffff", borderTop: "1px solid #e2e8f0" }}>
                 {hideQuickAdd ? (

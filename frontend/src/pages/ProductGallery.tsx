@@ -716,6 +716,29 @@ export function ProductGalleryPage() {
                         {prod.product_code || "PRODUCT"}
                       </span>
 
+                      {prod.license_certificate_required && (
+                        <span
+                          title={`License Required: ${prod.license_certificate_required}`}
+                          style={{
+                            position: "absolute",
+                            top: "10px",
+                            right: "10px",
+                            background: "#dc2626",
+                            color: "#ffffff",
+                            fontSize: "10.5px",
+                            fontWeight: 700,
+                            padding: "3px 8px",
+                            borderRadius: "4px",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "3px",
+                            boxShadow: "0 2px 4px rgba(220,38,38,0.3)",
+                          }}
+                        >
+                          ⚠️ LICENSE
+                        </span>
+                      )}
+
                       {imgList.length > 0 && (
                         <span
                           style={{

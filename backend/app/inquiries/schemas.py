@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -85,6 +85,23 @@ class BulkTallyPostRequest(BaseModel):
     item_ids: list[uuid.UUID] = Field(..., min_length=1)
 
 
+class BulkItemLineCreate(BaseModel):
+    product_id: uuid.UUID
+    quantity: float = Field(gt=0, description="Quantity")
+    brand_preference: str | None = Field(default=None, max_length=255)
+    product_specs_remarks: str | None = Field(default=None)
+    status: InquiryItemStatus = Field(default=InquiryItemStatus.PROPOSED)
+
+
+class BulkInquiryItemCreate(BaseModel):
+    """Payload for creating multiple inquiry items in a single request."""
+
+    buyer_id: uuid.UUID
+    branch_id: str | None = None
+    consignment_code_id: uuid.UUID
+    items: list[BulkItemLineCreate] = Field(..., min_length=1)
+
+
 class InquiryItemRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -105,8 +122,91 @@ class InquiryItemRead(BaseModel):
     tally_posted_by: uuid.UUID | None
     procurement_remarks: str | None
     requires_license: bool
+    product_name: str | None = None
+    product_name_tally: str | None = None
+    product_code: str | None = None
+    uom_name: str | None = None
+    uom_code: str | None = None
+    license_details: str | None = None
+    packaging_quantity: float | None = None
+    packaging_gross_weight: float | None = None
+    packaging_unit_cbm: float | None = None
+    quotation_count: int = 0
     created_at: datetime
     updated_at: datetime
+
+
+# ---------------------------------------------------------------------------
+# Quotations & RFQs
+# ---------------------------------------------------------------------------
+
+
+class QuotationCreate(BaseModel):
+    supplier_id: uuid.UUID
+    quantity: float = Field(..., gt=0)
+    unit_price: float = Field(..., ge=0)
+    total_cost: float = Field(..., ge=0)
+    currency: str = Field(default="CNY", max_length=10)
+    expected_receiving_date: str | None = None
+    terms_and_conditions: str | None = None
+    remarks: str | None = None
+
+
+class QuotationUpdate(BaseModel):
+    quantity: float | None = Field(default=None, gt=0)
+    unit_price: float | None = Field(default=None, ge=0)
+    total_cost: float | None = Field(default=None, ge=0)
+    currency: str | None = Field(default=None, max_length=10)
+    expected_receiving_date: str | None = None
+    terms_and_conditions: str | None = None
+    remarks: str | None = None
+
+
+class QuotationStatusUpdate(BaseModel):
+    status: str = Field(..., description="pending, approved, rejected, po_created")
+
+
+class QuotationRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    quote_number: str
+    inquiry_item_id: uuid.UUID
+    supplier_id: uuid.UUID
+    supplier_name: str | None = None
+    supplier_code: str | None = None
+    quantity: float
+    unit_price: float
+    total_cost: float
+    currency: str = "CNY"
+    expected_receiving_date: date | str | None = None
+    terms_and_conditions: str | None = None
+    remarks: str | None = None
+    status: str
+    created_by: uuid.UUID
+    created_at: datetime
+    updated_at: datetime
+
+
+class RFQCreate(BaseModel):
+    expected_receiving_date: str | None = None
+    supplier_type: str = Field(default="selected", description="all or selected")
+    supplier_ids: list[uuid.UUID] = Field(default_factory=list)
+    notes: str | None = None
+
+
+class RFQRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    inquiry_item_id: uuid.UUID
+    expected_receiving_date: date | str | None = None
+    supplier_type: str
+    supplier_ids: list[str] | None = None
+    notes: str | None = None
+    status: str
+    created_by: uuid.UUID
+    created_at: datetime
 
 
 # ---------------------------------------------------------------------------
@@ -121,11 +221,14 @@ class InquiryRead(BaseModel):
 
     id: uuid.UUID
     buyer_id: uuid.UUID
+    buyer_name: str | None = None
     branch_id: str | None = None
     consignment_code_id: uuid.UUID
+    consignment_code: str | None = None
     consignment_status: InquiryConsignmentStatus
     total_cbm: float
     total_weight: float
+    total_amount: float = 0.0
     created_by: uuid.UUID
     created_at: datetime
     updated_at: datetime
@@ -139,11 +242,14 @@ class InquiryListItemRead(BaseModel):
 
     id: uuid.UUID
     buyer_id: uuid.UUID
+    buyer_name: str | None = None
     branch_id: str | None = None
     consignment_code_id: uuid.UUID
+    consignment_code: str | None = None
     consignment_status: InquiryConsignmentStatus
     total_cbm: float
     total_weight: float
+    total_amount: float = 0.0
     created_at: datetime
     updated_at: datetime
 
@@ -158,6 +264,8 @@ class CompanySummaryRead(BaseModel):
     approved_count: int = 0
     total_cbm: float
     total_weight: float
+    total_amount: float = 0.0
     consignment_status: InquiryConsignmentStatus = InquiryConsignmentStatus.PROPOSED
     consignment_codes: list[str] = Field(default_factory=list)
     updated_at: datetime | None = None
+

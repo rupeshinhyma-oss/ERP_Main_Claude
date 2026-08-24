@@ -784,13 +784,21 @@ export function ProductsPage() {
           header: "Product Name (Tally)",
           render: (p) => {
             const name = p.product_name_tally || p.product_name || "—";
+            const hasLicense = Boolean(p.license_certificate_required && p.license_certificate_required.trim());
             return (
-              <div style={{ display: "inline-flex", alignItems: "center", gap: "6px", maxWidth: "340px", minWidth: "240px" }}>
+              <div style={{ display: "inline-flex", alignItems: "center", gap: "8px", maxWidth: "360px", minWidth: "240px", flexWrap: "nowrap" }}>
                 <a
                   href="#"
                   className="cell-primary"
                   title={name}
-                  style={{ color: "var(--color-primary)", fontWeight: 600, maxWidth: "300px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                  style={{
+                    color: hasLicense ? "#dc2626" : "var(--color-primary)",
+                    fontWeight: 700,
+                    maxWidth: hasLicense ? "220px" : "320px",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
                   onClick={(e) => {
                     e.preventDefault();
                     openProductDetailView(p.id);
@@ -798,9 +806,28 @@ export function ProductsPage() {
                 >
                   {name}
                 </a>
-                {p.license_certificate_required && (
-                  <span title="License Required" style={{ color: "#ef4444", fontSize: "11px", fontWeight: "bold", flexShrink: 0 }}>
-                    ⚠️
+                {hasLicense && (
+                  <span
+                    title={`License / Certificate Required: ${p.license_certificate_required}`}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "4px",
+                      background: "#fee2e2",
+                      color: "#b91c1c",
+                      border: "1px solid #f87171",
+                      borderRadius: "4px",
+                      padding: "2px 7px",
+                      fontSize: "10.5px",
+                      fontWeight: 800,
+                      letterSpacing: "0.4px",
+                      boxShadow: "0 1px 2px rgba(220, 38, 38, 0.15)",
+                      whiteSpace: "nowrap",
+                      flexShrink: 0,
+                    }}
+                  >
+                    <span>⚠️</span>
+                    <span>LICENSE NEEDED</span>
                   </span>
                 )}
               </div>
@@ -1094,7 +1121,43 @@ export function ProductsPage() {
           status: f.status,
         };
       }}
-      renderFields={(f, set) => {
+      validateForm={(f) => {
+        const errs: Record<string, string> = {};
+        if (!f.product_name_tally?.trim()) {
+          errs.product_name_tally = "Product Name (As per Tally) is required.";
+        }
+        if (!f.category_id) {
+          errs.category_id = "Please select a Category.";
+        }
+        if (!f.sub_category_id) {
+          errs.sub_category_id = "Please select a Sub-Category.";
+        }
+        if (!f.hsn_id) {
+          errs.hsn_id = "Please select a HSN Code.";
+        }
+        if (!f.uom_id) {
+          errs.uom_id = "Please select a Primary UOM.";
+        }
+        if (numOrNull(f.packaging_quantity) === null) {
+          errs.packaging_quantity = "Packaging Quantity (unit) is required.";
+        }
+        const grossWeight = numOrNull(f.packaging_gross_weight);
+        if (grossWeight === null || grossWeight <= 0) {
+          errs.packaging_gross_weight = "Packaging Gross Weight (kg) is required.";
+        }
+        const l = numOrNull(f.length_cm);
+        const w = numOrNull(f.width_cm);
+        const h = numOrNull(f.height_cm);
+        const cbm =
+          l && w && h && l > 0 && w > 0 && h > 0
+            ? Number(((l * w * h) / 1000000).toFixed(6))
+            : numOrNull(f.packaging_unit_cbm);
+        if (cbm === null || cbm <= 0) {
+          errs.packaging_unit_cbm = "Packaging Unit CBM is required.";
+        }
+        return errs;
+      }}
+      renderFields={(f, set, errors = {}) => {
         const scopedSubCategories = f.category_id
           ? subCategories.items.filter((sc) => sc.category_id === f.category_id && (sc.status === "active" || sc.id === f.sub_category_id))
           : subCategories.items.filter((sc) => sc.status === "active" || sc.id === f.sub_category_id);
@@ -1121,6 +1184,7 @@ export function ProductsPage() {
                   placeholder="Name as in Tally"
                   value={f.product_name_tally}
                   onChange={(v) => set("product_name_tally", v)}
+                  error={errors.product_name_tally}
                 />
                 {(() => {
                   const cleanTyped = (f.product_name_tally || "").trim().toLowerCase().replace(/[\s-]/g, "");
@@ -1205,7 +1269,7 @@ export function ProductsPage() {
               </div>
               <TextField id="product_name_invoice" label="Product Name (As per Invoice)" maxLength={255} placeholder="Name for Tax Invoices" value={f.product_name_invoice} onChange={(v) => set("product_name_invoice", v)} />
               <div style={{ position: "relative" }}>
-                <TextField id="product_code" label="Product Code" maxLength={50} placeholder="e.g. PRD-001" value={f.product_code} onChange={(v) => set("product_code", v)} />
+                <TextField id="product_code" label="Product Code" maxLength={50} placeholder="e.g. PRD-001" value={f.product_code} onChange={(v) => set("product_code", v)} error={errors.product_code} />
                 {(() => {
                   const cleanCode = (f.product_code || "").trim().toLowerCase();
                   if (!cleanCode) return null;
@@ -1236,7 +1300,7 @@ export function ProductsPage() {
             <div className="section-title">Classification &amp; Tax</div>
             <div className="form-grid" style={{ gridTemplateColumns: "repeat(3, 1fr)" }}>
               {/* Row 2: Brand, Category, Sub-Category */}
-              <SelectField id="brand_id" label="Brand" value={f.brand_id} onChange={(v) => set("brand_id", v)}>
+              <SelectField id="brand_id" label="Brand" value={f.brand_id} onChange={(v) => set("brand_id", v)} error={errors.brand_id}>
                 <option value="">-- Select Brand --</option>
                 {brands.items
                   .filter((b) => b.status === "active" || b.id === f.brand_id)
@@ -1251,6 +1315,7 @@ export function ProductsPage() {
                 label="Category *"
                 required
                 value={f.category_id}
+                error={errors.category_id}
                 onChange={(v) => {
                   set("category_id", v);
                   set("sub_category_id", "");
@@ -1265,7 +1330,7 @@ export function ProductsPage() {
                     </option>
                   ))}
               </SelectField>
-              <SelectField id="sub_category_id" label="Sub-Category *" value={f.sub_category_id} onChange={(v) => set("sub_category_id", v)}>
+              <SelectField id="sub_category_id" label="Sub-Category *" value={f.sub_category_id} onChange={(v) => set("sub_category_id", v)} error={errors.sub_category_id}>
                 <option value="">-- Select Sub-Category --</option>
                 {scopedSubCategories.map((sc) => (
                   <option key={sc.id} value={sc.id}>
@@ -1279,6 +1344,7 @@ export function ProductsPage() {
                 id="hsn_id"
                 label="HSN Code *"
                 value={f.hsn_id}
+                error={errors.hsn_id}
                 onChange={(v) => {
                   set("hsn_id", v);
                   const picked = hsnCodes.items.find((h) => h.id === v);
@@ -1308,8 +1374,8 @@ export function ProductsPage() {
 
                   // Automatically check / pre-select all branches belonging to the selected organization(s)
                   const selectedOrgs = organizations.items.filter((org) => newVals.includes(org.id));
-                  const autoBranchIds: string[] = selectedOrgs.flatMap((org) => {
-                    const branches: any[] = (org as any).branches || [];
+                  const autoBranchIds: string[] = selectedOrgs.flatMap((org: any) => {
+                    const branches: any[] = org.branches || [];
                     return branches.map((b: any) => b.id || `${org.id}_${b.name}`);
                   });
                   set("branch_ids_json", JSON.stringify(autoBranchIds));
@@ -1323,26 +1389,28 @@ export function ProductsPage() {
                   catch { return []; }
                 })();
                 const selectedOrgs = organizations.items.filter((org) => selectedOrgIds.includes(org.id));
-                const availableBranchOptions: { id: string; name: string }[] = selectedOrgs.flatMap((org) => {
-                  const branches: any[] = (org as any).branches || [];
-                  return branches.map((b: any) => ({
+                const availableBranchOptions: { id: string; name: string }[] = selectedOrgs.flatMap((org: any) => {
+                  const brList: any[] = org.branches || [];
+                  return brList.map((b: any) => ({
                     id: b.id || `${org.id}_${b.name}`,
                     name: `${org.name} — ${b.name}${b.code_prefix ? ` (${b.code_prefix})` : ""}`,
                   }));
                 });
 
                 return (
-                  <MultiSelectField
-                    id="branch_ids_json"
-                    label="Branches / Operating Locations"
-                    placeholder={availableBranchOptions.length > 0 ? "-- Select Branches --" : "-- Select Organization First --"}
-                    values={(() => {
-                      try { return JSON.parse(f.branch_ids_json || "[]"); }
-                      catch { return []; }
-                    })()}
-                    options={availableBranchOptions}
-                    onChange={(newVals) => set("branch_ids_json", JSON.stringify(newVals))}
-                  />
+                  <div className="form-grid" style={{ gridTemplateColumns: "1fr", marginTop: "14px" }}>
+                    <MultiSelectField
+                      id="branch_ids_json"
+                      label="Branches / Operating Locations"
+                      placeholder={availableBranchOptions.length > 0 ? "-- Select Branches --" : "-- Select Organization First --"}
+                      values={(() => {
+                        try { return JSON.parse(f.branch_ids_json || "[]"); }
+                        catch { return []; }
+                      })()}
+                      options={availableBranchOptions}
+                      onChange={(newVals) => set("branch_ids_json", JSON.stringify(newVals))}
+                    />
+                  </div>
                 );
               })()}
             </div>
@@ -1352,7 +1420,7 @@ export function ProductsPage() {
                 <div className="section-title" style={{ marginTop: 0 }}>Compliance &amp; License Requirements</div>
                 <TextAreaField
                   id="license_certificate_required"
-                  label="Any License / Certificate (if needed)"
+                  label="Compliance &amp; License Requirements"
                   rows={3}
                   placeholder="e.g. Import License, Drug Certificate. Highlighted RED in Inquiry if set."
                   value={f.license_certificate_required}
@@ -1374,7 +1442,7 @@ export function ProductsPage() {
 
             <div className="section-title">Packaging &amp; Physical Attributes</div>
             <div className="form-grid" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
-              <SelectField id="uom_id" label="UOM (Unit of Measure) *" required value={f.uom_id} onChange={(v) => set("uom_id", v)}>
+              <SelectField id="uom_id" label="UOM (Unit of Measure) *" required value={f.uom_id} onChange={(v) => set("uom_id", v)} error={errors.uom_id}>
                 <option value="">-- Select UOM --</option>
                 {uoms.items.map((u) => (
                   <option key={u.id} value={u.id}>
@@ -1382,9 +1450,9 @@ export function ProductsPage() {
                   </option>
                 ))}
               </SelectField>
-              <TextField id="packaging_quantity" label="Packaging Quantity (unit) *" required type="number" step="0.001" min={0} value={f.packaging_quantity} onChange={(v) => set("packaging_quantity", v)} />
+              <TextField id="packaging_quantity" label="Packaging Quantity (unit) *" required type="number" step="0.001" min={0} value={f.packaging_quantity} onChange={(v) => set("packaging_quantity", v)} error={errors.packaging_quantity} />
               <TextField id="packaging_net_weight" label="Packaging Net Weight (kg)" type="number" step="0.001" min={0} value={f.packaging_net_weight} onChange={(v) => set("packaging_net_weight", v)} />
-              <TextField id="packaging_gross_weight" label="Packaging Gross Weight (kg) *" required type="number" step="0.001" min={0.001} value={f.packaging_gross_weight} onChange={(v) => set("packaging_gross_weight", v)} />
+              <TextField id="packaging_gross_weight" label="Packaging Gross Weight (kg) *" required type="number" step="0.001" min={0.001} value={f.packaging_gross_weight} onChange={(v) => set("packaging_gross_weight", v)} error={errors.packaging_gross_weight} />
             </div>
 
 
@@ -1403,6 +1471,7 @@ export function ProductsPage() {
                 placeholder="Auto-calculated or enter directly"
                 value={f.packaging_unit_cbm}
                 onChange={(v) => set("packaging_unit_cbm", v)}
+                error={errors.packaging_unit_cbm}
               />
             </div>
 
@@ -1586,6 +1655,20 @@ export function ProductsPage() {
           </>
         );
       }}
+      getRowStyle={(item) => {
+        if (item.license_certificate_required && item.license_certificate_required.trim()) {
+          return {
+            backgroundColor: "#fff1f2",
+            borderLeft: "4px solid #ef4444",
+          };
+        }
+        return {};
+      }}
+      getRowClassName={(item) =>
+        item.license_certificate_required && item.license_certificate_required.trim()
+          ? "row-danger"
+          : ""
+      }
       onReady={(handle) => {
         masterHandleRef.current = handle;
       }}

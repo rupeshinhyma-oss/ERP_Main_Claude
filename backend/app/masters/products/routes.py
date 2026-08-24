@@ -278,8 +278,7 @@ async def update_product(
     db: AsyncSession = Depends(get_db_session),
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
 ) -> dict:
-    """Update an existing product."""
-    product = await service.update(product_id, **payload.model_dump())
+    product = await service.update(product_id, **payload.model_dump(exclude_unset=True))
     data = ProductRead.model_validate(product).model_dump(mode="json")
     await _record_action(
         audit_service=audit_service,

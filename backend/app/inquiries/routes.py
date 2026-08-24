@@ -37,6 +37,7 @@ from app.events.dispatcher import EventDispatcher
 from app.inquiries.dependencies import get_inquiry_service
 from app.inquiries.schemas import (
     BulkTallyPostRequest,
+    BulkInquiryItemCreate,
     CompanySummaryRead,
     ConsignmentCodeCreate,
     ConsignmentCodeRead,
@@ -47,6 +48,11 @@ from app.inquiries.schemas import (
     InquiryItemUpdate,
     InquiryListItemRead,
     InquiryRead,
+    QuotationCreate,
+    QuotationRead,
+    QuotationStatusUpdate,
+    RFQCreate,
+    RFQRead,
 )
 from app.inquiries.service import InquiryService
 
@@ -295,6 +301,35 @@ async def create_item(
     return build_success_response(data=data, request_id=request.state.request_id, message="Inquiry item added.")
 
 
+@router.post("/items/bulk", status_code=status.HTTP_201_CREATED, summary="Add multiple inquiry items in a single request")
+async def create_items_bulk(
+    payload: BulkInquiryItemCreate,
+    request: Request,
+    service: InquiryService = Depends(get_inquiry_service),
+    current_user: CurrentUser = Depends(get_current_user),
+    audit_service: AuditService = Depends(get_audit_service),
+    db: AsyncSession = Depends(get_db_session),
+    dispatcher: EventDispatcher = Depends(get_event_dispatcher),
+) -> dict:
+    items_raw = [item.model_dump(mode="json") for item in payload.items]
+    items = await service.add_items_bulk(
+        buyer_id=payload.buyer_id,
+        consignment_code_id=payload.consignment_code_id,
+        items_payload=items_raw,
+        user_id=current_user.id,
+    )
+    data = [InquiryItemRead.model_validate(i).model_dump(mode="json") for i in items]
+    await _publish_inquiry_event(
+        db=db,
+        dispatcher=dispatcher,
+        event_type="inquiry.created",
+        entity_id=payload.consignment_code_id,
+        user_id=current_user.id,
+        changes={"count": len(items)},
+    )
+    return build_success_response(data=data, request_id=request.state.request_id, message=f"Added {len(items)} inquiry items.")
+
+
 @router.get("/{inquiry_id}/items", summary="Layer 2: list items in a consignment")
 async def list_items(
     inquiry_id: uuid.UUID,
@@ -315,10 +350,8 @@ async def get_inquiry(
     service: InquiryService = Depends(get_inquiry_service),
     _current_user: CurrentUser = Depends(get_current_user),
 ) -> dict:
-    inquiry = await service.get_inquiry_or_raise(inquiry_id)
-    items = await service.list_items(inquiry_id)
-    inquiry.items = items
-    data = InquiryRead.model_validate(inquiry).model_dump(mode="json")
+    inquiry_data = await service.get_inquiry_with_details(inquiry_id)
+    data = InquiryRead.model_validate(inquiry_data).model_dump(mode="json")
     return build_success_response(data=data, request_id=request.state.request_id)
 
 
@@ -569,3 +602,143 @@ async def bulk_mark_tally_posted(
         )
         await dispatcher.publish(module_channel("inquiries"), event, exclude_user_id=current_user.id)
     return build_success_response(data=data, request_id=request.state.request_id, message=f"{len(items)} item(s) marked Posted.")
+
+
+# ---------------------------------------------------------------------------
+# Quotations & RFQs
+# ---------------------------------------------------------------------------
+
+
+@router.get("/products/{product_id}/last-purchase", summary="Get last purchase or quote for a product")
+async def get_product_last_purchase(
+    product_id: uuid.UUID,
+    request: Request,
+    service: InquiryService = Depends(get_inquiry_service),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    """Return latest approved purchase or quote details for a product."""
+    data = await service.get_last_purchase_for_product(product_id)
+    return build_success_response(data=data, request_id=request.state.request_id)
+
+
+@router.get("/items/{item_id}/quotations", summary="List quotations for an inquiry item")
+async def list_item_quotations(
+    item_id: uuid.UUID,
+    request: Request,
+    service: InquiryService = Depends(get_inquiry_service),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    """Return all supplier quotations received for a specific inquiry line item."""
+    quotes = await service.list_quotations_for_item(item_id)
+    return build_success_response(data=quotes, request_id=request.state.request_id)
+
+
+@router.post("/items/{item_id}/quotations", status_code=status.HTTP_201_CREATED, summary="Add a quotation for an inquiry item")
+async def create_item_quotation(
+    item_id: uuid.UUID,
+    payload: QuotationCreate,
+    request: Request,
+    service: InquiryService = Depends(get_inquiry_service),
+    current_user: CurrentUser = Depends(get_current_user),
+    audit_service: AuditService = Depends(get_audit_service),
+    db: AsyncSession = Depends(get_db_session),
+    dispatcher: EventDispatcher = Depends(get_event_dispatcher),
+) -> dict:
+    """Record a supplier's quotation response for an inquiry item."""
+    quote = await service.create_quotation(item_id, payload, user_id=current_user.id)
+    await _record_action(
+        audit_service=audit_service,
+        request=request,
+        action=AuditAction.CREATE,
+        actor=current_user,
+        entity_id=quote.id,
+        description=f"Created quotation {quote.quote_number} for inquiry item {item_id}.",
+        new_values={"quote_number": quote.quote_number, "supplier_id": str(quote.supplier_id), "total_cost": quote.total_cost},
+    )
+    await _publish_inquiry_event(
+        db=db,
+        dispatcher=dispatcher,
+        event_type="quotation.created",
+        entity_id=item_id,
+        user_id=current_user.id,
+        changes={"quote_number": quote.quote_number},
+    )
+    return build_success_response(
+        data=QuotationRead.model_validate(quote).model_dump(mode="json"),
+        request_id=request.state.request_id,
+        message=f"Quotation {quote.quote_number} added successfully.",
+    )
+
+
+@router.patch("/quotations/{quotation_id}/status", summary="Update quotation status (approve/reject)")
+async def update_quotation_status(
+    quotation_id: uuid.UUID,
+    payload: QuotationStatusUpdate,
+    request: Request,
+    service: InquiryService = Depends(get_inquiry_service),
+    current_user: CurrentUser = Depends(get_current_user),
+    audit_service: AuditService = Depends(get_audit_service),
+    db: AsyncSession = Depends(get_db_session),
+    dispatcher: EventDispatcher = Depends(get_event_dispatcher),
+) -> dict:
+    """Approve or reject a quotation."""
+    quote = await service.update_quotation_status(quotation_id, payload.status, user_id=current_user.id)
+    await _record_action(
+        audit_service=audit_service,
+        request=request,
+        action=AuditAction.UPDATE,
+        actor=current_user,
+        entity_id=quote.id,
+        description=f"Updated quotation {quote.quote_number} status to {quote.status}.",
+        new_values={"status": quote.status.value if hasattr(quote.status, "value") else str(quote.status)},
+    )
+    await _publish_inquiry_event(
+        db=db,
+        dispatcher=dispatcher,
+        event_type="quotation.updated",
+        entity_id=quote.inquiry_item_id,
+        user_id=current_user.id,
+        changes={"quotation_status": str(quote.status)},
+    )
+    return build_success_response(
+        data=QuotationRead.model_validate(quote).model_dump(mode="json"),
+        request_id=request.state.request_id,
+        message=f"Quotation status updated to {quote.status}.",
+    )
+
+
+@router.post("/items/{item_id}/rfqs", status_code=status.HTTP_201_CREATED, summary="Create an RFQ for an inquiry item")
+async def create_item_rfq(
+    item_id: uuid.UUID,
+    payload: RFQCreate,
+    request: Request,
+    service: InquiryService = Depends(get_inquiry_service),
+    current_user: CurrentUser = Depends(get_current_user),
+    audit_service: AuditService = Depends(get_audit_service),
+    db: AsyncSession = Depends(get_db_session),
+    dispatcher: EventDispatcher = Depends(get_event_dispatcher),
+) -> dict:
+    """Create and dispatch a Request For Quotation to suppliers."""
+    rfq = await service.create_rfq(item_id, payload, user_id=current_user.id)
+    await _record_action(
+        audit_service=audit_service,
+        request=request,
+        action=AuditAction.CREATE,
+        actor=current_user,
+        entity_id=rfq.id,
+        description=f"Created RFQ for inquiry item {item_id}.",
+        new_values={"supplier_type": rfq.supplier_type, "supplier_ids": rfq.supplier_ids},
+    )
+    await _publish_inquiry_event(
+        db=db,
+        dispatcher=dispatcher,
+        event_type="rfq.created",
+        entity_id=item_id,
+        user_id=current_user.id,
+        changes={"rfq_id": str(rfq.id)},
+    )
+    return build_success_response(
+        data=RFQRead.model_validate(rfq).model_dump(mode="json"),
+        request_id=request.state.request_id,
+        message="Request For Quotation dispatched successfully.",
+    )

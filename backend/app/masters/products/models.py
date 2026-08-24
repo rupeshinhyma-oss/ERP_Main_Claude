@@ -34,7 +34,7 @@ class Product(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin, SoftDelet
     __tablename__ = "products"
 
     # --- Identity -----------------------------------------------------------------
-    product_code: Mapped[str] = mapped_column(String(50), unique=True, nullable=False, index=True)
+    product_code: Mapped[str | None] = mapped_column(String(50), unique=True, nullable=True, index=True)
     product_name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)  # Legacy alias
     product_name_tally: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     product_name_invoice: Mapped[str | None] = mapped_column(String(255), nullable=True)

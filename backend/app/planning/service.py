@@ -3165,22 +3165,21 @@ class PlanningService:
                             if appr_cell and appr_cell.value:
                                 await self.cell_repository.update(appr_cell, value=None, updated_by=user_id)
                 elif value is not None and value.strip():
-                    if not cell.status_color:
-                        try:
-                            cell = await self.set_cell_status(
-                                sheet_id,
-                                row_id,
-                                column_id,
-                                status_color=PlanningCellStatusColor.BLUE_ORDERED,
-                                custom_status_tag_id=None,
-                                user_id=user_id,
-                                username=username,
-                                user_permissions=user_permissions,
-                                check_permissions=False,
-                            )
-                        except (BadRequestException, ForbiddenException):
-                            pass
-            elif value is not None and value.strip() and column.enable_status_color and not cell.status_color:
+                    try:
+                        cell = await self.set_cell_status(
+                            sheet_id,
+                            row_id,
+                            column_id,
+                            status_color=PlanningCellStatusColor.BLUE_ORDERED,
+                            custom_status_tag_id=None,
+                            user_id=user_id,
+                            username=username,
+                            user_permissions=user_permissions,
+                            check_permissions=False,
+                        )
+                    except (BadRequestException, ForbiddenException):
+                        pass
+            elif value is not None and value.strip() and column.enable_status_color:
                 if not is_test_yn_column and not is_approval_date_column:
                     try:
                         cell = await self.set_cell_status(

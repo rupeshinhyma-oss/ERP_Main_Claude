@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.audit.constants import AuditAction
 from app.audit.dependencies import get_audit_service
 from app.audit.service import AuditService
+from app.auth.dependencies import get_current_user
 from app.auth.service import CurrentUser
 from app.common.list_query import ListQueryParams, get_list_query_params
 from app.common.pagination import PageMeta
@@ -29,6 +30,7 @@ from app.masters.product_categories.dependencies import get_product_category_ser
 from app.masters.product_categories.schemas import (
     ImportSummaryRead,
     ProductCategoryCreate,
+    ProductCategoryLookupRead,
     ProductCategoryRead,
     ProductCategoryUpdate,
 )
@@ -135,6 +137,38 @@ async def list_categories(
     meta = PageMeta.build(page=query.page.page, page_size=query.page.page_size, total_records=total).as_meta_dict()
     data = [ProductCategoryRead.model_validate(c).model_dump(mode="json") for c in categories]
     return build_success_response(data=data, request_id=request.state.request_id, meta=meta)
+
+
+@router.get(
+    "/lookup",
+    summary="Lightweight id/name lookup for product categories (no category.view required)",
+)
+async def lookup_categories(
+    request: Request,
+    service: ProductCategoryService = Depends(get_product_category_service),
+    _current_user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    """
+    Return every active category as bare ``{id, name}`` pairs.
+
+    Deliberately gated on "is logged in" only, NOT ``category.view``.
+    Other modules (e.g. Buyers, Shipment Planning) store category IDs
+    on their own records and need to resolve those IDs to display names
+    for a user who has permission to view *that* module's data, even if
+    the admin never separately granted them access to the Categories
+    master module itself. Module permissions control whether a user can
+    open/manage the Categories module -- they should never control
+    whether a name a user is already entitled to see (because it's
+    referenced on a record they can see) renders correctly.
+
+    Without this, ``category.view``-less users see raw category UUIDs
+    on pages like Buyers instead of names, because the page's own
+    lookup call to the full ``GET /masters/product-categories`` list
+    gets rejected with 403 and silently degrades to an empty list.
+    """
+    categories = await service.list_all_cached()
+    data = [ProductCategoryLookupRead.model_validate(c).model_dump(mode="json") for c in categories]
+    return build_success_response(data=data, request_id=request.state.request_id)
 
 
 @router.get("/export", summary="Export product categories to CSV/Excel")

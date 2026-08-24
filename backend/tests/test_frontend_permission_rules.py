@@ -25,12 +25,6 @@ def test_permission_alias_conventions():
         if code.endswith(".read"):
             if code.replace(".read", ".view") in user_perms:
                 return True
-        if code.endswith(".export"):
-            if code.replace(".export", ".read") in user_perms or code.replace(".export", ".view") in user_perms:
-                return True
-        if code.endswith(".import"):
-            if code.replace(".import", ".create") in user_perms:
-                return True
         return False
 
     # Super admin bypass
@@ -43,11 +37,14 @@ def test_permission_alias_conventions():
     assert resolve_permission({"supplier.read"}, False, "supplier.view") is True
     assert resolve_permission({"supplier.view"}, False, "supplier.read") is True
 
-    # Export alias
-    assert resolve_permission({"supplier.read"}, False, "supplier.export") is True
+    # Export strictly requires export permission
+    assert resolve_permission({"supplier.export"}, False, "supplier.export") is True
+    assert resolve_permission({"supplier.read"}, False, "supplier.export") is False
+    assert resolve_permission({"supplier.view"}, False, "supplier.export") is False
 
-    # Import alias
-    assert resolve_permission({"supplier.create"}, False, "supplier.import") is True
+    # Import strictly requires import permission
+    assert resolve_permission({"supplier.import"}, False, "supplier.import") is True
+    assert resolve_permission({"supplier.create"}, False, "supplier.import") is False
 
     # Missing permission rejection
     assert resolve_permission({"supplier.read"}, False, "supplier.delete") is False

@@ -585,4 +585,69 @@ async def test_status_color_permission_isolation():
     assert "no quantity or value entered" in str(exc_zero.value)
 
 
+@pytest.mark.asyncio
+async def test_set_cell_value_updates_status_color_to_blue_when_number_changed():
+    """When a user changes the number in a Mum or status-color column, its status turns to BLUE_ORDERED."""
+    sheet_id = uuid.uuid4()
+    row_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    col_mum_id = uuid.uuid4()
+
+    mock_sheet = PlanningSheet(id=sheet_id, name="Mumbai", mum_group_label="Mumdarsh")
+    col_mum = PlanningColumn(
+        id=col_mum_id, sheet_id=sheet_id, name="Mumdarsh 2", position=3,
+        data_type=PlanningColumnDataType.NUMBER, source_type=PlanningColumnSourceType.MANUAL,
+        enable_status_color=True, is_locked=False
+    )
+    mock_row = PlanningRow(id=row_id, sheet_id=sheet_id, label="Nitrogen Kit for Band Sealer", position=0)
+
+    # Initial state: Cell has value "4" and RED_REQUIREMENT status
+    cell_mum = PlanningCell(
+        id=uuid.uuid4(), row_id=row_id, column_id=col_mum_id, value="4",
+        status_color=PlanningCellStatusColor.RED_REQUIREMENT
+    )
+
+    mock_sheet_repo = AsyncMock()
+    mock_sheet_repo.get_by_id.return_value = mock_sheet
+    mock_col_repo = AsyncMock()
+    mock_col_repo.get_by_id.return_value = col_mum
+    mock_col_repo.list_for_sheet.return_value = [col_mum]
+    mock_row_repo = AsyncMock()
+    mock_row_repo.get_by_id.return_value = mock_row
+
+    mock_cell_repo = AsyncMock()
+    mock_cell_repo.get_by_row_and_column.return_value = cell_mum
+
+    async def update_cell(c, **kwargs):
+        for k, v in kwargs.items():
+            setattr(c, k, v)
+        return c
+
+    mock_cell_repo.update.side_effect = update_cell
+    mock_cell_repo.list_for_rows.return_value = [cell_mum]
+
+    mock_change_log_repo = AsyncMock()
+
+    service = PlanningService(
+        sheet_repository=mock_sheet_repo,
+        row_repository=mock_row_repo,
+        column_repository=mock_col_repo,
+        cell_repository=mock_cell_repo,
+        status_tag_repository=AsyncMock(),
+        change_log_repository=mock_change_log_repo,
+        audit_service=AsyncMock(),
+        column_role_lock_repository=AsyncMock(),
+    )
+
+    # User changes number from "4" to "5"
+    updated_cell = await service.set_cell_value(
+        sheet_id, row_id, col_mum_id, value="5", user_id=user_id, username="editor_user",
+        user_permissions=frozenset(["planning.cell.edit", "planning.view"])
+    )
+
+    # Value is updated to "5" and status_color MUST change to BLUE_ORDERED
+    assert updated_cell.value == "5"
+    assert updated_cell.status_color == PlanningCellStatusColor.BLUE_ORDERED
+
+
 

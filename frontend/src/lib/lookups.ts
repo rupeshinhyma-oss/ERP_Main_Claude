@@ -171,3 +171,25 @@ export function useNameMap<T extends { id: string }>(
 
   return (id) => (id ? map.get(id) ?? "—" : "—");
 }
+
+/**
+ * Bare id/name fallback lookup, for resolving names on records the user
+ * CAN see even when they lack permission on the referenced master module
+ * itself (e.g. a Buyers-only user viewing a buyer's linked Product
+ * Category names). Hits a module's permission-free `<apiBase>/lookup`
+ * endpoint -- see e.g. `app.masters.product_categories.routes.lookup_categories`
+ * on the backend -- which is gated on "is logged in" only, unlike the
+ * full `<apiBase>` list endpoint used by `useLookup` (gated on that
+ * module's own `.view` permission, needed there because the full list
+ * carries every field, including ones a non-admin shouldn't necessarily
+ * bulk-export).
+ *
+ * This is intentionally a SEPARATE hook from `useLookup`, not a fallback
+ * baked into `useLookup` itself: pages use the full `useLookup` result
+ * for forms/filters that need more than id+name (category_id on a
+ * sub-category, status, code, etc.), and only need this narrower
+ * fallback for display-only name resolution (chips, table cells).
+ */
+export function useLookupNames(apiBase: string): LookupResult<{ id: string; name: string }> {
+  return useLookup<{ id: string; name: string }>(`${apiBase}/lookup`, 1000);
+}

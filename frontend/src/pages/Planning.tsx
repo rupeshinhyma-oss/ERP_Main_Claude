@@ -300,9 +300,9 @@ function statusLabel(
 }
 
 /**
- * Floating description popover — appears anchored below a cell when the
- * user clicks the ✎ description button. The textarea saves on blur or
- * Ctrl+Enter; Escape closes without saving.
+ * Floating description popover — appears anchored below a column header when the
+ * user clicks the ✎ description button. Pressing Enter saves; Shift+Enter inserts
+ * a new line; Escape closes without saving.
  */
 function DescriptionPopover({
   anchor,
@@ -316,8 +316,18 @@ function DescriptionPopover({
   onClose: () => void;
 }) {
   const [text, setText] = useState(initialValue);
-  const rect = anchor.getBoundingClientRect();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Snapshot position on initial mount so if anchor unmounts or mouse leaves the header, the popover remains locked in place
+  const [pos] = useState(() => {
+    const rect = anchor.getBoundingClientRect();
+    const left = Math.max(10, Math.min(rect.left, window.innerWidth - 290));
+    const top =
+      rect.bottom + 230 > window.innerHeight && rect.top > 240
+        ? Math.max(10, rect.top - 220)
+        : Math.max(10, Math.min(rect.bottom + 6, window.innerHeight - 240));
+    return { top, left };
+  });
 
   useEffect(() => {
     textareaRef.current?.focus();
@@ -328,21 +338,14 @@ function DescriptionPopover({
     onClose();
   }
 
-  // Position below the anchor, clamped to viewport width and height
-  const left = Math.max(10, Math.min(rect.left, window.innerWidth - 290));
-  const top =
-    rect.bottom + 230 > window.innerHeight && rect.top > 240
-      ? Math.max(10, rect.top - 220)
-      : Math.max(10, Math.min(rect.bottom + 6, window.innerHeight - 240));
-
   return createPortal(
     <>
       <div style={{ position: "fixed", inset: 0, zIndex: 9998 }} onClick={() => { onSave(text); onClose(); }} />
       <div
         style={{
           position: "fixed",
-          top,
-          left,
+          top: pos.top,
+          left: pos.left,
           zIndex: 9999,
           background: "#fff",
           border: "1px solid #CBD5E1",
@@ -360,10 +363,15 @@ function DescriptionPopover({
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Escape") { onClose(); e.stopPropagation(); }
-            if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) commit();
+            if (e.key === "Escape") {
+              onClose();
+              e.stopPropagation();
+            } else if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              commit();
+            }
           }}
-          placeholder="Add a note for this cell…"
+          placeholder="Add a note for this column…"
           rows={4}
           style={{
             width: "100%",
@@ -393,7 +401,7 @@ function DescriptionPopover({
             Save
           </button>
         </div>
-        <div style={{ fontSize: 11, color: "#94A3B8", marginTop: 4, textAlign: "right" }}>Ctrl+Enter to save</div>
+        <div style={{ fontSize: 11, color: "#94A3B8", marginTop: 4, textAlign: "right" }}>Enter to save · Shift+Enter for new line</div>
       </div>
     </>,
     document.body
@@ -1353,7 +1361,7 @@ export function PlanningPage() {
    * same pattern the active sheet tab already uses, so a link to a
    * filtered view can be shared/bookmarked.
    */
-  const organizations = useLookup<{ id: string; name: string; branches?: { id: string; name: string; code_prefix?: string }[] | null }>("/masters/company-list", 250);
+  const organizations = useLookup<{ id: string; name: string; branches?: { id: string; name: string; code_prefix?: string }[] | null }>("/masters/company-list/lookup", 250);
   const [activeOrganizationId, setActiveOrganizationId] = useState<string | null>(null);
   /**
    * Which organization's sheet TABS are currently shown at all (Mumbai/
@@ -2640,6 +2648,9 @@ export function PlanningPage() {
     const targetCol = grid?.columns.find((c) => c.id === columnId);
     const mumLabel = grid?.sheet?.mum_group_label || "Mum";
     const isMumCol = targetCol ? isPureMumColumn(targetCol.name, mumLabel) : false;
+    const isStatusColorCol = targetCol
+      ? isMumCol || (targetCol.enable_status_color && !isTestColumn(targetCol.name) && !isApprovalDateColumn(targetCol.name))
+      : false;
     const isZeroOrBlank = isMumCol && (value.trim() === "" || value.trim() === "0" || (!isNaN(Number(value)) && Number(value) === 0));
     const effectiveVal = isZeroOrBlank ? "" : value;
     const mumNum = targetCol ? mumGroupNumber(targetCol.name, mumLabel) : null;
@@ -2660,7 +2671,11 @@ export function PlanningPage() {
           const exists = r.cells.some((cell) => cell.column_id === columnId);
           const optimisticCell = isZeroOrBlank
             ? { value: "", display_value: "", status_color: null, custom_status_tag_id: null }
-            : { value: effectiveVal, display_value: effectiveVal };
+            : {
+                value: effectiveVal,
+                display_value: effectiveVal,
+                ...(isStatusColorCol && effectiveVal.trim() !== "" ? { status_color: "blue_ordered" as PlanningCellStatusColor, custom_status_tag_id: null } : {}),
+              };
           let updatedCells = exists
             ? r.cells.map((cell) => (cell.column_id === columnId ? { ...cell, ...optimisticCell } : cell))
             : [
@@ -2671,7 +2686,7 @@ export function PlanningPage() {
                 column_id: columnId,
                 value: isZeroOrBlank ? "" : effectiveVal,
                 display_value: isZeroOrBlank ? "" : effectiveVal,
-                status_color: null,
+                status_color: isZeroOrBlank ? null : isStatusColorCol && effectiveVal.trim() !== "" ? "blue_ordered" : null,
                 custom_status_tag_id: null,
               } as PlanningCell,
             ];
@@ -3648,7 +3663,6 @@ function ColumnHeader({
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(column.name);
-  const [hovered, setHovered] = useState(false);
   const [descAnchor, setDescAnchor] = useState<HTMLElement | null>(null);
   const [resizing, setResizing] = useState(false);
   const hasDescription = !!column.description;
@@ -3711,8 +3725,6 @@ function ColumnHeader({
 
   return (
     <th
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
       style={{
         padding: "5px 8px",
         textAlign: "center",
@@ -3730,7 +3742,7 @@ function ColumnHeader({
         boxShadow: isFrozen && isLastFrozen ? "3px 0 6px -2px rgba(0,0,0,0.15)" : undefined,
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: 20, width: "100%", gap: 2 }}>
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", width: "100%", minHeight: 28, gap: 2 }}>
         {editing ? (
           <input
             autoFocus
@@ -3748,110 +3760,112 @@ function ColumnHeader({
           />
         ) : (
           <>
-            <span
-              onClick={() => canManage && setEditing(true)}
-              style={{
-                cursor: canManage ? "text" : "default",
-                fontWeight: 600,
-                color: "#334155",
-                textAlign: "center",
-                padding: "0 2px",
-                whiteSpace: "normal",
-                wordBreak: "break-word",
-                lineHeight: "1.2",
-                minWidth: 0,
-                flex: "1 1 auto",
-                overflow: "hidden",
-              }}
-              title={column.name}
-            >
-              {column.name}
-            </span>
-            {sourceBadge && (
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 3, width: "100%", minWidth: 0 }}>
               <span
-                title={sourceBadge.title}
+                onClick={() => canManage && setEditing(true)}
                 style={{
-                  fontSize: 10,
-                  fontWeight: 700,
-                  color: "#7C3AED",
-                  background: "#EDE9FE",
+                  cursor: canManage ? "text" : "default",
+                  fontWeight: 600,
+                  color: "#334155",
+                  textAlign: "center",
+                  padding: "0 2px",
+                  whiteSpace: "normal",
+                  wordBreak: "break-word",
+                  lineHeight: "1.2",
+                  minWidth: 0,
+                  overflow: "hidden",
+                }}
+                title={column.name}
+              >
+                {column.name}
+              </span>
+              {sourceBadge && (
+                <span
+                  title={sourceBadge.title}
+                  style={{
+                    fontSize: 10,
+                    fontWeight: 700,
+                    color: "#7C3AED",
+                    background: "#EDE9FE",
+                    borderRadius: 4,
+                    padding: "1px 4px",
+                    flexShrink: 0,
+                  }}
+                >
+                  {sourceBadge.label}
+                </span>
+              )}
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 2, flexShrink: 0, marginTop: 2 }}>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onOpenFilter?.(e.currentTarget);
+                }}
+                title={isFiltered ? `Filter active on ${column.name}` : `Filter ${column.name}`}
+                style={{
+                  border: "none",
+                  background: isFiltered ? "#EFF6FF" : "transparent",
+                  color: isFiltered ? "#2563EB" : "#94A3B8",
+                  cursor: "pointer",
+                  padding: "1px 3px",
                   borderRadius: 4,
-                  padding: "1px 4px",
-                  flexShrink: 0,
-                }}
-              >
-                {sourceBadge.label}
-              </span>
-            )}
-            {isPureMumColumn(column.name) && column.enable_description && hasDescription && !hovered && (
-              <span
-                title={`Description: ${column.description}`}
-                style={{ color: "#2563EB", fontSize: 11, flexShrink: 0 }}
-              >
-                ✎
-              </span>
-            )}
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                onOpenFilter?.(e.currentTarget);
-              }}
-              title={isFiltered ? `Filter active on ${column.name}` : `Filter ${column.name}`}
-              style={{
-                border: "none",
-                background: isFiltered ? "#EFF6FF" : "transparent",
-                color: isFiltered ? "#2563EB" : "#94A3B8",
-                cursor: "pointer",
-                padding: "2px 3px",
-                borderRadius: 4,
-                display: "inline-flex",
-                alignItems: "center",
-                flexShrink: 0,
-              }}
-            >
-              <svg width="11" height="11" viewBox="0 0 24 24" fill={isFiltered ? "#2563EB" : "none"} stroke="currentColor" strokeWidth="2.5">
-                <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
-              </svg>
-            </button>
-            {canManage && hovered && (
-              <div
-                style={{
-                  display: "flex",
+                  display: "inline-flex",
                   alignItems: "center",
-                  gap: 2,
-                  flexShrink: 0,
+                  lineHeight: 1,
                 }}
               >
-                {isPureMumColumn(column.name) && (
-                  <button
-                    type="button"
-                    onClick={(e) => setDescAnchor(descAnchor ? null : e.currentTarget)}
-                    title={hasDescription ? `Description: ${column.description}` : "Add a note about this column"}
-                    style={{
-                      border: "none",
-                      background: "transparent",
-                      cursor: "pointer",
-                      fontSize: 12,
-                      padding: "1px 3px",
-                      color: hasDescription ? "#2563EB" : "#94A3B8",
-                    }}
-                  >
-                    ✎
-                  </button>
-                )}
-                {!isSystemColumn(column.name) && (
-                  <button
-                    type="button"
-                    onClick={onDelete}
-                    title="Delete column"
-                    style={{ border: "none", background: "transparent", cursor: "pointer", color: "#EF4444", fontSize: 13, padding: "1px 3px" }}
-                  >
-                    ×
-                  </button>
-                )}
-              </div>
-            )}
+                <svg width="11" height="11" viewBox="0 0 24 24" fill={isFiltered ? "#2563EB" : "none"} stroke="currentColor" strokeWidth="2.5">
+                  <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
+                </svg>
+              </button>
+
+              {isPureMumColumn(column.name) && (
+                <button
+                  type="button"
+                  onClick={(e) => setDescAnchor(descAnchor ? null : e.currentTarget)}
+                  title={hasDescription ? `Description: ${column.description}` : "Add a note about this column"}
+                  style={{
+                    border: "none",
+                    background: "transparent",
+                    cursor: "pointer",
+                    fontSize: 12,
+                    padding: "1px 3px",
+                    color: hasDescription ? "#2563EB" : "#94A3B8",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    lineHeight: 1,
+                  }}
+                >
+                  ✎
+                </button>
+              )}
+
+              {canManage && !isSystemColumn(column.name) && (
+                <button
+                  type="button"
+                  onClick={onDelete}
+                  title="Delete column"
+                  style={{
+                    border: "none",
+                    background: "transparent",
+                    cursor: "pointer",
+                    color: "#94A3B8",
+                    fontSize: 13,
+                    padding: "0 2px",
+                    lineHeight: 1,
+                    display: "inline-flex",
+                    alignItems: "center",
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.color = "#EF4444")}
+                  onMouseLeave={(e) => (e.currentTarget.style.color = "#94A3B8")}
+                >
+                  ×
+                </button>
+              )}
+            </div>
           </>
         )}
       </div>
@@ -3905,7 +3919,6 @@ function EditableItemHeader({
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(column.name);
-  const [hovered, setHovered] = useState(false);
   const [descAnchor, setDescAnchor] = useState<HTMLElement | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const hasDescription = !!itemDescription;
@@ -3938,8 +3951,6 @@ function EditableItemHeader({
 
   return (
     <th
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
       style={{
         padding: "5px 8px",
         textAlign: "left",
@@ -3957,7 +3968,7 @@ function EditableItemHeader({
         boxShadow: isLastFrozen ? "3px 0 6px -2px rgba(0,0,0,0.15)" : undefined,
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", minHeight: 20, width: "100%", gap: 2 }}>
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", justifyContent: "center", width: "100%", minHeight: 28, gap: 2 }}>
         {editing && canManage ? (
           <input
             ref={inputRef}
@@ -3975,102 +3986,87 @@ function EditableItemHeader({
           />
         ) : (
           <>
-            <span
-              onClick={() => canManage && setEditing(true)}
-              title={canManage ? "Click to rename header" : undefined}
-              style={{
-                cursor: canManage ? "pointer" : "default",
-                fontWeight: 600,
-                color: "#334155",
-                minWidth: 0,
-                flex: "1 1 auto",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
-              }}
-            >
-              {column.name}
-            </span>
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                onOpenFilter?.(e.currentTarget);
-              }}
-              title={isFiltered ? `Filter active on ${column.name}` : `Filter ${column.name}`}
-              style={{
-                border: "none",
-                background: isFiltered ? "#EFF6FF" : "transparent",
-                color: isFiltered ? "#2563EB" : "#94A3B8",
-                cursor: "pointer",
-                padding: "2px 3px",
-                borderRadius: 4,
-                display: "inline-flex",
-                alignItems: "center",
-                flexShrink: 0,
-              }}
-            >
-              <svg width="11" height="11" viewBox="0 0 24 24" fill={isFiltered ? "#2563EB" : "none"} stroke="currentColor" strokeWidth="2.5">
-                <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
-              </svg>
-            </button>
-            {sourceBadge && (
+            <div style={{ display: "flex", alignItems: "center", gap: 3, width: "100%", minWidth: 0 }}>
               <span
-                title={sourceBadge.title}
+                onClick={() => canManage && setEditing(true)}
+                title={canManage ? "Click to rename header" : undefined}
                 style={{
-                  fontSize: 10,
-                  fontWeight: 700,
-                  color: "#7C3AED",
-                  background: "#EDE9FE",
+                  cursor: canManage ? "pointer" : "default",
+                  fontWeight: 600,
+                  color: "#334155",
+                  minWidth: 0,
+                  flex: "1 1 auto",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {column.name}
+              </span>
+              {sourceBadge && (
+                <span
+                  title={sourceBadge.title}
+                  style={{
+                    fontSize: 10,
+                    fontWeight: 700,
+                    color: "#7C3AED",
+                    background: "#EDE9FE",
+                    borderRadius: 4,
+                    padding: "1px 4px",
+                    flexShrink: 0,
+                  }}
+                >
+                  {sourceBadge.label}
+                </span>
+              )}
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 2, flexShrink: 0, marginTop: 2 }}>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onOpenFilter?.(e.currentTarget);
+                }}
+                title={isFiltered ? `Filter active on ${column.name}` : `Filter ${column.name}`}
+                style={{
+                  border: "none",
+                  background: isFiltered ? "#EFF6FF" : "transparent",
+                  color: isFiltered ? "#2563EB" : "#94A3B8",
+                  cursor: "pointer",
+                  padding: "1px 3px",
                   borderRadius: 4,
-                  padding: "1px 4px",
-                  flexShrink: 0,
-                }}
-              >
-                {sourceBadge.label}
-              </span>
-            )}
-            {column.enable_description && hasDescription && !hovered && (
-              <span
-                title={`Description: ${itemDescription}`}
-                style={{ color: "#2563EB", fontSize: 11, flexShrink: 0 }}
-              >
-                ✎
-              </span>
-            )}
-            {canManage && hovered && (
-              <div
-                style={{
-                  display: "flex",
+                  display: "inline-flex",
                   alignItems: "center",
-                  gap: 2,
-                  flexShrink: 0,
+                  lineHeight: 1,
                 }}
               >
+                <svg width="11" height="11" viewBox="0 0 24 24" fill={isFiltered ? "#2563EB" : "none"} stroke="currentColor" strokeWidth="2.5">
+                  <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
+                </svg>
+              </button>
+
+              {column.enable_description && (
                 <button
                   type="button"
                   onClick={(e) => setDescAnchor(descAnchor ? null : e.currentTarget)}
-                  title={
-                    !column.enable_description
-                      ? "Enable Description in Columns panel to add a note"
-                      : hasDescription
-                        ? `Description: ${itemDescription}`
-                        : "Add a note about this column"
-                  }
-                  disabled={!column.enable_description}
+                  title={hasDescription ? `Description: ${itemDescription}` : "Add a note about this column"}
                   style={{
                     border: "none",
                     background: "transparent",
-                    cursor: column.enable_description ? "pointer" : "not-allowed",
+                    cursor: "pointer",
                     fontSize: 12,
                     padding: "1px 3px",
-                    color: !column.enable_description ? "#CBD5E1" : hasDescription ? "#2563EB" : "#94A3B8",
+                    color: hasDescription ? "#2563EB" : "#94A3B8",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    lineHeight: 1,
                   }}
                 >
                   ✎
                 </button>
-              </div>
-            )}
+              )}
+            </div>
           </>
         )}
       </div>

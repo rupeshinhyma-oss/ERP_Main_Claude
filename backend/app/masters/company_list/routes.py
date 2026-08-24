@@ -7,12 +7,19 @@ from typing import Any
 from fastapi import APIRouter, Depends, File, Request, UploadFile, status
 from fastapi.responses import Response
 
+from app.auth.dependencies import get_current_user
 from app.auth.service import CurrentUser
 from app.common.list_query import ListQueryParams, get_list_query_params
 from app.common.pagination import PageMeta
 from app.core.responses import build_success_response
 from app.masters.company_list.dependencies import get_company_service
-from app.masters.company_list.schemas import CompanyCreate, CompanyRead, CompanyUpdate, ImportSummaryRead
+from app.masters.company_list.schemas import (
+    CompanyCreate,
+    CompanyLookupRead,
+    CompanyRead,
+    CompanyUpdate,
+    ImportSummaryRead,
+)
 from app.masters.company_list.service import CompanyService
 from app.rbac.dependencies import require_permission
 
@@ -33,11 +40,42 @@ async def list_companies(
     return build_success_response(data=data, request_id=request.state.request_id, meta=meta)
 
 
+@router.get(
+    "/lookup",
+    summary="Lightweight id/name/branches lookup for organizations (no organizationlist.view required)",
+)
+async def lookup_companies(
+    request: Request,
+    service: CompanyService = Depends(get_company_service),
+    _current_user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    """
+    Return every active organization and its branches as bare objects.
+
+    Gated on 'is logged in' only, NOT organizationlist.view.
+    Shipment Planning, Product Master, etc. store organization and branch IDs
+    and need to resolve those IDs to display names and filter tabs for a user
+    who has permission to view that module's data, even if they don't have
+    permission to manage the Organization master list itself.
+    """
+    companies = await service.list_all_dropdown()
+    data = [
+        {
+            "id": str(c.id),
+            "name": c.name,
+            "code": c.code,
+            "branches": c.branches or [],
+        }
+        for c in companies
+    ]
+    return build_success_response(data=data, request_id=request.state.request_id)
+
+
 @router.get("/dropdown", summary="List companies for dropdowns")
 async def list_companies_dropdown(
     request: Request,
     service: CompanyService = Depends(get_company_service),
-    _current_user: CurrentUser = Depends(require_permission("organizationlist.view")),
+    _current_user: CurrentUser = Depends(get_current_user),
 ) -> dict:
     """Return all active companies for dropdown options."""
     companies = await service.list_all_dropdown()

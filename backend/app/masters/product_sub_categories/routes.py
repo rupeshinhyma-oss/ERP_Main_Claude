@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.audit.constants import AuditAction
 from app.audit.dependencies import get_audit_service
 from app.audit.service import AuditService
+from app.auth.dependencies import get_current_user
 from app.auth.service import CurrentUser
 from app.common.list_query import ListQueryParams, get_list_query_params
 from app.common.pagination import PageMeta
@@ -30,6 +31,7 @@ from app.masters.product_sub_categories.dependencies import get_product_sub_cate
 from app.masters.product_sub_categories.schemas import (
     ImportSummaryRead,
     ProductSubCategoryCreate,
+    ProductSubCategoryLookupRead,
     ProductSubCategoryRead,
     ProductSubCategoryUpdate,
 )
@@ -136,6 +138,29 @@ async def list_sub_categories(
     meta = PageMeta.build(page=query.page.page, page_size=query.page.page_size, total_records=total).as_meta_dict()
     data = [ProductSubCategoryRead.model_validate(c).model_dump(mode="json") for c in sub_categories]
     return build_success_response(data=data, request_id=request.state.request_id, meta=meta)
+
+
+@router.get(
+    "/lookup",
+    summary="Lightweight id/name lookup for product sub-categories (no subcategory.view required)",
+)
+async def lookup_sub_categories(
+    request: Request,
+    service: ProductSubCategoryService = Depends(get_product_sub_category_service),
+    _current_user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    """
+    Return every active sub-category as bare ``{id, name}`` pairs.
+
+    Same rationale as ``product_categories.routes.lookup_categories``:
+    gated on "is logged in" only, so pages like Buyers can resolve
+    sub-category IDs on records the user IS permitted to see, without
+    requiring the admin to separately grant access to the Sub Categories
+    master module.
+    """
+    sub_categories = await service.list_all_cached()
+    data = [ProductSubCategoryLookupRead.model_validate(c).model_dump(mode="json") for c in sub_categories]
+    return build_success_response(data=data, request_id=request.state.request_id)
 
 
 @router.get("/export", summary="Export product sub-categories to CSV/Excel")

@@ -459,12 +459,8 @@ export function MasterPage<T extends MasterRecord>({
   const canUpdate = hasPermission(`${permissionPrefix}.update`);
   const canDelete = hasPermission(`${permissionPrefix}.delete`);
   const canImport = hasPermission(`${permissionPrefix}.import`);
-  // Backward-compatible: pages that don't pass exportPermission keep the
-  // original behavior of Export following Import's visibility.
-  const canExport = exportPermission ? hasPermission(exportPermission) : canImport;
-  // Backward-compatible: pages that don't pass bulkActionPermission keep
-  // Bulk Actions always visible, same as before this prop existed.
-  const canBulkAction = bulkActionPermission ? hasPermission(bulkActionPermission) : true;
+  const canExport = exportPermission ? hasPermission(exportPermission) : hasPermission(`${permissionPrefix}.export`);
+  const canBulkAction = bulkActionPermission ? hasPermission(bulkActionPermission) : hasPermission(`${permissionPrefix}.bulk_action`);
 
   const [rows, setRows] = useState<T[]>([]);
   const [allRecords, setAllRecords] = useState<T[]>([]);

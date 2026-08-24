@@ -1062,6 +1062,7 @@ export function SelectField({
   children,
   hint,
   style,
+  disabled = false,
   hasError = false,
   errorMessage,
   error,
@@ -1069,6 +1070,7 @@ export function SelectField({
   value: string;
   onChange: (value: string) => void;
   required?: boolean;
+  disabled?: boolean;
   children: ReactNode;
 }) {
   const isErr = Boolean(hasError || errorMessage || error);
@@ -1129,6 +1131,7 @@ export function SelectField({
   }, [options, searchTerm]);
 
   const toggleOpen = () => {
+    if (disabled) return;
     setOpen((prev) => {
       const next = !prev;
       if (next) {
@@ -1145,9 +1148,10 @@ export function SelectField({
 
       <div
         id={id}
-        tabIndex={0}
+        tabIndex={disabled ? -1 : 0}
         onClick={toggleOpen}
         onKeyDown={(e) => {
+          if (disabled) return;
           if (e.key === "Enter" || e.key === " ") {
             e.preventDefault();
             toggleOpen();
@@ -1156,12 +1160,13 @@ export function SelectField({
         style={{
           border: isErr ? "1.5px solid #ef4444" : "1px solid var(--color-border-strong)",
           boxShadow: isErr ? "0 0 0 3px rgba(239, 68, 68, 0.15)" : undefined,
-          backgroundColor: isErr ? "#fff5f5" : "var(--color-surface)",
+          backgroundColor: disabled ? "#f1f5f9" : isErr ? "#fff5f5" : "var(--color-surface)",
           borderRadius: "var(--radius-sm)",
           padding: "9px 11px",
           fontSize: "13.5px",
-          color: "var(--color-text)",
-          cursor: "pointer",
+          color: disabled ? "var(--color-muted)" : "var(--color-text)",
+          cursor: disabled ? "not-allowed" : "pointer",
+          opacity: disabled ? 0.75 : 1,
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",

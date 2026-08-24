@@ -90,10 +90,7 @@ export const Auth = {
   /**
    * Permission check with the backend's alias fallbacks. The Admin
    * (super_admin) role passes everything; otherwise a code matches if it is
-   * granted directly or via one of the documented aliases (view<->read,
-   * export/import fallbacks, the legacy employee<->user module pair kept
-   * for backward compatibility with older data, or a hierarchical short
-   * form such as masters.brand.create -> brand.create).
+   * granted directly or via view<->read alias.
    */
   hasPermission(code?: string | null): boolean {
     if (!code) return true;
@@ -104,15 +101,14 @@ export const Auth = {
     const perms = profile.permissions;
     if (perms.includes(code)) return true;
 
-    // Check export fallback to view
-    if (code.endsWith(".export")) {
-      const viewAlias = code.replace(/\.export$/, ".view");
-      if (perms.includes(viewAlias)) return true;
+    // View <-> Read compatibility alias
+    if (code.endsWith(".view")) {
+      const readAlias = code.replace(/\.view$/, ".read");
+      if (perms.includes(readAlias)) return true;
     }
-    // Check import fallback to create
-    if (code.endsWith(".import")) {
-      const createAlias = code.replace(/\.import$/, ".create");
-      if (perms.includes(createAlias)) return true;
+    if (code.endsWith(".read")) {
+      const viewAlias = code.replace(/\.read$/, ".view");
+      if (perms.includes(viewAlias)) return true;
     }
 
     return false;

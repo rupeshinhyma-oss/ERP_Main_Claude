@@ -1667,6 +1667,8 @@ export function ImpExpDropdown({
 
   if (!showImport && !showExport) return null;
 
+  const buttonLabel = showImport && showExport ? "Imp / Exp ▾" : showImport ? "Import ▾" : "Export ▾";
+
   return (
     <div ref={menuRef} style={{ position: "relative", display: "inline-block" }}>
       <button
@@ -1687,7 +1689,7 @@ export function ImpExpDropdown({
           gap: "6px",
         }}
       >
-        Imp / Exp ▾
+        {buttonLabel}
       </button>
 
       {open && (
@@ -1797,7 +1799,7 @@ export function ImpExpDropdown({
                 fontWeight: 600,
                 background: "none",
                 border: "none",
-                borderTop: "1px solid #f1f5f9",
+                borderTop: showImport ? "1px solid #f1f5f9" : "none",
                 cursor: "pointer",
                 display: "flex",
                 alignItems: "center",

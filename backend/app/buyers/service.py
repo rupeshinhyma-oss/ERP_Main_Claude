@@ -335,6 +335,17 @@ class BuyerService:
         await refresh_planning_cells_for_record(self.repository.session, "buyer", buyer_id)
         return await self.get_by_id_or_raise(buyer_id)
 
+    async def update_current_status(self, buyer_id: uuid.UUID, current_status: Any) -> Buyer:
+        """List-view inline "editable dropdown" for Current Status."""
+        buyer = await self.get_by_id_or_raise(buyer_id)
+        if current_status is not None:
+            self._validate_status_transition(buyer.current_status, current_status)
+        await self.repository.update(buyer, current_status=current_status)
+        await self._invalidate_cache()
+        await notify_source_record_changed("buyer", buyer_id)
+        await refresh_planning_cells_for_record(self.repository.session, "buyer", buyer_id)
+        return buyer
+
     async def update_grade(self, buyer_id: uuid.UUID, buyer_grade: Any) -> Buyer:
         """List-view inline "editable dropdown" for Client Grade."""
         buyer = await self.get_by_id_or_raise(buyer_id)

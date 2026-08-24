@@ -320,6 +320,9 @@ export function BuyersPage() {
   const canExport = hasPermission("buyer.export");
   const canImport = hasPermission("buyer.import");
   const canBulkAction = hasPermission("buyer.bulk_action");
+  const canEditCurrentStatus = hasPermission("buyer.currentstatus");
+  const canEditPotential = hasPermission("buyer.potential");
+  const canEditClientGrade = hasPermission("buyer.clientgrade");
 
   const [rows, setRows] = useState<Buyer[]>([]);
   const [totalRecords, setTotalRecords] = useState(0);
@@ -2027,6 +2030,7 @@ export function BuyersPage() {
                       id="current_status"
                       label="Current Status"
                       value={form.current_status}
+                      disabled={Boolean(editingId && !canEditCurrentStatus)}
                       onChange={(v) => setField("current_status", v)}
                     >
                       <option value="">-- Select Status --</option>
@@ -2040,6 +2044,7 @@ export function BuyersPage() {
                       id="potential"
                       label="Potential"
                       value={form.potential}
+                      disabled={Boolean(editingId && !canEditPotential)}
                       onChange={(v) => setField("potential", v)}
                     >
                       <option value="">-- Select Potential --</option>
@@ -2051,6 +2056,7 @@ export function BuyersPage() {
                       id="buyer_grade"
                       label="Client Grade"
                       value={form.buyer_grade}
+                      disabled={Boolean(editingId && !canEditClientGrade)}
                       onChange={(v) => setField("buyer_grade", v)}
                     >
                       <option value="">-- Select Grade --</option>
@@ -2790,12 +2796,12 @@ export function BuyersPage() {
                       4: renderChips(r.category_ids, categories.items, "Product Categories"),
                       5: renderChips(r.sub_category_ids, subCategories.items, "Product Sub-Categories"),
                       6: countryName,
-                      7: canUpdate ? (
+                      7: canEditCurrentStatus ? (
                         <select
                           className="inline-select"
                           value={r.current_status || ""}
                           onChange={(e) =>
-                            handleInlineUpdate(r.id, `/buyers/${r.id}`, {
+                            handleInlineUpdate(r.id, `/buyers/${r.id}/current-status`, {
                               current_status: e.target.value || null,
                             })
                           }
@@ -2811,7 +2817,7 @@ export function BuyersPage() {
                           }}
                         >
                           <option value="">SELECT</option>
-                          <option value="new">NEW</option>
+                          {r.current_status !== "existing" && <option value="new">NEW</option>}
                           <option value="existing">EXISTING</option>
                         </select>
                       ) : (
@@ -2828,7 +2834,7 @@ export function BuyersPage() {
                           {r.current_status ? r.current_status.toUpperCase() : "SELECT"}
                         </span>
                       ),
-                      8: canUpdate ? (
+                      8: canEditPotential ? (
                         <select
                           className="inline-select"
                           value={r.potential || ""}
@@ -2866,7 +2872,7 @@ export function BuyersPage() {
                           {r.potential ? r.potential.toUpperCase() : "SELECT"}
                         </span>
                       ),
-                      9: canUpdate ? (
+                      9: canEditClientGrade ? (
                         <select
                           className="inline-select"
                           value={r.buyer_grade || ""}

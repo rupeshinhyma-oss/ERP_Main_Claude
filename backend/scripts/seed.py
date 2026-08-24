@@ -109,11 +109,14 @@ BOOTSTRAP_PERMISSIONS: list[tuple[str, str, str, str, str, str]] = [
     # Buyers (Clients)
     ("buyer.view", "buyer", "buyers", "view", "ALL", "View the buyer list and contacts; use search, filters, and the Active/Inactive tabs."),
     ("buyer.create", "buyer", "buyers", "create", "ALL", "Create buyers via Add New Buyer, and add buyer contacts."),
-    ("buyer.update", "buyer", "buyers", "update", "ALL", "Edit buyers (Action > Edit), including grade/potential; activate/deactivate; edit contacts."),
+    ("buyer.update", "buyer", "buyers", "update", "ALL", "Edit buyers (Action > Edit); activate/deactivate; edit contacts."),
     ("buyer.delete", "buyer", "buyers", "delete", "ALL", "Delete buyers (Action > Delete) and remove buyer contacts."),
     ("buyer.export", "buyer", "buyers", "export", "ALL", "Export buyer data."),
     ("buyer.import", "buyer", "buyers", "import", "ALL", "Import buyer data."),
     ("buyer.bulk_action", "buyer", "buyers", "manage", "ALL", "Use Bulk Actions (bulk activate, deactivate, or delete) in the buyer list."),
+    ("buyer.currentstatus", "buyer", "buyers", "update", "ALL", "Edit the Current Status dropdown in the buyer list and edit form (read-only without this)."),
+    ("buyer.potential", "buyer", "buyers", "update", "ALL", "Edit the Potential dropdown in the buyer list and edit form (read-only without this)."),
+    ("buyer.clientgrade", "buyer", "buyers", "update", "ALL", "Edit the Client Grade dropdown in the buyer list and edit form (read-only without this)."),
     # Buyer Types (Configurations master; independent of the Buyers module above)
     ("buyertype.view", "buyertype", "buyer-types", "view", "ALL", "View buyer types; use search, filters, and the Active/Inactive tabs."),
     ("buyertype.create", "buyertype", "buyer-types", "create", "ALL", "Create buyer types."),

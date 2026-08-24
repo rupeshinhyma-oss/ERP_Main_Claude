@@ -25,6 +25,7 @@ from app.buyers.schemas import (
     BuyerContactRead,
     BuyerContactUpdate,
     BuyerCreate,
+    BuyerCurrentStatusUpdate,
     BuyerGradeUpdate,
     BuyerListItemRead,
     BuyerPotentialUpdate,
@@ -352,13 +353,49 @@ async def update_buyer(
     return build_success_response(data=data, request_id=request.state.request_id)
 
 
+@router.patch("/{buyer_id}/current-status", summary="Update a buyer's current status (list-view inline dropdown)")
+@router.patch("/{buyer_id}/status", summary="Update a buyer's current status (list-view inline dropdown)")
+async def update_buyer_current_status(
+    buyer_id: uuid.UUID,
+    payload: BuyerCurrentStatusUpdate,
+    request: Request,
+    service: BuyerService = Depends(get_buyer_service),
+    current_user: CurrentUser = Depends(require_permission("buyer.currentstatus")),
+    audit_service: AuditService = Depends(get_audit_service),
+    db: AsyncSession = Depends(get_db_session),
+    dispatcher: EventDispatcher = Depends(get_event_dispatcher),
+) -> dict:
+    """Document: "Current Status (editable dropdown in list)"."""
+    buyer = await service.update_current_status(buyer_id, payload.current_status)
+    data = await _to_buyer_read(service, buyer)
+    await _record_action(
+        audit_service=audit_service,
+        request=request,
+        action=AuditAction.UPDATE,
+        actor=current_user,
+        entity_id=buyer.id,
+        description=f"Updated current status for buyer {buyer.company_name!r}.",
+        new_values=payload.model_dump(mode="json"),
+    )
+    await _publish_buyer_event(
+        db=db,
+        dispatcher=dispatcher,
+        event_type="buyer.updated",
+        buyer_id=buyer.id,
+        version=buyer.version,
+        user_id=current_user.id,
+        changes={"current_status": payload.model_dump(mode="json").get("current_status")},
+    )
+    return build_success_response(data=data, request_id=request.state.request_id)
+
+
 @router.patch("/{buyer_id}/grade", summary="Update a buyer's grade (list-view inline dropdown)")
 async def update_buyer_grade(
     buyer_id: uuid.UUID,
     payload: BuyerGradeUpdate,
     request: Request,
     service: BuyerService = Depends(get_buyer_service),
-    current_user: CurrentUser = Depends(require_permission("buyer.update")),
+    current_user: CurrentUser = Depends(require_permission("buyer.clientgrade")),
     audit_service: AuditService = Depends(get_audit_service),
     db: AsyncSession = Depends(get_db_session),
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),
@@ -393,7 +430,7 @@ async def update_buyer_potential(
     payload: BuyerPotentialUpdate,
     request: Request,
     service: BuyerService = Depends(get_buyer_service),
-    current_user: CurrentUser = Depends(require_permission("buyer.update")),
+    current_user: CurrentUser = Depends(require_permission("buyer.potential")),
     audit_service: AuditService = Depends(get_audit_service),
     db: AsyncSession = Depends(get_db_session),
     dispatcher: EventDispatcher = Depends(get_event_dispatcher),

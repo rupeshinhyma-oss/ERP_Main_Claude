@@ -209,6 +209,12 @@ class BuyerUpdate(BaseModel):
         return v
 
 
+class BuyerCurrentStatusUpdate(BaseModel):
+    """Inline list-view "editable dropdown" payload for Current Status."""
+
+    current_status: BuyerCurrentStatus | None = None
+
+
 class BuyerGradeUpdate(BaseModel):
     """Inline list-view "editable dropdown" payload for Client Grade."""
 

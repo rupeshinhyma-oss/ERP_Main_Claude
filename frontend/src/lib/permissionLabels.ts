@@ -51,6 +51,9 @@ const ACTION_LABELS: Record<string, string> = {
   bulk_action: "Bulk Actions",
   grade_edit: "Edit Grade",
   potential_edit: "Edit Potential",
+  currentstatus: "Current Status",
+  potential: "Potential",
+  clientgrade: "Client Grade",
 };
 
 /**
@@ -64,6 +67,9 @@ const FULL_CODE_LABELS: Record<string, string> = {
   "planning.approvaldate.edit": "Edit APPROVAL DATE Column",
   "planning.colorstatusred.edit": "Set Status: Red",
   "planning.colorstatusgreen.edit": "Set Status: Green",
+  "buyer.currentstatus": "Current Status",
+  "buyer.potential": "Potential",
+  "buyer.clientgrade": "Client Grade",
 };
 
 /** "product.create" -> "Create"; unknown actions fall back to the raw code. */

@@ -633,7 +633,7 @@ function CompaniesView({
               <th style={thStyle}>Total CBM</th>
               <th style={thStyle}>Total Weight</th>
               <th style={thStyle}>Updated Date</th>
-              <th style={thStyle}>Action</th>
+              <th style={{ ...thStyle, textAlign: "center" }}>Action</th>
             </tr>
           </thead>
           <tbody>
@@ -690,8 +690,8 @@ function CompaniesView({
                   <td style={tdStyle}>{s.total_cbm.toFixed(3)}</td>
                   <td style={tdStyle}>{s.total_weight.toFixed(2)}</td>
                   <td style={tdStyle}>{s.updated_at ? new Date(s.updated_at).toLocaleDateString() : "-"}</td>
-                  <td style={tdStyle}>
-                    <div style={{ display: "flex", gap: "6px" }}>
+                  <td style={{ ...tdStyle, textAlign: "center" }}>
+                    <div style={{ display: "flex", gap: "6px", justifyContent: "center", alignItems: "center" }}>
                       <button
                         type="button"
                         onClick={() => onOpenCompany(s.buyer_id)}
@@ -824,7 +824,7 @@ function ConsignmentsView({
               <th style={thStyle}>Total CBM</th>
               <th style={thStyle}>Total Weight</th>
               <th style={thStyle}>Updated</th>
-              <th style={thStyle}>Action</th>
+              <th style={{ ...thStyle, textAlign: "center" }}>Action</th>
             </tr>
           </thead>
           <tbody>
@@ -847,8 +847,8 @@ function ConsignmentsView({
                   <td style={tdStyle}>{r.total_cbm.toFixed(3)}</td>
                   <td style={tdStyle}>{r.total_weight.toFixed(2)}</td>
                   <td style={tdStyle}>{new Date(r.updated_at).toLocaleDateString()}</td>
-                  <td style={tdStyle}>
-                    <div style={{ display: "flex", gap: 6 }}>
+                  <td style={{ ...tdStyle, textAlign: "center" }}>
+                    <div style={{ display: "flex", gap: 6, justifyContent: "center", alignItems: "center" }}>
                       <button type="button" onClick={() => onOpenConsignment(r.id)} className="btn-link">View</button>
                       <Can permission="inquiry.delete">
                         <button
@@ -2622,6 +2622,7 @@ function RequestQuotationDrawer({
     subCategoryId?: string;
     subCategoryName?: string;
   } | null>(null);
+  const [allMatchingSuppliers, setAllMatchingSuppliers] = useState<Array<{ id: string; name: string }>>([]);
   const [supplierFilterScope, setSupplierFilterScope] = useState<"all_matching" | "sub_category" | "category" | "all">("all_matching");
 
   useEffect(() => {
@@ -2661,26 +2662,42 @@ function RequestQuotationDrawer({
           subCategoryName: subCatName,
         });
 
-        // Automatically fetch and pre-select all matching suppliers for this product
-        const matchingSupplierIds = new Set<string>();
+        // Automatically fetch all matching suppliers for this product to keep in allMatchingSuppliers
+        const matchingList: Array<{ id: string; name: string }> = [];
+        const seenIds = new Set<string>();
         try {
           if (prod.sub_category_id) {
             const { data: subSups } = await apiGet<any>(`/suppliers?sub_category_id=${prod.sub_category_id}&limit=100`);
             const subList = Array.isArray(subSups) ? subSups : subSups?.data || [];
-            subList.forEach((s: any) => matchingSupplierIds.add(s.id));
+            subList.forEach((s: any) => {
+              if (!seenIds.has(s.id)) {
+                seenIds.add(s.id);
+                matchingList.push({ id: s.id, name: s.company_name || s.name || "Supplier" });
+              }
+            });
           }
           if (prod.category_id) {
             const { data: catSups } = await apiGet<any>(`/suppliers?category_id=${prod.category_id}&limit=100`);
             const catList = Array.isArray(catSups) ? catSups : catSups?.data || [];
-            catList.forEach((s: any) => matchingSupplierIds.add(s.id));
+            catList.forEach((s: any) => {
+              if (!seenIds.has(s.id)) {
+                seenIds.add(s.id);
+                matchingList.push({ id: s.id, name: s.company_name || s.name || "Supplier" });
+              }
+            });
           }
-          if (matchingSupplierIds.size === 0) {
+          if (matchingList.length === 0) {
             const { data: allSups } = await apiGet<any>(`/suppliers?limit=100`);
             const allList = Array.isArray(allSups) ? allSups : allSups?.data || [];
-            allList.forEach((s: any) => matchingSupplierIds.add(s.id));
+            allList.forEach((s: any) => {
+              if (!seenIds.has(s.id)) {
+                seenIds.add(s.id);
+                matchingList.push({ id: s.id, name: s.company_name || s.name || "Supplier" });
+              }
+            });
           }
-          if (matchingSupplierIds.size > 0 && isMounted) {
-            setSelectedSupplierIds(Array.from(matchingSupplierIds));
+          if (isMounted) {
+            setAllMatchingSuppliers(matchingList);
           }
         } catch {
           /* ignore */
@@ -2755,26 +2772,22 @@ function RequestQuotationDrawer({
       return;
     }
 
+    const supplierIdsToSend = supplierType === "all" ? allMatchingSuppliers.map((s) => s.id) : selectedSupplierIds;
+
     setSubmitting(true);
     try {
       const res = await apiPost<any>(`/inquiries/items/${item.id}/rfqs`, {
         expected_receiving_date: expDate || null,
         supplier_type: supplierType,
-        supplier_ids: selectedSupplierIds,
+        supplier_ids: supplierIdsToSend,
         notes: note.trim() || null,
       });
 
       if (res.data && res.data.supplier_links && res.data.supplier_links.length > 0) {
-        const initialSent: Record<string, boolean> = {};
-        res.data.supplier_links.forEach((l: any) => {
-          if ((l.emails && l.emails.length > 0) || l.email) {
-            initialSent[l.token] = true;
-          }
-        });
-        setSentEmailSuccess(initialSent);
+        setSentEmailSuccess({});
         setDispatchedData(res.data);
       } else {
-        alert("Request for Quotation successfully sent to suppliers!");
+        alert("Request for Quotation successfully created!");
         onDispatched();
       }
     } catch (err) {
@@ -2872,7 +2885,7 @@ function RequestQuotationDrawer({
               {dispatchedData.supplier_links?.map((sup: any) => {
                 const host = window.location.hostname;
                 const isLocal = host === "localhost" || host === "127.0.0.1";
-                const baseOrigin = isLocal ? `${window.location.protocol}//192.168.1.23:${window.location.port}` : window.location.origin;
+                const baseOrigin = isLocal ? `${window.location.protocol}//192.168.1.28:${window.location.port}` : window.location.origin;
                 const fullQuoteUrl = `${baseOrigin}${sup.quote_path}`;
                 const prodTitle = item.product_name || item.product_name_tally || "Product";
                 const waText = `Hello ${sup.contact_name},\n\nWe have an RFQ for ${item.quantity} units of *${prodTitle}* (#${item.product_code || "PC"}).\n\nPlease submit your best quotation with price and lead time using this link:\n\n${fullQuoteUrl}\n\nThank you!\nfrom Yinglima`;
@@ -2940,7 +2953,7 @@ function RequestQuotationDrawer({
                         ) : sentEmailSuccess[sup.token] ? (
                           <><span>✓</span> Email Sent!</>
                         ) : (
-                          <><span>⚡</span> Auto-Send Email</>
+                          <><span>⚡</span> Send Email</>
                         )}
                       </button>
 
@@ -3041,7 +3054,7 @@ function RequestQuotationDrawer({
                         }}
                       >
                         <span>{copiedToken === sup.token ? "✓" : "📋"}</span>
-                        {copiedToken === sup.token ? "Copied!" : "Copy Link"}
+                        {copiedToken === sup.token ? "✓ Link Copied!" : "Copy Link"}
                       </button>
                     </div>
                   </div>
@@ -3133,7 +3146,7 @@ function RequestQuotationDrawer({
                 *Suppliers Type
               </label>
               <div style={{ display: "flex", gap: "20px" }}>
-                <label style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "13px", cursor: "pointer" }}>
+                <label style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "13px", cursor: "pointer", fontWeight: supplierType === "all" ? 600 : 400 }}>
                   <input
                     type="radio"
                     name="supplierType"
@@ -3141,9 +3154,9 @@ function RequestQuotationDrawer({
                     checked={supplierType === "all"}
                     onChange={() => setSupplierType("all")}
                   />
-                  All Suppliers
+                  All Suppliers (Category &amp; Sub-Category)
                 </label>
-                <label style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "13px", cursor: "pointer" }}>
+                <label style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "13px", cursor: "pointer", fontWeight: supplierType === "selected" ? 600 : 400 }}>
                   <input
                     type="radio"
                     name="supplierType"
@@ -3156,19 +3169,43 @@ function RequestQuotationDrawer({
               </div>
             </div>
 
+            {/* When "all" is selected: show preview of all matching suppliers */}
+            {supplierType === "all" && (
+              <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", padding: "12px 14px", borderRadius: "8px" }}>
+                <div style={{ fontSize: "13px", fontWeight: 700, color: "#166534", display: "flex", alignItems: "center", gap: "6px" }}>
+                  <span>🌟</span> All Matching Suppliers ({allMatchingSuppliers.length})
+                </div>
+                <div style={{ fontSize: "12px", color: "#15803d", marginTop: "3px" }}>
+                  Will automatically dispatch quotation request to all {allMatchingSuppliers.length} supplier(s) matching {productMeta?.subCategoryName ? `Sub-Category "${productMeta.subCategoryName}"` : productMeta?.categoryName ? `Category "${productMeta.categoryName}"` : "this product"}.
+                </div>
+                {allMatchingSuppliers.length > 0 && (
+                  <div style={{ marginTop: "8px", display: "flex", flexWrap: "wrap", gap: "5px" }}>
+                    {allMatchingSuppliers.map((s) => (
+                      <span key={s.id} style={{ background: "#dcfce7", color: "#166534", border: "1px solid #86efac", padding: "3px 8px", borderRadius: "4px", fontSize: "11.5px", fontWeight: 600 }}>
+                        🏢 {s.name}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Multi-Select Suppliers (if selected) */}
             {supplierType === "selected" && (
               <div>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
                   <label style={{ display: "block", fontSize: "12.5px", fontWeight: 700, color: "#334155" }}>
-                    *Suppliers ({selectedSupplierIds.length} Selected)
+                    *Select Suppliers ({selectedSupplierIds.length} Selected)
                   </label>
                   <div style={{ display: "flex", gap: "10px" }}>
                     <button
                       type="button"
                       onClick={async () => {
                         const matching = await fetchSupplierOptions("");
-                        setSelectedSupplierIds(matching.map((m: any) => m.value));
+                        setSelectedSupplierIds((prev) => {
+                          const combined = new Set([...prev, ...matching.map((m: any) => m.value)]);
+                          return Array.from(combined);
+                        });
                       }}
                       style={{
                         background: "none",
@@ -3220,7 +3257,7 @@ function RequestQuotationDrawer({
                       transition: "all 0.15s ease",
                     }}
                   >
-                    🌟 All Matching (Sub-Category &amp; Category)
+                    🌟 All Matching
                   </button>
 
                   {productMeta?.subCategoryId && (

@@ -20,7 +20,7 @@ import { Breadcrumb } from "@/components/Breadcrumb";
 import { Banner, ModalAlert, TableMessageRow } from "@/components/ui";
 import { SideDrawer, DetailFieldGrid } from "@/components/SideDrawer";
 import { Pagination } from "@/components/Pagination";
-import { ItemPopoverCell } from "@/components/ItemPopoverCell";
+import { ItemPopoverCell, TextPopoverCell } from "@/components/ItemPopoverCell";
 import { ImpExpDropdown, BulkActionsDropdown, ImportSummaryPanel, downloadSampleCsv, parseFile, WizardModal, type SheetRow } from "@/components/ImportWizard";
 import {
   SearchableDropdown,
@@ -1173,37 +1173,16 @@ export function SuppliersPage() {
     }
   }, [liveConnectionStatus]);
 
-  function renderTruncatedText(text: string | null | undefined, maxLen = 22, modalTitle = "Details") {
-    if (!text) return <span className="muted">—</span>;
-    const str = text.trim();
-    if (str.length <= maxLen) return <span style={{ whiteSpace: "nowrap" }}>{str}</span>;
-
-    const shortText = str.slice(0, maxLen) + "…";
+  function renderTruncatedText(text: string | null | undefined, maxLen = 22, modalTitle = "Details", icon = "📍") {
     return (
-      <span style={{ display: "inline-flex", alignItems: "center", gap: "6px", whiteSpace: "nowrap" }}>
-        <span style={{ maxWidth: "150px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "inline-block" }} title={str}>
-          {shortText}
-        </span>
-        <button
-          type="button"
-          onClick={() => setAlertPopup({ title: modalTitle, message: str })}
-          style={{
-            border: "1px solid #cbd5e1",
-            background: "#f8fafc",
-            color: "#0061f2",
-            fontSize: "11px",
-            padding: "1px 6px",
-            borderRadius: "10px",
-            cursor: "pointer",
-            fontWeight: 600,
-            whiteSpace: "nowrap",
-            flexShrink: 0,
-          }}
-          title="Click to view full text 👁️"
-        >
-          👁️
-        </button>
-      </span>
+      <TextPopoverCell
+        text={text}
+        maxLen={maxLen}
+        title={modalTitle}
+        icon={icon}
+        maxWidth="150px"
+        emptyText="—"
+      />
     );
   }
 

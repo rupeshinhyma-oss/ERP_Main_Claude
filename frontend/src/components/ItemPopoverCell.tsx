@@ -1,4 +1,5 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
+import { createPortal } from "react-dom";
 
 export interface ItemPopoverCellProps {
   items: string[];
@@ -9,6 +10,13 @@ export interface ItemPopoverCellProps {
   emptyText?: string;
   badgeIcon?: string;
   badgeColor?: "blue" | "emerald" | "amber" | "purple";
+}
+
+interface PopoverCoords {
+  top?: number;
+  bottom?: number;
+  left: number;
+  openUpward: boolean;
 }
 
 export function ItemPopoverCell({
@@ -22,36 +30,106 @@ export function ItemPopoverCell({
   badgeColor = "blue",
 }: ItemPopoverCellProps) {
   const [isOpen, setIsOpen] = useState(false);
-  const [openUpward, setOpenUpward] = useState(false);
-  const [alignRight, setAlignRight] = useState(false);
+  const [coords, setCoords] = useState<PopoverCoords | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
+  const closeTimeoutRef = useRef<number | null>(null);
 
-  const calculatePosition = () => {
+  const calculatePosition = useCallback(() => {
     if (!containerRef.current) return;
     const rect = containerRef.current.getBoundingClientRect();
     const spaceBelow = window.innerHeight - rect.bottom;
-    const spaceRight = window.innerWidth - rect.left;
-    // If there is not enough space below (less than 260px) and sufficient space above, flip upwards
-    setOpenUpward(spaceBelow < 260 && rect.top > 180);
-    setAlignRight(spaceRight < 300);
-  };
+    const spaceAbove = rect.top;
 
-  const handleOpen = () => {
+    // Popover height is at most 250px + padding
+    const openUpward = spaceBelow < 260 && spaceAbove > 160;
+    const popoverWidth = 280;
+    let left = rect.left;
+    if (left + popoverWidth > window.innerWidth - 16) {
+      left = Math.max(12, window.innerWidth - popoverWidth - 16);
+    }
+    if (left < 12) left = 12;
+
+    if (openUpward) {
+      setCoords({
+        bottom: window.innerHeight - rect.top + 6,
+        left,
+        openUpward: true,
+      });
+    } else {
+      setCoords({
+        top: rect.bottom + 6,
+        left,
+        openUpward: false,
+      });
+    }
+  }, []);
+
+  const handleMouseEnter = () => {
+    if (closeTimeoutRef.current) {
+      clearTimeout(closeTimeoutRef.current);
+      closeTimeoutRef.current = null;
+    }
     calculatePosition();
     setIsOpen(true);
   };
 
-  // Close on outside click if opened via click
+  const handleMouseLeave = () => {
+    closeTimeoutRef.current = window.setTimeout(() => {
+      setIsOpen(false);
+    }, 180);
+  };
+
+  const handleToggleClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (isOpen) {
+      setIsOpen(false);
+    } else {
+      calculatePosition();
+      setIsOpen(true);
+    }
+  };
+
+  // Close on outside click
   useEffect(() => {
     if (!isOpen) return;
     const handleClickOutside = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      if (
+        containerRef.current &&
+        !containerRef.current.contains(target) &&
+        popoverRef.current &&
+        !popoverRef.current.contains(target)
+      ) {
         setIsOpen(false);
       }
     };
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [isOpen]);
+
+  // Update position on scroll/resize
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleScrollOrResize = () => {
+      calculatePosition();
+    };
+    window.addEventListener("scroll", handleScrollOrResize, true);
+    window.addEventListener("resize", handleScrollOrResize);
+    return () => {
+      window.removeEventListener("scroll", handleScrollOrResize, true);
+      window.removeEventListener("resize", handleScrollOrResize);
+    };
+  }, [isOpen, calculatePosition]);
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (closeTimeoutRef.current) {
+        clearTimeout(closeTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const cleanItems = (items || []).filter(Boolean);
 
@@ -95,8 +173,8 @@ export function ItemPopoverCell({
     <div
       ref={containerRef}
       style={{ position: "relative", display: "inline-flex", alignItems: "center" }}
-      onMouseEnter={handleOpen}
-      onMouseLeave={() => setIsOpen(false)}
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
     >
       <div style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
         <span
@@ -116,14 +194,7 @@ export function ItemPopoverCell({
         </span>
         <button
           type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            if (isOpen) {
-              setIsOpen(false);
-            } else {
-              handleOpen();
-            }
-          }}
+          onClick={handleToggleClick}
           style={{
             display: "inline-flex",
             alignItems: "center",
@@ -138,7 +209,7 @@ export function ItemPopoverCell({
             cursor: "pointer",
             lineHeight: 1.2,
             transition: "all 0.15s ease",
-            boxShadow: `0 1px 2px rgba(0, 0, 0, 0.05)`,
+            boxShadow: "0 1px 2px rgba(0, 0, 0, 0.05)",
             whiteSpace: "nowrap",
             flexShrink: 0,
           }}
@@ -149,89 +220,100 @@ export function ItemPopoverCell({
         </button>
       </div>
 
-      {isOpen && (
-        <div
-          style={{
-            position: "absolute",
-            top: openUpward ? "auto" : "calc(100% + 6px)",
-            bottom: openUpward ? "calc(100% + 6px)" : "auto",
-            left: alignRight ? "auto" : 0,
-            right: alignRight ? 0 : "auto",
-            background: "#ffffff",
-            border: "1px solid #cbd5e1",
-            borderRadius: "8px",
-            boxShadow: "0 14px 34px -4px rgba(0, 0, 0, 0.2), 0 8px 16px -4px rgba(0, 0, 0, 0.12)",
-            padding: "10px 12px",
-            minWidth: "220px",
-            maxWidth: "340px",
-            maxHeight: "240px",
-            overflowY: "auto",
-            zIndex: 999999,
-            textAlign: "left",
-          }}
-          onClick={(e) => e.stopPropagation()}
-        >
+      {isOpen &&
+        coords &&
+        createPortal(
           <div
+            ref={popoverRef}
             style={{
-              fontSize: "11.5px",
-              fontWeight: 700,
-              color: "#334155",
-              marginBottom: "8px",
-              borderBottom: "1px solid #f1f5f9",
-              paddingBottom: "5px",
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
+              position: "fixed",
+              top: coords.openUpward ? "auto" : `${coords.top}px`,
+              bottom: coords.openUpward ? `${coords.bottom}px` : "auto",
+              left: `${coords.left}px`,
+              background: "#ffffff",
+              border: "1px solid #cbd5e1",
+              borderRadius: "8px",
+              boxShadow: "0 16px 36px -4px rgba(0, 0, 0, 0.22), 0 8px 16px -4px rgba(0, 0, 0, 0.12)",
+              padding: "10px 12px",
+              minWidth: "230px",
+              maxWidth: "340px",
+              maxHeight: "250px",
+              overflowY: "auto",
+              zIndex: 9999999,
+              textAlign: "left",
+              animation: "fadeIn 0.12s ease-out",
             }}
+            onMouseEnter={() => {
+              if (closeTimeoutRef.current) {
+                clearTimeout(closeTimeoutRef.current);
+                closeTimeoutRef.current = null;
+              }
+            }}
+            onMouseLeave={handleMouseLeave}
+            onClick={(e) => e.stopPropagation()}
           >
-            <span>
-              {title || "Selected Items"} ({cleanItems.length})
-            </span>
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                setIsOpen(false);
-              }}
+            <div
               style={{
-                background: "transparent",
-                border: "none",
-                color: "#94a3b8",
-                fontSize: "13px",
-                cursor: "pointer",
-                padding: "0 4px",
-                lineHeight: 1,
+                fontSize: "11.5px",
+                fontWeight: 700,
+                color: "#334155",
+                marginBottom: "8px",
+                borderBottom: "1px solid #f1f5f9",
+                paddingBottom: "5px",
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
               }}
-              title="Close"
             >
-              ✕
-            </button>
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
-            {cleanItems.map((itemText, i) => (
-              <div
-                key={i}
-                style={{
-                  fontSize: "12px",
-                  color: "#1e293b",
-                  fontWeight: 500,
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "6px",
-                  padding: "5px 8px",
-                  borderRadius: "4px",
-                  background: "#f8fafc",
+              <span>
+                {title || "Selected Items"} ({cleanItems.length})
+              </span>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setIsOpen(false);
                 }}
+                style={{
+                  background: "transparent",
+                  border: "none",
+                  color: "#94a3b8",
+                  fontSize: "13px",
+                  cursor: "pointer",
+                  padding: "0 4px",
+                  lineHeight: 1,
+                }}
+                title="Close"
               >
-                <span style={{ color: "#3b82f6", fontSize: "12px" }}>
-                  {itemIcon || icon || "•"}
-                </span>
-                <span style={{ wordBreak: "break-word" }}>{itemText}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+                ✕
+              </button>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
+              {cleanItems.map((itemText, i) => (
+                <div
+                  key={i}
+                  style={{
+                    fontSize: "12px",
+                    color: "#1e293b",
+                    fontWeight: 500,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    padding: "5px 8px",
+                    borderRadius: "4px",
+                    background: "#f8fafc",
+                  }}
+                >
+                  <span style={{ color: "#3b82f6", fontSize: "12px" }}>
+                    {itemIcon || icon || "•"}
+                  </span>
+                  <span style={{ wordBreak: "break-word" }}>{itemText}</span>
+                </div>
+              ))}
+            </div>
+          </div>,
+          document.body
+        )}
     </div>
   );
 }
@@ -254,35 +336,105 @@ export function TextPopoverCell({
   emptyText = "—",
 }: TextPopoverCellProps) {
   const [isOpen, setIsOpen] = useState(false);
-  const [openUpward, setOpenUpward] = useState(false);
-  const [alignRight, setAlignRight] = useState(false);
+  const [coords, setCoords] = useState<PopoverCoords | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
+  const closeTimeoutRef = useRef<number | null>(null);
 
-  const calculatePosition = () => {
+  const calculatePosition = useCallback(() => {
     if (!containerRef.current) return;
     const rect = containerRef.current.getBoundingClientRect();
     const spaceBelow = window.innerHeight - rect.bottom;
-    const spaceRight = window.innerWidth - rect.left;
-    setOpenUpward(spaceBelow < 260 && rect.top > 180);
-    setAlignRight(spaceRight < 300);
-  };
+    const spaceAbove = rect.top;
 
-  const handleOpen = () => {
+    const openUpward = spaceBelow < 260 && spaceAbove > 160;
+    const popoverWidth = 300;
+    let left = rect.left;
+    if (left + popoverWidth > window.innerWidth - 16) {
+      left = Math.max(12, window.innerWidth - popoverWidth - 16);
+    }
+    if (left < 12) left = 12;
+
+    if (openUpward) {
+      setCoords({
+        bottom: window.innerHeight - rect.top + 6,
+        left,
+        openUpward: true,
+      });
+    } else {
+      setCoords({
+        top: rect.bottom + 6,
+        left,
+        openUpward: false,
+      });
+    }
+  }, []);
+
+  const handleMouseEnter = () => {
+    if (closeTimeoutRef.current) {
+      clearTimeout(closeTimeoutRef.current);
+      closeTimeoutRef.current = null;
+    }
     calculatePosition();
     setIsOpen(true);
+  };
+
+  const handleMouseLeave = () => {
+    closeTimeoutRef.current = window.setTimeout(() => {
+      setIsOpen(false);
+    }, 180);
+  };
+
+  const handleToggleClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (isOpen) {
+      setIsOpen(false);
+    } else {
+      calculatePosition();
+      setIsOpen(true);
+    }
   };
 
   // Close on outside click
   useEffect(() => {
     if (!isOpen) return;
     const handleClickOutside = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      if (
+        containerRef.current &&
+        !containerRef.current.contains(target) &&
+        popoverRef.current &&
+        !popoverRef.current.contains(target)
+      ) {
         setIsOpen(false);
       }
     };
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [isOpen]);
+
+  // Update position on scroll/resize
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleScrollOrResize = () => {
+      calculatePosition();
+    };
+    window.addEventListener("scroll", handleScrollOrResize, true);
+    window.addEventListener("resize", handleScrollOrResize);
+    return () => {
+      window.removeEventListener("scroll", handleScrollOrResize, true);
+      window.removeEventListener("resize", handleScrollOrResize);
+    };
+  }, [isOpen, calculatePosition]);
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (closeTimeoutRef.current) {
+        clearTimeout(closeTimeoutRef.current);
+      }
+    };
+  }, []);
 
   if (!text || !text.trim()) {
     return <span style={{ color: "#94a3b8" }}>{emptyText}</span>;
@@ -310,8 +462,8 @@ export function TextPopoverCell({
     <div
       ref={containerRef}
       style={{ position: "relative", display: "inline-flex", alignItems: "center" }}
-      onMouseEnter={handleOpen}
-      onMouseLeave={() => setIsOpen(false)}
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
     >
       <div style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
         <span
@@ -331,14 +483,7 @@ export function TextPopoverCell({
         </span>
         <button
           type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            if (isOpen) {
-              setIsOpen(false);
-            } else {
-              handleOpen();
-            }
-          }}
+          onClick={handleToggleClick}
           style={{
             display: "inline-flex",
             alignItems: "center",
@@ -363,81 +508,92 @@ export function TextPopoverCell({
         </button>
       </div>
 
-      {isOpen && (
-        <div
-          style={{
-            position: "absolute",
-            top: openUpward ? "auto" : "calc(100% + 6px)",
-            bottom: openUpward ? "calc(100% + 6px)" : "auto",
-            left: alignRight ? "auto" : 0,
-            right: alignRight ? 0 : "auto",
-            background: "#ffffff",
-            border: "1px solid #cbd5e1",
-            borderRadius: "8px",
-            boxShadow: "0 14px 34px -4px rgba(0, 0, 0, 0.2), 0 8px 16px -4px rgba(0, 0, 0, 0.12)",
-            padding: "12px 14px",
-            minWidth: "250px",
-            maxWidth: "380px",
-            maxHeight: "260px",
-            overflowY: "auto",
-            zIndex: 999999,
-            textAlign: "left",
-          }}
-          onClick={(e) => e.stopPropagation()}
-        >
+      {isOpen &&
+        coords &&
+        createPortal(
           <div
+            ref={popoverRef}
             style={{
-              fontSize: "11.5px",
-              fontWeight: 700,
-              color: "#334155",
-              marginBottom: "8px",
-              borderBottom: "1px solid #f1f5f9",
-              paddingBottom: "6px",
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
+              position: "fixed",
+              top: coords.openUpward ? "auto" : `${coords.top}px`,
+              bottom: coords.openUpward ? `${coords.bottom}px` : "auto",
+              left: `${coords.left}px`,
+              background: "#ffffff",
+              border: "1px solid #cbd5e1",
+              borderRadius: "8px",
+              boxShadow: "0 16px 36px -4px rgba(0, 0, 0, 0.22), 0 8px 16px -4px rgba(0, 0, 0, 0.12)",
+              padding: "12px 14px",
+              minWidth: "250px",
+              maxWidth: "380px",
+              maxHeight: "260px",
+              overflowY: "auto",
+              zIndex: 9999999,
+              textAlign: "left",
+              animation: "fadeIn 0.12s ease-out",
             }}
+            onMouseEnter={() => {
+              if (closeTimeoutRef.current) {
+                clearTimeout(closeTimeoutRef.current);
+                closeTimeoutRef.current = null;
+              }
+            }}
+            onMouseLeave={handleMouseLeave}
+            onClick={(e) => e.stopPropagation()}
           >
-            <span>
-              {icon} {title}
-            </span>
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                setIsOpen(false);
-              }}
+            <div
               style={{
-                background: "transparent",
-                border: "none",
-                color: "#94a3b8",
-                fontSize: "13px",
-                cursor: "pointer",
-                padding: "0 4px",
-                lineHeight: 1,
+                fontSize: "11.5px",
+                fontWeight: 700,
+                color: "#334155",
+                marginBottom: "8px",
+                borderBottom: "1px solid #f1f5f9",
+                paddingBottom: "6px",
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
               }}
-              title="Close"
             >
-              ✕
-            </button>
-          </div>
-          <div
-            style={{
-              fontSize: "12.5px",
-              lineHeight: "1.5",
-              color: "#1e293b",
-              whiteSpace: "pre-wrap",
-              wordBreak: "break-word",
-              background: "#f8fafc",
-              padding: "8px 10px",
-              borderRadius: "6px",
-              border: "1px solid #f1f5f9",
-            }}
-          >
-            {cleanText}
-          </div>
-        </div>
-      )}
+              <span>
+                {icon} {title}
+              </span>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setIsOpen(false);
+                }}
+                style={{
+                  background: "transparent",
+                  border: "none",
+                  color: "#94a3b8",
+                  fontSize: "13px",
+                  cursor: "pointer",
+                  padding: "0 4px",
+                  lineHeight: 1,
+                }}
+                title="Close"
+              >
+                ✕
+              </button>
+            </div>
+            <div
+              style={{
+                fontSize: "12.5px",
+                lineHeight: "1.5",
+                color: "#1e293b",
+                whiteSpace: "pre-wrap",
+                wordBreak: "break-word",
+                background: "#f8fafc",
+                padding: "8px 10px",
+                borderRadius: "6px",
+                border: "1px solid #f1f5f9",
+              }}
+            >
+              {cleanText}
+            </div>
+          </div>,
+          document.body
+        )}
     </div>
   );
 }

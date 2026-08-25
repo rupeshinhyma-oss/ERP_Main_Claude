@@ -307,23 +307,27 @@ export function InquiriesPage() {
                   alignItems: "center",
                   gap: "14px",
                   boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
+                  transition: "all 0.15s ease",
                 }}
               >
                 <div
                   style={{
-                    width: "42px",
-                    height: "42px",
-                    borderRadius: "50%",
-                    background: "#fffbe6",
-                    border: "1px solid #fef3c7",
-                    color: "#b45309",
+                    width: "44px",
+                    height: "44px",
+                    borderRadius: "10px",
+                    background: "#fffbeb",
+                    border: "1px solid #fde68a",
+                    color: "#d97706",
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
-                    fontSize: "18px",
+                    flexShrink: 0,
                   }}
                 >
-                  🕒
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="10" />
+                    <polyline points="12 6 12 12 16 14" />
+                  </svg>
                 </div>
                 <div>
                   <div style={{ fontSize: "20px", fontWeight: 700, color: "#0f172a" }}>
@@ -343,23 +347,27 @@ export function InquiriesPage() {
                   alignItems: "center",
                   gap: "14px",
                   boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
+                  transition: "all 0.15s ease",
                 }}
               >
                 <div
                   style={{
-                    width: "42px",
-                    height: "42px",
-                    borderRadius: "50%",
-                    background: "#f0fdf4",
-                    border: "1px solid #bbf7d0",
-                    color: "#15803d",
+                    width: "44px",
+                    height: "44px",
+                    borderRadius: "10px",
+                    background: "#ecfdf5",
+                    border: "1px solid #a7f3d0",
+                    color: "#059669",
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
-                    fontSize: "18px",
+                    flexShrink: 0,
                   }}
                 >
-                  ✅
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+                    <polyline points="22 4 12 14.01 9 11.01" />
+                  </svg>
                 </div>
                 <div>
                   <div style={{ fontSize: "20px", fontWeight: 700, color: "#0f172a" }}>
@@ -379,23 +387,26 @@ export function InquiriesPage() {
                   alignItems: "center",
                   gap: "14px",
                   boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
+                  transition: "all 0.15s ease",
                 }}
               >
                 <div
                   style={{
-                    width: "42px",
-                    height: "42px",
-                    borderRadius: "50%",
+                    width: "44px",
+                    height: "44px",
+                    borderRadius: "10px",
                     background: "#eff6ff",
                     border: "1px solid #bfdbfe",
-                    color: "#1d4ed8",
+                    color: "#2563eb",
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
-                    fontSize: "18px",
+                    flexShrink: 0,
                   }}
                 >
-                  🔄
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2" />
+                  </svg>
                 </div>
                 <div>
                   <div style={{ fontSize: "20px", fontWeight: 700, color: "#0f172a" }}>
@@ -415,23 +426,27 @@ export function InquiriesPage() {
                   alignItems: "center",
                   gap: "14px",
                   boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
+                  transition: "all 0.15s ease",
                 }}
               >
                 <div
                   style={{
-                    width: "42px",
-                    height: "42px",
-                    borderRadius: "50%",
-                    background: "#f0f9ff",
-                    border: "1px solid #bae6fd",
-                    color: "#0284c7",
+                    width: "44px",
+                    height: "44px",
+                    borderRadius: "10px",
+                    background: "#f0fdfa",
+                    border: "1px solid #99f6e4",
+                    color: "#0d9488",
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
-                    fontSize: "18px",
+                    flexShrink: 0,
                   }}
                 >
-                  👍
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z" />
+                    <path d="m9 12 2 2 4-4" />
+                  </svg>
                 </div>
                 <div>
                   <div style={{ fontSize: "20px", fontWeight: 700, color: "#0f172a" }}>
@@ -451,23 +466,28 @@ export function InquiriesPage() {
                   alignItems: "center",
                   gap: "14px",
                   boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
+                  transition: "all 0.15s ease",
                 }}
               >
                 <div
                   style={{
-                    width: "42px",
-                    height: "42px",
-                    borderRadius: "50%",
-                    background: "#f8fafc",
-                    border: "1px solid #cbd5e1",
-                    color: "#334155",
+                    width: "44px",
+                    height: "44px",
+                    borderRadius: "10px",
+                    background: "#f5f3ff",
+                    border: "1px solid #ddd6fe",
+                    color: "#7c3aed",
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
-                    fontSize: "18px",
+                    flexShrink: 0,
                   }}
                 >
-                  📦
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+                    <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
+                    <line x1="12" y1="22.08" x2="12" y2="12" />
+                  </svg>
                 </div>
                 <div>
                   <div style={{ fontSize: "20px", fontWeight: 700, color: "#0f172a" }}>

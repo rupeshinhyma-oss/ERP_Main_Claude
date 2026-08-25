@@ -226,9 +226,9 @@ async def get_category(
     category_id: uuid.UUID,
     request: Request,
     service: ProductCategoryService = Depends(get_product_category_service),
-    _current_user: CurrentUser = Depends(require_permission("category.view")),
+    _current_user: CurrentUser = Depends(get_current_user),
 ) -> dict:
-    """Fetch a single product category by ID."""
+    """Fetch a single product category by ID (authenticated lookup)."""
     category = await service.get_by_id_or_raise(category_id)
     data = ProductCategoryRead.model_validate(category).model_dump(mode="json")
     return build_success_response(data=data, request_id=request.state.request_id)

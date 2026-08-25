@@ -10,6 +10,7 @@ from fastapi.responses import Response
 from app.audit.constants import AuditAction
 from app.audit.dependencies import get_audit_service
 from app.audit.service import AuditService
+from app.auth.dependencies import get_current_user
 from app.auth.service import CurrentUser
 from app.common.list_query import ListQueryParams, get_list_query_params
 from app.common.pagination import PageMeta
@@ -143,8 +144,9 @@ async def get_buyer_type(
     buyer_type_id: uuid.UUID,
     request: Request,
     service: BuyerTypeService = Depends(get_buyer_type_service),
-    _current_user: CurrentUser = Depends(require_permission("buyertype.view")),
+    _current_user: CurrentUser = Depends(get_current_user),
 ) -> dict:
+    """Fetch a single buyer type by ID (authenticated lookup)."""
     item = await service.get_by_id_or_raise(buyer_type_id)
     data = BuyerTypeRead.model_validate(item).model_dump(mode="json")
     return build_success_response(data=data, request_id=request.state.request_id)

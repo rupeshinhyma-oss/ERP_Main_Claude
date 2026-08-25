@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.audit.constants import AuditAction
 from app.audit.dependencies import get_audit_service
 from app.audit.service import AuditService
+from app.auth.dependencies import get_current_user
 from app.auth.service import CurrentUser
 from app.common.list_query import ListQueryParams, get_list_query_params
 from app.common.pagination import PageMeta
@@ -177,9 +178,9 @@ async def get_country(
     country_id: uuid.UUID,
     request: Request,
     service: CountryService = Depends(get_country_service),
-    _current_user: CurrentUser = Depends(require_permission("country.view")),
+    _current_user: CurrentUser = Depends(get_current_user),
 ) -> dict:
-    """Fetch a single country by ID."""
+    """Fetch a single country by ID (authenticated lookup)."""
     country = await service.get_by_id_or_raise(country_id)
     data = CountryRead.model_validate(country).model_dump(mode="json")
     return build_success_response(data=data, request_id=request.state.request_id)

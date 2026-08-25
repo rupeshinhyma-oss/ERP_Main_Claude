@@ -218,9 +218,9 @@ async def get_sub_category(
     sub_category_id: uuid.UUID,
     request: Request,
     service: ProductSubCategoryService = Depends(get_product_sub_category_service),
-    _current_user: CurrentUser = Depends(require_permission("subcategory.view")),
+    _current_user: CurrentUser = Depends(get_current_user),
 ) -> dict:
-    """Fetch a single product sub-category by ID."""
+    """Fetch a single product sub-category by ID (authenticated lookup)."""
     sub_category = await service.get_by_id_or_raise(sub_category_id)
     data = ProductSubCategoryRead.model_validate(sub_category).model_dump(mode="json")
     return build_success_response(data=data, request_id=request.state.request_id)

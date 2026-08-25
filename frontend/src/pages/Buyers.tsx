@@ -690,8 +690,12 @@ export function BuyersPage() {
 
   const fetchNameLabel = useCallback(
     (apiBase: string) => async (id: string) => {
-      const { data } = await apiGet<{ name: string }>(`${apiBase}/${id}`);
-      return data.name;
+      try {
+        const { data } = await apiGet<{ name?: string }>(`${apiBase}/${id}`);
+        return data?.name || "";
+      } catch {
+        return "";
+      }
     },
     []
   );

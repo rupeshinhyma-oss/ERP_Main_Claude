@@ -10,6 +10,7 @@ from fastapi.responses import Response
 from app.audit.constants import AuditAction
 from app.audit.dependencies import get_audit_service
 from app.audit.service import AuditService
+from app.auth.dependencies import get_current_user
 from app.auth.service import CurrentUser
 from app.common.list_query import ListQueryParams, get_list_query_params
 from app.common.pagination import PageMeta
@@ -144,8 +145,9 @@ async def get_supplier_type(
     supplier_type_id: uuid.UUID,
     request: Request,
     service: SupplierTypeService = Depends(get_supplier_type_service),
-    _current_user: CurrentUser = Depends(require_permission("suppliertype.view")),
+    _current_user: CurrentUser = Depends(get_current_user),
 ) -> dict:
+    """Fetch a single supplier type by ID (authenticated lookup)."""
     item = await service.get_by_id_or_raise(supplier_type_id)
     data = SupplierTypeRead.model_validate(item).model_dump(mode="json")
     return build_success_response(data=data, request_id=request.state.request_id)

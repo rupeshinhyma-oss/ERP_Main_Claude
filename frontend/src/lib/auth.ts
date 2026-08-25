@@ -120,10 +120,14 @@ export const Auth = {
   },
 };
 
-/** Two-letter initials, matching the original `initials()` helper exactly. */
+/** Two-letter initials, matching user full name or username. */
 export function initials(name?: string | null): string {
-  if (!name) return "?";
-  return name.trim().slice(0, 2).toUpperCase();
+  if (!name) return "U";
+  const parts = name.trim().split(/\s+/);
+  if (parts.length >= 2 && parts[0] && parts[parts.length - 1]) {
+    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+  }
+  return name.trim().slice(0, 2).toUpperCase() || "U";
 }
 
 /**

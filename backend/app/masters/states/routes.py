@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.audit.constants import AuditAction
 from app.audit.dependencies import get_audit_service
 from app.audit.service import AuditService
+from app.auth.dependencies import get_current_user
 from app.auth.service import CurrentUser
 from app.common.list_query import ListQueryParams, get_list_query_params
 from app.common.pagination import PageMeta
@@ -177,9 +178,9 @@ async def get_state(
     state_id: uuid.UUID,
     request: Request,
     service: StateService = Depends(get_state_service),
-    _current_user: CurrentUser = Depends(require_permission("state.view")),
+    _current_user: CurrentUser = Depends(get_current_user),
 ) -> dict:
-    """Fetch a single state by ID."""
+    """Fetch a single state by ID (authenticated lookup)."""
     state = await service.get_by_id_or_raise(state_id)
     data = StateRead.model_validate(state).model_dump(mode="json")
     return build_success_response(data=data, request_id=request.state.request_id)

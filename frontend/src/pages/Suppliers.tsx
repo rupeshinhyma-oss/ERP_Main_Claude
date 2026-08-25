@@ -815,9 +815,25 @@ export function SuppliersPage() {
       if (!loadedBatchEndpoints.has(apiBase)) {
         loadedBatchEndpoints.add(apiBase);
         try {
-          const { data } = await apiGet<Record<string, unknown>[]>(
-            `${apiBase}${toQueryString({ page: 1, page_size: 250, sort_order: "asc" })}`
-          );
+          let data: Record<string, unknown>[] | undefined;
+          try {
+            const lookupRes = await apiGet<Record<string, unknown>[]>(`${apiBase}/lookup`);
+            if (Array.isArray(lookupRes?.data)) {
+              data = lookupRes.data;
+            }
+          } catch {
+            /* fall back to standard list endpoint */
+          }
+
+          if (!data) {
+            const listRes = await apiGet<Record<string, unknown>[]>(
+              `${apiBase}${toQueryString({ page: 1, page_size: 250, sort_order: "asc" })}`
+            );
+            if (Array.isArray(listRes?.data)) {
+              data = listRes.data;
+            }
+          }
+
           if (Array.isArray(data)) {
             for (const item of data) {
               const itemId = String(item.id || "");
@@ -969,8 +985,12 @@ export function SuppliersPage() {
 
   const fetchNameLabel = useCallback(
     (apiBase: string) => async (id: string) => {
-      const { data } = await apiGet<{ name: string }>(`${apiBase}/${id}`);
-      return data.name;
+      try {
+        const { data } = await apiGet<{ name?: string; product_name?: string }>(`${apiBase}/${id}`);
+        return data?.name || data?.product_name || "";
+      } catch {
+        return "";
+      }
     },
     []
   );

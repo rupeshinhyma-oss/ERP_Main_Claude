@@ -123,9 +123,9 @@ async def get_company(
     request: Request,
     company_id: uuid.UUID,
     service: CompanyService = Depends(get_company_service),
-    _current_user: CurrentUser = Depends(require_permission("organizationlist.view")),
+    _current_user: CurrentUser = Depends(get_current_user),
 ) -> dict:
-    """Get a single company by ID."""
+    """Get a single company by ID (authenticated lookup)."""
     company = await service.get_by_id_or_raise(company_id)
     data = CompanyRead.model_validate(company).model_dump(mode="json")
     return build_success_response(data=data, request_id=request.state.request_id)

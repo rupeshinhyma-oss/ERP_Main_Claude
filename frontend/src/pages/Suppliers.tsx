@@ -20,6 +20,7 @@ import { Breadcrumb } from "@/components/Breadcrumb";
 import { Banner, ModalAlert, TableMessageRow } from "@/components/ui";
 import { SideDrawer, DetailFieldGrid } from "@/components/SideDrawer";
 import { Pagination } from "@/components/Pagination";
+import { ItemPopoverCell } from "@/components/ItemPopoverCell";
 import { ImpExpDropdown, BulkActionsDropdown, ImportSummaryPanel, downloadSampleCsv, parseFile, WizardModal, type SheetRow } from "@/components/ImportWizard";
 import {
   SearchableDropdown,
@@ -1206,66 +1207,28 @@ export function SuppliersPage() {
     );
   }
 
-  function chipList(ids: string[] | undefined, tableKey: string, modalTitle = "Selected Items") {
+  function chipList(
+    ids: string[] | undefined,
+    tableKey: string,
+    modalTitle = "Selected Items",
+    icon = "🏷️"
+  ) {
     if (!ids || !ids.length) return <span className="muted">—</span>;
-    const names = ids.map((id) => resolver.get(tableKey, id) || "…");
-    const hasUnresolved = names.some((n) => n === "…");
+    const names = ids.map((id) => resolver.get(tableKey, id) || id);
+    const hasUnresolved = names.some((n) => !n || n === "…");
     if (hasUnresolved) {
       void resolver.resolve(tableKey, ids).then(() => setNamesVersion((n) => n + 1));
     }
-    const first = names[0];
-    const remaining = names.length - 1;
-
-    const handleOpenModal = async () => {
-      if (hasUnresolved) {
-        await resolver.resolve(tableKey, ids);
-        const resolvedNames = ids.map((id) => resolver.get(tableKey, id) || id);
-        setAlertPopup({ title: modalTitle, message: "• " + resolvedNames.join("\n• ") });
-        setNamesVersion((n) => n + 1);
-      } else {
-        setAlertPopup({ title: modalTitle, message: "• " + names.join("\n• ") });
-      }
-    };
+    const cleanNames = names.filter(Boolean);
 
     return (
-      <div className="chip-list" style={{ display: "inline-flex", flexWrap: "nowrap", gap: "4px", alignItems: "center", whiteSpace: "nowrap" }}>
-        <span
-          className="chip"
-          title={first}
-          style={{
-            maxWidth: "120px",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-            display: "inline-block",
-            verticalAlign: "middle",
-          }}
-        >
-          {first}
-        </span>
-        {remaining > 0 && (
-          <button
-            type="button"
-            className="chip-more"
-            title={names.join(", ")}
-            onClick={() => void handleOpenModal()}
-            style={{
-              fontWeight: 600,
-              fontSize: "11px",
-              color: "#0061f2",
-              background: "#eff6ff",
-              border: "1px solid #bfdbfe",
-              borderRadius: "12px",
-              padding: "1px 7px",
-              cursor: "pointer",
-              whiteSpace: "nowrap",
-              flexShrink: 0,
-            }}
-          >
-            +{remaining} 👁️
-          </button>
-        )}
-      </div>
+      <ItemPopoverCell
+        items={cleanNames}
+        icon={icon}
+        itemIcon={icon}
+        title={`📍 ${modalTitle}`}
+        badgeIcon="📍"
+      />
     );
   }
 

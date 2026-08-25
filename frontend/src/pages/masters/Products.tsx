@@ -18,6 +18,7 @@ import { useLiveModule } from "@/lib/live/useLive";
 import { MasterPage, type FormState, type MasterPageHandle } from "@/components/MasterPage";
 import { SideDrawer, DetailFieldGrid } from "@/components/SideDrawer";
 import { StatusBadge } from "@/components/ui";
+import { ItemPopoverCell } from "@/components/ItemPopoverCell";
 import {
   MultiSelectField,
   SelectField,
@@ -107,121 +108,15 @@ export function resolveImageUrl(url: string | null | undefined): string {
 }
 
 function BranchPopoverCell({ branches }: { branches: string[] }) {
-  const [isOpen, setIsOpen] = useState(false);
-
-  if (!branches.length) return <span style={{ color: "#94a3b8" }}>—</span>;
-
-  if (branches.length === 1) {
-    return (
-      <span className="cell-truncate" title={branches[0]} style={{ maxWidth: "160px", color: "#1e293b", fontSize: "13px" }}>
-        🏢 {branches[0]}
-      </span>
-    );
-  }
-
   return (
-    <div
-      style={{ position: "relative", display: "inline-flex", alignItems: "center" }}
-      onMouseEnter={() => setIsOpen(true)}
-      onMouseLeave={() => setIsOpen(false)}
-    >
-      <div style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
-        <span className="cell-truncate" title={branches[0]} style={{ maxWidth: "120px", color: "#1e293b", fontSize: "13px" }}>
-          🏢 {branches[0]}
-        </span>
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            setIsOpen((prev) => !prev);
-          }}
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: "3px",
-            padding: "2px 7px",
-            fontSize: "11px",
-            fontWeight: 600,
-            color: "#2563eb",
-            background: "#eff6ff",
-            border: "1px solid #bfdbfe",
-            borderRadius: "12px",
-            cursor: "pointer",
-            lineHeight: 1.2,
-            transition: "all 0.15s ease",
-            boxShadow: "0 1px 2px rgba(37,99,235,0.08)",
-          }}
-          title="Click or hover to view all branches"
-        >
-          👁️ +{branches.length - 1}
-        </button>
-      </div>
-
-      {isOpen && (
-        <div
-          style={{
-            position: "absolute",
-            top: "calc(100% + 4px)",
-            left: 0,
-            background: "#ffffff",
-            border: "1px solid #cbd5e1",
-            borderRadius: "8px",
-            boxShadow: "0 12px 28px -4px rgba(0, 0, 0, 0.18), 0 8px 12px -6px rgba(0, 0, 0, 0.1)",
-            padding: "10px 12px",
-            minWidth: "230px",
-            maxWidth: "340px",
-            maxHeight: "240px",
-            overflowY: "auto",
-            zIndex: 99999,
-          }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <div style={{ fontSize: "11.5px", fontWeight: 700, color: "#334155", marginBottom: "8px", borderBottom: "1px solid #f1f5f9", paddingBottom: "5px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <span>📍 Assigned Branches ({branches.length})</span>
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                setIsOpen(false);
-              }}
-              style={{
-                background: "transparent",
-                border: "none",
-                color: "#94a3b8",
-                fontSize: "13px",
-                cursor: "pointer",
-                padding: "0 4px",
-                lineHeight: 1,
-              }}
-              title="Close"
-            >
-              ✕
-            </button>
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
-            {branches.map((b, i) => (
-              <div
-                key={i}
-                style={{
-                  fontSize: "12px",
-                  color: "#1e293b",
-                  fontWeight: 500,
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "6px",
-                  padding: "5px 8px",
-                  borderRadius: "4px",
-                  background: "#f8fafc",
-                }}
-              >
-                <span style={{ color: "#3b82f6", fontSize: "12px" }}>🏢</span>
-                <span>{b}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
+    <ItemPopoverCell
+      items={branches}
+      icon="🏢"
+      itemIcon="🏢"
+      title="📍 Assigned Branches"
+      badgeIcon="📍"
+      emptyText="—"
+    />
   );
 }
 

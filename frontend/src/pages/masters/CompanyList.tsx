@@ -1,6 +1,7 @@
 import { MasterPage, type FormState } from "@/components/MasterPage";
 import { StatusBadge } from "@/components/ui";
 import { StatusSelectField, TextField } from "@/components/fields";
+import { ItemPopoverCell } from "@/components/ItemPopoverCell";
 import type { MasterRecord, CompanyBranch } from "@/types";
 
 interface MasterCompanyItem extends MasterRecord {
@@ -39,30 +40,21 @@ export function CompanyListPage() {
         { header: "ORGANIZATION NAME", render: (c) => <span className="cell-primary">{c.name}</span> },
         {
           header: "OPERATING BRANCHES",
-          render: (c) => (
-            <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
-              {Array.isArray(c.branches) && c.branches.length > 0 ? (
-                c.branches.map((b, i) => (
-                  <span
-                    key={b.id || i}
-                    style={{
-                      background: "#e0f2fe",
-                      color: "#0369a1",
-                      border: "1px solid #bae6fd",
-                      borderRadius: "4px",
-                      padding: "2px 8px",
-                      fontSize: "12px",
-                      fontWeight: 600,
-                    }}
-                  >
-                    🏢 {b.name} {b.code_prefix ? `(${b.code_prefix})` : ""}
-                  </span>
-                ))
-              ) : (
-                <span style={{ color: "#94a3b8", fontSize: "12px", fontStyle: "italic" }}>No branches</span>
-              )}
-            </div>
-          ),
+          render: (c) => {
+            const branchNames = Array.isArray(c.branches)
+              ? c.branches.map((b) => `${b.name}${b.code_prefix ? ` (${b.code_prefix})` : ""}`)
+              : [];
+            return (
+              <ItemPopoverCell
+                items={branchNames}
+                icon="🏢"
+                itemIcon="🏢"
+                title="📍 Operating Branches"
+                badgeIcon="📍"
+                emptyText="No branches"
+              />
+            );
+          },
         },
         { header: "STATUS", render: (c) => <StatusBadge status={c.status} /> },
       ]}

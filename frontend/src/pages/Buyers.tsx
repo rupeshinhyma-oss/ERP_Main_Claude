@@ -26,6 +26,7 @@ import { Pagination } from "@/components/Pagination";
 import { SearchableDropdown, SearchableDropdownMultiPanel, type DropdownOption } from "@/components/SearchableDropdown";
 import { EmailTagInput, PhoneGroupField, SelectField, TextAreaField, TextField, WebsiteTagInput } from "@/components/fields";
 import { SideDrawer, DetailFieldGrid } from "@/components/SideDrawer";
+import { ItemPopoverCell } from "@/components/ItemPopoverCell";
 import { ImpExpDropdown, BulkActionsDropdown, ImportSummaryPanel, downloadSampleCsv, parseFile, WizardModal, type SheetRow } from "@/components/ImportWizard";
 import { apiDelete, apiGet, apiPatch, apiPost, downloadExport, toQueryString } from "@/lib/api";
 import { useLookup, useLookupNames } from "@/lib/lookups";
@@ -700,86 +701,32 @@ export function BuyersPage() {
     []
   );
 
-  /* Chip Render Helper (Max 3 Chips + Eye Icon Modal for full view) */
+  /* Chip / Popover Render Helper */
   function renderChips(
     ids: string[] | undefined,
     itemsList: Array<{ id: string; name: string }>,
     fieldTitle = "Selected Items",
-    fallbackItemsList?: Array<{ id: string; name: string }>
+    fallbackItemsList?: Array<{ id: string; name: string }>,
+    icon = "🏷️"
   ) {
     if (!ids || !ids.length) return <span style={{ color: "#94a3b8" }}>—</span>;
-    const names = ids.map(
-      (id) =>
-        itemsList.find((x) => x.id === id)?.name ||
-        fallbackItemsList?.find((x) => x.id === id)?.name ||
-        id
-    );
-    const MAX_SHOW = 3;
-    const shown = names.slice(0, MAX_SHOW);
-    const remaining = names.length - shown.length;
+    const names = ids
+      .map(
+        (id) =>
+          itemsList.find((x) => x.id === id)?.name ||
+          fallbackItemsList?.find((x) => x.id === id)?.name ||
+          id
+      )
+      .filter(Boolean);
 
     return (
-      <div style={{ display: "flex", flexWrap: "wrap", gap: "4px", alignItems: "center" }}>
-        {shown.map((n, i) => (
-          <span
-            key={`${n}-${i}`}
-            style={{
-              padding: "2px 7px",
-              borderRadius: "4px",
-              background: "#f1f5f9",
-              fontSize: "11.5px",
-              fontWeight: 600,
-              color: "#334155",
-              border: "1px solid #cbd5e1",
-              whiteSpace: "nowrap",
-            }}
-          >
-            {n}
-          </span>
-        ))}
-        {remaining > 0 ? (
-          <button
-            type="button"
-            title={`Click to view all ${names.length} items`}
-            onClick={() => setChipModalData({ title: fieldTitle, items: names })}
-            style={{
-              padding: "2px 7px",
-              borderRadius: "4px",
-              background: "#dbeafe",
-              color: "#1d4ed8",
-              border: "1px solid #93c5fd",
-              fontSize: "11px",
-              fontWeight: 700,
-              cursor: "pointer",
-              display: "inline-flex",
-              alignItems: "center",
-              gap: "3px",
-              transition: "all 0.15s ease",
-            }}
-          >
-            👁️ +{remaining}
-          </button>
-        ) : names.length >= 2 ? (
-          <button
-            type="button"
-            title="Click to view full list"
-            onClick={() => setChipModalData({ title: fieldTitle, items: names })}
-            style={{
-              padding: "2px 5px",
-              borderRadius: "4px",
-              background: "#f8fafc",
-              color: "#64748b",
-              border: "1px solid #cbd5e1",
-              fontSize: "11px",
-              cursor: "pointer",
-              display: "inline-flex",
-              alignItems: "center",
-            }}
-          >
-            👁️
-          </button>
-        ) : null}
-      </div>
+      <ItemPopoverCell
+        items={names}
+        icon={icon}
+        itemIcon={icon}
+        title={`📍 ${fieldTitle}`}
+        badgeIcon="📍"
+      />
     );
   }
 

@@ -61,8 +61,13 @@ export interface TokenPair {
 
 export interface Profile {
   id?: string;
+  first_name?: string | null;
+  last_name?: string | null;
+  full_name?: string | null;
+  employee_code?: string | null;
   username: string;
   email?: string;
+  phone?: string | null;
   roles?: string[];
   permissions?: string[];
   must_change_password?: boolean;

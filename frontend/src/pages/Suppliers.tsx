@@ -28,6 +28,7 @@ import {
 } from "@/components/SearchableDropdown";
 import { EmailTagInput, PhoneGroupField, SelectField, TextAreaField, TextField, WebsiteField, autoTitleCase } from "@/components/fields";
 import { useLookup } from "@/lib/lookups";
+import { useLiveModule } from "@/lib/live/useLive";
 
 function resolveImageUrl(url: string | null | undefined): string {
   if (!url) return "";
@@ -397,6 +398,11 @@ export function SuppliersPage() {
   const [pageSize, setPageSize] = useState(50);
   const [reloadCounter, setReloadCounter] = useState(0);
   const [namesVersion, setNamesVersion] = useState(0);
+
+  /* Live Real-time cross-tab synchronization for Suppliers */
+  useLiveModule("suppliers", () => {
+    setReloadCounter((k) => k + 1);
+  });
 
   const [searchInput, setSearchInput] = useState("");
   const [effectiveSearch, setEffectiveSearch] = useState("");
@@ -1477,10 +1483,10 @@ export function SuppliersPage() {
     if (!formCountryId) {
       initialErrors["field-country"] = "Country is required.";
     }
-    if (!formStateCustomText.trim()) {
+    if (!formStateId && !formStateCustomText.trim()) {
       initialErrors["field-province"] = "Province is required.";
     }
-    if (!formCityCustomText.trim()) {
+    if (!formCityId && !formCityCustomText.trim()) {
       initialErrors["field-city"] = "City is required.";
     }
     if (form.contact_calling_number) {
@@ -1651,7 +1657,7 @@ export function SuppliersPage() {
         }
         : EMPTY_CONTACT_FORM
     );
-    setContactCountryId(contact?.country_id || defaultChinaId || null);
+    setContactCountryId(contact?.country_id || formCountryId || defaultChinaId || null);
     setContactSameCallingWhatsapp(false);
     setContactSameCallingWechat(false);
     setContactFormOpen(true);

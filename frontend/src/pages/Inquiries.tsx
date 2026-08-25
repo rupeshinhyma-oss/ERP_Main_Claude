@@ -15,7 +15,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { Banner, Can, TableMessageRow } from "@/components/ui";
-import { SearchableDropdown, type DropdownOption, type FetchOptions } from "@/components/SearchableDropdown";
+import { SearchableDropdown, SearchableDropdownMultiPanel, type DropdownOption, type FetchOptions } from "@/components/SearchableDropdown";
 import { SelectField, TextAreaField, TextField } from "@/components/fields";
 import { apiDelete, apiGet, apiPatch, apiPost, toQueryString } from "@/lib/api";
 import { useLiveModule } from "@/lib/live/useLive";
@@ -74,7 +74,6 @@ function InquiriesConsignmentSkeletonRows({ count = 6 }: { count?: number }) {
     </>
   );
 }
-
 
 function InquiriesItemsSkeletonRows({ count = 6 }: { count?: number }) {
   const prodWidths = ["80%", "65%", "90%", "75%", "85%"];
@@ -938,27 +937,29 @@ function ItemsView({
 
   const { guard: guardRowAction } = usePendingGuard<string>();
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const { data } = await apiGet<Inquiry>(`/inquiries/${inquiryId}`);
       setInquiry(data);
-      if (data.items && data.items.length > 0 && !selectedItemId) {
-        setSelectedItemId(data.items[0].id);
-      }
+      setSelectedItemId((prev) => prev || (data.items && data.items.length > 0 ? data.items[0].id : ""));
     } catch (err) {
-      onError(err);
+      if (!silent) onError(err);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
-  }, [inquiryId, onError, selectedItemId]);
+  }, [inquiryId, onError]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
+  // Live real-time WebSocket subscription: updates quietly when a supplier submits a quotation
   useLiveModule("inquiries", () => {
-    void load();
+    void load(true);
+    if (selectedItemId) {
+      void loadQuotations(selectedItemId, true);
+    }
   });
 
   const items = inquiry?.items ?? [];
@@ -969,16 +970,16 @@ function ItemsView({
   }, [items, selectedItemId]);
 
   // Load quotations when selected item changes
-  const loadQuotations = useCallback(async (itemId: string) => {
-    setLoadingQuotes(true);
+  const loadQuotations = useCallback(async (itemId: string, silent = false) => {
+    if (!silent) setLoadingQuotes(true);
     try {
       const { data } = await apiGet<Quotation[]>(`/inquiries/items/${itemId}/quotations`);
       setQuotations(data || []);
     } catch (err) {
       console.warn("Failed to load quotations", err);
-      setQuotations([]);
+      if (!silent) setQuotations([]);
     } finally {
-      setLoadingQuotes(false);
+      if (!silent) setLoadingQuotes(false);
     }
   }, []);
 
@@ -988,6 +989,15 @@ function ItemsView({
     } else {
       setQuotations([]);
     }
+  }, [selectedItem?.id, loadQuotations]);
+
+  // Seamless silent auto-sync every 3s so mobile submissions appear instantly on screen
+  useEffect(() => {
+    if (!selectedItem?.id) return;
+    const interval = setInterval(() => {
+      void loadQuotations(selectedItem.id, true);
+    }, 3000);
+    return () => clearInterval(interval);
   }, [selectedItem?.id, loadQuotations]);
 
   // Filtered products on left
@@ -1065,6 +1075,23 @@ function ItemsView({
     await guardRowAction(`quote_status:${quote.id}`, async () => {
       try {
         await apiPatch(`/inquiries/quotations/${quote.id}/status`, { status: "rejected" });
+        if (selectedItem?.id) void loadQuotations(selectedItem.id);
+        void load();
+      } catch (err) {
+        onError(err);
+      } finally {
+        setActiveActionMenuId(null);
+      }
+    });
+  }
+
+  async function handleDeleteQuote(quote: Quotation) {
+    if (!window.confirm(`Are you sure you want to delete Quotation #${quote.quote_number}?`)) {
+      return;
+    }
+    await guardRowAction(`quote_delete:${quote.id}`, async () => {
+      try {
+        await apiDelete(`/inquiries/quotations/${quote.id}`);
         if (selectedItem?.id) void loadQuotations(selectedItem.id);
         void load();
       } catch (err) {
@@ -1975,6 +2002,31 @@ function ItemsView({
                                     >
                                       📄 Create PO
                                     </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleDeleteQuote(quote)}
+                                      style={{
+                                        padding: "8px 12px",
+                                        background: "none",
+                                        border: "none",
+                                        borderRadius: "6px",
+                                        textAlign: "left",
+                                        fontSize: "13px",
+                                        cursor: "pointer",
+                                        color: "#dc2626",
+                                        fontWeight: 600,
+                                        borderTop: "1px solid #f1f5f9",
+                                        marginTop: "2px",
+                                        paddingTop: "8px",
+                                        display: "flex",
+                                        alignItems: "center",
+                                        gap: "8px",
+                                      }}
+                                      onMouseEnter={(e) => (e.currentTarget.style.background = "#fef2f2")}
+                                      onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
+                                    >
+                                      🗑️ Delete Quote
+                                    </button>
                                   </div>
                                 </>
                               )}
@@ -2136,6 +2188,67 @@ function AddQuotationDrawer({
   const [submitting, setSubmitting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
+  const [productMeta, setProductMeta] = useState<{
+    categoryId?: string;
+    categoryName?: string;
+    subCategoryId?: string;
+    subCategoryName?: string;
+  } | null>(null);
+  const [supplierFilterScope, setSupplierFilterScope] = useState<"sub_category" | "category" | "all">("sub_category");
+
+  useEffect(() => {
+    if (!item.product_id) return;
+    let isMounted = true;
+    (async () => {
+      try {
+        const { data: prod } = await apiGet<any>(`/masters/products/${item.product_id}`);
+        if (!prod || !isMounted) return;
+
+        let catName = "";
+        let subCatName = "";
+
+        if (prod.category_id) {
+          try {
+            const { data: cat } = await apiGet<any>(`/masters/product-categories/${prod.category_id}`);
+            catName = cat?.name || "";
+          } catch {
+            /* ignore */
+          }
+        }
+
+        if (prod.sub_category_id) {
+          try {
+            const { data: subCat } = await apiGet<any>(`/masters/product-sub-categories/${prod.sub_category_id}`);
+            subCatName = subCat?.name || "";
+          } catch {
+            /* ignore */
+          }
+        }
+
+        if (!isMounted) return;
+        setProductMeta({
+          categoryId: prod.category_id || undefined,
+          categoryName: catName,
+          subCategoryId: prod.sub_category_id || undefined,
+          subCategoryName: subCatName,
+        });
+
+        if (prod.sub_category_id) {
+          setSupplierFilterScope("sub_category");
+        } else if (prod.category_id) {
+          setSupplierFilterScope("category");
+        } else {
+          setSupplierFilterScope("all");
+        }
+      } catch {
+        /* ignore */
+      }
+    })();
+    return () => {
+      isMounted = false;
+    };
+  }, [item.product_id]);
+
   // Auto calculate total cost when qty or unit price changes
   const handleUnitPriceChange = (val: string) => {
     setUnitPrice(val);
@@ -2146,15 +2259,24 @@ function AddQuotationDrawer({
     }
   };
 
-  const fetchSuppliers = useCallback(async (term: string) => {
-    try {
-      const res = await apiGet<any>(`/suppliers?search=${encodeURIComponent(term)}&limit=20`);
-      const list = Array.isArray(res.data) ? res.data : res.data?.data || [];
-      return list.map((s: any) => ({ value: s.id, label: s.company_name || s.name || "Supplier" }));
-    } catch {
-      return [];
-    }
-  }, []);
+  const fetchSuppliers = useCallback(
+    async (term: string) => {
+      try {
+        let url = `/suppliers?search=${encodeURIComponent(term)}&limit=100&sort_by=company_name&sort_order=asc`;
+        if (supplierFilterScope === "sub_category" && productMeta?.subCategoryId) {
+          url += `&sub_category_id=${productMeta.subCategoryId}`;
+        } else if (supplierFilterScope === "category" && productMeta?.categoryId) {
+          url += `&category_id=${productMeta.categoryId}`;
+        }
+        const res = await apiGet<any>(url);
+        const list = Array.isArray(res.data) ? res.data : res.data?.data || [];
+        return list.map((s: any) => ({ value: s.id, label: s.company_name || s.name || "Supplier" }));
+      } catch {
+        return [];
+      }
+    },
+    [supplierFilterScope, productMeta]
+  );
 
   const fetchSupplierLabel = useCallback(async (id: string) => {
     try {
@@ -2229,7 +2351,11 @@ function AddQuotationDrawer({
                 <div style={{ fontSize: "13.5px", fontWeight: 700, color: "#0f172a" }}>
                   {item.product_name || item.product_name_tally}
                 </div>
-                <div style={{ fontSize: "12px", color: "#64748b" }}>#{item.product_code || "PC10956df"}</div>
+                <div style={{ fontSize: "12px", color: "#64748b" }}>
+                  #{item.product_code || "PC10956df"}
+                  {productMeta?.subCategoryName && ` • ${productMeta.subCategoryName}`}
+                  {!productMeta?.subCategoryName && productMeta?.categoryName && ` • ${productMeta.categoryName}`}
+                </div>
               </div>
               <div style={{ fontSize: "13px", fontWeight: 600, color: "#334155" }}>
                 Qty: {item.quantity}
@@ -2239,10 +2365,78 @@ function AddQuotationDrawer({
 
           {/* Supplier Dropdown */}
           <div>
-            <label style={{ display: "block", fontSize: "12.5px", fontWeight: 700, color: "#334155", marginBottom: "4px" }}>
-              Supplier *
-            </label>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
+              <label style={{ display: "block", fontSize: "12.5px", fontWeight: 700, color: "#334155" }}>
+                Supplier *
+              </label>
+            </div>
+
+            {/* Filter Pills: Sub-Category / Category / All Suppliers */}
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginBottom: "8px" }}>
+              {productMeta?.subCategoryId && (
+                <button
+                  type="button"
+                  onClick={() => setSupplierFilterScope("sub_category")}
+                  style={{
+                    padding: "4px 10px",
+                    borderRadius: "16px",
+                    border: "none",
+                    fontSize: "11.5px",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    background: supplierFilterScope === "sub_category" ? "#0061f2" : "#f1f5f9",
+                    color: supplierFilterScope === "sub_category" ? "#ffffff" : "#475569",
+                    boxShadow: supplierFilterScope === "sub_category" ? "0 2px 4px rgba(0,97,242,0.25)" : "none",
+                    transition: "all 0.15s ease",
+                  }}
+                >
+                  🎯 Sub-Category: {productMeta.subCategoryName || "Sub-Category"}
+                </button>
+              )}
+
+              {productMeta?.categoryId && (
+                <button
+                  type="button"
+                  onClick={() => setSupplierFilterScope("category")}
+                  style={{
+                    padding: "4px 10px",
+                    borderRadius: "16px",
+                    border: "none",
+                    fontSize: "11.5px",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    background: supplierFilterScope === "category" ? "#0061f2" : "#f1f5f9",
+                    color: supplierFilterScope === "category" ? "#ffffff" : "#475569",
+                    boxShadow: supplierFilterScope === "category" ? "0 2px 4px rgba(0,97,242,0.25)" : "none",
+                    transition: "all 0.15s ease",
+                  }}
+                >
+                  📁 Category: {productMeta.categoryName || "Category"}
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={() => setSupplierFilterScope("all")}
+                style={{
+                  padding: "4px 10px",
+                  borderRadius: "16px",
+                  border: "none",
+                  fontSize: "11.5px",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  background: supplierFilterScope === "all" ? "#0061f2" : "#f1f5f9",
+                  color: supplierFilterScope === "all" ? "#ffffff" : "#475569",
+                  boxShadow: supplierFilterScope === "all" ? "0 2px 4px rgba(0,97,242,0.25)" : "none",
+                  transition: "all 0.15s ease",
+                }}
+              >
+                🌐 All Suppliers
+              </button>
+            </div>
+
             <SearchableDropdown
+              key={`add-quote-sup-${supplierFilterScope}-${productMeta?.subCategoryId || ""}-${productMeta?.categoryId || ""}`}
               value={supplierId || null}
               onChange={(val) => {
                 setSupplierId(val || "");
@@ -2250,7 +2444,13 @@ function AddQuotationDrawer({
               }}
               fetchOptions={fetchSuppliers}
               fetchLabelForValue={fetchSupplierLabel}
-              placeholder="Search or Select Supplier..."
+              placeholder={
+                supplierFilterScope === "sub_category" && productMeta?.subCategoryName
+                  ? `-- Select ${productMeta.subCategoryName} Supplier --`
+                  : supplierFilterScope === "category" && productMeta?.categoryName
+                  ? `-- Select ${productMeta.categoryName} Supplier --`
+                  : "Search or Select Supplier..."
+              }
               hasError={Boolean(errors.supplier)}
             />
             {errors.supplier && <div style={{ color: "#ef4444", fontSize: "11.5px", marginTop: "3px" }}>⚠️ {errors.supplier}</div>}
@@ -2374,48 +2574,209 @@ function RequestQuotationDrawer({
 }) {
   const [expDate, setExpDate] = useState("");
   const [supplierType, setSupplierType] = useState<"all" | "selected">("selected");
-  const [selectedSuppliers, setSelectedSuppliers] = useState<{ id: string; name: string }[]>([]);
+  const [selectedSupplierIds, setSelectedSupplierIds] = useState<string[]>([]);
   const [note, setNote] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [dispatchedData, setDispatchedData] = useState<any | null>(null);
+  const [copiedToken, setCopiedToken] = useState<string | null>(null);
+  const [copiedWechatToken, setCopiedWechatToken] = useState<string | null>(null);
+  const [sendingEmailToken, setSendingEmailToken] = useState<string | null>(null);
+  const [sentEmailSuccess, setSentEmailSuccess] = useState<Record<string, boolean>>({});
 
-  const fetchSuppliers = useCallback(async (term: string) => {
+  const handleSendAutoEmail = async (sup: any, fullQuoteUrl: string, prodTitle: string) => {
+    const emailsList = (sup.emails && Array.isArray(sup.emails) && sup.emails.length > 0)
+      ? sup.emails
+      : sup.email
+      ? [sup.email]
+      : [];
+
+    if (emailsList.length === 0) {
+      alert(`No email address registered for ${sup.company_name}. Please open Gmail or copy the link.`);
+      return;
+    }
+
+    setSendingEmailToken(sup.token);
     try {
-      const res = await apiGet<any>(`/suppliers?search=${encodeURIComponent(term)}&limit=20`);
-      const list = Array.isArray(res.data) ? res.data : res.data?.data || [];
-      return list.map((s: any) => ({ value: s.id, label: s.company_name || s.name || "Supplier" }));
+      await apiPost("/inquiries/rfqs/send-email", {
+        to_emails: emailsList,
+        contact_name: sup.contact_name || "Valued Partner",
+        company_name: sup.company_name,
+        product_name: prodTitle,
+        product_code: item.product_code || null,
+        quantity: item.quantity,
+        quote_url: fullQuoteUrl,
+        expected_receiving_date: expDate || null,
+        notes: note.trim() || null,
+      });
+      setSentEmailSuccess((prev) => ({ ...prev, [sup.token]: true }));
+    } catch (err: any) {
+      alert("Failed to send automated email: " + (err?.message || "Please check connection."));
+    } finally {
+      setSendingEmailToken(null);
+    }
+  };
+
+  const [productMeta, setProductMeta] = useState<{
+    categoryId?: string;
+    categoryName?: string;
+    subCategoryId?: string;
+    subCategoryName?: string;
+  } | null>(null);
+  const [supplierFilterScope, setSupplierFilterScope] = useState<"all_matching" | "sub_category" | "category" | "all">("all_matching");
+
+  useEffect(() => {
+    if (!item.product_id) return;
+    let isMounted = true;
+    (async () => {
+      try {
+        const { data: prod } = await apiGet<any>(`/masters/products/${item.product_id}`);
+        if (!prod || !isMounted) return;
+
+        let catName = "";
+        let subCatName = "";
+
+        if (prod.category_id) {
+          try {
+            const { data: cat } = await apiGet<any>(`/masters/product-categories/${prod.category_id}`);
+            catName = cat?.name || "";
+          } catch {
+            /* ignore */
+          }
+        }
+
+        if (prod.sub_category_id) {
+          try {
+            const { data: subCat } = await apiGet<any>(`/masters/product-sub-categories/${prod.sub_category_id}`);
+            subCatName = subCat?.name || "";
+          } catch {
+            /* ignore */
+          }
+        }
+
+        if (!isMounted) return;
+        setProductMeta({
+          categoryId: prod.category_id || undefined,
+          categoryName: catName,
+          subCategoryId: prod.sub_category_id || undefined,
+          subCategoryName: subCatName,
+        });
+
+        // Automatically fetch and pre-select all matching suppliers for this product
+        const matchingSupplierIds = new Set<string>();
+        try {
+          if (prod.sub_category_id) {
+            const { data: subSups } = await apiGet<any>(`/suppliers?sub_category_id=${prod.sub_category_id}&limit=100`);
+            const subList = Array.isArray(subSups) ? subSups : subSups?.data || [];
+            subList.forEach((s: any) => matchingSupplierIds.add(s.id));
+          }
+          if (prod.category_id) {
+            const { data: catSups } = await apiGet<any>(`/suppliers?category_id=${prod.category_id}&limit=100`);
+            const catList = Array.isArray(catSups) ? catSups : catSups?.data || [];
+            catList.forEach((s: any) => matchingSupplierIds.add(s.id));
+          }
+          if (matchingSupplierIds.size === 0) {
+            const { data: allSups } = await apiGet<any>(`/suppliers?limit=100`);
+            const allList = Array.isArray(allSups) ? allSups : allSups?.data || [];
+            allList.forEach((s: any) => matchingSupplierIds.add(s.id));
+          }
+          if (matchingSupplierIds.size > 0 && isMounted) {
+            setSelectedSupplierIds(Array.from(matchingSupplierIds));
+          }
+        } catch {
+          /* ignore */
+        }
+      } catch {
+        /* ignore */
+      }
+    })();
+    return () => {
+      isMounted = false;
+    };
+  }, [item.product_id]);
+
+  const fetchSupplierOptions = useCallback(
+    async (term: string) => {
+      try {
+        if (supplierFilterScope === "all_matching") {
+          const supplierMap = new Map<string, any>();
+          if (productMeta?.subCategoryId) {
+            const { data: subSups } = await apiGet<any>(`/suppliers?search=${encodeURIComponent(term)}&sub_category_id=${productMeta.subCategoryId}&limit=100`);
+            const list = Array.isArray(subSups) ? subSups : subSups?.data || [];
+            list.forEach((s: any) => supplierMap.set(s.id, s));
+          }
+          if (productMeta?.categoryId) {
+            const { data: catSups } = await apiGet<any>(`/suppliers?search=${encodeURIComponent(term)}&category_id=${productMeta.categoryId}&limit=100`);
+            const list = Array.isArray(catSups) ? catSups : catSups?.data || [];
+            list.forEach((s: any) => supplierMap.set(s.id, s));
+          }
+          if (supplierMap.size === 0) {
+            const { data: allSups } = await apiGet<any>(`/suppliers?search=${encodeURIComponent(term)}&limit=100`);
+            const list = Array.isArray(allSups) ? allSups : allSups?.data || [];
+            list.forEach((s: any) => supplierMap.set(s.id, s));
+          }
+          return Array.from(supplierMap.values()).map((s: any) => ({
+            value: s.id,
+            label: s.company_name || s.name || "Supplier",
+          }));
+        }
+
+        let url = `/suppliers?search=${encodeURIComponent(term)}&limit=100&sort_by=company_name&sort_order=asc`;
+        if (supplierFilterScope === "sub_category" && productMeta?.subCategoryId) {
+          url += `&sub_category_id=${productMeta.subCategoryId}`;
+        } else if (supplierFilterScope === "category" && productMeta?.categoryId) {
+          url += `&category_id=${productMeta.categoryId}`;
+        }
+        const res = await apiGet<any>(url);
+        const list = Array.isArray(res.data) ? res.data : res.data?.data || [];
+        return list.map((s: any) => ({
+          value: s.id,
+          label: s.company_name || s.name || "Supplier",
+        }));
+      } catch {
+        return [];
+      }
+    },
+    [supplierFilterScope, productMeta]
+  );
+
+  const fetchSupplierLabel = useCallback(async (id: string) => {
+    try {
+      const res = await apiGet<any>(`/suppliers/${id}`);
+      return res.data?.company_name || res.data?.name || id;
     } catch {
-      return [];
+      return id;
     }
   }, []);
 
-  const addSupplierTag = (val: string | null, label?: string) => {
-    if (!val || !label) return;
-    if (!selectedSuppliers.some((s) => s.id === val)) {
-      setSelectedSuppliers((prev) => [...prev, { id: val, name: label }]);
-    }
-  };
-
-  const removeSupplierTag = (id: string) => {
-    setSelectedSuppliers((prev) => prev.filter((s) => s.id !== id));
-  };
-
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (supplierType === "selected" && selectedSuppliers.length === 0) {
+    if (supplierType === "selected" && selectedSupplierIds.length === 0) {
       alert("Please select at least one supplier.");
       return;
     }
 
     setSubmitting(true);
     try {
-      await apiPost(`/inquiries/items/${item.id}/rfqs`, {
+      const res = await apiPost<any>(`/inquiries/items/${item.id}/rfqs`, {
         expected_receiving_date: expDate || null,
         supplier_type: supplierType,
-        supplier_ids: selectedSuppliers.map((s) => s.id),
+        supplier_ids: selectedSupplierIds,
         notes: note.trim() || null,
       });
-      alert("Request for Quotation successfully sent to suppliers!");
-      onDispatched();
+
+      if (res.data && res.data.supplier_links && res.data.supplier_links.length > 0) {
+        const initialSent: Record<string, boolean> = {};
+        res.data.supplier_links.forEach((l: any) => {
+          if ((l.emails && l.emails.length > 0) || l.email) {
+            initialSent[l.token] = true;
+          }
+        });
+        setSentEmailSuccess(initialSent);
+        setDispatchedData(res.data);
+      } else {
+        alert("Request for Quotation successfully sent to suppliers!");
+        onDispatched();
+      }
     } catch (err) {
       onError(err);
     } finally {
@@ -2462,8 +2823,8 @@ function RequestQuotationDrawer({
       <div
         style={{
           position: "relative",
-          width: "480px",
-          maxWidth: "92vw",
+          width: "520px",
+          maxWidth: "94vw",
           height: "100%",
           background: "#ffffff",
           boxShadow: "-10px 0 30px rgba(0,0,0,0.15)",
@@ -2474,163 +2835,511 @@ function RequestQuotationDrawer({
       >
         {/* Header */}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "18px 24px", borderBottom: "1px solid #e2e8f0" }}>
-          <h3 style={{ margin: 0, fontSize: "17px", fontWeight: 700, color: "#0f172a" }}>Request For Quotation</h3>
+          <h3 style={{ margin: 0, fontSize: "17px", fontWeight: 700, color: "#0f172a" }}>
+            {dispatchedData ? "⚡ RFQ Share & Dispatch" : "Request For Quotation"}
+          </h3>
           <button type="button" onClick={onClose} style={{ background: "none", border: "none", fontSize: "18px", cursor: "pointer", color: "#64748b" }}>✕</button>
         </div>
 
-        {/* Content */}
-        <form onSubmit={handleSubmit} style={{ padding: "20px 24px", display: "flex", flexDirection: "column", gap: "16px", flex: 1 }}>
-          {/* Selected Product Card */}
-          <div>
-            <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#64748b", marginBottom: "6px" }}>Product</label>
-            <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "12px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <div>
-                <div style={{ fontSize: "13.5px", fontWeight: 700, color: "#0f172a" }}>
-                  {item.product_name || item.product_name_tally}
-                </div>
-                <div style={{ fontSize: "12px", color: "#64748b" }}>#{item.product_code || "PC10956df"}</div>
+        {/* If already dispatched, show interactive Share Links modal */}
+        {dispatchedData ? (
+          <div style={{ padding: "20px 24px", display: "flex", flexDirection: "column", gap: "16px", flex: 1 }}>
+            <div style={{ background: "#ecfdf5", border: "1px solid #a7f3d0", padding: "14px 16px", borderRadius: "10px" }}>
+              <div style={{ fontSize: "14px", fontWeight: 700, color: "#065f46", display: "flex", alignItems: "center", gap: "6px" }}>
+                <span>✓</span> RFQ Created Successfully!
               </div>
-              <div style={{ fontSize: "13px", fontWeight: 600, color: "#334155" }}>
-                Qty: {item.quantity}
+              <div style={{ fontSize: "12.5px", color: "#047857", marginTop: "4px" }}>
+                Send the private quotation link to each supplier. When they submit their quote, it will automatically appear in your ERP Quotations Table.
               </div>
             </div>
-            <div style={{ textAlign: "right", marginTop: "4px" }}>
+
+            {/* Product Summary */}
+            <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "12px 14px" }}>
+              <div style={{ fontSize: "13.5px", fontWeight: 700, color: "#0f172a" }}>
+                {item.product_name || item.product_name_tally}
+              </div>
+              <div style={{ fontSize: "12px", color: "#64748b" }}>
+                Qty: <strong>{item.quantity} units</strong> {expDate && `• Expected By: ${expDate}`}
+              </div>
+            </div>
+
+            {/* List of Supplier Links */}
+            <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+              <label style={{ fontSize: "12.5px", fontWeight: 700, color: "#334155" }}>
+                Supplier Quotation Links ({dispatchedData.supplier_links?.length || 0})
+              </label>
+
+              {dispatchedData.supplier_links?.map((sup: any) => {
+                const host = window.location.hostname;
+                const isLocal = host === "localhost" || host === "127.0.0.1";
+                const baseOrigin = isLocal ? `${window.location.protocol}//192.168.1.23:${window.location.port}` : window.location.origin;
+                const fullQuoteUrl = `${baseOrigin}${sup.quote_path}`;
+                const prodTitle = item.product_name || item.product_name_tally || "Product";
+                const waText = `Hello ${sup.contact_name},\n\nWe have an RFQ for ${item.quantity} units of *${prodTitle}* (#${item.product_code || "PC"}).\n\nPlease submit your best quotation with price and lead time using this link:\n\n${fullQuoteUrl}\n\nThank you!\nfrom Yinglima`;
+                const waUrl = sup.clean_phone
+                  ? `https://api.whatsapp.com/send?phone=${sup.clean_phone}&text=${encodeURIComponent(waText)}`
+                  : `https://api.whatsapp.com/send?text=${encodeURIComponent(waText)}`;
+                const supEmail = (
+                  typeof sup.email === "string" && sup.email
+                    ? sup.email
+                    : Array.isArray(sup.emails)
+                    ? sup.emails.map((e: any) => (typeof e === "string" ? e : e?.email || "")).filter(Boolean).join(", ")
+                    : ""
+                );
+                const emailSubject = `Request for Quotation: ${prodTitle} (${item.quantity} units)`;
+                const emailBody = `Dear ${sup.contact_name},\n\nPlease review our inquiry for ${item.quantity} units of ${prodTitle}.\n\nYou can view specifications and submit your quotation using the link below:\n\n${fullQuoteUrl}\n\nBest regards,\nYinglima Procurement Team`;
+                const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(supEmail)}&su=${encodeURIComponent(emailSubject)}&body=${encodeURIComponent(emailBody)}`;
+
+                return (
+                  <div
+                    key={sup.supplier_id}
+                    style={{
+                      background: "#ffffff",
+                      border: "1.5px solid #e2e8f0",
+                      borderRadius: "10px",
+                      padding: "14px 16px",
+                      boxShadow: "0 1px 3px rgba(0,0,0,0.03)",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "10px",
+                    }}
+                  >
+                    <div>
+                      <div style={{ fontSize: "13.5px", fontWeight: 700, color: "#0f172a" }}>
+                        🏢 {sup.company_name}
+                      </div>
+                      <div style={{ fontSize: "12px", color: "#64748b", marginTop: "2px" }}>
+                        Contact: {sup.contact_name} {sup.phone ? `• 📞 ${sup.phone}` : ""} {supEmail ? `• ✉️ ${supEmail}` : ""}
+                      </div>
+                    </div>
+
+                    {/* Action Buttons Row */}
+                    <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                      {/* 1-Click Instant Auto-Email Button */}
+                      <button
+                        type="button"
+                        disabled={sendingEmailToken === sup.token}
+                        onClick={() => void handleSendAutoEmail(sup, fullQuoteUrl, prodTitle)}
+                        style={{
+                          padding: "7px 14px",
+                          background: sentEmailSuccess[sup.token] ? "#059669" : "#0061f2",
+                          color: "#ffffff",
+                          border: "none",
+                          borderRadius: "6px",
+                          fontSize: "12px",
+                          fontWeight: 700,
+                          cursor: sendingEmailToken === sup.token ? "wait" : "pointer",
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "6px",
+                          boxShadow: "0 2px 5px rgba(0,97,242,0.25)",
+                        }}
+                      >
+                        {sendingEmailToken === sup.token ? (
+                          <><span>⏳</span> Sending Email...</>
+                        ) : sentEmailSuccess[sup.token] ? (
+                          <><span>✓</span> Email Sent!</>
+                        ) : (
+                          <><span>⚡</span> Auto-Send Email</>
+                        )}
+                      </button>
+
+                      {/* 1-Click Copy for WeChat Button (English) */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const wechatMsg = `Dear ${sup.contact_name || sup.company_name},\n\nYinglima Procurement Team invites you to submit your quotation for:\n\n• Product: ${prodTitle}${item.product_code ? ` (#${item.product_code})` : ''}\n• Quantity: ${item.quantity} units\n${expDate ? `• Required Date: ${expDate}\n` : ''}${note.trim() ? `• Notes: ${note.trim()}\n` : ''}\nPlease click the link below to view specifications and submit your quotation:\n👉 ${fullQuoteUrl}\n\nThank you!\n(Yinglima Procurement Team)`;
+                          navigator.clipboard.writeText(wechatMsg);
+                          setCopiedWechatToken(sup.token);
+                          setTimeout(() => setCopiedWechatToken(null), 3000);
+                        }}
+                        style={{
+                          padding: "7px 12px",
+                          background: copiedWechatToken === sup.token ? "#dcfce7" : "#07c160",
+                          color: copiedWechatToken === sup.token ? "#15803d" : "#ffffff",
+                          border: copiedWechatToken === sup.token ? "1px solid #86efac" : "none",
+                          borderRadius: "6px",
+                          fontSize: "12px",
+                          fontWeight: 700,
+                          cursor: "pointer",
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "6px",
+                          boxShadow: "0 2px 4px rgba(7,193,96,0.25)",
+                        }}
+                        title="Copy pre-formatted inquiry message with quote link to paste into WeChat"
+                      >
+                        <span>💬</span>
+                        {copiedWechatToken === sup.token ? "✓ Message Copied!" : "WeChat Message"}
+                      </button>
+
+                      {/* WhatsApp Button */}
+                      <a
+                        href={waUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{
+                          padding: "7px 12px",
+                          background: "#25D366",
+                          color: "#ffffff",
+                          borderRadius: "6px",
+                          fontSize: "12px",
+                          fontWeight: 700,
+                          textDecoration: "none",
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "6px",
+                          boxShadow: "0 2px 4px rgba(37,211,102,0.2)",
+                        }}
+                      >
+                        <span>💬</span> Send on WhatsApp
+                      </a>
+
+                      {/* Gmail Button */}
+                      <a
+                        href={gmailUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{
+                          padding: "7px 12px",
+                          background: "#fef2f2",
+                          color: "#dc2626",
+                          border: "1px solid #fecaca",
+                          borderRadius: "6px",
+                          fontSize: "12px",
+                          fontWeight: 600,
+                          textDecoration: "none",
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "6px",
+                        }}
+                        title="Open in Gmail Web to review or edit before sending"
+                      >
+                        <span>✉️</span> Gmail Web
+                      </a>
+
+                      {/* Copy Link Button */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          navigator.clipboard.writeText(fullQuoteUrl);
+                          setCopiedToken(sup.token);
+                          setTimeout(() => setCopiedToken(null), 2500);
+                        }}
+                        style={{
+                          padding: "7px 12px",
+                          background: copiedToken === sup.token ? "#dcfce7" : "#f8fafc",
+                          color: copiedToken === sup.token ? "#15803d" : "#334155",
+                          border: copiedToken === sup.token ? "1px solid #86efac" : "1px solid #cbd5e1",
+                          borderRadius: "6px",
+                          fontSize: "12px",
+                          fontWeight: 600,
+                          cursor: "pointer",
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "6px",
+                        }}
+                      >
+                        <span>{copiedToken === sup.token ? "✓" : "📋"}</span>
+                        {copiedToken === sup.token ? "Copied!" : "Copy Link"}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Done & View Quotations Button */}
+            <div style={{ marginTop: "auto", paddingTop: "16px" }}>
               <button
                 type="button"
-                onClick={handleViewLastPurchase}
-                disabled={loadingLastPurchase}
+                onClick={() => {
+                  onDispatched();
+                  onClose();
+                }}
                 style={{
-                  background: "none",
+                  width: "100%",
+                  padding: "10px",
+                  background: "#0061f2",
+                  color: "#ffffff",
                   border: "none",
-                  color: "#2563eb",
-                  fontSize: "12px",
-                  cursor: loadingLastPurchase ? "wait" : "pointer",
-                  textDecoration: "underline",
+                  borderRadius: "8px",
+                  fontSize: "14px",
+                  fontWeight: 700,
+                  cursor: "pointer",
+                  boxShadow: "0 2px 6px rgba(0,97,242,0.25)",
                 }}
               >
-                {loadingLastPurchase ? "Fetching..." : "View Last Purchase"}
+                Done &amp; View Quotations Table
               </button>
             </div>
           </div>
-
-          {/* Expected Receiving Date */}
-          <div>
-            <label style={{ display: "block", fontSize: "12.5px", fontWeight: 700, color: "#334155", marginBottom: "4px" }}>
-              *Expected Receiving
-            </label>
-            <input
-              type="date"
-              value={expDate}
-              onChange={(e) => setExpDate(e.target.value)}
-              style={{ width: "100%", padding: "8px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px" }}
-            />
-          </div>
-
-          {/* Suppliers Type Radio */}
-          <div>
-            <label style={{ display: "block", fontSize: "12.5px", fontWeight: 700, color: "#334155", marginBottom: "6px" }}>
-              *Suppliers Type
-            </label>
-            <div style={{ display: "flex", gap: "20px" }}>
-              <label style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "13px", cursor: "pointer" }}>
-                <input
-                  type="radio"
-                  name="supplierType"
-                  value="all"
-                  checked={supplierType === "all"}
-                  onChange={() => setSupplierType("all")}
-                />
-                All Suppliers
-              </label>
-              <label style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "13px", cursor: "pointer" }}>
-                <input
-                  type="radio"
-                  name="supplierType"
-                  value="selected"
-                  checked={supplierType === "selected"}
-                  onChange={() => setSupplierType("selected")}
-                />
-                Selected Suppliers
-              </label>
-            </div>
-          </div>
-
-          {/* Multi-Select Suppliers (if selected) */}
-          {supplierType === "selected" && (
+        ) : (
+          /* Initial RFQ Creation Form */
+          <form onSubmit={handleSubmit} style={{ padding: "20px 24px", display: "flex", flexDirection: "column", gap: "16px", flex: 1 }}>
+            {/* Selected Product Card */}
             <div>
-              <label style={{ display: "block", fontSize: "12.5px", fontWeight: 700, color: "#334155", marginBottom: "4px" }}>
-                *Suppliers
-              </label>
-              <SearchableDropdown
-                value={null}
-                onChange={addSupplierTag}
-                fetchOptions={fetchSuppliers}
-                placeholder="Select Suppliers to add..."
-              />
-              {/* Removable chips */}
-              <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginTop: "8px" }}>
-                {selectedSuppliers.map((s) => (
-                  <span
-                    key={s.id}
-                    style={{
-                      background: "#f1f5f9",
-                      border: "1px solid #cbd5e1",
-                      padding: "4px 8px",
-                      borderRadius: "6px",
-                      fontSize: "12px",
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "6px",
-                    }}
-                  >
-                    {s.name}
-                    <button
-                      type="button"
-                      onClick={() => removeSupplierTag(s.id)}
-                      style={{ background: "none", border: "none", color: "#ef4444", fontSize: "12px", cursor: "pointer", padding: 0 }}
-                    >
-                      ✕
-                    </button>
-                  </span>
-                ))}
+              <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#64748b", marginBottom: "6px" }}>Product</label>
+              <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "12px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div>
+                  <div style={{ fontSize: "13.5px", fontWeight: 700, color: "#0f172a" }}>
+                    {item.product_name || item.product_name_tally}
+                  </div>
+                  <div style={{ fontSize: "12px", color: "#64748b" }}>
+                    #{item.product_code || "PC10956df"}
+                    {productMeta?.subCategoryName && ` • ${productMeta.subCategoryName}`}
+                    {!productMeta?.subCategoryName && productMeta?.categoryName && ` • ${productMeta.categoryName}`}
+                  </div>
+                </div>
+                <div style={{ fontSize: "13px", fontWeight: 600, color: "#334155" }}>
+                  Qty: {item.quantity}
+                </div>
+              </div>
+              <div style={{ textAlign: "right", marginTop: "4px" }}>
+                <button
+                  type="button"
+                  onClick={handleViewLastPurchase}
+                  disabled={loadingLastPurchase}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    color: "#2563eb",
+                    fontSize: "12px",
+                    cursor: loadingLastPurchase ? "wait" : "pointer",
+                    textDecoration: "underline",
+                  }}
+                >
+                  {loadingLastPurchase ? "Fetching..." : "View Last Purchase"}
+                </button>
               </div>
             </div>
-          )}
 
-          {/* Note */}
-          <div>
-            <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#64748b", marginBottom: "4px" }}>Note</label>
-            <textarea
-              rows={3}
-              placeholder="Add notes for suppliers..."
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-              style={{ width: "100%", padding: "8px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px", resize: "vertical" }}
-            />
-          </div>
+            {/* Expected Receiving Date */}
+            <div>
+              <label style={{ display: "block", fontSize: "12.5px", fontWeight: 700, color: "#334155", marginBottom: "4px" }}>
+                *Expected Receiving
+              </label>
+              <input
+                type="date"
+                value={expDate}
+                onChange={(e) => setExpDate(e.target.value)}
+                style={{ width: "100%", padding: "8px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px" }}
+              />
+            </div>
 
-          {/* Submit Button */}
-          <div style={{ marginTop: "auto", paddingTop: "16px" }}>
-            <button
-              type="submit"
-              disabled={submitting}
-              style={{
-                width: "100%",
-                padding: "10px",
-                background: "#2563eb",
-                color: "#ffffff",
-                border: "none",
-                borderRadius: "8px",
-                fontSize: "14px",
-                fontWeight: 700,
-                cursor: submitting ? "not-allowed" : "pointer",
-                boxShadow: "0 2px 6px rgba(37,99,235,0.25)",
-              }}
-            >
-              {submitting ? "Dispatching..." : "Submit"}
-            </button>
-          </div>
-        </form>
+            {/* Suppliers Type Radio */}
+            <div>
+              <label style={{ display: "block", fontSize: "12.5px", fontWeight: 700, color: "#334155", marginBottom: "6px" }}>
+                *Suppliers Type
+              </label>
+              <div style={{ display: "flex", gap: "20px" }}>
+                <label style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "13px", cursor: "pointer" }}>
+                  <input
+                    type="radio"
+                    name="supplierType"
+                    value="all"
+                    checked={supplierType === "all"}
+                    onChange={() => setSupplierType("all")}
+                  />
+                  All Suppliers
+                </label>
+                <label style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "13px", cursor: "pointer" }}>
+                  <input
+                    type="radio"
+                    name="supplierType"
+                    value="selected"
+                    checked={supplierType === "selected"}
+                    onChange={() => setSupplierType("selected")}
+                  />
+                  Selected Suppliers
+                </label>
+              </div>
+            </div>
+
+            {/* Multi-Select Suppliers (if selected) */}
+            {supplierType === "selected" && (
+              <div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
+                  <label style={{ display: "block", fontSize: "12.5px", fontWeight: 700, color: "#334155" }}>
+                    *Suppliers ({selectedSupplierIds.length} Selected)
+                  </label>
+                  <div style={{ display: "flex", gap: "10px" }}>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const matching = await fetchSupplierOptions("");
+                        setSelectedSupplierIds(matching.map((m: any) => m.value));
+                      }}
+                      style={{
+                        background: "none",
+                        border: "none",
+                        color: "#0061f2",
+                        fontSize: "11.5px",
+                        fontWeight: 700,
+                        cursor: "pointer",
+                        textDecoration: "underline",
+                      }}
+                    >
+                      + Select All in List
+                    </button>
+                    {selectedSupplierIds.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setSelectedSupplierIds([])}
+                        style={{
+                          background: "none",
+                          border: "none",
+                          color: "#ef4444",
+                          fontSize: "11.5px",
+                          fontWeight: 600,
+                          cursor: "pointer",
+                          textDecoration: "underline",
+                        }}
+                      >
+                        Clear All
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Filter Pills: All Matching / Sub-Category / Category / All Suppliers */}
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginBottom: "8px", alignItems: "center" }}>
+                  <button
+                    type="button"
+                    onClick={() => setSupplierFilterScope("all_matching")}
+                    style={{
+                      padding: "4px 10px",
+                      borderRadius: "16px",
+                      border: "none",
+                      fontSize: "11.5px",
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      background: supplierFilterScope === "all_matching" ? "#0061f2" : "#f1f5f9",
+                      color: supplierFilterScope === "all_matching" ? "#ffffff" : "#475569",
+                      boxShadow: supplierFilterScope === "all_matching" ? "0 2px 4px rgba(0,97,242,0.25)" : "none",
+                      transition: "all 0.15s ease",
+                    }}
+                  >
+                    🌟 All Matching (Sub-Category &amp; Category)
+                  </button>
+
+                  {productMeta?.subCategoryId && (
+                    <button
+                      type="button"
+                      onClick={() => setSupplierFilterScope("sub_category")}
+                      style={{
+                        padding: "4px 10px",
+                        borderRadius: "16px",
+                        border: "none",
+                        fontSize: "11.5px",
+                        fontWeight: 600,
+                        cursor: "pointer",
+                        background: supplierFilterScope === "sub_category" ? "#0061f2" : "#f1f5f9",
+                        color: supplierFilterScope === "sub_category" ? "#ffffff" : "#475569",
+                        boxShadow: supplierFilterScope === "sub_category" ? "0 2px 4px rgba(0,97,242,0.25)" : "none",
+                        transition: "all 0.15s ease",
+                      }}
+                    >
+                      🎯 Sub-Category: {productMeta.subCategoryName || "Sub-Category"}
+                    </button>
+                  )}
+
+                  {productMeta?.categoryId && (
+                    <button
+                      type="button"
+                      onClick={() => setSupplierFilterScope("category")}
+                      style={{
+                        padding: "4px 10px",
+                        borderRadius: "16px",
+                        border: "none",
+                        fontSize: "11.5px",
+                        fontWeight: 600,
+                        cursor: "pointer",
+                        background: supplierFilterScope === "category" ? "#0061f2" : "#f1f5f9",
+                        color: supplierFilterScope === "category" ? "#ffffff" : "#475569",
+                        boxShadow: supplierFilterScope === "category" ? "0 2px 4px rgba(0,97,242,0.25)" : "none",
+                        transition: "all 0.15s ease",
+                      }}
+                    >
+                      📁 Category: {productMeta.categoryName || "Category"}
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => setSupplierFilterScope("all")}
+                    style={{
+                      padding: "4px 10px",
+                      borderRadius: "16px",
+                      border: "none",
+                      fontSize: "11.5px",
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      background: supplierFilterScope === "all" ? "#0061f2" : "#f1f5f9",
+                      color: supplierFilterScope === "all" ? "#ffffff" : "#475569",
+                      boxShadow: supplierFilterScope === "all" ? "0 2px 4px rgba(0,97,242,0.25)" : "none",
+                      transition: "all 0.15s ease",
+                    }}
+                  >
+                    🌐 All Suppliers
+                  </button>
+                </div>
+
+                <SearchableDropdownMultiPanel
+                  key={`rfq-sup-${supplierFilterScope}-${productMeta?.subCategoryId || ""}-${productMeta?.categoryId || ""}`}
+                  values={selectedSupplierIds}
+                  onChange={setSelectedSupplierIds}
+                  placeholder={
+                    supplierFilterScope === "all_matching"
+                      ? "-- Select or search matching suppliers --"
+                      : supplierFilterScope === "sub_category" && productMeta?.subCategoryName
+                      ? `-- Select ${productMeta.subCategoryName} Suppliers --`
+                      : supplierFilterScope === "category" && productMeta?.categoryName
+                      ? `-- Select ${productMeta.categoryName} Suppliers --`
+                      : "-- Select Suppliers --"
+                  }
+                  chipsPlacement="below"
+                  fetchOptions={fetchSupplierOptions}
+                  fetchLabelForValue={fetchSupplierLabel}
+                />
+              </div>
+            )}
+
+            {/* Note */}
+            <div>
+              <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#64748b", marginBottom: "4px" }}>Note</label>
+              <textarea
+                rows={3}
+                placeholder="Add notes for suppliers..."
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+                style={{ width: "100%", padding: "8px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px", resize: "vertical" }}
+              />
+            </div>
+
+            {/* Submit Button */}
+            <div style={{ marginTop: "auto", paddingTop: "16px" }}>
+              <button
+                type="submit"
+                disabled={submitting}
+                style={{
+                  width: "100%",
+                  padding: "10px",
+                  background: "#2563eb",
+                  color: "#ffffff",
+                  border: "none",
+                  borderRadius: "8px",
+                  fontSize: "14px",
+                  fontWeight: 700,
+                  cursor: submitting ? "not-allowed" : "pointer",
+                  boxShadow: "0 2px 6px rgba(37,99,235,0.25)",
+                }}
+              >
+                {submitting ? "Dispatching RFQ..." : "Submit & Generate Links"}
+              </button>
+            </div>
+          </form>
+        )}
       </div>
     </div>
   );
@@ -2851,25 +3560,10 @@ function AddItemModal({
     }
   }
 
-  const [quickProductOpen, setQuickProductOpen] = useState(false);
-  const [quickProductName, setQuickProductName] = useState("");
-
-  const handleProductSelect = async (v: string | null, directProd?: any) => {
-    const isDirectObj = Boolean(directProd && typeof directProd === "object" && directProd.id);
-    const prodId = isDirectObj ? directProd.id : (v || "");
-
+  const handleProductSelect = async (v: string | null) => {
+    const prodId = v || "";
     setForm((f) => ({ ...f, product_id: prodId }));
     setModalError(null);
-
-    if (isDirectObj) {
-      setForm((f) => ({
-        ...f,
-        product_id: directProd.id,
-        product_specs_remarks: directProd.specification || directProd.description || f.product_specs_remarks,
-        brand_preference: directProd.brand?.name || directProd.brand_name || f.brand_preference,
-      }));
-      return;
-    }
 
     if (prodId) {
       try {
@@ -2889,118 +3583,99 @@ function AddItemModal({
   };
 
   return (
-    <>
-      <ModalShell title="Add Inquiry Item" onClose={onClose}>
-        <form onSubmit={handleSubmit}>
-          {modalError && (
-            <div
-              style={{
-                background: "#fef2f2",
-                border: "1px solid #fecaca",
-                color: "#dc2626",
-                padding: "9px 13px",
-                borderRadius: "8px",
-                fontSize: "12.5px",
-                marginBottom: "14px",
-                display: "flex",
-                alignItems: "center",
-                gap: "8px",
-              }}
-            >
-              <span>⚠️</span>
-              <span>{modalError}</span>
-            </div>
-          )}
+    <ModalShell title="Add Inquiry Item" onClose={onClose}>
+      <form onSubmit={handleSubmit}>
+        {modalError && (
+          <div
+            style={{
+              background: "#fef2f2",
+              border: "1px solid #fecaca",
+              color: "#dc2626",
+              padding: "9px 13px",
+              borderRadius: "8px",
+              fontSize: "12.5px",
+              marginBottom: "14px",
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
+            }}
+          >
+            <span>⚠️</span>
+            <span>{modalError}</span>
+          </div>
+        )}
 
-          <label style={labelStyle}>Consignment Code *</label>
-          <SearchableDropdown
-            value={form.consignment_code_id}
+        <label style={labelStyle}>Consignment Code *</label>
+        <SearchableDropdown
+          value={form.consignment_code_id}
+          onChange={(v) => {
+            setForm((f) => ({ ...f, consignment_code_id: v || "" }));
+            setModalError(null);
+          }}
+          placeholder="e.g. FB1"
+          fetchOptions={codeFetcher}
+          fetchLabelForValue={codeLabel}
+        />
+
+        <label style={{ ...labelStyle, marginTop: 12 }}>Product Name *</label>
+        <SearchableDropdown
+          value={form.product_id}
+          onChange={(v) => handleProductSelect(v)}
+          placeholder="Search products…"
+          fetchOptions={productFetcher}
+          fetchLabelForValue={productLabel}
+        />
+
+        <div style={{ marginTop: 12 }}>
+          <TextField
+            id="quantity"
+            label="Quantity *"
+            required
+            type="number"
+            value={form.quantity}
             onChange={(v) => {
-              setForm((f) => ({ ...f, consignment_code_id: v || "" }));
+              setForm((f) => ({ ...f, quantity: v }));
               setModalError(null);
             }}
-            placeholder="e.g. FB1"
-            fetchOptions={codeFetcher}
-            fetchLabelForValue={codeLabel}
           />
-
-          <label style={{ ...labelStyle, marginTop: 12 }}>Product Name *</label>
-          <SearchableDropdown
-            value={form.product_id}
-            onChange={(v) => handleProductSelect(v)}
-            placeholder="Search products…"
-            fetchOptions={productFetcher}
-            fetchLabelForValue={productLabel}
-            onCreateNew={(typed) => {
-              setQuickProductName(typed);
-              setQuickProductOpen(true);
-            }}
-            createNewLabel={(typed) => `+ Add "${typed}" as New Product`}
+        </div>
+        <div style={{ marginTop: 12 }}>
+          <TextField
+            id="brand_preference"
+            label="Brand Preference (optional)"
+            value={form.brand_preference}
+            onChange={(v) => setForm((f) => ({ ...f, brand_preference: v }))}
           />
+        </div>
+        <div style={{ marginTop: 12 }}>
+          <TextAreaField
+            id="product_specs_remarks"
+            label="Product Specs / Remarks (optional)"
+            rows={2}
+            value={form.product_specs_remarks}
+            onChange={(v) => setForm((f) => ({ ...f, product_specs_remarks: v }))}
+          />
+        </div>
+        <div style={{ marginTop: 12 }}>
+          <SelectField id="status" label="Status" value={status} onChange={(v) => setStatus(v as "proposed" | "approved")}>
+            <option value="proposed">Proposed</option>
+            <option value="approved">Approved</option>
+          </SelectField>
+        </div>
 
-          <div style={{ marginTop: 12 }}>
-            <TextField
-              id="quantity"
-              label="Quantity *"
-              required
-              type="number"
-              value={form.quantity}
-              onChange={(v) => {
-                setForm((f) => ({ ...f, quantity: v }));
-                setModalError(null);
-              }}
-            />
-          </div>
-          <div style={{ marginTop: 12 }}>
-            <TextField
-              id="brand_preference"
-              label="Brand Preference (optional)"
-              value={form.brand_preference}
-              onChange={(v) => setForm((f) => ({ ...f, brand_preference: v }))}
-            />
-          </div>
-          <div style={{ marginTop: 12 }}>
-            <TextAreaField
-              id="product_specs_remarks"
-              label="Product Specs / Remarks (optional)"
-              rows={2}
-              value={form.product_specs_remarks}
-              onChange={(v) => setForm((f) => ({ ...f, product_specs_remarks: v }))}
-            />
-          </div>
-          <div style={{ marginTop: 12 }}>
-            <SelectField id="status" label="Status" value={status} onChange={(v) => setStatus(v as "proposed" | "approved")}>
-              <option value="proposed">Proposed</option>
-              <option value="approved">Approved</option>
-            </SelectField>
-          </div>
-
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 20 }}>
-            <button type="button" className="btn btn-secondary" onClick={onClose}>Cancel</button>
-            <button
-              type="submit"
-              className="btn btn-primary"
-              disabled={submitting}
-              style={submitting ? { cursor: "default", opacity: 0.7 } : undefined}
-            >
-              {submitting ? "Adding…" : "Add Item"}
-            </button>
-          </div>
-        </form>
-      </ModalShell>
-
-      {quickProductOpen && (
-        <QuickAddProductMiniModal
-          initialName={quickProductName}
-          onClose={() => setQuickProductOpen(false)}
-          onCreated={(prod) => {
-            setQuickProductOpen(false);
-            handleProductSelect(prod.id, prod);
-          }}
-          onError={onError}
-        />
-      )}
-    </>
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 20 }}>
+          <button type="button" className="btn btn-secondary" onClick={onClose}>Cancel</button>
+          <button
+            type="submit"
+            className="btn btn-primary"
+            disabled={submitting}
+            style={submitting ? { cursor: "default", opacity: 0.7 } : undefined}
+          >
+            {submitting ? "Adding…" : "Add Item"}
+          </button>
+        </div>
+      </form>
+    </ModalShell>
   );
 }
 
@@ -3131,608 +3806,6 @@ function ModalShell({ title, children, onClose }: { title: string; children: Rea
   );
 }
 
-function QuickAddBuyerMiniModal({
-  initialName = "",
-  onClose,
-  onCreated,
-  onError,
-}: {
-  initialName?: string;
-  onClose: () => void;
-  onCreated: (buyer: any) => void;
-  onError: (err: unknown) => void;
-}) {
-  const [companyName, setCompanyName] = useState(autoTitleCase(initialName || ""));
-  const [countryId, setCountryId] = useState("");
-  const [cityId, setCityId] = useState("");
-  const [city, setCity] = useState("");
-  const [contactName, setContactName] = useState("");
-  const [phone, setPhone] = useState("");
-  const [email, setEmail] = useState("");
-  const [countries, setCountries] = useState<any[]>([]);
-  const [submitting, setSubmitting] = useState(false);
-  const [touched, setTouched] = useState(false);
-  const [serverError, setServerError] = useState<string | null>(null);
-
-  useEffect(() => {
-    (async () => {
-      try {
-        const { data } = await apiGet<any>("/masters/countries?page_size=1000&sort_by=name&sort_order=asc");
-        const list: any[] = Array.isArray(data) ? data : data?.data || [];
-        const sorted = [...list].sort((a, b) => (a.name || "").localeCompare(b.name || ""));
-        setCountries(sorted);
-        const uganda = sorted.find((c) => c.name?.toLowerCase().trim() === "uganda" || c.name?.toLowerCase().includes("uganda"));
-        if (uganda) {
-          setCountryId(uganda.id);
-        } else if (sorted.length > 0) {
-          setCountryId(sorted[0].id);
-        }
-      } catch (e) {
-        /* fallback */
-      }
-    })();
-  }, []);
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setTouched(true);
-    setServerError(null);
-    if (!companyName.trim() || !countryId) return;
-
-    setSubmitting(true);
-    try {
-      const payload: any = {
-        company_name: companyName.trim(),
-        country_id: countryId,
-        city: city.trim() || null,
-        contact_full_name: contactName.trim() || null,
-        contact_calling_number: phone.trim() || null,
-        emails: email.trim() ? [email.trim()] : [],
-      };
-      const res = await apiPost<any>("/buyers", payload);
-      onCreated(res.data);
-    } catch (err: any) {
-      const msg = err?.response?.data?.message || err?.message || "Failed to create buyer. Please check fields.";
-      setServerError(msg);
-      onError(err);
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  const nameError = touched && !companyName.trim();
-  const countryError = touched && !countryId;
-
-  return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 100010, display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <div style={{ position: "absolute", inset: 0, background: "rgba(15,23,42,0.45)", backdropFilter: "blur(2px)" }} onClick={onClose} />
-      <div style={{ position: "relative", width: 500, maxWidth: "94vw", maxHeight: "90vh", overflowY: "auto", background: "#ffffff", borderRadius: 12, boxShadow: "0 20px 40px rgba(0,0,0,0.22)", padding: "24px" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18, borderBottom: "1px solid #e2e8f0", paddingBottom: 12 }}>
-          <h3 style={{ margin: 0, fontSize: "16px", fontWeight: 700, color: "#0f172a" }}>🏢 Add New Buyer Company</h3>
-          <button type="button" onClick={onClose} style={{ background: "none", border: "none", fontSize: "18px", cursor: "pointer", color: "#64748b" }}>✕</button>
-        </div>
-
-        {serverError && (
-          <div style={{ background: "#fee2e2", border: "1px solid #fca5a5", color: "#b91c1c", padding: "10px 14px", borderRadius: "6px", fontSize: "12.5px", fontWeight: 600, marginBottom: "14px" }}>
-            ⚠️ {serverError}
-          </div>
-        )}
-
-        <form onSubmit={handleSubmit} noValidate style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-          <div>
-            <label style={{ display: "block", fontSize: "12.5px", fontWeight: 700, color: "#334155", marginBottom: "4px" }}>
-              Company Name *
-            </label>
-            <input
-              type="text"
-              placeholder="e.g. Acme Corporation"
-              value={companyName}
-              onChange={(e) => setCompanyName(autoTitleCase(e.target.value))}
-              style={{
-                width: "100%",
-                padding: "8px 12px",
-                borderRadius: "6px",
-                border: nameError ? "1.5px solid #ef4444" : "1px solid #cbd5e1",
-                boxShadow: nameError ? "0 0 0 3px rgba(239, 68, 68, 0.15)" : undefined,
-                background: nameError ? "#fff5f5" : "#ffffff",
-                fontSize: "13px",
-              }}
-            />
-            {nameError && <div style={{ color: "#ef4444", fontSize: "11.5px", marginTop: "3px" }}>⚠️ Company name is required</div>}
-          </div>
-
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
-            <div>
-              <label style={{ display: "block", fontSize: "12.5px", fontWeight: 700, color: "#334155", marginBottom: "4px" }}>
-                Country *
-              </label>
-              <select
-                value={countryId}
-                onChange={(e) => {
-                  setCountryId(e.target.value);
-                  setCityId("");
-                  setCity("");
-                }}
-                style={{
-                  width: "100%",
-                  padding: "8px 10px",
-                  borderRadius: "6px",
-                  border: countryError ? "1.5px solid #ef4444" : "1px solid #cbd5e1",
-                  boxShadow: countryError ? "0 0 0 3px rgba(239, 68, 68, 0.15)" : undefined,
-                  background: countryError ? "#fff5f5" : "#ffffff",
-                  fontSize: "13px",
-                  maxHeight: "200px",
-                }}
-              >
-                <option value="">Select Country</option>
-                {countries.map((c) => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label style={{ display: "block", fontSize: "12.5px", fontWeight: 600, color: "#64748b", marginBottom: "4px" }}>
-                City (from Master or Type)
-              </label>
-              <SearchableDropdown
-                key={`buyer-mini-city-${countryId}`}
-                value={cityId}
-                onChange={(v, label) => {
-                  setCityId(v || "");
-                  setCity(v ? autoTitleCase(label || "") : "");
-                }}
-                allowCustomText={true}
-                onTextChange={(typed) => {
-                  setCityId("");
-                  setCity(autoTitleCase(typed));
-                }}
-                onCreateNew={(typed) => {
-                  setCityId("");
-                  setCity(autoTitleCase(typed));
-                }}
-                createNewLabel={(typed) => `+ Use "${autoTitleCase(typed)}" as City`}
-                disabled={!countryId}
-                placeholder={countryId ? "Search city from Master..." : "Select Country first..."}
-                fetchOptions={async (term, signal) => {
-                  if (!countryId) return [];
-                  const { data } = await apiGet<any[]>(
-                    `/masters/cities${toQueryString({ search: term, country_id: countryId, page: 1, page_size: 250, sort_order: "asc" })}`,
-                    { signal }
-                  );
-                  const list = Array.isArray(data) ? data : (data as any)?.data || [];
-                  return list.map((c: any) => ({ value: c.id, label: c.name }));
-                }}
-                fetchLabelForValue={async (id) => {
-                  try {
-                    const { data } = await apiGet<any>(`/masters/cities/${id}`);
-                    return data.name || id;
-                  } catch {
-                    return id;
-                  }
-                }}
-              />
-            </div>
-          </div>
-
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
-            <div>
-              <label style={{ display: "block", fontSize: "12.5px", fontWeight: 600, color: "#64748b", marginBottom: "4px" }}>
-                Contact Person (optional)
-              </label>
-              <input
-                type="text"
-                placeholder="e.g. John Doe"
-                value={contactName}
-                onChange={(e) => setContactName(autoTitleCase(e.target.value))}
-                style={{ width: "100%", padding: "8px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px" }}
-              />
-            </div>
-
-            <div>
-              <label style={{ display: "block", fontSize: "12.5px", fontWeight: 600, color: "#64748b", marginBottom: "4px" }}>
-                Calling Number (optional)
-              </label>
-              <input
-                type="text"
-                placeholder="e.g. +256 700 123456"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                style={{ width: "100%", padding: "8px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px" }}
-              />
-            </div>
-          </div>
-
-          <div>
-            <label style={{ display: "block", fontSize: "12.5px", fontWeight: 600, color: "#64748b", marginBottom: "4px" }}>
-              Email (optional)
-            </label>
-            <input
-              type="email"
-              placeholder="e.g. info@company.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              style={{ width: "100%", padding: "8px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px" }}
-            />
-          </div>
-
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px", borderTop: "1px solid #e2e8f0", paddingTop: "14px" }}>
-            <button
-              type="button"
-              onClick={onClose}
-              style={{ padding: "8px 16px", borderRadius: "6px", border: "1px solid #cbd5e1", background: "#ffffff", fontSize: "13px", fontWeight: 600, cursor: "pointer", color: "#475569" }}
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={submitting}
-              style={{ padding: "8px 18px", borderRadius: "6px", border: "none", background: "#0061f2", color: "#ffffff", fontSize: "13px", fontWeight: 700, cursor: submitting ? "default" : "pointer", opacity: submitting ? 0.7 : 1 }}
-            >
-              {submitting ? "Creating…" : "Create & Select Buyer"}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
-}
-
-function QuickAddProductMiniModal({
-  initialName = "",
-  onClose,
-  onCreated,
-  onError,
-}: {
-  initialName?: string;
-  onClose: () => void;
-  onCreated: (product: any) => void;
-  onError: (err: unknown) => void;
-}) {
-  const [productName, setProductName] = useState(autoTitleCase(initialName || ""));
-  const [productCode, setProductCode] = useState("");
-  const [categoryId, setCategoryId] = useState("");
-  const [uomId, setUomId] = useState("");
-  const [brandId, setBrandId] = useState("");
-  const [pkgQty, setPkgQty] = useState("");
-  const [pkgGrossWt, setPkgGrossWt] = useState("");
-  const [pkgCbm, setPkgCbm] = useState("");
-  const [specs, setSpecs] = useState("");
-
-  const [categories, setCategories] = useState<any[]>([]);
-  const [uoms, setUoms] = useState<any[]>([]);
-  const [brands, setBrands] = useState<any[]>([]);
-  const [submitting, setSubmitting] = useState(false);
-  const [touched, setTouched] = useState(false);
-  const [serverError, setServerError] = useState<string | null>(null);
-
-  useEffect(() => {
-    (async () => {
-      try {
-        const [catRes, uomRes, brandRes] = await Promise.all([
-          apiGet<any>("/masters/product-categories?page_size=1000&sort_by=name&sort_order=asc"),
-          apiGet<any>("/masters/uom?page_size=1000&sort_by=name&sort_order=asc"),
-          apiGet<any>("/masters/brands?page_size=1000&sort_by=name&sort_order=asc"),
-        ]);
-        const catList = Array.isArray(catRes.data) ? catRes.data : catRes.data?.data || [];
-        const uomList = Array.isArray(uomRes.data) ? uomRes.data : uomRes.data?.data || [];
-        const brandList = Array.isArray(brandRes.data) ? brandRes.data : brandRes.data?.data || [];
-
-        setCategories(catList);
-        setUoms(uomList);
-        setBrands(brandList);
-
-        // Leave category and UOM empty by default as requested
-      } catch (e) {
-        /* fallback */
-      }
-    })();
-  }, []);
-
-  const fetchUomOptions = useCallback(
-    async (term: string) => {
-      const q = term.toLowerCase().trim();
-      return uoms
-        .filter((u) => !q || (u.name && u.name.toLowerCase().includes(q)) || (u.code && u.code.toLowerCase().includes(q)))
-        .map((u) => ({ value: u.id, label: `${u.name} (${u.code})` }));
-    },
-    [uoms]
-  );
-
-  const fetchCategoryOptions = useCallback(
-    async (term: string) => {
-      const q = term.toLowerCase().trim();
-      return categories
-        .filter((c) => !q || (c.name && c.name.toLowerCase().includes(q)))
-        .map((c) => ({ value: c.id, label: c.name }));
-    },
-    [categories]
-  );
-
-  const fetchBrandOptions = useCallback(
-    async (term: string) => {
-      const q = term.toLowerCase().trim();
-      const filtered = brands
-        .filter((b) => !q || (b.name && b.name.toLowerCase().includes(q)))
-        .map((b) => ({ value: b.id, label: b.name }));
-      return [{ value: "", label: "No Brand / Select" }, ...filtered];
-    },
-    [brands]
-  );
-
-  const fetchUomLabel = useCallback(
-    async (id: string) => {
-      const found = uoms.find((u) => u.id === id);
-      return found ? `${found.name} (${found.code})` : "";
-    },
-    [uoms]
-  );
-
-  const fetchCategoryLabel = useCallback(
-    async (id: string) => {
-      const found = categories.find((c) => c.id === id);
-      return found ? found.name : "";
-    },
-    [categories]
-  );
-
-  const fetchBrandLabel = useCallback(
-    async (id: string) => {
-      if (!id) return "No Brand / Select";
-      const found = brands.find((b) => b.id === id);
-      return found ? found.name : "No Brand / Select";
-    },
-    [brands]
-  );
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setTouched(true);
-    setServerError(null);
-    if (
-      !productName.trim() ||
-      !categoryId ||
-      !uomId ||
-      !pkgQty ||
-      parseFloat(pkgQty) <= 0 ||
-      !pkgGrossWt ||
-      parseFloat(pkgGrossWt) <= 0 ||
-      !pkgCbm ||
-      parseFloat(pkgCbm) <= 0
-    ) {
-      return;
-    }
-
-    setSubmitting(true);
-    try {
-      const payload: any = {
-        product_name_tally: productName.trim(),
-        product_name: productName.trim(),
-        product_code: productCode.trim() ? productCode.trim() : null,
-        category_id: categoryId,
-        uom_id: uomId,
-        brand_id: brandId || null,
-        packaging_quantity: parseFloat(pkgQty),
-        packaging_gross_weight: parseFloat(pkgGrossWt),
-        packaging_unit_cbm: parseFloat(pkgCbm),
-        specification: specs.trim() || null,
-        description: specs.trim() || null,
-      };
-      const res = await apiPost<any>("/masters/products", payload);
-      onCreated(res.data);
-    } catch (err: any) {
-      const msg = err?.response?.data?.message || err?.message || "Failed to create product. Please check fields.";
-      setServerError(msg);
-      onError(err);
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  const nameError = touched && !productName.trim();
-  const catError = touched && !categoryId;
-  const uomError = touched && !uomId;
-  const qtyError = touched && (!pkgQty || parseFloat(pkgQty) <= 0);
-  const wtError = touched && (!pkgGrossWt || parseFloat(pkgGrossWt) <= 0);
-  const cbmError = touched && (!pkgCbm || parseFloat(pkgCbm) <= 0);
-
-  return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 100010, display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <div style={{ position: "absolute", inset: 0, background: "rgba(15,23,42,0.45)", backdropFilter: "blur(2px)" }} onClick={onClose} />
-      <div style={{ position: "relative", width: 560, maxWidth: "94vw", maxHeight: "90vh", overflowY: "auto", background: "#ffffff", borderRadius: 12, boxShadow: "0 20px 40px rgba(0,0,0,0.22)", padding: "24px" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18, borderBottom: "1px solid #e2e8f0", paddingBottom: 12 }}>
-          <h3 style={{ margin: 0, fontSize: "16px", fontWeight: 700, color: "#0f172a" }}>📦 Add New Product</h3>
-          <button type="button" onClick={onClose} style={{ background: "none", border: "none", fontSize: "18px", cursor: "pointer", color: "#64748b" }}>✕</button>
-        </div>
-
-        {serverError && (
-          <div style={{ background: "#fee2e2", border: "1px solid #fca5a5", color: "#b91c1c", padding: "10px 14px", borderRadius: "6px", fontSize: "12.5px", fontWeight: 600, marginBottom: "14px" }}>
-            ⚠️ {serverError}
-          </div>
-        )}
-
-        <form onSubmit={handleSubmit} noValidate style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-          <div>
-            <label style={{ display: "block", fontSize: "12.5px", fontWeight: 700, color: "#334155", marginBottom: "4px" }}>
-              Product Name (as per Tally) *
-            </label>
-            <input
-              type="text"
-              placeholder="e.g. Ink Roller MY-380F"
-              value={productName}
-              onChange={(e) => setProductName(autoTitleCase(e.target.value))}
-              style={{
-                width: "100%",
-                padding: "8px 12px",
-                borderRadius: "6px",
-                border: nameError ? "1.5px solid #ef4444" : "1px solid #cbd5e1",
-                boxShadow: nameError ? "0 0 0 3px rgba(239, 68, 68, 0.15)" : undefined,
-                background: nameError ? "#fff5f5" : "#ffffff",
-                fontSize: "13px",
-              }}
-            />
-            {nameError && <div style={{ color: "#ef4444", fontSize: "11.5px", marginTop: "3px" }}>⚠️ Product name is required</div>}
-          </div>
-
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
-            <div>
-              <label style={{ display: "block", fontSize: "12.5px", fontWeight: 600, color: "#64748b", marginBottom: "4px" }}>
-                Product Code (optional)
-              </label>
-              <input
-                type="text"
-                placeholder="e.g. INH-00095"
-                value={productCode}
-                onChange={(e) => setProductCode(e.target.value)}
-                style={{ width: "100%", padding: "8px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px" }}
-              />
-            </div>
-
-            <div>
-              <label style={{ display: "block", fontSize: "12.5px", fontWeight: 700, color: "#334155", marginBottom: "4px" }}>
-                UOM *
-              </label>
-              <SearchableDropdown
-                value={uomId || null}
-                onChange={(val) => setUomId(val || "")}
-                fetchOptions={fetchUomOptions}
-                fetchLabelForValue={fetchUomLabel}
-                placeholder="Select UOM"
-                hasError={Boolean(uomError)}
-              />
-              {uomError && <div style={{ color: "#ef4444", fontSize: "11.5px", marginTop: "3px" }}>⚠️ UOM is required</div>}
-            </div>
-          </div>
-
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
-            <div>
-              <label style={{ display: "block", fontSize: "12.5px", fontWeight: 700, color: "#334155", marginBottom: "4px" }}>
-                Category *
-              </label>
-              <SearchableDropdown
-                value={categoryId || null}
-                onChange={(val) => setCategoryId(val || "")}
-                fetchOptions={fetchCategoryOptions}
-                fetchLabelForValue={fetchCategoryLabel}
-                placeholder="Select Category"
-                hasError={Boolean(catError)}
-              />
-              {catError && <div style={{ color: "#ef4444", fontSize: "11.5px", marginTop: "3px" }}>⚠️ Category is required</div>}
-            </div>
-
-            <div>
-              <label style={{ display: "block", fontSize: "12.5px", fontWeight: 600, color: "#64748b", marginBottom: "4px" }}>
-                Brand (optional)
-              </label>
-              <SearchableDropdown
-                value={brandId || null}
-                onChange={(val) => setBrandId(val || "")}
-                fetchOptions={fetchBrandOptions}
-                fetchLabelForValue={fetchBrandLabel}
-                placeholder="No Brand / Select"
-              />
-            </div>
-          </div>
-
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "10px" }}>
-            <div>
-              <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "#334155", marginBottom: "4px" }}>
-                Pkg Qty *
-              </label>
-              <input
-                type="number"
-                min="1"
-                placeholder="e.g. 1"
-                value={pkgQty}
-                onChange={(e) => setPkgQty(e.target.value)}
-                style={{
-                  width: "100%",
-                  padding: "7px 9px",
-                  borderRadius: "6px",
-                  border: qtyError ? "1.5px solid #ef4444" : "1px solid #cbd5e1",
-                  fontSize: "13px",
-                }}
-              />
-            </div>
-
-            <div>
-              <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "#334155", marginBottom: "4px" }}>
-                Gross Wt (kg) *
-              </label>
-              <input
-                type="number"
-                step="any"
-                min="0.001"
-                placeholder="e.g. 1.0"
-                value={pkgGrossWt}
-                onChange={(e) => setPkgGrossWt(e.target.value)}
-                style={{
-                  width: "100%",
-                  padding: "7px 9px",
-                  borderRadius: "6px",
-                  border: wtError ? "1.5px solid #ef4444" : "1px solid #cbd5e1",
-                  fontSize: "13px",
-                }}
-              />
-            </div>
-
-            <div>
-              <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "#334155", marginBottom: "4px" }}>
-                Unit CBM *
-              </label>
-              <input
-                type="number"
-                step="any"
-                min="0.000001"
-                placeholder="e.g. 0.001"
-                value={pkgCbm}
-                onChange={(e) => setPkgCbm(e.target.value)}
-                style={{
-                  width: "100%",
-                  padding: "7px 9px",
-                  borderRadius: "6px",
-                  border: cbmError ? "1.5px solid #ef4444" : "1px solid #cbd5e1",
-                  fontSize: "13px",
-                }}
-              />
-            </div>
-          </div>
-
-          <div>
-            <label style={{ display: "block", fontSize: "12.5px", fontWeight: 600, color: "#64748b", marginBottom: "4px" }}>
-              Specification / Remarks (optional)
-            </label>
-            <input
-              type="text"
-              placeholder="e.g. Dimensions, material, etc."
-              value={specs}
-              onChange={(e) => setSpecs(autoTitleCase(e.target.value))}
-              style={{ width: "100%", padding: "8px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px" }}
-            />
-          </div>
-
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px", borderTop: "1px solid #e2e8f0", paddingTop: "14px" }}>
-            <button
-              type="button"
-              onClick={onClose}
-              style={{ padding: "8px 16px", borderRadius: "6px", border: "1px solid #cbd5e1", background: "#ffffff", fontSize: "13px", fontWeight: 600, cursor: "pointer", color: "#475569" }}
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={submitting}
-              style={{ padding: "8px 18px", borderRadius: "6px", border: "none", background: "#0061f2", color: "#ffffff", fontSize: "13px", fontWeight: 700, cursor: submitting ? "default" : "pointer", opacity: submitting ? 0.7 : 1 }}
-            >
-              {submitting ? "Creating…" : "Create & Select Product"}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
-}
-
 interface QuickItemRow {
   id: string;
   product_id: string;
@@ -3765,13 +3838,6 @@ function QuickInquiryDrawer({
   const [selectedCodeId, setSelectedCodeId] = useState("");
   const [customNewCode, setCustomNewCode] = useState("");
   const [isCreatingNewCode, setIsCreatingNewCode] = useState(false);
-
-  const [quickBuyerOpen, setQuickBuyerOpen] = useState(false);
-  const [quickBuyerName, setQuickBuyerName] = useState("");
-
-  const [quickProductOpen, setQuickProductOpen] = useState(false);
-  const [quickProductName, setQuickProductName] = useState("");
-  const [quickProductTargetIdx, setQuickProductTargetIdx] = useState<number | null>(null);
 
   const [items, setItems] = useState<QuickItemRow[]>([
     {
@@ -3881,12 +3947,39 @@ function QuickInquiryDrawer({
     })();
   }, [selectedBuyerId, selectedCodeId]);
 
-  const selectedCompany = companies.find((c) => c.id === selectedBuyerId);
+  const [selectedBuyer, setSelectedBuyer] = useState<any | null>(null);
+
+  useEffect(() => {
+    if (!selectedBuyerId) {
+      setSelectedBuyer(null);
+      return;
+    }
+    const found = companies.find((c) => c.id === selectedBuyerId);
+    if (found) {
+      setSelectedBuyer(found);
+      return;
+    }
+    (async () => {
+      try {
+        const { data } = await apiGet<any>(`/buyers/${selectedBuyerId}`);
+        if (data) {
+          const formatted = {
+            ...data,
+            name: data.company_name || data.name || "Unnamed Buyer",
+          };
+          setSelectedBuyer(formatted);
+          setCompanies((prev) => [formatted, ...prev.filter((p) => p.id !== data.id)]);
+        }
+      } catch {
+        /* ignore */
+      }
+    })();
+  }, [selectedBuyerId, companies]);
 
   const recommendedCode = useMemo(() => {
-    if (!selectedCompany) return "";
-    const name = String(selectedCompany.name || selectedCompany.company_name || "");
-    const code = selectedCompany.code;
+    if (!selectedBuyer) return "";
+    const name = String(selectedBuyer.name || selectedBuyer.company_name || "").trim();
+    const code = selectedBuyer.code;
 
     let prefix = "";
     if (code && String(code).trim()) {
@@ -3898,16 +3991,21 @@ function QuickInquiryDrawer({
       else if (lower.includes("one stop") || lower.includes("onestop")) prefix = "OS";
       else if (lower.includes("inhyma")) prefix = "INM";
       else {
-        const words = name.trim().split(/\s+/).filter(Boolean);
-        if (words.length >= 2) {
-          prefix = words.map((w) => w[0]).join("").toUpperCase();
-        } else if (name.length >= 2) {
-          prefix = (name[0] + name[name.length - 1]).toUpperCase();
+        const words = name.replace(/[^a-zA-Z0-9\s]/g, "").trim().split(/\s+/).filter(Boolean);
+        const alphaWords = words.filter((w) => /^[a-zA-Z]/.test(w));
+        if (alphaWords.length >= 2) {
+          prefix = alphaWords.map((w) => w[0]).join("").toUpperCase();
+        } else if (alphaWords.length === 1 && alphaWords[0].length >= 3) {
+          prefix = alphaWords[0].slice(0, 3).toUpperCase();
+        } else if (words.length >= 1) {
+          prefix = words[0].slice(0, 2).toUpperCase();
         } else {
-          prefix = name.toUpperCase() || "CMP";
+          prefix = "CS";
         }
       }
     }
+
+    if (!prefix) prefix = "CS";
 
     const matchingCodes = allConsignmentCodes.filter((c) => c.code && c.code.toUpperCase().startsWith(prefix));
     let maxNum = 0;
@@ -3916,13 +4014,13 @@ function QuickInquiryDrawer({
       if (!isNaN(num) && num > maxNum) maxNum = num;
     });
     return `${prefix}${maxNum + 1}`;
-  }, [selectedCompany, allConsignmentCodes]);
+  }, [selectedBuyer, allConsignmentCodes]);
 
   useEffect(() => {
     if (recommendedCode) {
-      setCustomNewCode(recommendedCode);
+      setCustomNewCode((prev) => (isCreatingNewCode && (!prev || prev === "") ? recommendedCode : prev || recommendedCode));
     }
-  }, [recommendedCode]);
+  }, [recommendedCode, isCreatingNewCode]);
 
   const handleAddItemRow = () => {
     setItems((prev) => [
@@ -4068,10 +4166,15 @@ function QuickInquiryDrawer({
       let finalCodeId = selectedCodeId;
 
       if (isCreatingNewCode || !finalCodeId || finalCodeId === "__NEW__") {
-        const codeToCreate = customNewCode.trim().toUpperCase() || recommendedCode;
+        const codeToCreate = (customNewCode.trim() || recommendedCode || "").toUpperCase();
+        if (!codeToCreate) {
+          alert("Please enter a Consignment Code (e.g. INM1, FB1, T1).");
+          setSaving(false);
+          return;
+        }
         const createRes = await apiPost<ConsignmentCode>("/inquiries/consignment-codes", {
           code: codeToCreate,
-          label: `${selectedCompany?.name || ""} Consignment ${codeToCreate}`,
+          label: `${selectedBuyer?.name || ""} Consignment ${codeToCreate}`,
           buyer_id: selectedBuyerId,
           branch_id: null,
         });
@@ -4161,11 +4264,6 @@ function QuickInquiryDrawer({
                   placeholder="Search Buyer Company..."
                   fetchOptions={buyerFetcher}
                   fetchLabelForValue={buyerLabel}
-                  onCreateNew={(typed) => {
-                    setQuickBuyerName(typed);
-                    setQuickBuyerOpen(true);
-                  }}
-                  createNewLabel={(typed) => `+ Add "${typed}" as New Buyer`}
                 />
               </div>
 
@@ -4291,12 +4389,6 @@ function QuickInquiryDrawer({
                           placeholder="Search products…"
                           fetchOptions={productFetcher}
                           fetchLabelForValue={productLabel}
-                          onCreateNew={(typed) => {
-                            setQuickProductTargetIdx(idx);
-                            setQuickProductName(typed);
-                            setQuickProductOpen(true);
-                          }}
-                          createNewLabel={(typed) => `+ Add "${typed}" as New Product`}
                         />
                       </div>
 
@@ -4376,41 +4468,6 @@ function QuickInquiryDrawer({
           </div>
         </div>
       </div>
-
-      {quickBuyerOpen && (
-        <QuickAddBuyerMiniModal
-          initialName={quickBuyerName}
-          onClose={() => setQuickBuyerOpen(false)}
-          onCreated={(buyer) => {
-            setQuickBuyerOpen(false);
-            const formatted = {
-              ...buyer,
-              name: buyer.company_name || buyer.name || "Unnamed Buyer",
-            };
-            setCompanies((prev) => [formatted, ...prev]);
-            setSelectedBuyerId(buyer.id);
-          }}
-          onError={onError}
-        />
-      )}
-
-      {quickProductOpen && (
-        <QuickAddProductMiniModal
-          initialName={quickProductName}
-          onClose={() => {
-            setQuickProductOpen(false);
-            setQuickProductTargetIdx(null);
-          }}
-          onCreated={(product) => {
-            setQuickProductOpen(false);
-            if (quickProductTargetIdx !== null) {
-              handleProductSelect(quickProductTargetIdx, product.id, product);
-            }
-            setQuickProductTargetIdx(null);
-          }}
-          onError={onError}
-        />
-      )}
     </>
   );
 }

@@ -481,6 +481,42 @@ class InquiryService:
 
         return updated_quote
 
+    async def delete_quotation(
+        self, quotation_id: uuid.UUID, *, user_id: uuid.UUID
+    ) -> Quotation:
+        """Soft-delete a quotation and resync inquiry item status."""
+        if not self.quotation_repository:
+            raise BadRequestException("Quotation repository not initialized.")
+        quote = await self.quotation_repository.get_by_id(quotation_id)
+        if quote is None:
+            raise NotFoundException("Quotation not found.")
+
+        item_id = quote.inquiry_item_id
+        await self.quotation_repository.delete(quote)
+
+        # Sync inquiry item status with remaining quotations:
+        if self.item_repository:
+            approved_count = await self.quotation_repository.count_approved_for_item(item_id)
+            item = await self.item_repository.get_by_id(item_id)
+            if item:
+                if approved_count > 0:
+                    await self.item_repository.update(
+                        item,
+                        status=InquiryItemStatus.APPROVED,
+                        approved_at=_utcnow(),
+                        approved_by=user_id,
+                    )
+                else:
+                    await self.item_repository.update(
+                        item,
+                        status=InquiryItemStatus.PROPOSED,
+                        approved_at=None,
+                        approved_by=None,
+                    )
+                await self._refresh_rollup(item.inquiry_id)
+
+        return quote
+
     async def create_rfq(
         self, inquiry_item_id: uuid.UUID, data: RFQCreate, *, user_id: uuid.UUID
     ) -> RFQ:

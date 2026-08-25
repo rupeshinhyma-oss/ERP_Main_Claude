@@ -18,6 +18,7 @@ from app.buyers.routes import router as buyers_router
 from app.cache.routes import router as cache_router
 from app.core.responses import build_success_response
 from app.events.routes import router as events_router
+from app.inquiries.public_quotes import router as public_quotes_router
 from app.inquiries.routes import router as inquiries_router
 from app.masters.brands.routes import router as brands_router
 from app.masters.cities.routes import router as cities_router
@@ -86,6 +87,7 @@ api_router.include_router(buyers_router)
 
 # Inquiries (Requirement) workflow -- two-layer consignment planning.
 api_router.include_router(inquiries_router)
+api_router.include_router(public_quotes_router)
 
 # Shipment Planning: dynamic branch-sheet grid (Mum Branch, MP Branch, ...).
 api_router.include_router(planning_router)

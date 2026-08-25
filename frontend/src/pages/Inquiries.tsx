@@ -1164,21 +1164,20 @@ function ItemsView({
                 inquiry?.consignment_status === "fully_approved"
                   ? "#dcfce7"
                   : inquiry?.consignment_status === "partial_approved"
-                  ? "#e0f2fe"
-                  : "#fef3c7",
+                    ? "#e0f2fe"
+                    : "#fef3c7",
               color:
                 inquiry?.consignment_status === "fully_approved"
                   ? "#15803d"
                   : inquiry?.consignment_status === "partial_approved"
-                  ? "#0284c7"
-                  : "#b45309",
-              border: `1px solid ${
-                inquiry?.consignment_status === "fully_approved"
+                    ? "#0284c7"
+                    : "#b45309",
+              border: `1px solid ${inquiry?.consignment_status === "fully_approved"
                   ? "#bbf7d0"
                   : inquiry?.consignment_status === "partial_approved"
-                  ? "#bae6fd"
-                  : "#fde68a"
-              }`,
+                    ? "#bae6fd"
+                    : "#fde68a"
+                }`,
             }}
           >
             {statusLabel(inquiry?.consignment_status || "proposed")}
@@ -1863,9 +1862,8 @@ function ItemsView({
                                   fontWeight: 600,
                                   background: isQuoteApproved ? "#dcfce7" : quote.status === "rejected" ? "#fee2e2" : "#fef3c7",
                                   color: isQuoteApproved ? "#15803d" : quote.status === "rejected" ? "#b91c1c" : "#b45309",
-                                  border: `1px solid ${
-                                    isQuoteApproved ? "#bbf7d0" : quote.status === "rejected" ? "#fca5a5" : "#fde68a"
-                                  }`,
+                                  border: `1px solid ${isQuoteApproved ? "#bbf7d0" : quote.status === "rejected" ? "#fca5a5" : "#fde68a"
+                                    }`,
                                 }}
                               >
                                 {statusLabel(quote.status)}
@@ -2468,8 +2466,8 @@ function AddQuotationDrawer({
                 supplierFilterScope === "sub_category" && productMeta?.subCategoryName
                   ? `-- Select ${productMeta.subCategoryName} Supplier --`
                   : supplierFilterScope === "category" && productMeta?.categoryName
-                  ? `-- Select ${productMeta.categoryName} Supplier --`
-                  : "Search or Select Supplier..."
+                    ? `-- Select ${productMeta.categoryName} Supplier --`
+                    : "Search or Select Supplier..."
               }
               hasError={Boolean(errors.supplier)}
             />
@@ -2607,8 +2605,8 @@ function RequestQuotationDrawer({
     const emailsList = (sup.emails && Array.isArray(sup.emails) && sup.emails.length > 0)
       ? sup.emails
       : sup.email
-      ? [sup.email]
-      : [];
+        ? [sup.email]
+        : [];
 
     if (emailsList.length === 0) {
       alert(`No email address registered for ${sup.company_name}. Please open Gmail or copy the link.`);
@@ -2642,6 +2640,7 @@ function RequestQuotationDrawer({
     subCategoryId?: string;
     subCategoryName?: string;
   } | null>(null);
+  const [allMatchingSuppliers, setAllMatchingSuppliers] = useState<Array<{ id: string; name: string }>>([]);
   const [supplierFilterScope, setSupplierFilterScope] = useState<"all_matching" | "sub_category" | "category" | "all">("all_matching");
 
   useEffect(() => {
@@ -2681,26 +2680,42 @@ function RequestQuotationDrawer({
           subCategoryName: subCatName,
         });
 
-        // Automatically fetch and pre-select all matching suppliers for this product
-        const matchingSupplierIds = new Set<string>();
+        // Automatically fetch all matching suppliers for this product to keep in allMatchingSuppliers
+        const matchingList: Array<{ id: string; name: string }> = [];
+        const seenIds = new Set<string>();
         try {
           if (prod.sub_category_id) {
             const { data: subSups } = await apiGet<any>(`/suppliers?sub_category_id=${prod.sub_category_id}&limit=100`);
             const subList = Array.isArray(subSups) ? subSups : subSups?.data || [];
-            subList.forEach((s: any) => matchingSupplierIds.add(s.id));
+            subList.forEach((s: any) => {
+              if (!seenIds.has(s.id)) {
+                seenIds.add(s.id);
+                matchingList.push({ id: s.id, name: s.company_name || s.name || "Supplier" });
+              }
+            });
           }
           if (prod.category_id) {
             const { data: catSups } = await apiGet<any>(`/suppliers?category_id=${prod.category_id}&limit=100`);
             const catList = Array.isArray(catSups) ? catSups : catSups?.data || [];
-            catList.forEach((s: any) => matchingSupplierIds.add(s.id));
+            catList.forEach((s: any) => {
+              if (!seenIds.has(s.id)) {
+                seenIds.add(s.id);
+                matchingList.push({ id: s.id, name: s.company_name || s.name || "Supplier" });
+              }
+            });
           }
-          if (matchingSupplierIds.size === 0) {
+          if (matchingList.length === 0) {
             const { data: allSups } = await apiGet<any>(`/suppliers?limit=100`);
             const allList = Array.isArray(allSups) ? allSups : allSups?.data || [];
-            allList.forEach((s: any) => matchingSupplierIds.add(s.id));
+            allList.forEach((s: any) => {
+              if (!seenIds.has(s.id)) {
+                seenIds.add(s.id);
+                matchingList.push({ id: s.id, name: s.company_name || s.name || "Supplier" });
+              }
+            });
           }
-          if (matchingSupplierIds.size > 0 && isMounted) {
-            setSelectedSupplierIds(Array.from(matchingSupplierIds));
+          if (isMounted) {
+            setAllMatchingSuppliers(matchingList);
           }
         } catch {
           /* ignore */
@@ -2775,16 +2790,24 @@ function RequestQuotationDrawer({
       return;
     }
 
+    const supplierIdsToSend = supplierType === "all" ? allMatchingSuppliers.map((s) => s.id) : selectedSupplierIds;
+
     setSubmitting(true);
     try {
       const res = await apiPost<any>(`/inquiries/items/${item.id}/rfqs`, {
         expected_receiving_date: expDate || null,
         supplier_type: supplierType,
-        supplier_ids: selectedSupplierIds,
+        supplier_ids: supplierIdsToSend,
         notes: note.trim() || null,
       });
 
       if (res.data && res.data.supplier_links && res.data.supplier_links.length > 0) {
+        // The backend now automatically dispatches emails in the background
+        // to every supplier link that has an email address (see
+        // app.inquiries.routes.create_item_rfq), so pre-mark those as
+        // already sent -- otherwise this dialog would show "⚡ Send Email"
+        // as still available/unsent for suppliers who were already
+        // emailed automatically, inviting a confusing duplicate send.
         const initialSent: Record<string, boolean> = {};
         res.data.supplier_links.forEach((l: any) => {
           if ((l.emails && l.emails.length > 0) || l.email) {
@@ -2903,8 +2926,8 @@ function RequestQuotationDrawer({
                   typeof sup.email === "string" && sup.email
                     ? sup.email
                     : Array.isArray(sup.emails)
-                    ? sup.emails.map((e: any) => (typeof e === "string" ? e : e?.email || "")).filter(Boolean).join(", ")
-                    : ""
+                      ? sup.emails.map((e: any) => (typeof e === "string" ? e : e?.email || "")).filter(Boolean).join(", ")
+                      : ""
                 );
                 const emailSubject = `Request for Quotation: ${prodTitle} (${item.quantity} units)`;
                 const emailBody = `Dear ${sup.contact_name},\n\nPlease review our inquiry for ${item.quantity} units of ${prodTitle}.\n\nYou can view specifications and submit your quotation using the link below:\n\n${fullQuoteUrl}\n\nBest regards,\nYinglima Procurement Team`;
@@ -3061,7 +3084,7 @@ function RequestQuotationDrawer({
                         }}
                       >
                         <span>{copiedToken === sup.token ? "✓" : "📋"}</span>
-                        {copiedToken === sup.token ? "Copied!" : "Copy Link"}
+                        {copiedToken === sup.token ? "✓ Link Copied!" : "Copy Link"}
                       </button>
                     </div>
                   </div>
@@ -3153,7 +3176,7 @@ function RequestQuotationDrawer({
                 *Suppliers Type
               </label>
               <div style={{ display: "flex", gap: "20px" }}>
-                <label style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "13px", cursor: "pointer" }}>
+                <label style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "13px", cursor: "pointer", fontWeight: supplierType === "all" ? 600 : 400 }}>
                   <input
                     type="radio"
                     name="supplierType"
@@ -3161,9 +3184,9 @@ function RequestQuotationDrawer({
                     checked={supplierType === "all"}
                     onChange={() => setSupplierType("all")}
                   />
-                  All Suppliers
+                  All Suppliers (Category &amp; Sub-Category)
                 </label>
-                <label style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "13px", cursor: "pointer" }}>
+                <label style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "13px", cursor: "pointer", fontWeight: supplierType === "selected" ? 600 : 400 }}>
                   <input
                     type="radio"
                     name="supplierType"
@@ -3176,19 +3199,43 @@ function RequestQuotationDrawer({
               </div>
             </div>
 
+            {/* When "all" is selected: show preview of all matching suppliers */}
+            {supplierType === "all" && (
+              <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", padding: "12px 14px", borderRadius: "8px" }}>
+                <div style={{ fontSize: "13px", fontWeight: 700, color: "#166534", display: "flex", alignItems: "center", gap: "6px" }}>
+                  <span>🌟</span> All Matching Suppliers ({allMatchingSuppliers.length})
+                </div>
+                <div style={{ fontSize: "12px", color: "#15803d", marginTop: "3px" }}>
+                  Will automatically dispatch quotation request to all {allMatchingSuppliers.length} supplier(s) matching {productMeta?.subCategoryName ? `Sub-Category "${productMeta.subCategoryName}"` : productMeta?.categoryName ? `Category "${productMeta.categoryName}"` : "this product"}.
+                </div>
+                {allMatchingSuppliers.length > 0 && (
+                  <div style={{ marginTop: "8px", display: "flex", flexWrap: "wrap", gap: "5px" }}>
+                    {allMatchingSuppliers.map((s) => (
+                      <span key={s.id} style={{ background: "#dcfce7", color: "#166534", border: "1px solid #86efac", padding: "3px 8px", borderRadius: "4px", fontSize: "11.5px", fontWeight: 600 }}>
+                        🏢 {s.name}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Multi-Select Suppliers (if selected) */}
             {supplierType === "selected" && (
               <div>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
                   <label style={{ display: "block", fontSize: "12.5px", fontWeight: 700, color: "#334155" }}>
-                    *Suppliers ({selectedSupplierIds.length} Selected)
+                    *Select Suppliers ({selectedSupplierIds.length} Selected)
                   </label>
                   <div style={{ display: "flex", gap: "10px" }}>
                     <button
                       type="button"
                       onClick={async () => {
                         const matching = await fetchSupplierOptions("");
-                        setSelectedSupplierIds(matching.map((m: any) => m.value));
+                        setSelectedSupplierIds((prev) => {
+                          const combined = new Set([...prev, ...matching.map((m: any) => m.value)]);
+                          return Array.from(combined);
+                        });
                       }}
                       style={{
                         background: "none",
@@ -3240,7 +3287,7 @@ function RequestQuotationDrawer({
                       transition: "all 0.15s ease",
                     }}
                   >
-                    🌟 All Matching (Sub-Category &amp; Category)
+                    🌟 All Matching
                   </button>
 
                   {productMeta?.subCategoryId && (
@@ -3313,10 +3360,10 @@ function RequestQuotationDrawer({
                     supplierFilterScope === "all_matching"
                       ? "-- Select or search matching suppliers --"
                       : supplierFilterScope === "sub_category" && productMeta?.subCategoryName
-                      ? `-- Select ${productMeta.subCategoryName} Suppliers --`
-                      : supplierFilterScope === "category" && productMeta?.categoryName
-                      ? `-- Select ${productMeta.categoryName} Suppliers --`
-                      : "-- Select Suppliers --"
+                        ? `-- Select ${productMeta.subCategoryName} Suppliers --`
+                        : supplierFilterScope === "category" && productMeta?.categoryName
+                          ? `-- Select ${productMeta.categoryName} Suppliers --`
+                          : "-- Select Suppliers --"
                   }
                   chipsPlacement="below"
                   fetchOptions={fetchSupplierOptions}

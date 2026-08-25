@@ -24,7 +24,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, Request, status
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.constants import AuditAction
@@ -40,7 +40,7 @@ from app.events.dispatcher import EventDispatcher
 from app.inquiries.dependencies import get_inquiry_service
 from app.inquiries.public_quotes import generate_rfq_token
 from app.masters.products.models import Product
-from app.suppliers.models import Supplier
+from app.suppliers.models import Supplier, SupplierCategoryLink, SupplierSubCategoryLink
 from app.inquiries.schemas import (
     BulkTallyPostRequest,
     BulkInquiryItemCreate,
@@ -779,35 +779,60 @@ async def create_item_rfq(
         changes={"rfq_id": str(rfq.id)},
     )
 
-    # Generate public supplier quotation links
-    supplier_uuids = [uuid.UUID(sid) for sid in (rfq.supplier_ids or []) if sid]
-    supplier_links = []
-    if supplier_uuids:
-        suppliers_res = (await db.execute(select(Supplier).where(Supplier.id.in_(supplier_uuids)))).scalars().all()
-        for sup in suppliers_res:
-            token = generate_rfq_token(rfq.id, item_id, sup.id)
-            phone = (sup.contact_whatsapp_number or sup.contact_calling_number or "").strip()
-            clean_phone = "".join(ch for ch in phone if ch.isdigit() or ch == "+")
-            all_emails = [e.email for e in sup.emails if getattr(e, "email", None)]
-            email_str = ", ".join(all_emails)
-            supplier_links.append({
-                "supplier_id": str(sup.id),
-                "company_name": sup.company_name,
-                "contact_name": sup.contact_full_name or "Valued Partner",
-                "phone": phone,
-                "clean_phone": clean_phone,
-                "email": email_str,
-                "emails": all_emails,
-                "token": token,
-                "quote_path": f"/quote/{token}",
-            })
-
-    # Fetch product information for automated email dispatch
+    # Fetch product information (needed both for "all suppliers" category
+    # matching below, and for the automated email dispatch that follows).
     item = await service.item_repository.get_by_id(item_id) if service.item_repository else None
     prod = (await db.execute(select(Product).where(Product.id == item.product_id))).scalars().first() if item else None
     product_name = (prod.product_name or prod.product_name_tally) if prod else "Product"
     product_code = prod.product_code if prod else None
     quantity = item.quantity if item else 1
+
+    # Generate public supplier quotation links.
+    #
+    # supplier_type == "all": resolve every ACTIVE supplier linked to this
+    # product's Category and/or Sub-Category (via SupplierCategoryLink /
+    # SupplierSubCategoryLink), falling back to every active supplier if
+    # the product has no category/sub-category set. This matches the
+    # "All Suppliers (Category & Sub-Category)" option in the Request
+    # Quotation dialog on the frontend.
+    #
+    # Otherwise (or if the frontend already resolved and sent explicit
+    # supplier_ids): use exactly the suppliers given.
+    supplier_uuids = [uuid.UUID(sid) for sid in (rfq.supplier_ids or []) if sid]
+    supplier_links = []
+
+    if not supplier_uuids and rfq.supplier_type == "all":
+        conditions = []
+        if prod and prod.sub_category_id:
+            conditions.append(Supplier.sub_category_links.any(SupplierSubCategoryLink.sub_category_id == prod.sub_category_id))
+        if prod and prod.category_id:
+            conditions.append(Supplier.category_links.any(SupplierCategoryLink.category_id == prod.category_id))
+        if conditions:
+            suppliers_res = (await db.execute(select(Supplier).where(Supplier.is_active == True, or_(*conditions)))).scalars().all()
+        else:
+            suppliers_res = (await db.execute(select(Supplier).where(Supplier.is_active == True))).scalars().all()
+    elif supplier_uuids:
+        suppliers_res = (await db.execute(select(Supplier).where(Supplier.id.in_(supplier_uuids)))).scalars().all()
+    else:
+        suppliers_res = []
+
+    for sup in suppliers_res:
+        token = generate_rfq_token(rfq.id, item_id, sup.id)
+        phone = (sup.contact_whatsapp_number or sup.contact_calling_number or "").strip()
+        clean_phone = "".join(ch for ch in phone if ch.isdigit() or ch == "+")
+        all_emails = [e.email for e in sup.emails if getattr(e, "email", None)]
+        email_str = ", ".join(all_emails)
+        supplier_links.append({
+            "supplier_id": str(sup.id),
+            "company_name": sup.company_name,
+            "contact_name": sup.contact_full_name or "Valued Partner",
+            "phone": phone,
+            "clean_phone": clean_phone,
+            "email": email_str,
+            "emails": all_emails,
+            "token": token,
+            "quote_path": f"/quote/{token}",
+        })
 
     # Automatically dispatch emails in the background for suppliers with email addresses
     base_host = request.headers.get("origin") or "http://192.168.1.23:5173"
@@ -880,4 +905,4 @@ async def send_rfq_email_manual(
         data={"sent": True, "recipients": payload.to_emails},
         request_id=request.state.request_id,
         message=f"RFQ email successfully sent to {', '.join(payload.to_emails)}.",
-    )
+    )

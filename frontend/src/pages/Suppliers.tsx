@@ -46,10 +46,11 @@ function resolveImageUrl(url: string | null | undefined): string {
   if (clean.startsWith("data:") || clean.startsWith("http://") || clean.startsWith("https://")) {
     return encodeURI(clean);
   }
-  const fullUrl = `http://localhost:8000${clean.startsWith("/") ? "" : "/"}${clean}`;
+  const fullUrl = `${API_ORIGIN}${clean.startsWith("/") ? "" : "/"}${clean}`;
   return encodeURI(fullUrl);
 }
 import {
+  API_ORIGIN,
   apiDelete,
   apiGet,
   apiPatch,
@@ -2662,11 +2663,6 @@ export function SuppliersPage() {
                                     src={resolveImageUrl(url)}
                                     alt={`Visit photo ${idx + 1}`}
                                     style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                                    onError={(e) => {
-                                      if (!url.startsWith("http") && !url.startsWith("data:")) {
-                                        (e.target as HTMLImageElement).src = `http://localhost:8000${url.startsWith("/") ? "" : "/"}${url}`;
-                                      }
-                                    }}
                                   />
                                   <button
                                     type="button"

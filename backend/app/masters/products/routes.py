@@ -22,6 +22,7 @@ from app.auth.dependencies import get_current_user
 from app.auth.service import CurrentUser
 from app.common.list_query import ListQueryParams, get_list_query_params
 from app.common.pagination import PageMeta
+from app.core.logging import get_logger
 from app.core.responses import build_success_response
 from app.database.session import get_db_session
 from app.events.dependencies import get_event_dispatcher
@@ -32,6 +33,7 @@ from app.masters.products.service import ProductService
 from app.rbac.dependencies import require_permission
 
 router = APIRouter(prefix="/masters/products", tags=["Masters - Products"])
+logger = get_logger(__name__)
 
 
 async def _publish_product_event(
@@ -223,7 +225,15 @@ async def upload_product_image(
     supabase_project_id = os.getenv("SUPABASE_PROJECT_ID", "mpvzjzunkiqchhhvxrza")
     supabase_key = os.getenv("SUPABASE_SERVICE_KEY") or os.getenv("SUPABASE_ANON_KEY", "")
 
-    if supabase_key:
+    if not supabase_key:
+        logger.warning(
+            "SUPABASE_SERVICE_KEY / SUPABASE_ANON_KEY not set on this backend instance -- "
+            "falling back to local disk. This image will NOT be visible from any other machine "
+            "or deployment. Set one of these environment variables to upload to Supabase Storage "
+            "instead.",
+            extra={"filename": filename},
+        )
+    else:
         try:
             supabase_upload_url = f"https://{supabase_project_id}.supabase.co/storage/v1/object/product-images/{filename}"
             async with httpx.AsyncClient(timeout=30.0) as client:
@@ -239,8 +249,26 @@ async def upload_product_image(
             if resp.status_code in (200, 201):
                 public_url = f"https://{supabase_project_id}.supabase.co/storage/v1/object/public/product-images/{filename}"
                 return {"success": True, "data": {"url": public_url}}
-        except Exception:
-            pass
+            logger.warning(
+                "Supabase Storage rejected the upload -- falling back to local disk. This "
+                "image will NOT be visible from any other machine or deployment.",
+                extra={
+                    "filename": filename,
+                    "status_code": resp.status_code,
+                    "response_body": resp.text[:500],
+                },
+            )
+        except Exception as exc:
+            logger.warning(
+                "Request to Supabase Storage failed (network error, timeout, or similar) -- "
+                "falling back to local disk. This image will NOT be visible from any other machine "
+                "or deployment.",
+                extra={
+                    "filename": filename,
+                    "error": str(exc),
+                    "error_type": type(exc).__name__,
+                },
+            )
 
     def _write_to_local_disk() -> str:
         uploads_dir = Path("uploads/products")

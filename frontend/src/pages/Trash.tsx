@@ -108,8 +108,9 @@ export function TrashPage() {
     return true;
   });
 
-  const allFilteredSelected =
-    filteredItems.length > 0 && filteredItems.every((i) => selectedIds.has(`${i.entity_type}:${i.id}`));
+  const allFilteredSelected: boolean = Boolean(
+    filteredItems.length > 0 && filteredItems.every((i) => selectedIds.has(`${i.entity_type}:${i.id}`))
+  );
 
   function toggleSelectAll() {
     if (allFilteredSelected) {
@@ -404,7 +405,7 @@ export function TrashPage() {
               <thead>
                 <tr style={{ background: "#f8fafc", borderBottom: "1px solid #e2e8f0", textAlign: "left" }}>
                   <th style={{ padding: "12px 16px", width: "40px" }}>
-                    <input type="checkbox" disabled />
+                    <input type="checkbox" checked={false} disabled onChange={() => { }} />
                   </th>
                   <th style={{ padding: "12px 16px", fontSize: "13px", fontWeight: 600, color: "#475569" }}>
                     Module Type

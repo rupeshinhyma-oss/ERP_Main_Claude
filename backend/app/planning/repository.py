@@ -192,26 +192,44 @@ class PlanningRowRepository(BaseRepository[PlanningRow]):
         self, organization_id: uuid.UUID | None, *, branch_id: str | None = None
     ) -> list[uuid.UUID]:
         """
-        Return every live Product Master ID, in stable ``created_at`` order,
-        optionally restricted to those whose ``organization_ids`` contains
-        ``organization_id`` AND (if given) whose ``branch_ids`` contains
-        ``branch_id``.
+        Return every live Product Master ID, ordered by Sub Category (so
+        products cluster together by sub-category, in sub-category name
+        order -- mirroring how Product Master's own list naturally reads
+        when products were entered sub-category-by-sub-category), then by
+        ``created_at``/``id`` as the tiebreaker within each sub-category
+        group. Optionally restricted to those whose ``organization_ids``
+        contains ``organization_id`` AND (if given) whose ``branch_ids``
+        contains ``branch_id``.
 
-        This is the SAME ordering ``ProductRepository.list()`` /
-        ``BaseRepository._base_select()`` falls back to, so results here
-        line up 1:1 with what ``PlanningService.auto_populate_rows_from_item_source``
-        pulls when it calls ``repository.list(offset=0, limit=...)`` --
+        Products with no ``sub_category_id`` set sort last, after every
+        named sub-category group, rather than interleaving with them.
+
+        This ordering is what makes Shipment Planning's ITEM column (when
+        LINKED_LOOKUP onto "product") list/auto-populate items clustered
+        by Sub Category, matching the requirement that the ITEM list
+        "should be completely based on Sub categories" the same way
+        Product Master's list already reads.
+
+        Line up 1:1 with what ``PlanningService.auto_populate_rows_from_item_source``
+        pulls (same ordering is applied there too, see that method) --
         important because both the "how many rows COULD this sheet have"
         count and the "create the next N rows" action need to agree on
         which record is #1, #2, #51, etc., or a page boundary could skip
         or duplicate a record.
         """
+        from app.masters.product_sub_categories.models import ProductSubCategory
         from app.masters.products.models import Product
 
         stmt = (
             select(Product.id, Product.organization_ids, Product.branch_ids)
+            .outerjoin(ProductSubCategory, ProductSubCategory.id == Product.sub_category_id)
             .where(Product.deleted_at.is_(None))
-            .order_by(Product.created_at, Product.id)
+            .order_by(
+                ProductSubCategory.name.is_(None),  # False (has a sub-category) sorts before True (none)
+                ProductSubCategory.name.asc(),
+                Product.created_at,
+                Product.id,
+            )
         )
         result = await self.session.execute(stmt)
         rows = result.all()

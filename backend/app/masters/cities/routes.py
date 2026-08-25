@@ -26,7 +26,7 @@ from app.database.session import get_db_session
 from app.events.dependencies import get_event_dispatcher
 from app.events.dispatcher import EventDispatcher
 from app.masters.cities.dependencies import get_city_service
-from app.masters.cities.schemas import CityRead, CityCreate, CityUpdate, ImportSummaryRead
+from app.masters.cities.schemas import CityLookupRead, CityRead, CityCreate, CityUpdate, ImportSummaryRead
 from app.masters.cities.service import CityService
 from app.rbac.dependencies import require_permission
 
@@ -127,6 +127,26 @@ async def list_citys(
     meta = PageMeta.build(page=query.page.page, page_size=query.page.page_size, total_records=total).as_meta_dict()
     data = [CityRead.model_validate(b).model_dump(mode="json") for b in citys]
     return build_success_response(data=data, request_id=request.state.request_id, meta=meta)
+
+
+@router.get(
+    "/lookup",
+    summary="Lightweight id/name lookup for cities (no city.view required)",
+)
+async def lookup_cities(
+    request: Request,
+    service: CityService = Depends(get_city_service),
+    _current_user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    """
+    Return every active city as bare ``{id, name}`` pairs.
+
+    Gated on "is logged in" only, NOT ``city.view`` -- same rationale as
+    ``app.masters.countries.routes.lookup_countries``.
+    """
+    cities = await service.list_all_cached()
+    data = [CityLookupRead.model_validate(c).model_dump(mode="json") for c in cities]
+    return build_success_response(data=data, request_id=request.state.request_id)
 
 
 @router.get("/export", summary="Export citys to CSV/Excel")

@@ -2033,7 +2033,20 @@ export function PlanningPage() {
       cancelled = true;
       if (retryTimer) clearTimeout(retryTimer);
       wsRef.current = null;
-      socket?.close();
+      if (socket) {
+        if (socket.readyState === WebSocket.CONNECTING) {
+          // Calling close() while still CONNECTING is safe (the socket
+          // never opens) but Chrome/Firefox log a "WebSocket is closed
+          // before the connection is established" console warning for
+          // it -- purely cosmetic, but avoidable: defer the close until
+          // the handshake actually settles (open or error), same as
+          // waiting for a promise to settle before cancelling it.
+          const pendingSocket = socket;
+          pendingSocket.addEventListener("open", () => pendingSocket.close(), { once: true });
+        } else {
+          socket.close();
+        }
+      }
     };
   }, [activeSheetId, applyLiveEvent]);
 
@@ -2672,10 +2685,10 @@ export function PlanningPage() {
           const optimisticCell = isZeroOrBlank
             ? { value: "", display_value: "", status_color: null, custom_status_tag_id: null }
             : {
-                value: effectiveVal,
-                display_value: effectiveVal,
-                ...(isStatusColorCol && effectiveVal.trim() !== "" ? { status_color: "blue_ordered" as PlanningCellStatusColor, custom_status_tag_id: null } : {}),
-              };
+              value: effectiveVal,
+              display_value: effectiveVal,
+              ...(isStatusColorCol && effectiveVal.trim() !== "" ? { status_color: "blue_ordered" as PlanningCellStatusColor, custom_status_tag_id: null } : {}),
+            };
           let updatedCells = exists
             ? r.cells.map((cell) => (cell.column_id === columnId ? { ...cell, ...optimisticCell } : cell))
             : [

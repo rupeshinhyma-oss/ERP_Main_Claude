@@ -26,7 +26,7 @@ from app.database.session import get_db_session
 from app.events.dependencies import get_event_dispatcher
 from app.events.dispatcher import EventDispatcher
 from app.masters.countries.dependencies import get_country_service
-from app.masters.countries.schemas import CountryRead, CountryCreate, CountryUpdate, ImportSummaryRead
+from app.masters.countries.schemas import CountryLookupRead, CountryRead, CountryCreate, CountryUpdate, ImportSummaryRead
 from app.masters.countries.service import CountryService
 from app.rbac.dependencies import require_permission
 
@@ -127,6 +127,31 @@ async def list_countrys(
     meta = PageMeta.build(page=query.page.page, page_size=query.page.page_size, total_records=total).as_meta_dict()
     data = [CountryRead.model_validate(b).model_dump(mode="json") for b in countrys]
     return build_success_response(data=data, request_id=request.state.request_id, meta=meta)
+
+
+@router.get(
+    "/lookup",
+    summary="Lightweight id/name lookup for countries (no country.view required)",
+)
+async def lookup_countries(
+    request: Request,
+    service: CountryService = Depends(get_country_service),
+    _current_user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    """
+    Return every active country as bare ``{id, name}`` pairs.
+
+    Gated on "is logged in" only, NOT ``country.view`` -- other modules
+    (Suppliers, Buyers) store a country ID on their own records and need
+    to resolve that ID to a display name for a user who can see that
+    record, even if they were never separately granted access to the
+    Countries master module. Without this, requests to this path used to
+    fall through to ``GET /{country_id}``, which tried to parse the
+    literal string "lookup" as a UUID and failed with a 422.
+    """
+    countries = await service.list_all_cached()
+    data = [CountryLookupRead.model_validate(c).model_dump(mode="json") for c in countries]
+    return build_success_response(data=data, request_id=request.state.request_id)
 
 
 @router.get("/export", summary="Export countrys to CSV/Excel")

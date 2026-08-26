@@ -26,6 +26,7 @@ from app.audit.service import AuditService
 from app.auth.service import CurrentUser
 from app.common.list_query import ListQueryParams, get_list_query_params
 from app.common.pagination import PageMeta
+from app.core.logging import get_logger
 from app.core.responses import build_success_response
 from app.database.session import get_db_session
 from app.events.dependencies import get_event_dispatcher
@@ -47,6 +48,7 @@ from app.suppliers.schemas import (
 from app.suppliers.service import SupplierService
 
 router = APIRouter(prefix="/suppliers", tags=["Suppliers"])
+logger = get_logger(__name__)
 
 
 async def _publish_supplier_event(
@@ -306,8 +308,23 @@ async def upload_supplier_media(
     file: UploadFile = File(...),
     _current_user: CurrentUser = Depends(require_permission("supplier.create")),
 ) -> dict:
+    """
+    Upload a supplier visit photo/video to Supabase Storage, falling back to
+    local disk.
+
+    Switched from a blocking ``urllib.request.urlopen`` call to
+    ``httpx.AsyncClient`` (matching ``app.masters.products.routes.upload_product_image``,
+    which already made this fix) -- the blocking version froze this FastAPI
+    worker's entire event loop, and every other concurrent request it was
+    serving, for the whole duration of the upload. Also replaced the silent
+    ``except Exception: pass`` with real logging: a failed Supabase upload
+    used to disappear with zero trace, silently falling back to local disk
+    (which is invisible from any other machine/deployment) with no way to
+    tell WHY it fell back -- missing/wrong API key, network failure, wrong
+    bucket permissions, etc. all looked identical from the outside.
+    """
+    import httpx
     from pathlib import Path
-    import urllib.request
     import os
 
     content = await file.read()
@@ -316,26 +333,53 @@ async def upload_supplier_media(
     supabase_key = os.getenv("SUPABASE_SERVICE_KEY") or os.getenv("SUPABASE_ANON_KEY", "")
 
     # Try direct upload to Supabase Storage Buckets
-    if supabase_key:
+    if not supabase_key:
+        logger.warning(
+            "SUPABASE_SERVICE_KEY / SUPABASE_ANON_KEY not set on this backend instance -- "
+            "falling back to local disk. This file will NOT be visible from any other machine "
+            "or deployment. Set one of these environment variables to upload to Supabase Storage "
+            "instead.",
+            extra={"filename": filename},
+        )
+    else:
         for bucket in ("supplier-media", "product-images"):
             try:
                 supabase_upload_url = f"https://{supabase_project_id}.supabase.co/storage/v1/object/{bucket}/{filename}"
-                req = urllib.request.Request(
-                    supabase_upload_url,
-                    data=content,
-                    headers={
-                        "Authorization": f"Bearer {supabase_key}",
-                        "Content-Type": file.content_type or "application/octet-stream",
-                        "x-upsert": "true",
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    resp = await client.post(
+                        supabase_upload_url,
+                        content=content,
+                        headers={
+                            "Authorization": f"Bearer {supabase_key}",
+                            "Content-Type": file.content_type or "application/octet-stream",
+                            "x-upsert": "true",
+                        },
+                    )
+                if resp.status_code in (200, 201):
+                    public_url = f"https://{supabase_project_id}.supabase.co/storage/v1/object/public/{bucket}/{filename}"
+                    return {"success": True, "data": {"url": public_url}}
+                logger.warning(
+                    "Supabase Storage rejected the upload for this bucket -- trying the next "
+                    "bucket (if any), then falling back to local disk if all fail.",
+                    extra={
+                        "filename": filename,
+                        "bucket": bucket,
+                        "status_code": resp.status_code,
+                        "response_body": resp.text[:500],
                     },
-                    method="POST"
                 )
-                with urllib.request.urlopen(req) as resp:
-                    if resp.status in (200, 201):
-                        public_url = f"https://{supabase_project_id}.supabase.co/storage/v1/object/public/{bucket}/{filename}"
-                        return {"success": True, "data": {"url": public_url}}
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning(
+                    "Request to Supabase Storage failed (network error, timeout, or similar) "
+                    "for this bucket -- trying the next bucket (if any), then falling back to "
+                    "local disk if all fail.",
+                    extra={
+                        "filename": filename,
+                        "bucket": bucket,
+                        "error": str(exc),
+                        "error_type": type(exc).__name__,
+                    },
+                )
 
     # Fallback to local server static storage
     upload_dir = Path("uploads/suppliers")

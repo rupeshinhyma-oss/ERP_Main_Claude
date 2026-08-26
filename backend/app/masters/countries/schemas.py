@@ -32,6 +32,15 @@ class CountryUpdate(BaseModel):
     status: RecordStatus | None = None
 
 
+class CountryLookupRead(BaseModel):
+    """Bare id/name pair, for the permission-free ``/lookup`` endpoint."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    name: str
+
+
 class CountryRead(BaseModel):
     """A country, as returned by the API."""
 

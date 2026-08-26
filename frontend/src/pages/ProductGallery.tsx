@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from "react";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { SideDrawer, DetailFieldGrid } from "@/components/SideDrawer";
-import { apiGet, apiPatch } from "@/lib/api";
+import { apiGet, apiPatch, API_ORIGIN } from "@/lib/api";
 import { usePendingGuard, useAuth } from "@/lib/hooks";
 import { useLookup } from "@/lib/lookups";
 import type {
@@ -32,7 +32,7 @@ function resolveImageUrl(url: string | null | undefined): string {
   if (clean.startsWith("data:") || clean.startsWith("http://") || clean.startsWith("https://")) {
     return encodeURI(clean);
   }
-  const fullUrl = `http://localhost:8000${clean.startsWith("/") ? "" : "/"}${clean}`;
+  const fullUrl = `${API_ORIGIN}${clean.startsWith("/") ? "" : "/"}${clean}`;
   return encodeURI(fullUrl);
 }
 
@@ -1171,8 +1171,8 @@ export function ProductGalleryPage() {
                           {isPhotoDeletePending(`${p.id}:bulk-delete`) || isPhotoDeletePending(`${p.id}:${selectedImageIndex}`)
                             ? "Deleting…"
                             : selectedMediaIndices.length > 0
-                            ? `🗑️ Delete Selected (${selectedMediaIndices.length})`
-                            : "🗑️ Delete"}
+                              ? `🗑️ Delete Selected (${selectedMediaIndices.length})`
+                              : "🗑️ Delete"}
                         </button>
                       )}
                     </div>
@@ -1490,8 +1490,8 @@ export function ProductGalleryPage() {
                           {isPhotoDeletePending(`supp:${supp.id}:bulk-delete`) || isPhotoDeletePending(`supp:${supp.id}:${selectedImageIndex}`)
                             ? "Deleting…"
                             : selectedMediaIndices.length > 0
-                            ? `🗑️ Delete Selected (${selectedMediaIndices.length})`
-                            : "🗑️ Delete"}
+                              ? `🗑️ Delete Selected (${selectedMediaIndices.length})`
+                              : "🗑️ Delete"}
                         </button>
                       )}
                     </div>

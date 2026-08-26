@@ -1,9 +1,3 @@
-"""
-Inquiry Routes.
-
-Implements the document's two-layer structure directly in the URL shape:
-
-- Layer 1 (company-wise): ``GET /inquiries/companies``
 - Layer 1 inside a company: ``GET /inquiries/companies/{buyer_id}``
 - Layer 2 (inside a consignment): ``GET /inquiries/{inquiry_id}/items``
 
@@ -874,4 +868,4 @@ async def send_rfq_email_manual(
         data={"sent": True, "recipients": payload.to_emails},
         request_id=request.state.request_id,
         message=f"RFQ email successfully sent to {', '.join(payload.to_emails)}.",
-    )
+    )

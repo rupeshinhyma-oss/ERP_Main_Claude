@@ -2051,6 +2051,14 @@ class PlanningService:
         filtered page runs past how many matching rows already exist,
         instead of only ever pulling from the front of the WHOLE
         (unfiltered) source list.
+
+        For the "product" source module, records are always pulled via
+        ``_all_product_ids_for_organization`` (even with no organization
+        filter active) rather than the generic ``repository.list()``,
+        because that method orders products by Sub Category -- see its
+        docstring -- and every "product" row-creation path needs to agree
+        on that same ordering, or a page boundary could skip/duplicate a
+        record between this call and ``get_grid``'s row count.
         """
         sheet = await self.get_sheet_or_raise(sheet_id)
         if sheet.item_source_type != PlanningColumnSourceType.LINKED_LOOKUP:
@@ -2060,19 +2068,16 @@ class PlanningService:
             raise ConflictException("The ITEM column references an unregistered source module.")
 
         if module.key == "product":
-            if organization_id is not None:
-                record_ids = await self.row_repository._all_product_ids_for_organization(organization_id, branch_id=branch_id)
-                record_ids = record_ids if limit is None else record_ids[:limit]
-                repository = module.repository_factory(self.row_repository.session)
-                records_by_id = await repository.get_by_ids(record_ids)
-                # get_by_ids returns a dict (arbitrary key order in some drivers) --
-                # re-sort back into record_ids' deterministic order, so
-                # position/next_position assignment below stays stable.
-                records = [records_by_id[rid] for rid in record_ids if rid in records_by_id]
-            else:
-                repository = module.repository_factory(self.row_repository.session)
-                order_by = getattr(repository.model, "created_at", None)
-                records = await repository.list(offset=0, limit=limit, order_by=order_by)
+            record_ids = await self.row_repository._all_product_ids_for_organization(
+                organization_id, branch_id=branch_id
+            )
+            record_ids = record_ids if limit is None else record_ids[:limit]
+            repository = module.repository_factory(self.row_repository.session)
+            records_by_id = await repository.get_by_ids(record_ids)
+            # get_by_ids returns a dict (arbitrary key order in some drivers) --
+            # re-sort back into record_ids' deterministic (sub-category-grouped)
+            # order, so position/next_position assignment below stays stable.
+            records = [records_by_id[rid] for rid in record_ids if rid in records_by_id]
             # Batch attach supplier info in 1 fast query for all records
             await repository.attach_planning_supplier_info(records)
         else:

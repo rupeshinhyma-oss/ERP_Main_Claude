@@ -20,6 +20,7 @@ import { Breadcrumb } from "@/components/Breadcrumb";
 import { Banner, ModalAlert, TableMessageRow } from "@/components/ui";
 import { SideDrawer, DetailFieldGrid } from "@/components/SideDrawer";
 import { Pagination } from "@/components/Pagination";
+import { ItemPopoverCell, TextPopoverCell } from "@/components/ItemPopoverCell";
 import { ImpExpDropdown, BulkActionsDropdown, ImportSummaryPanel, downloadSampleCsv, parseFile, WizardModal, type SheetRow } from "@/components/ImportWizard";
 import {
   SearchableDropdown,
@@ -45,10 +46,11 @@ function resolveImageUrl(url: string | null | undefined): string {
   if (clean.startsWith("data:") || clean.startsWith("http://") || clean.startsWith("https://")) {
     return encodeURI(clean);
   }
-  const fullUrl = `http://localhost:8000${clean.startsWith("/") ? "" : "/"}${clean}`;
+  const fullUrl = `${API_ORIGIN}${clean.startsWith("/") ? "" : "/"}${clean}`;
   return encodeURI(fullUrl);
 }
 import {
+  API_ORIGIN,
   apiDelete,
   apiGet,
   apiPatch,
@@ -1172,100 +1174,41 @@ export function SuppliersPage() {
     }
   }, [liveConnectionStatus]);
 
-  function renderTruncatedText(text: string | null | undefined, maxLen = 22, modalTitle = "Details") {
-    if (!text) return <span className="muted">—</span>;
-    const str = text.trim();
-    if (str.length <= maxLen) return <span style={{ whiteSpace: "nowrap" }}>{str}</span>;
-
-    const shortText = str.slice(0, maxLen) + "…";
+  function renderTruncatedText(text: string | null | undefined, maxLen = 22, modalTitle = "Details", icon = "📍") {
     return (
-      <span style={{ display: "inline-flex", alignItems: "center", gap: "6px", whiteSpace: "nowrap" }}>
-        <span style={{ maxWidth: "150px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "inline-block" }} title={str}>
-          {shortText}
-        </span>
-        <button
-          type="button"
-          onClick={() => setAlertPopup({ title: modalTitle, message: str })}
-          style={{
-            border: "1px solid #cbd5e1",
-            background: "#f8fafc",
-            color: "#0061f2",
-            fontSize: "11px",
-            padding: "1px 6px",
-            borderRadius: "10px",
-            cursor: "pointer",
-            fontWeight: 600,
-            whiteSpace: "nowrap",
-            flexShrink: 0,
-          }}
-          title="Click to view full text 👁️"
-        >
-          👁️
-        </button>
-      </span>
+      <TextPopoverCell
+        text={text}
+        maxLen={maxLen}
+        title={modalTitle}
+        icon={icon}
+        maxWidth="150px"
+        emptyText="—"
+      />
     );
   }
 
-  function chipList(ids: string[] | undefined, tableKey: string, modalTitle = "Selected Items") {
+  function chipList(
+    ids: string[] | undefined,
+    tableKey: string,
+    modalTitle = "Selected Items",
+    icon = "🏷️"
+  ) {
     if (!ids || !ids.length) return <span className="muted">—</span>;
-    const names = ids.map((id) => resolver.get(tableKey, id) || "…");
-    const hasUnresolved = names.some((n) => n === "…");
+    const names = ids.map((id) => resolver.get(tableKey, id) || id);
+    const hasUnresolved = names.some((n) => !n || n === "…");
     if (hasUnresolved) {
       void resolver.resolve(tableKey, ids).then(() => setNamesVersion((n) => n + 1));
     }
-    const first = names[0];
-    const remaining = names.length - 1;
-
-    const handleOpenModal = async () => {
-      if (hasUnresolved) {
-        await resolver.resolve(tableKey, ids);
-        const resolvedNames = ids.map((id) => resolver.get(tableKey, id) || id);
-        setAlertPopup({ title: modalTitle, message: "• " + resolvedNames.join("\n• ") });
-        setNamesVersion((n) => n + 1);
-      } else {
-        setAlertPopup({ title: modalTitle, message: "• " + names.join("\n• ") });
-      }
-    };
+    const cleanNames = names.filter(Boolean);
 
     return (
-      <div className="chip-list" style={{ display: "inline-flex", flexWrap: "nowrap", gap: "4px", alignItems: "center", whiteSpace: "nowrap" }}>
-        <span
-          className="chip"
-          title={first}
-          style={{
-            maxWidth: "120px",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-            display: "inline-block",
-            verticalAlign: "middle",
-          }}
-        >
-          {first}
-        </span>
-        {remaining > 0 && (
-          <button
-            type="button"
-            className="chip-more"
-            title={names.join(", ")}
-            onClick={() => void handleOpenModal()}
-            style={{
-              fontWeight: 600,
-              fontSize: "11px",
-              color: "#0061f2",
-              background: "#eff6ff",
-              border: "1px solid #bfdbfe",
-              borderRadius: "12px",
-              padding: "1px 7px",
-              cursor: "pointer",
-              whiteSpace: "nowrap",
-              flexShrink: 0,
-            }}
-          >
-            +{remaining} 👁️
-          </button>
-        )}
-      </div>
+      <ItemPopoverCell
+        items={cleanNames}
+        icon={icon}
+        itemIcon={icon}
+        title={`📍 ${modalTitle}`}
+        badgeIcon="📍"
+      />
     );
   }
 
@@ -2720,11 +2663,6 @@ export function SuppliersPage() {
                                     src={resolveImageUrl(url)}
                                     alt={`Visit photo ${idx + 1}`}
                                     style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                                    onError={(e) => {
-                                      if (!url.startsWith("http") && !url.startsWith("data:")) {
-                                        (e.target as HTMLImageElement).src = `http://localhost:8000${url.startsWith("/") ? "" : "/"}${url}`;
-                                      }
-                                    }}
                                   />
                                   <button
                                     type="button"

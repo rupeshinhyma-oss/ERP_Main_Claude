@@ -54,6 +54,7 @@ export type FormState = Record<string, string>;
 export interface MasterColumn<T> {
   header: string;
   render: (item: T) => ReactNode;
+  sortValue?: (item: T) => string | number | boolean | null | undefined;
 }
 
 export interface MasterPageProps<T extends MasterRecord> {
@@ -412,6 +413,81 @@ function computeSearchRelevance<T>(
   return maxScore;
 }
 
+function extractSortValue<T>(
+  item: T,
+  mIdx: number,
+  col: MasterColumn<T>,
+  columnHeaders?: string[]
+): string | number {
+  if (col.sortValue) {
+    const custom = col.sortValue(item);
+    if (typeof custom === "number") return isNaN(custom) ? 0 : custom;
+    if (typeof custom === "string") return custom.toLowerCase();
+    if (custom === null || custom === undefined) return "";
+    return String(custom).toLowerCase();
+  }
+
+  const rec = item as unknown as Record<string, unknown>;
+  const rawLabel = (columnHeaders ?? [col.header])[mIdx] ?? col.header ?? "";
+  const label = rawLabel.toLowerCase();
+
+  // 1. Numeric fields
+  if (label.includes("qty") || label.includes("quantity")) {
+    const n = Number(rec.packaging_quantity ?? rec.quantity ?? 0);
+    return isNaN(n) ? 0 : n;
+  }
+  if (label.includes("gross wt") || label.includes("net wt") || label.includes("weight") || label.includes("wt")) {
+    const n = Number(rec.packaging_gross_weight ?? rec.packaging_net_weight ?? rec.weight ?? 0);
+    return isNaN(n) ? 0 : n;
+  }
+  if (label.includes("cbm")) {
+    const n = Number(rec.packaging_unit_cbm ?? rec.cbm ?? 0);
+    return isNaN(n) ? 0 : n;
+  }
+  if (label.includes("price") || label.includes("cost") || label.includes("rate") || label.includes("vat")) {
+    const n = Number(rec.standard_price ?? rec.standard_cost ?? rec.refund_vat_percent ?? rec.rate ?? 0);
+    return isNaN(n) ? 0 : n;
+  }
+
+  // 2. Named common master fields
+  if (label.includes("product name") || label.includes("tally")) {
+    return String(rec.product_name_tally || rec.product_name || rec.name || "").toLowerCase();
+  }
+  if (label.includes("product code") || label.includes("code")) {
+    return String(rec.product_code || rec.code || rec.barcode || "").toLowerCase();
+  }
+  if (label.includes("status")) {
+    return String(rec.status ?? (rec.is_active ? "active" : "inactive")).toLowerCase();
+  }
+
+  // 3. Try key matches
+  const cleanKey = label.replace(/[^a-z0-9]/g, "_");
+  for (const [k, v] of Object.entries(rec)) {
+    if (k.toLowerCase() === cleanKey || cleanKey.includes(k.toLowerCase())) {
+      if (typeof v === "number") return v;
+      if (typeof v === "string") return v.toLowerCase();
+    }
+  }
+
+  // 4. Try rendering column
+  try {
+    const rendered = col.render(item);
+    if (typeof rendered === "string" || typeof rendered === "number") {
+      return typeof rendered === "number" ? rendered : rendered.toLowerCase();
+    }
+    if (rendered && typeof rendered === "object" && "props" in (rendered as any)) {
+      const child = (rendered as any).props?.children;
+      if (typeof child === "string" || typeof child === "number") {
+        return typeof child === "number" ? child : String(child).toLowerCase();
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+
+  return String(rec.name || rec.title || rec.id || "").toLowerCase();
+}
+
 export function MasterPage<T extends MasterRecord>({
   activeKey,
   apiBase,
@@ -543,6 +619,27 @@ export function MasterPage<T extends MasterRecord>({
   const [effectiveSearch, setEffectiveSearch] = useState("");
   const [alertPopup, setAlertPopup] = useState<{ title: string; message: string } | null>(null);
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
+  const [sortColIndex, setSortColIndex] = useState<number | null>(null);
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
+
+  const handleHeaderSort = useCallback((colIdx: number) => {
+    setSortColIndex((prevCol) => {
+      if (prevCol === colIdx) {
+        if (sortDirection === "asc") {
+          setSortDirection("desc");
+          return colIdx;
+        } else {
+          // Reset sorting back to natural order
+          setSortDirection("asc");
+          return null;
+        }
+      } else {
+        setSortDirection("asc");
+        return colIdx;
+      }
+    });
+    setCurrentPage(1);
+  }, [sortDirection]);
 
   const colCount = columns.length + 3; // +1 for Checkbox, +1 for Sr. No., +1 for actions
   const extraFiltersKey = JSON.stringify(extraFilters || {});
@@ -739,7 +836,7 @@ export function MasterPage<T extends MasterRecord>({
       const params: Record<string, string | number> = {
         page: currentPage,
         page_size: pageSize,
-        sort_order: "asc",
+        sort_order: sortColIndex !== null ? sortDirection : "asc",
       };
       if (effectiveSearch) params.search = effectiveSearch;
       if (statusFilter) params.status = statusFilter;
@@ -778,12 +875,14 @@ export function MasterPage<T extends MasterRecord>({
     extraFiltersKey,
     reloadCounter,
     reloadToken,
+    sortColIndex,
+    sortDirection,
   ]);
 
-  /* --- Client-side instant 0ms search & filter with relevance ranking --- */
+  /* --- Client-side instant 0ms search, filter & ascending/descending sorting --- */
   const filteredRecords = useMemo(() => {
     if (!clientSideSearch) return rows;
-    let list = allRecords;
+    let list = [...allRecords];
     if (statusFilter) {
       list = list.filter((r) => {
         const rec = r as unknown as Record<string, unknown>;
@@ -808,12 +907,46 @@ export function MasterPage<T extends MasterRecord>({
           scored.push({ item, score });
         }
       }
-      // Sort by relevance score descending (Name/Code matches first, then category/brand, then hidden specs last)
-      scored.sort((a, b) => b.score - a.score);
+      // If user hasn't explicitly sorted by a column, sort by relevance score
+      if (sortColIndex === null) {
+        scored.sort((a, b) => b.score - a.score);
+      }
       list = scored.map((x) => x.item);
     }
+
+    // Apply ascending / descending column sorting
+    if (sortColIndex !== null) {
+      const sortedList = [...list];
+      if (sortColIndex === 1) {
+        // Sr. No. sorting (by created_at or fallback index)
+        sortedList.sort((a, b) => {
+          const tA = (a as any).created_at ? new Date((a as any).created_at).getTime() : 0;
+          const tB = (b as any).created_at ? new Date((b as any).created_at).getTime() : 0;
+          return sortDirection === "asc" ? tA - tB : tB - tA;
+        });
+      } else if (sortColIndex >= 2 && sortColIndex < colCount - 1) {
+        const mIdx = sortColIndex - 2;
+        const col = columns[mIdx];
+        if (col) {
+          sortedList.sort((a, b) => {
+            const valA = extractSortValue(a, mIdx, col, columnHeaders);
+            const valB = extractSortValue(b, mIdx, col, columnHeaders);
+            if (typeof valA === "number" && typeof valB === "number") {
+              return sortDirection === "asc" ? valA - valB : valB - valA;
+            }
+            const strA = String(valA ?? "");
+            const strB = String(valB ?? "");
+            return sortDirection === "asc"
+              ? strA.localeCompare(strB, undefined, { numeric: true, sensitivity: "base" })
+              : strB.localeCompare(strA, undefined, { numeric: true, sensitivity: "base" });
+          });
+        }
+      }
+      return sortedList;
+    }
+
     return list;
-  }, [clientSideSearch, rows, allRecords, statusFilter, extraFiltersKey, searchInput, customSearchMatcher]);
+  }, [clientSideSearch, rows, allRecords, statusFilter, extraFiltersKey, searchInput, customSearchMatcher, sortColIndex, sortDirection, columns, columnHeaders, colCount]);
 
   const displayedRows = useMemo(() => {
     if (!clientSideSearch) return rows;
@@ -1470,11 +1603,55 @@ export function MasterPage<T extends MasterRecord>({
     }
 
     if (idx === 1) {
+      const isSorted = sortColIndex === 1;
       return (
-        <th key="col-1" style={{ width: "65px", minWidth: "65px", maxWidth: "75px", textAlign: "center", ...getFreezeStyle(1, true) }}>
+        <th key="col-1" style={{ width: "75px", minWidth: "75px", maxWidth: "85px", textAlign: "center", ...getFreezeStyle(1, true) }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "2px" }}>
-            <span style={{ whiteSpace: "nowrap" }}>Sr. No.</span>
-            <button type="button" onClick={() => togglePin(1)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: "11px", opacity: pinnedCols[1] ? 1 : 0.4, padding: "0 2px" }} title={pinnedCols[1] ? "Unfreeze" : "Freeze"}>
+            <div
+              onClick={() => handleHeaderSort(1)}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "4px",
+                cursor: "pointer",
+                userSelect: "none",
+                padding: "2px 0",
+              }}
+              title={
+                isSorted
+                  ? `Sorted by Sr. No. (${sortDirection === "asc" ? "Ascending — click for Descending" : "Descending — click to reset"})`
+                  : "Click to sort by Sr. No."
+              }
+            >
+              <span style={{ whiteSpace: "nowrap" }}>Sr. No.</span>
+              {isSorted ? (
+                <span
+                  style={{
+                    color: "#0284c7",
+                    fontSize: "10px",
+                    fontWeight: 800,
+                    background: "#e0f2fe",
+                    padding: "1px 4px",
+                    borderRadius: "3px",
+                    border: "1px solid #bae6fd",
+                    lineHeight: 1,
+                  }}
+                >
+                  {sortDirection === "asc" ? "▲" : "▼"}
+                </span>
+              ) : (
+                <span style={{ fontSize: "10px", color: "#94a3b8", opacity: 0.45, lineHeight: 1 }}>↕</span>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                togglePin(1);
+              }}
+              style={{ background: "none", border: "none", cursor: "pointer", fontSize: "11px", opacity: pinnedCols[1] ? 1 : 0.4, padding: "0 2px" }}
+              title={pinnedCols[1] ? "Unfreeze" : "Freeze"}
+            >
               📌
             </button>
           </div>
@@ -1498,13 +1675,71 @@ export function MasterPage<T extends MasterRecord>({
     const mIdx = idx - 2;
     const label = (columnHeaders ?? columns.map((col) => col.header))[mIdx];
     const isPinned = Boolean(pinnedCols[idx]);
+    const isSorted = sortColIndex === idx;
+
     return (
       <th key={`col-${mIdx}-${label}`} style={getFreezeStyle(idx, true)}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "4px" }}>
-          <span>{label}</span>
+          <div
+            onClick={() => handleHeaderSort(idx)}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "5px",
+              cursor: "pointer",
+              userSelect: "none",
+              flex: 1,
+              minWidth: 0,
+              padding: "2px 0",
+            }}
+            title={
+              isSorted
+                ? `Sorted by ${label} (${sortDirection === "asc" ? "Ascending — click for Descending" : "Descending — click to reset"})`
+                : `Sort by ${label} (Ascending)`
+            }
+          >
+            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {label}
+            </span>
+            {isSorted ? (
+              <span
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  color: "#0284c7",
+                  fontSize: "10px",
+                  fontWeight: 800,
+                  background: "#e0f2fe",
+                  padding: "1px 4px",
+                  borderRadius: "3px",
+                  border: "1px solid #bae6fd",
+                  lineHeight: 1,
+                  flexShrink: 0,
+                }}
+              >
+                {sortDirection === "asc" ? "▲" : "▼"}
+              </span>
+            ) : (
+              <span
+                style={{
+                  fontSize: "10px",
+                  color: "#94a3b8",
+                  opacity: 0.45,
+                  lineHeight: 1,
+                  flexShrink: 0,
+                }}
+              >
+                ↕
+              </span>
+            )}
+          </div>
+
           <button
             type="button"
-            onClick={() => togglePin(idx)}
+            onClick={(e) => {
+              e.stopPropagation();
+              togglePin(idx);
+            }}
             style={{
               background: "none",
               border: "none",
@@ -1512,6 +1747,7 @@ export function MasterPage<T extends MasterRecord>({
               fontSize: "11px",
               opacity: isPinned ? 1 : 0.4,
               padding: "0 2px",
+              flexShrink: 0,
             }}
             title={isPinned ? "Unfreeze column" : "Freeze column"}
           >

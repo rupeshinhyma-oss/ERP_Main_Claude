@@ -18,6 +18,7 @@ import { useLiveModule } from "@/lib/live/useLive";
 import { MasterPage, type FormState, type MasterPageHandle } from "@/components/MasterPage";
 import { SideDrawer, DetailFieldGrid } from "@/components/SideDrawer";
 import { StatusBadge } from "@/components/ui";
+import { ItemPopoverCell } from "@/components/ItemPopoverCell";
 import {
   MultiSelectField,
   SelectField,
@@ -27,7 +28,7 @@ import {
   nullIfBlank,
   numOrNull,
 } from "@/components/fields";
-import { apiGet, apiPostMultipart } from "@/lib/api";
+import { API_ORIGIN, apiGet, apiPostMultipart } from "@/lib/api";
 import { useLookup } from "@/lib/lookups";
 import type {
   Brand,
@@ -102,245 +103,34 @@ export function resolveImageUrl(url: string | null | undefined): string {
   if (clean.startsWith("data:") || clean.startsWith("http://") || clean.startsWith("https://")) {
     return encodeURI(clean);
   }
-  const fullUrl = `http://localhost:8000${clean.startsWith("/") ? "" : "/"}${clean}`;
+  const fullUrl = `${API_ORIGIN}${clean.startsWith("/") ? "" : "/"}${clean}`;
   return encodeURI(fullUrl);
 }
 
 function BranchPopoverCell({ branches }: { branches: string[] }) {
-  const [isOpen, setIsOpen] = useState(false);
-
-  if (!branches.length) return <span style={{ color: "#94a3b8" }}>—</span>;
-
-  if (branches.length === 1) {
-    return (
-      <span className="cell-truncate" title={branches[0]} style={{ maxWidth: "160px", color: "#1e293b", fontSize: "13px" }}>
-        🏢 {branches[0]}
-      </span>
-    );
-  }
-
   return (
-    <div
-      style={{ position: "relative", display: "inline-flex", alignItems: "center" }}
-      onMouseEnter={() => setIsOpen(true)}
-      onMouseLeave={() => setIsOpen(false)}
-    >
-      <div style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
-        <span className="cell-truncate" title={branches[0]} style={{ maxWidth: "120px", color: "#1e293b", fontSize: "13px" }}>
-          🏢 {branches[0]}
-        </span>
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            setIsOpen((prev) => !prev);
-          }}
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: "3px",
-            padding: "2px 7px",
-            fontSize: "11px",
-            fontWeight: 600,
-            color: "#2563eb",
-            background: "#eff6ff",
-            border: "1px solid #bfdbfe",
-            borderRadius: "12px",
-            cursor: "pointer",
-            lineHeight: 1.2,
-            transition: "all 0.15s ease",
-            boxShadow: "0 1px 2px rgba(37,99,235,0.08)",
-          }}
-          title="Click or hover to view all branches"
-        >
-          👁️ +{branches.length - 1}
-        </button>
-      </div>
-
-      {isOpen && (
-        <div
-          style={{
-            position: "absolute",
-            top: "calc(100% + 4px)",
-            left: 0,
-            background: "#ffffff",
-            border: "1px solid #cbd5e1",
-            borderRadius: "8px",
-            boxShadow: "0 12px 28px -4px rgba(0, 0, 0, 0.18), 0 8px 12px -6px rgba(0, 0, 0, 0.1)",
-            padding: "10px 12px",
-            minWidth: "230px",
-            maxWidth: "340px",
-            maxHeight: "240px",
-            overflowY: "auto",
-            zIndex: 99999,
-          }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <div style={{ fontSize: "11.5px", fontWeight: 700, color: "#334155", marginBottom: "8px", borderBottom: "1px solid #f1f5f9", paddingBottom: "5px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <span>📍 Assigned Branches ({branches.length})</span>
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                setIsOpen(false);
-              }}
-              style={{
-                background: "transparent",
-                border: "none",
-                color: "#94a3b8",
-                fontSize: "13px",
-                cursor: "pointer",
-                padding: "0 4px",
-                lineHeight: 1,
-              }}
-              title="Close"
-            >
-              ✕
-            </button>
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
-            {branches.map((b, i) => (
-              <div
-                key={i}
-                style={{
-                  fontSize: "12px",
-                  color: "#1e293b",
-                  fontWeight: 500,
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "6px",
-                  padding: "5px 8px",
-                  borderRadius: "4px",
-                  background: "#f8fafc",
-                }}
-              >
-                <span style={{ color: "#3b82f6", fontSize: "12px" }}>🏢</span>
-                <span>{b}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
+    <ItemPopoverCell
+      items={branches}
+      icon="🏢"
+      itemIcon="🏢"
+      title="📍 Assigned Branches"
+      badgeIcon="📍"
+      emptyText="—"
+    />
   );
 }
 
 function OrgPopoverCell({ orgNames }: { orgNames: string[] }) {
-  const [isOpen, setIsOpen] = useState(false);
-
-  if (!orgNames.length) return <span style={{ color: "#94a3b8" }}>—</span>;
-
-  if (orgNames.length === 1) {
-    return (
-      <span className="cell-truncate" title={orgNames[0]} style={{ maxWidth: "160px", color: "#1e293b", fontSize: "13px" }}>
-        {orgNames[0]}
-      </span>
-    );
-  }
-
   return (
-    <div
-      style={{ position: "relative", display: "inline-flex", alignItems: "center" }}
-      onMouseEnter={() => setIsOpen(true)}
-      onMouseLeave={() => setIsOpen(false)}
-    >
-      <div style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
-        <span className="cell-truncate" title={orgNames[0]} style={{ maxWidth: "120px", color: "#1e293b", fontSize: "13px" }}>
-          {orgNames[0]}
-        </span>
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            setIsOpen((prev) => !prev);
-          }}
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: "3px",
-            padding: "2px 7px",
-            fontSize: "11px",
-            fontWeight: 600,
-            color: "#059669",
-            background: "#ecfdf5",
-            border: "1px solid #a7f3d0",
-            borderRadius: "12px",
-            cursor: "pointer",
-            lineHeight: 1.2,
-            transition: "all 0.15s ease",
-            boxShadow: "0 1px 2px rgba(5,150,105,0.08)",
-          }}
-          title="Click or hover to view all organizations"
-        >
-          👁️ +{orgNames.length - 1}
-        </button>
-      </div>
-
-      {isOpen && (
-        <div
-          style={{
-            position: "absolute",
-            top: "calc(100% + 4px)",
-            left: 0,
-            background: "#ffffff",
-            border: "1px solid #cbd5e1",
-            borderRadius: "8px",
-            boxShadow: "0 12px 28px -4px rgba(0, 0, 0, 0.18), 0 8px 12px -6px rgba(0, 0, 0, 0.1)",
-            padding: "10px 12px",
-            minWidth: "210px",
-            maxWidth: "320px",
-            maxHeight: "240px",
-            overflowY: "auto",
-            zIndex: 99999,
-          }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <div style={{ fontSize: "11.5px", fontWeight: 700, color: "#334155", marginBottom: "8px", borderBottom: "1px solid #f1f5f9", paddingBottom: "5px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <span>🏢 Organizations ({orgNames.length})</span>
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                setIsOpen(false);
-              }}
-              style={{
-                background: "transparent",
-                border: "none",
-                color: "#94a3b8",
-                fontSize: "13px",
-                cursor: "pointer",
-                padding: "0 4px",
-                lineHeight: 1,
-              }}
-              title="Close"
-            >
-              ✕
-            </button>
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
-            {orgNames.map((name, i) => (
-              <div
-                key={i}
-                style={{
-                  fontSize: "12px",
-                  color: "#1e293b",
-                  fontWeight: 500,
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "6px",
-                  padding: "5px 8px",
-                  borderRadius: "4px",
-                  background: "#f8fafc",
-                }}
-              >
-                <span style={{ color: "#10b981", fontSize: "12px" }}>🏢</span>
-                <span>{name}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
+    <ItemPopoverCell
+      items={orgNames}
+      icon="🏢"
+      itemIcon="🏢"
+      title="🏢 Organizations"
+      badgeIcon="👁️"
+      badgeColor="emerald"
+      emptyText="—"
+    />
   );
 }
 
@@ -789,6 +579,7 @@ export function ProductsPage() {
       columns={[
         {
           header: "Product Name (Tally)",
+          sortValue: (p) => p.product_name_tally || p.product_name || "",
           render: (p) => {
             const name = p.product_name_tally || p.product_name || "—";
             const hasLicense = Boolean(p.license_certificate_required && p.license_certificate_required.trim());
@@ -843,6 +634,7 @@ export function ProductsPage() {
         },
         {
           header: "Product Code",
+          sortValue: (p) => p.product_code || "",
           render: (p) => (
             <span title={p.product_code || ""} style={{ fontWeight: 500, fontFamily: "monospace", fontSize: "13px" }}>
               {p.product_code || "—"}
@@ -851,6 +643,7 @@ export function ProductsPage() {
         },
         {
           header: "Brand",
+          sortValue: (p) => brands.items.find((x) => x.id === p.brand_id)?.name || "",
           render: (p) => {
             const b = brands.items.find((x) => x.id === p.brand_id);
             const name = b ? `${b.name}${b.status === "inactive" ? " (Inactive)" : ""}` : "—";
@@ -863,6 +656,7 @@ export function ProductsPage() {
         },
         {
           header: "Sub-Category",
+          sortValue: (p) => subCategories.items.find((x) => x.id === p.sub_category_id)?.name || "",
           render: (p) => {
             const sc = subCategories.items.find((x) => x.id === p.sub_category_id);
             const name = sc ? `${sc.name}${sc.status === "inactive" ? " (Inactive)" : ""}` : "—";
@@ -875,6 +669,7 @@ export function ProductsPage() {
         },
         {
           header: "HSN Code",
+          sortValue: (p) => hsnCodes.items.find((x) => x.id === p.hsn_id)?.code || "",
           render: (p) => {
             const code = hsnCodes.items.find((x) => x.id === p.hsn_id)?.code ?? "—";
             return (
@@ -886,6 +681,7 @@ export function ProductsPage() {
         },
         {
           header: "UOM",
+          sortValue: (p) => uoms.items.find((x) => x.id === p.uom_id)?.code || "",
           render: (p) => {
             const u = uoms.items.find((x) => x.id === p.uom_id);
             const label = u ? `${u.name} (${u.code})` : "—";
@@ -894,6 +690,15 @@ export function ProductsPage() {
         },
         {
           header: "Organization",
+          sortValue: (p) => {
+            const orgIds = p.organization_ids && p.organization_ids.length > 0
+              ? p.organization_ids
+              : (p.organization_id ? [p.organization_id] : []);
+            return orgIds
+              .map((id) => organizations.items.find((x) => x.id === id)?.name)
+              .filter(Boolean)
+              .join(", ");
+          },
           render: (p) => {
             const orgIds = p.organization_ids && p.organization_ids.length > 0
               ? p.organization_ids
@@ -907,6 +712,7 @@ export function ProductsPage() {
         },
         {
           header: "Branches",
+          sortValue: (p) => (p.branch_ids || []).length,
           render: (p) => {
             const branchIds = p.branch_ids || [];
             if (!branchIds.length) return <span style={{ color: "#94a3b8" }}>—</span>;
@@ -923,18 +729,25 @@ export function ProductsPage() {
         },
         {
           header: "Pkg Qty",
+          sortValue: (p) => p.packaging_quantity ?? 0,
           render: (p) => (p.packaging_quantity != null ? p.packaging_quantity : "—"),
         },
         {
           header: "Gross Wt (kg)",
+          sortValue: (p) => p.packaging_gross_weight ?? 0,
           render: (p) => (p.packaging_gross_weight != null ? p.packaging_gross_weight : "—"),
         },
         {
           header: "Unit CBM",
+          sortValue: (p) => p.packaging_unit_cbm ?? 0,
           render: (p) =>
             p.packaging_unit_cbm != null ? Number(p.packaging_unit_cbm).toFixed(6) : "—",
         },
-        { header: "Status", render: (p) => <StatusBadge status={p.status} /> },
+        {
+          header: "Status",
+          sortValue: (p) => p.status,
+          render: (p) => <StatusBadge status={p.status} />,
+        },
       ]}
       importHeaders={[
         { key: "Product Name (As Per Tally)", label: "Product Name (As Per Tally)", required: true },

@@ -26,7 +26,7 @@ from app.database.session import get_db_session
 from app.events.dependencies import get_event_dispatcher
 from app.events.dispatcher import EventDispatcher
 from app.masters.states.dependencies import get_state_service
-from app.masters.states.schemas import StateRead, StateCreate, StateUpdate, ImportSummaryRead
+from app.masters.states.schemas import StateLookupRead, StateRead, StateCreate, StateUpdate, ImportSummaryRead
 from app.masters.states.service import StateService
 from app.rbac.dependencies import require_permission
 
@@ -127,6 +127,29 @@ async def list_states(
     meta = PageMeta.build(page=query.page.page, page_size=query.page.page_size, total_records=total).as_meta_dict()
     data = [StateRead.model_validate(b).model_dump(mode="json") for b in states]
     return build_success_response(data=data, request_id=request.state.request_id, meta=meta)
+
+
+@router.get(
+    "/lookup",
+    summary="Lightweight id/name lookup for states (no state.view required)",
+)
+async def lookup_states(
+    request: Request,
+    service: StateService = Depends(get_state_service),
+    _current_user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    """
+    Return every active state as bare ``{id, name}`` pairs.
+
+    Gated on "is logged in" only, NOT ``state.view`` -- same rationale as
+    ``app.masters.countries.routes.lookup_countries``: other modules
+    (Suppliers, Buyers) store a state ID on their own records and need to
+    resolve it to a display name for a user who can see that record,
+    without needing separate access to the States master module.
+    """
+    states = await service.list_all_cached()
+    data = [StateLookupRead.model_validate(s).model_dump(mode="json") for s in states]
+    return build_success_response(data=data, request_id=request.state.request_id)
 
 
 @router.get("/export", summary="Export states to CSV/Excel")

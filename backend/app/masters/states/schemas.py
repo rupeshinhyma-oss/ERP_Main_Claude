@@ -28,6 +28,15 @@ class StateUpdate(BaseModel):
     status: RecordStatus | None = None
 
 
+class StateLookupRead(BaseModel):
+    """Bare id/name pair, for the permission-free ``/lookup`` endpoint."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    name: str
+
+
 class StateRead(BaseModel):
     """A state, as returned by the API."""
 

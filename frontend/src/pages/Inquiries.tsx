@@ -1255,14 +1255,19 @@ function ItemsView({
               height: "44px",
               borderRadius: "10px",
               background: "#eff6ff",
+              border: "1px solid #bfdbfe",
+              color: "#2563eb",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              fontSize: "20px",
-              color: "#3b82f6",
+              flexShrink: 0,
             }}
           >
-            👍
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect width="20" height="13" x="2" y="5.5" rx="2" />
+              <circle cx="12" cy="12" r="2.5" />
+              <path d="M6 12h.01M18 12h.01" />
+            </svg>
           </div>
           <div>
             <div style={{ fontSize: "20px", fontWeight: 700, color: "#0f172a" }}>
@@ -1292,15 +1297,20 @@ function ItemsView({
               width: "44px",
               height: "44px",
               borderRadius: "10px",
-              background: "#eff6ff",
+              background: "#f0fdfa",
+              border: "1px solid #99f6e4",
+              color: "#0d9488",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              fontSize: "20px",
-              color: "#3b82f6",
+              flexShrink: 0,
             }}
           >
-            👍
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+              <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
+              <line x1="12" y1="22.08" x2="12" y2="12" />
+            </svg>
           </div>
           <div>
             <div style={{ fontSize: "20px", fontWeight: 700, color: "#0f172a" }}>
@@ -1328,15 +1338,22 @@ function ItemsView({
               width: "44px",
               height: "44px",
               borderRadius: "10px",
-              background: "#eff6ff",
+              background: "#faf5ff",
+              border: "1px solid #e9d5ff",
+              color: "#9333ea",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              fontSize: "20px",
-              color: "#3b82f6",
+              flexShrink: 0,
             }}
           >
-            👍
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="m16 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z" />
+              <path d="m2 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z" />
+              <path d="M7 21h10" />
+              <path d="M12 3v18" />
+              <path d="M3 7h2c2 0 5-1 7-2 2 1 5 2 7 2h2" />
+            </svg>
           </div>
           <div>
             <div style={{ fontSize: "20px", fontWeight: 700, color: "#0f172a" }}>
@@ -1524,7 +1541,7 @@ function ItemsView({
                         <span style={{ fontWeight: 700, color: "#0f172a" }}>{item.quantity}</span> Qty.{" "}
                         <span style={{ fontWeight: 600 }}>{item.packaging_quantity || 10}</span> Pkg. Qty.
                       </div>
-                      <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                      <div style={{ display: "flex", gap: "4px", alignItems: "center" }}>
                         <button
                           type="button"
                           onClick={(e) => {
@@ -1532,9 +1549,22 @@ function ItemsView({
                             setEditQtyItem({ id: item.id, qty: item.quantity });
                           }}
                           title="Edit Quantity"
-                          style={{ background: "none", border: "none", cursor: "pointer", color: "#64748b", fontSize: "12px", padding: "2px" }}
+                          style={{
+                            background: "transparent",
+                            border: "none",
+                            cursor: "pointer",
+                            color: "#64748b",
+                            padding: "4px",
+                            borderRadius: "6px",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                          }}
                         >
-                          ✏️
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
+                            <path d="m15 5 4 4" />
+                          </svg>
                         </button>
                         <button
                           type="button"
@@ -1543,9 +1573,25 @@ function ItemsView({
                             setShiftTarget(item);
                           }}
                           title="Shift to Another Consignment"
-                          style={{ background: "none", border: "none", cursor: "pointer", color: "#64748b", fontSize: "12px", padding: "2px" }}
+                          style={{
+                            background: "transparent",
+                            border: "none",
+                            cursor: "pointer",
+                            color: "#64748b",
+                            padding: "4px",
+                            borderRadius: "6px",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                          }}
                         >
-                          🔄
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M16 3h5v5" />
+                            <path d="M4 20L21 3" />
+                            <path d="M21 16v5h-5" />
+                            <path d="M15 15l6 6" />
+                            <path d="M4 4l5 5" />
+                          </svg>
                         </button>
                         <button
                           type="button"
@@ -1554,9 +1600,21 @@ function ItemsView({
                             setRemarksTarget(item);
                           }}
                           title="Procurement Remarks"
-                          style={{ background: "none", border: "none", cursor: "pointer", color: "#64748b", fontSize: "12px", padding: "2px" }}
+                          style={{
+                            background: "transparent",
+                            border: "none",
+                            cursor: "pointer",
+                            color: "#64748b",
+                            padding: "4px",
+                            borderRadius: "6px",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                          }}
                         >
-                          💬
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                          </svg>
                         </button>
                         <button
                           type="button"
@@ -1565,9 +1623,23 @@ function ItemsView({
                             void handleDeleteItem(item);
                           }}
                           title="Delete Product Item"
-                          style={{ background: "none", border: "none", cursor: "pointer", color: "#ef4444", fontSize: "12px", padding: "2px" }}
+                          style={{
+                            background: "transparent",
+                            border: "none",
+                            cursor: "pointer",
+                            color: "#ef4444",
+                            padding: "4px",
+                            borderRadius: "6px",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                          }}
                         >
-                          🗑️
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M3 6h18" />
+                            <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
+                            <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+                          </svg>
                         </button>
                       </div>
                     </div>
@@ -1663,7 +1735,10 @@ function ItemsView({
                       boxShadow: "0 1px 2px rgba(245,158,11,0.1)",
                     }}
                   >
-                    ⚡ Request Quotation
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                      <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+                    </svg>
+                    Request Quotation
                   </button>
 
                   <button
@@ -1684,7 +1759,11 @@ function ItemsView({
                       boxShadow: "0 1px 2px rgba(59,130,246,0.1)",
                     }}
                   >
-                    ➕ Add Quotation
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                      <line x1="12" y1="5" x2="12" y2="19" />
+                      <line x1="5" y1="12" x2="19" y2="12" />
+                    </svg>
+                    Add Quotation
                   </button>
                 </div>
               </div>

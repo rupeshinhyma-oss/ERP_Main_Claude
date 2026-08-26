@@ -92,6 +92,7 @@ export function App() {
         <Route path="/masters/subcategories" element={<SubCategoriesPage />} />
         <Route path="/masters/products" element={<ProductsPage />} />
         <Route path="/product-gallery" element={<ProductGalleryPage />} />
+        <Route path="/product_gallery" element={<Navigate to="/product-gallery" replace />} />
 
         {Object.entries(LEGACY_REDIRECTS).map(([from, to]) => (
           <Route key={from} path={from} element={<Navigate to={to} replace />} />

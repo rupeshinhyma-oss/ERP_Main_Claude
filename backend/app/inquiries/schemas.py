@@ -150,6 +150,8 @@ class QuotationCreate(BaseModel):
     expected_receiving_date: str | None = None
     terms_and_conditions: str | None = None
     remarks: str | None = None
+    attachment_url: str | None = None
+    attachment_filename: str | None = None
 
 
 class QuotationUpdate(BaseModel):
@@ -160,6 +162,8 @@ class QuotationUpdate(BaseModel):
     expected_receiving_date: str | None = None
     terms_and_conditions: str | None = None
     remarks: str | None = None
+    attachment_url: str | None = None
+    attachment_filename: str | None = None
 
 
 class QuotationStatusUpdate(BaseModel):
@@ -182,6 +186,8 @@ class QuotationRead(BaseModel):
     expected_receiving_date: date | str | None = None
     terms_and_conditions: str | None = None
     remarks: str | None = None
+    attachment_url: str | None = None
+    attachment_filename: str | None = None
     status: str
     created_by: uuid.UUID
     created_at: datetime

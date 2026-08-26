@@ -36,6 +36,12 @@ function resolveImageUrl(url: string | null | undefined): string {
   return encodeURI(fullUrl);
 }
 
+function isPdfUrl(url: string | null | undefined): boolean {
+  if (!url) return false;
+  const clean = url.split("?")[0].toLowerCase();
+  return Boolean(clean.endsWith(".pdf"));
+}
+
 function isVideoUrl(url: string | null | undefined): boolean {
   if (!url) return false;
   const clean = url.split("?")[0].toLowerCase();
@@ -321,7 +327,31 @@ function ProductGallerySkeletonGrid({ count = 12 }: { count?: number }) {
   );
 }
 
-type GalleryTab = "all" | "products" | "suppliers";
+interface QuotationDocument {
+  id: string;
+  quote_number: string;
+  product_id: string;
+  product_name: string;
+  product_code?: string | null;
+  category_id?: string | null;
+  sub_category_id?: string | null;
+  brand_id?: string | null;
+  supplier_id: string;
+  supplier_name: string;
+  unit_price: number;
+  total_cost: number;
+  currency: string;
+  quantity: number;
+  expected_receiving_date?: string | null;
+  terms_and_conditions?: string | null;
+  remarks?: string | null;
+  attachment_url?: string | null;
+  attachment_filename?: string | null;
+  status: string;
+  created_at?: string | null;
+}
+
+type GalleryTab = "all" | "products" | "suppliers" | "quotations";
 
 export function ProductGalleryPage() {
   const { hasPermission } = useAuth();
@@ -330,6 +360,7 @@ export function ProductGalleryPage() {
 
   const [products, setProducts] = useState<Product[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [quotationDocs, setQuotationDocs] = useState<QuotationDocument[]>([]);
   const [loading, setLoading] = useState(true);
 
   const [galleryTab, setGalleryTab] = useState<GalleryTab>("all");
@@ -340,6 +371,7 @@ export function ProductGalleryPage() {
 
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [selectedSupplier, setSelectedSupplier] = useState<Supplier | null>(null);
+  const [selectedQuotation, setSelectedQuotation] = useState<QuotationDocument | null>(null);
   const [selectedImageIndex, setSelectedImageIndex] = useState(0);
   const [selectedMediaIndices, setSelectedMediaIndices] = useState<number[]>([]);
   // Phase 7: keyed by "productId:photoIndex" so deleting one photo never
@@ -378,6 +410,14 @@ export function ProductGalleryPage() {
       const suppRes = await apiGet<Supplier[] | { items: Supplier[] }>("/suppliers?page_size=1000");
       const suppItems = Array.isArray(suppRes.data) ? suppRes.data : (suppRes.data?.items || []);
       setSuppliers(suppItems);
+
+      try {
+        const quoteRes = await apiGet<QuotationDocument[]>("/inquiries/quotation-documents");
+        const quoteItems = Array.isArray(quoteRes.data) ? quoteRes.data : [];
+        setQuotationDocs(quoteItems);
+      } catch (qErr) {
+        console.warn("Failed to fetch quotation documents for gallery:", qErr);
+      }
     } catch (err) {
       console.error("Failed to fetch gallery data:", err);
     } finally {
@@ -430,6 +470,24 @@ export function ProductGalleryPage() {
     });
   }, [suppliers, search]);
 
+  const filteredQuotations = useMemo(() => {
+    return quotationDocs.filter((q) => {
+      if (categoryFilter && q.category_id !== categoryFilter) return false;
+      if (subCategoryFilter && q.sub_category_id !== subCategoryFilter) return false;
+      if (brandFilter && q.brand_id !== brandFilter) return false;
+
+      if (search.trim()) {
+        const query = search.toLowerCase().trim();
+        const codeMatch = (q.product_code || "").toLowerCase().includes(query);
+        const nameMatch = (q.product_name || "").toLowerCase().includes(query);
+        const suppMatch = (q.supplier_name || "").toLowerCase().includes(query);
+        const quoteMatch = (q.quote_number || "").toLowerCase().includes(query);
+        if (!codeMatch && !nameMatch && !suppMatch && !quoteMatch) return false;
+      }
+      return true;
+    });
+  }, [quotationDocs, search, categoryFilter, subCategoryFilter, brandFilter]);
+
   const scopedSubCategories = useMemo(() => {
     if (!categoryFilter) return subCategories.items;
     return subCategories.items.filter((sc) => sc.category_id === categoryFilter);
@@ -462,7 +520,7 @@ export function ProductGalleryPage() {
           <div>
             <h1>Product &amp; Supplier Gallery</h1>
             <div className="page-subtitle">
-              Visual catalog of product images and supplier factory/office visit media.
+              Visual catalog of product images, supplier factory visits, and quotation document sheets.
             </div>
           </div>
         </div>
@@ -483,7 +541,7 @@ export function ProductGalleryPage() {
               cursor: "pointer",
             }}
           >
-            🌐 All Combined Media ({allProductMediaCount + allSupplierMediaCount})
+            🌐 All Combined Media ({allProductMediaCount + allSupplierMediaCount + quotationDocs.length})
           </button>
           <button
             type="button"
@@ -518,6 +576,23 @@ export function ProductGalleryPage() {
             }}
           >
             🏭 Supplier Visit Photos ({allSupplierMediaCount})
+          </button>
+          <button
+            type="button"
+            className="btn"
+            onClick={() => setGalleryTab("quotations")}
+            style={{
+              background: galleryTab === "quotations" ? "#0061f2" : "#ffffff",
+              color: galleryTab === "quotations" ? "#ffffff" : "#475569",
+              border: galleryTab === "quotations" ? "none" : "1px solid #cbd5e0",
+              borderRadius: "6px",
+              padding: "8px 16px",
+              fontWeight: 600,
+              fontSize: "13.5px",
+              cursor: "pointer",
+            }}
+          >
+            📄 Supplier Quotation Sheets / PDFs ({quotationDocs.length})
           </button>
         </div>
 
@@ -616,9 +691,10 @@ export function ProductGalleryPage() {
           <ProductGallerySkeletonGrid count={12} />
         ) : (galleryTab === "products" && filteredProducts.length === 0) ||
           (galleryTab === "suppliers" && filteredSuppliers.length === 0) ||
-          (galleryTab === "all" && filteredProducts.length === 0 && filteredSuppliers.length === 0) ? (
+          (galleryTab === "quotations" && filteredQuotations.length === 0) ||
+          (galleryTab === "all" && filteredProducts.length === 0 && filteredSuppliers.length === 0 && filteredQuotations.length === 0) ? (
           <div className="card" style={{ padding: "60px", textAlign: "center", color: "#94a3b8" }}>
-            <h3>No media found</h3>
+            <h3>No media or quotation sheets found</h3>
             <p>Try adjusting your search query or top filters.</p>
           </div>
         ) : (
@@ -645,6 +721,7 @@ export function ProductGalleryPage() {
                     onClick={() => {
                       setSelectedProduct(prod);
                       setSelectedSupplier(null);
+                      setSelectedQuotation(null);
                       setSelectedImageIndex(0);
                       setSelectedMediaIndices([]);
                     }}
@@ -678,7 +755,12 @@ export function ProductGalleryPage() {
                       }}
                     >
                       {img ? (
-                        isVideoUrl(img) ? (
+                        isPdfUrl(img) ? (
+                          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", width: "100%", background: "#ecfdf5", padding: "12px", textAlign: "center" }}>
+                            <div style={{ fontSize: "36px", marginBottom: "4px" }}>📄</div>
+                            <div style={{ fontSize: "11px", fontWeight: 700, color: "#166534" }}>PDF QUOTATION / SHEET</div>
+                          </div>
+                        ) : isVideoUrl(img) ? (
                           <video
                             src={resolveImageUrl(img)}
                             muted
@@ -723,16 +805,15 @@ export function ProductGalleryPage() {
                             position: "absolute",
                             top: "10px",
                             right: "10px",
-                            background: "#dc2626",
+                            background: "#ef4444",
                             color: "#ffffff",
-                            fontSize: "10.5px",
-                            fontWeight: 700,
+                            fontSize: "11px",
+                            fontWeight: 600,
                             padding: "3px 8px",
                             borderRadius: "4px",
                             display: "flex",
                             alignItems: "center",
-                            gap: "3px",
-                            boxShadow: "0 2px 4px rgba(220,38,38,0.3)",
+                            gap: "4px",
                           }}
                         >
                           ⚠️ LICENSE
@@ -745,7 +826,7 @@ export function ProductGalleryPage() {
                             position: "absolute",
                             bottom: "10px",
                             right: "10px",
-                            background: "rgba(37, 99, 235, 0.85)",
+                            background: "rgba(15, 23, 42, 0.75)",
                             color: "#ffffff",
                             fontSize: "11px",
                             fontWeight: 600,
@@ -756,7 +837,7 @@ export function ProductGalleryPage() {
                             gap: "4px",
                           }}
                         >
-                          {isVideoUrl(img) ? "🎬" : "📷"} {imgList.length} Photos
+                          📷 {imgList.length} Photos
                         </span>
                       )}
                     </div>
@@ -765,38 +846,32 @@ export function ProductGalleryPage() {
                       <div>
                         <h4
                           style={{
-                            margin: "0 0 6px 0",
+                            margin: "0 0 4px 0",
                             fontSize: "14px",
                             fontWeight: 600,
-                            color: "#0f172a",
+                            color: "#1e293b",
                             lineHeight: "1.3",
-                            display: "-webkit-box",
-                            WebkitLineClamp: 2,
-                            WebkitBoxOrient: "vertical",
-                            overflow: "hidden",
                           }}
                         >
                           {prod.product_name_tally || prod.product_name}
                         </h4>
-                        <div style={{ fontSize: "12px", color: "#64748b", display: "flex", gap: "8px", flexWrap: "wrap", marginTop: "4px" }}>
+                        <div style={{ fontSize: "12px", color: "#64748b", display: "flex", gap: "6px", flexWrap: "wrap", marginTop: "4px" }}>
                           {brandObj && <span>Brand: {brandObj.name}</span>}
+                          {brandObj && subCatObj && <span>•</span>}
                           {subCatObj && <span>Sub-Cat: {subCatObj.name}</span>}
                         </div>
                       </div>
 
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "12px" }}>
-                        {prod.refund_vat_percent != null ? (
-                          <div style={{ fontSize: "12px", color: "#16a34a", fontWeight: 600 }}>
-                            Refund VAT: {prod.refund_vat_percent}%
-                          </div>
-                        ) : <div />}
-
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "10px" }}>
+                        <div style={{ fontSize: "11.5px", color: "#16a34a", fontWeight: 600 }}>
+                          Refund VAT: {prod.refund_vat_percent ?? 0}%
+                        </div>
                         {imgList.length > 0 && (
                           <button
                             type="button"
                             onClick={(e) => {
                               e.stopPropagation();
-                              downloadAllMediaFiles(imgList, `product_${prod.product_code || prod.product_name || "item"}`);
+                              downloadAllMediaFiles(imgList, `product_${prod.product_code || "media"}`);
                             }}
                             style={{
                               background: "#0061f2",
@@ -839,6 +914,7 @@ export function ProductGalleryPage() {
                     onClick={() => {
                       setSelectedSupplier(supp);
                       setSelectedProduct(null);
+                      setSelectedQuotation(null);
                       setSelectedImageIndex(0);
                       setSelectedMediaIndices([]);
                     }}
@@ -987,6 +1063,174 @@ export function ProductGalleryPage() {
                   </div>
                 );
               })}
+
+            {(galleryTab === "all" || galleryTab === "quotations") &&
+              filteredQuotations.map((q: QuotationDocument) => {
+                const isPdf = Boolean(q.attachment_filename?.toLowerCase().endsWith(".pdf") || q.attachment_url?.toLowerCase().endsWith(".pdf"));
+                const hasAttachment = Boolean(q.attachment_url);
+
+                return (
+                  <div
+                    key={`quote-doc-${q.id}`}
+                    className="card"
+                    onClick={() => {
+                      setSelectedQuotation(q);
+                      setSelectedProduct(null);
+                      setSelectedSupplier(null);
+                    }}
+                    style={{
+                      borderRadius: "10px",
+                      overflow: "hidden",
+                      border: "1px solid #10b981",
+                      background: "#f0fdf4",
+                      cursor: "pointer",
+                      transition: "transform 0.15s ease, box-shadow 0.15s ease",
+                      display: "flex",
+                      flexDirection: "column",
+                    }}
+                    onMouseOver={(e) => {
+                      e.currentTarget.style.transform = "translateY(-3px)";
+                      e.currentTarget.style.boxShadow = "0 10px 15px -3px rgba(16,185,129,0.2)";
+                    }}
+                    onMouseOut={(e) => {
+                      e.currentTarget.style.transform = "translateY(0)";
+                      e.currentTarget.style.boxShadow = "none";
+                    }}
+                  >
+                    <div
+                      style={{
+                        height: "180px",
+                        background: "#dcfce7",
+                        display: "flex",
+                        flexDirection: "column",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        borderBottom: "1px solid #bbf7d0",
+                        position: "relative",
+                        padding: "16px",
+                        textAlign: "center",
+                      }}
+                    >
+                      {/* Document Icon Graphic */}
+                      <div
+                        style={{
+                          width: "56px",
+                          height: "56px",
+                          borderRadius: "12px",
+                          background: isPdf ? "#fee2e2" : "#ecfdf5",
+                          border: isPdf ? "1px solid #fecaca" : "1px solid #a7f3d0",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          fontSize: "26px",
+                          boxShadow: "0 2px 4px rgba(0,0,0,0.05)",
+                          marginBottom: "8px",
+                        }}
+                      >
+                        {isPdf ? "📄" : "📑"}
+                      </div>
+                      <div style={{ fontSize: "12px", fontWeight: 700, color: "#166534", maxWidth: "90%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {q.attachment_filename || `${q.quote_number} Quotation Sheet`}
+                      </div>
+                      <div style={{ fontSize: "11px", color: "#15803d", marginTop: "2px" }}>
+                        {q.quote_number} • {q.created_at ? new Date(q.created_at).toLocaleDateString() : ""}
+                      </div>
+
+                      <span
+                        style={{
+                          position: "absolute",
+                          top: "10px",
+                          left: "10px",
+                          background: "#059669",
+                          color: "#ffffff",
+                          fontSize: "10.5px",
+                          fontWeight: 700,
+                          padding: "3px 8px",
+                          borderRadius: "4px",
+                          letterSpacing: "0.5px",
+                        }}
+                      >
+                        {isPdf ? "PDF QUOTE" : "QUOTE SHEET"}
+                      </span>
+
+                      <span
+                        style={{
+                          position: "absolute",
+                          top: "10px",
+                          right: "10px",
+                          background: "#ffffff",
+                          color: "#047857",
+                          fontSize: "12px",
+                          fontWeight: 700,
+                          padding: "3px 8px",
+                          borderRadius: "4px",
+                          border: "1px solid #a7f3d0",
+                        }}
+                      >
+                        {q.currency} {q.unit_price.toLocaleString()}
+                      </span>
+                    </div>
+
+                    <div style={{ padding: "14px", flex: 1, display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
+                      <div>
+                        <div style={{ fontSize: "11px", fontWeight: 700, color: "#059669", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                          {q.product_code || "PRODUCT"}
+                        </div>
+                        <h4
+                          style={{
+                            margin: "2px 0 6px 0",
+                            fontSize: "13.5px",
+                            fontWeight: 600,
+                            color: "#1e293b",
+                            lineHeight: "1.3",
+                          }}
+                        >
+                          {q.product_name}
+                        </h4>
+                        <div style={{ fontSize: "12px", color: "#475569", display: "flex", alignItems: "center", gap: "4px" }}>
+                          <span>🏭</span>
+                          <span style={{ fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {q.supplier_name}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "12px", paddingTop: "8px", borderTop: "1px dashed #bbf7d0" }}>
+                        <div style={{ fontSize: "11px", color: "#166534", fontWeight: 600 }}>
+                          Qty: {q.quantity} • Total: {q.currency} {q.total_cost.toLocaleString()}
+                        </div>
+                        {hasAttachment && (
+                          <a
+                            href={resolveImageUrl(q.attachment_url)}
+                            download={q.attachment_filename || "Quotation.pdf"}
+                            target="_blank"
+                            rel="noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            style={{
+                              background: "#059669",
+                              color: "#ffffff",
+                              border: "none",
+                              borderRadius: "6px",
+                              padding: "4px 10px",
+                              fontSize: "11.5px",
+                              fontWeight: 600,
+                              cursor: "pointer",
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: "4px",
+                              textDecoration: "none",
+                              boxShadow: "0 1px 2px rgba(0,0,0,0.1)",
+                            }}
+                            title="Download or view quotation document directly"
+                          >
+                            📥 Download
+                          </a>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
           </div>
         )}
       </main>
@@ -1035,13 +1279,39 @@ export function ProductGalleryPage() {
 
           const activeMedia = detailImgList[selectedImageIndex] || detailImgList[0];
           const activeIsVideo = isVideoUrl(activeMedia);
+          const activeIsPdf = isPdfUrl(activeMedia);
 
           return (
             <>
               {detailImgList.length > 0 && (
                 <div style={{ marginBottom: "20px", background: "#f8fafc", padding: "16px", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
                   <div style={{ textAlign: "center", position: "relative" }}>
-                    {activeIsVideo ? (
+                    {activeIsPdf ? (
+                      <div style={{ padding: "30px 16px", background: "#f0fdf4", border: "1px solid #86efac", borderRadius: "8px", display: "flex", flexDirection: "column", alignItems: "center", gap: "10px" }}>
+                        <div style={{ fontSize: "44px" }}>📄</div>
+                        <div style={{ fontSize: "14px", fontWeight: 700, color: "#166534" }}>PDF Quotation / Sheet Attached</div>
+                        <a
+                          href={resolveImageUrl(activeMedia)}
+                          target="_blank"
+                          rel="noreferrer"
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "6px",
+                            padding: "8px 16px",
+                            background: "#059669",
+                            color: "#ffffff",
+                            borderRadius: "6px",
+                            fontSize: "13px",
+                            fontWeight: 600,
+                            textDecoration: "none",
+                            boxShadow: "0 1px 3px rgba(0,0,0,0.1)",
+                          }}
+                        >
+                          📄 Open / View PDF ↗
+                        </a>
+                      </div>
+                    ) : activeIsVideo ? (
                       <video
                         src={resolveImageUrl(activeMedia)}
                         controls
@@ -1658,6 +1928,79 @@ export function ProductGalleryPage() {
             </>
           );
         })()}
+      </SideDrawer>
+
+      <SideDrawer
+        open={Boolean(selectedQuotation)}
+        title={selectedQuotation ? `Quotation ${selectedQuotation.quote_number}` : "Quotation Document"}
+        subtitle={selectedQuotation ? `${selectedQuotation.product_name} • ${selectedQuotation.supplier_name}` : ""}
+        onClose={() => setSelectedQuotation(null)}
+      >
+        {selectedQuotation && (
+          <>
+            <div style={{ display: "flex", gap: "10px", marginBottom: "18px", flexWrap: "wrap" }}>
+              {selectedQuotation.attachment_url && (
+                <a
+                  href={resolveImageUrl(selectedQuotation.attachment_url)}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    padding: "8px 14px",
+                    background: "#059669",
+                    color: "#ffffff",
+                    borderRadius: "6px",
+                    fontSize: "13px",
+                    fontWeight: 600,
+                    textDecoration: "none",
+                    boxShadow: "0 1px 2px rgba(0,0,0,0.1)",
+                  }}
+                >
+                  📄 Open / View Document ↗
+                </a>
+              )}
+              {selectedQuotation.attachment_url && (
+                <a
+                  href={resolveImageUrl(selectedQuotation.attachment_url)}
+                  download={selectedQuotation.attachment_filename || "Quotation.pdf"}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    padding: "8px 14px",
+                    background: "#f0fdf4",
+                    border: "1px solid #86efac",
+                    color: "#166534",
+                    borderRadius: "6px",
+                    fontSize: "13px",
+                    fontWeight: 600,
+                    textDecoration: "none",
+                  }}
+                >
+                  📥 Download Attachment
+                </a>
+              )}
+            </div>
+
+            <DetailFieldGrid
+              fields={[
+                { label: "Quote Number", value: selectedQuotation.quote_number },
+                { label: "Status", value: selectedQuotation.status.toUpperCase() },
+                { label: "Product Name", value: selectedQuotation.product_name, fullWidth: true },
+                { label: "Product Code", value: selectedQuotation.product_code || "—" },
+                { label: "Supplier Company", value: selectedQuotation.supplier_name, fullWidth: true },
+                { label: "Unit Price", value: `${selectedQuotation.currency} ${selectedQuotation.unit_price.toLocaleString()}` },
+                { label: "Quoted Quantity", value: String(selectedQuotation.quantity) },
+                { label: "Total Cost", value: `${selectedQuotation.currency} ${selectedQuotation.total_cost.toLocaleString()}` },
+                { label: "Expected Date", value: selectedQuotation.expected_receiving_date || "—" },
+                { label: "Terms & Conditions", value: selectedQuotation.terms_and_conditions || "—", fullWidth: true },
+                { label: "Remarks / Summary", value: selectedQuotation.remarks || "—", fullWidth: true },
+              ]}
+            />
+          </>
+        )}
       </SideDrawer>
     </AppShell>
   );

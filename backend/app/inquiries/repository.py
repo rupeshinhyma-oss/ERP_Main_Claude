@@ -435,12 +435,67 @@ class QuotationRepository(BaseRepository[Quotation]):
                 "expected_receiving_date": str(q.expected_receiving_date) if q.expected_receiving_date else None,
                 "terms_and_conditions": q.terms_and_conditions,
                 "remarks": q.remarks,
+                "attachment_url": q.attachment_url,
+                "attachment_filename": q.attachment_filename,
                 "status": q.status.value if hasattr(q.status, "value") else str(q.status),
                 "created_by": q.created_by,
                 "created_at": q.created_at,
                 "updated_at": q.updated_at,
             })
         return items
+
+    async def get_all_quotation_documents(self) -> list[dict]:
+        """Fetch all quotations with product and supplier metadata for the Product & Supplier Gallery."""
+        stmt = (
+            select(
+                Quotation,
+                Supplier.company_name.label("supplier_name"),
+                Product.id.label("product_id"),
+                Product.product_name,
+                Product.product_name_tally,
+                Product.product_code,
+                Product.category_id,
+                Product.sub_category_id,
+                Product.brand_id,
+                InquiryItem.quantity.label("item_quantity"),
+            )
+            .join(InquiryItem, Quotation.inquiry_item_id == InquiryItem.id)
+            .join(Product, InquiryItem.product_id == Product.id)
+            .join(Supplier, Quotation.supplier_id == Supplier.id, isouter=True)
+            .where(
+                Quotation.deleted_at.is_(None),
+                Quotation.attachment_url.is_not(None),
+            )
+            .order_by(Quotation.created_at.desc())
+        )
+        result = await self.session.execute(stmt)
+        rows = result.all()
+        docs = []
+        for q, supp_name, p_id, p_name, p_tally, p_code, cat_id, sub_cat_id, b_id, item_qty in rows:
+            docs.append({
+                "id": str(q.id),
+                "quote_number": q.quote_number,
+                "product_id": str(p_id),
+                "product_name": p_tally or p_name,
+                "product_code": p_code,
+                "category_id": str(cat_id) if cat_id else None,
+                "sub_category_id": str(sub_cat_id) if sub_cat_id else None,
+                "brand_id": str(b_id) if b_id else None,
+                "supplier_id": str(q.supplier_id),
+                "supplier_name": supp_name or "Supplier",
+                "unit_price": float(q.unit_price or 0.0),
+                "total_cost": float(q.total_cost or 0.0),
+                "currency": q.currency or "CNY",
+                "quantity": float(q.quantity or item_qty or 1.0),
+                "expected_receiving_date": str(q.expected_receiving_date) if q.expected_receiving_date else None,
+                "terms_and_conditions": q.terms_and_conditions,
+                "remarks": q.remarks,
+                "attachment_url": q.attachment_url,
+                "attachment_filename": q.attachment_filename or f"{q.quote_number}_Quotation_Sheet",
+                "status": q.status.value if hasattr(q.status, "value") else str(q.status),
+                "created_at": q.created_at.isoformat() if q.created_at else None,
+            })
+        return docs
 
     async def count_approved_for_item(self, inquiry_item_id: uuid.UUID) -> int:
         """Count approved quotations for an inquiry item."""

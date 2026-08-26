@@ -1,3 +1,9 @@
+"""
+Inquiry Routes.
+
+Implements the document's two-layer structure directly in the URL shape:
+
+- Layer 1 (company-wise): ``GET /inquiries/companies``
 - Layer 1 inside a company: ``GET /inquiries/companies/{buyer_id}``
 - Layer 2 (inside a consignment): ``GET /inquiries/{inquiry_id}/items``
 
@@ -14,10 +20,11 @@ actually changes), not the consignment level.
 
 from __future__ import annotations
 
+from datetime import datetime
 import uuid
 
-from fastapi import APIRouter, Depends, Request, status
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
+from pydantic import BaseModel, Field
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -29,8 +36,10 @@ from app.auth.service import CurrentUser
 from app.core.responses import build_success_response
 from app.common.email import send_rfq_email
 from app.database.session import get_db_session
+from app.events.channels import module_channel
 from app.events.dependencies import get_event_dispatcher
 from app.events.dispatcher import EventDispatcher
+from app.events.models import Event
 from app.inquiries.dependencies import get_inquiry_service
 from app.inquiries.public_quotes import generate_rfq_token
 from app.masters.products.models import Product
@@ -119,6 +128,25 @@ async def _record_action(
         description=description,
     )
     request.state.audit_logged = True
+
+
+# ---------------------------------------------------------------------------
+# Gallery Quotation Documents (Must be declared before /{inquiry_id} wildcards!)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/quotation-documents", summary="Get all quotations with product & supplier metadata for Product Gallery")
+async def get_all_quotation_documents(
+    request: Request,
+    service: InquiryService = Depends(get_inquiry_service),
+    _current_user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    """Fetch all quotations with product and supplier metadata for the Product & Supplier Gallery."""
+    docs = await service.quotation_repository.get_all_quotation_documents()
+    return build_success_response(
+        data=docs,
+        request_id=request.state.request_id,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -868,4 +896,236 @@ async def send_rfq_email_manual(
         data={"sent": True, "recipients": payload.to_emails},
         request_id=request.state.request_id,
         message=f"RFQ email successfully sent to {', '.join(payload.to_emails)}.",
+    )
+
+
+from app.inquiries.ai_extractor import extract_supplier_quotation
+
+
+@router.post("/items/{item_id}/ai-parse-quote", summary="AI-powered extraction of supplier quotes from text/chat/PDF")
+async def ai_parse_item_quotation(
+    item_id: uuid.UUID,
+    request: Request,
+    raw_text: str | None = Form(None),
+    supplier_id: str | None = Form(None),
+    file: UploadFile | None = File(None),
+    session: AsyncSession = Depends(get_db_session),
+    service = Depends(get_inquiry_service),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    """Parse supplier quote text, WhatsApp/WeChat chat, or PDF quotation sheets using Gemini 2.0 Flash / OpenAI."""
+    from app.inquiries.models import InquiryItem, RFQ
+
+    stmt = select(InquiryItem).where(InquiryItem.id == item_id)
+    res = await session.execute(stmt)
+    item = res.scalar_one_or_none()
+    if not item:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inquiry item not found")
+
+    prod_name = item.product_name or None
+    prod_code = None
+    if item.product_id:
+        p_res = await session.execute(select(Product).where(Product.id == item.product_id))
+        p = p_res.scalar_one_or_none()
+        if p:
+            prod_name = prod_name or p.name
+            prod_code = p.code
+
+    rfq_res = await session.execute(select(RFQ).where(RFQ.inquiry_item_id == item_id).order_by(RFQ.created_at.desc()))
+    rfq = rfq_res.scalars().first()
+    target_date = str(rfq.expected_receiving_date) if rfq and rfq.expected_receiving_date else None
+
+    file_bytes = None
+    mime_type = None
+    if file:
+        file_bytes = await file.read()
+        mime_type = file.content_type or "application/pdf"
+
+    if not raw_text and not file_bytes:
+        try:
+            body = await request.json()
+            raw_text = body.get("raw_text")
+            if not supplier_id:
+                supplier_id = body.get("supplier_id")
+        except Exception:
+            pass
+
+    if not raw_text and not file_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Please provide supplier chat text, email content, or an attached quotation file (PDF/Image)."
+        )
+
+    try:
+        extracted = await extract_supplier_quotation(
+            text_content=raw_text,
+            file_bytes=file_bytes,
+            mime_type=mime_type,
+            product_name=prod_name,
+            product_code=prod_code,
+            target_quantity=float(item.quantity) if item.quantity else None,
+            target_date=target_date,
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"AI Extraction failed: {str(e)}",
+        )
+
+    return build_success_response(
+        data=extracted.model_dump(mode="json"),
+        request_id=request.state.request_id,
+        message="Quotation extracted successfully via AI.",
+    )
+
+
+class InboundMessageWebhookPayload(BaseModel):
+    channel: str = Field(default="email", description="email, whatsapp, wechat, zapier")
+    sender: str = Field(..., description="Sender email or phone number e.g. +86138..., supplier@gmail.com")
+    text: str = Field(..., description="Message text or chat transcript")
+    item_id: str | None = None
+    rfq_token: str | None = None
+
+
+@router.post("/inbound-webhook", summary="Inbound webhook for WhatsApp, WeChat, and Email quotation auto-ingestion")
+async def inbound_quotation_webhook(
+    payload: InboundMessageWebhookPayload,
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+    event_dispatcher: EventDispatcher = Depends(get_event_dispatcher),
+) -> dict:
+    """Accept incoming messages from WhatsApp/WeChat/Email webhooks, extract quote with AI, and auto-insert into ERP."""
+    from app.inquiries.models import InquiryItem, Quotation, QuotationStatus, RFQ
+    from app.inquiries.public_quotes import decode_rfq_token
+    from app.suppliers.models import Supplier, SupplierContact, SupplierEmail
+
+    # Match supplier
+    supplier: Supplier | None = None
+    s_email_res = await session.execute(
+        select(SupplierEmail).where(SupplierEmail.email.ilike(payload.sender))
+    )
+    s_email = s_email_res.scalar_one_or_none()
+    if s_email:
+        supplier = await session.get(Supplier, s_email.supplier_id)
+
+    if not supplier:
+        s_contact_res = await session.execute(
+            select(SupplierContact).where(SupplierContact.email.ilike(payload.sender))
+        )
+        s_contact = s_contact_res.scalar_one_or_none()
+        if s_contact:
+            supplier = await session.get(Supplier, s_contact.supplier_id)
+
+    # Match inquiry item
+    matched_item_id = None
+    if payload.item_id:
+        try:
+            matched_item_id = uuid.UUID(payload.item_id)
+        except Exception:
+            pass
+
+    if not matched_item_id and payload.rfq_token:
+        try:
+            rfq_data = decode_rfq_token(payload.rfq_token)
+            matched_item_id = uuid.UUID(rfq_data["inquiry_item_id"])
+        except Exception:
+            pass
+
+    if not matched_item_id and supplier:
+        rfq_res = await session.execute(select(RFQ).order_by(RFQ.created_at.desc()).limit(10))
+        for r in rfq_res.scalars().all():
+            if r.supplier_ids and str(supplier.id) in r.supplier_ids:
+                matched_item_id = r.inquiry_item_id
+                break
+
+    if not matched_item_id:
+        recent_res = await session.execute(select(InquiryItem).order_by(InquiryItem.created_at.desc()).limit(1))
+        latest_item = recent_res.scalar_one_or_none()
+        if latest_item:
+            matched_item_id = latest_item.id
+
+    if not matched_item_id:
+        return build_success_response(
+            data={"created": False},
+            request_id=request.state.request_id,
+            message="No active inquiry item matched for this supplier message.",
+        )
+
+    item_res = await session.execute(select(InquiryItem).where(InquiryItem.id == matched_item_id))
+    item = item_res.scalar_one_or_none()
+    if not item:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inquiry line item not found")
+
+    # Run AI Extractor
+    ai_result = await extract_supplier_quotation(
+        text_content=payload.text,
+        product_name=item.product_name,
+        product_code=item.product_code,
+        target_quantity=float(item.quantity) if item.quantity else None,
+    )
+
+    if not ai_result.is_quotation_detected or not ai_result.unit_price or ai_result.unit_price <= 0:
+        return build_success_response(
+            data={"created": False, "is_quotation_detected": False},
+            request_id=request.state.request_id,
+            message="Message received, but no quotation detected (casual greeting/inquiry).",
+        )
+
+    # Insert Quotation
+    quote_supplier_id = supplier.id if supplier else item.created_by
+    quote_count_res = await session.execute(select(Quotation).where(Quotation.inquiry_item_id == item.id))
+    existing_count = len(quote_count_res.scalars().all())
+    quote_number = f"QT-WEBHOOK-{existing_count + 1:02d}"
+
+    quoted_qty = ai_result.quantity or float(item.quantity or 1.0)
+    unit_p = float(ai_result.unit_price)
+
+    new_quotation = Quotation(
+        id=uuid.uuid4(),
+        quote_number=quote_number,
+        inquiry_item_id=item.id,
+        supplier_id=quote_supplier_id,
+        quantity=quoted_qty,
+        unit_price=unit_p,
+        total_cost=round(quoted_qty * unit_p, 2),
+        currency=ai_result.currency or "CNY",
+        expected_receiving_date=datetime.strptime(ai_result.earliest_available_date, "%Y-%m-%d").date()
+        if ai_result.earliest_available_date
+        else None,
+        terms_and_conditions=f"{ai_result.price_terms or ''} • {ai_result.payment_terms or ''}".strip(" •") or None,
+        remarks=ai_result.remarks or f"Auto-ingested via {payload.channel} from {payload.sender}",
+        status=QuotationStatus.PENDING,
+        created_by=item.created_by,
+    )
+    session.add(new_quotation)
+    await session.commit()
+
+    # Broadcast Live WebSocket update to ERP UI
+    await event_dispatcher.publish(
+        module_channel("inquiries"),
+        Event(
+            entity="inquiry",
+            entity_id=str(item.id),
+            event_type="quotation.created",
+            changes={
+                "id": str(new_quotation.id),
+                "inquiry_item_id": str(item.id),
+                "quote_number": quote_number,
+                "unit_price": unit_p,
+                "currency": ai_result.currency,
+                "status": "pending",
+            },
+        ),
+    )
+
+    return build_success_response(
+        data={
+            "created": True,
+            "quote_number": quote_number,
+            "unit_price": unit_p,
+            "currency": ai_result.currency,
+            "provider": ai_result.provider_used,
+        },
+        request_id=request.state.request_id,
+        message=f"Quotation {quote_number} automatically created and broadcasted to ERP.",
     )

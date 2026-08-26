@@ -94,17 +94,20 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     cleanup_worker = get_cleanup_worker()
     await cleanup_worker.start()
 
-    # Start the background trash auto-purge worker: permanently deletes
-    # soft-deleted records once they're older than
-    # settings.TRASH_RETENTION_DAYS (4 years) and still sitting
-    # un-restored in Trash. See app.trash.purge_worker for the full
-    # policy this enforces.
+    # Start the background trash auto-purge worker
     trash_purge_worker = TrashPurgeWorker()
     await trash_purge_worker.start()
+
+    # Start the automated inbound email quotation worker
+    from app.inquiries.email_inbound_worker import email_inbound_worker
+    await email_inbound_worker.start()
 
     yield
 
     logger.info("Application shutting down.")
+
+    # Gracefully stop the email inbound worker.
+    await email_inbound_worker.stop()
 
     # Gracefully drain the queue worker before closing the DB pool.
     await worker.stop()

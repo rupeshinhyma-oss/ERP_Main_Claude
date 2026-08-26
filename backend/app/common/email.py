@@ -102,84 +102,80 @@ async def send_rfq_email(
     code_display = f" (#{product_code})" if product_code else ""
     subject = f"Request for Quotation: {product_name} ({quantity} units)"
 
+    target_date_line_text = (
+        f"• Required Expected Receiving Date: {expected_receiving_date}\n"
+        if expected_receiving_date
+        else "• Delivery Schedule: Please provide your earliest possible delivery date / lead time\n"
+    )
+
+    date_checklist_text = (
+        f"2. Confirmation if you can meet delivery by {expected_receiving_date}"
+        if expected_receiving_date
+        else "2. Your Earliest Possible Delivery / Dispatch Date (or Lead Time in days)"
+    )
+
     text_body = (
-        f"Dear {contact_name},\n\n"
-        f"We are inviting your company ({company_name}) to submit a quotation for the following item:\n\n"
+        f"Dear {contact_name} ({company_name}),\n\n"
+        f"We are from Yinglima Procurement Team. We are requesting your best quotation for:\n\n"
+        f"• Company: {company_name}\n"
         f"• Product: {product_name}{code_display}\n"
-        f"• Quantity Required: {quantity} units\n"
-        f"{f'• Expected Delivery Date: {expected_receiving_date}\n' if expected_receiving_date else ''}"
-        f"{f'• Special Instructions: {notes}\n' if notes else ''}\n"
-        f"Please click the link below to view technical specifications and submit your best price:\n"
-        f"{quote_url}\n\n"
-        f"Thank you,\n"
+        f"• Required Quantity: {quantity} units\n"
+        f"{target_date_line_text}"
+        f"{f'• Notes / Specifications: {notes}\n' if notes else ''}\n"
+        f"👉 Please reply directly to this email with:\n"
+        f"1. Best Unit Price (Currency: CNY ¥ / USD $ / INR ₹)\n"
+        f"{date_checklist_text}\n"
+        f"3. Payment & Price Terms (Ex-Factory / FOB Ningbo, Deposit %)\n"
+        f"4. You may also attach your quotation PDF or product photo sheet directly.\n\n"
+        f"Best regards,\n"
         f"Yinglima Procurement Team\n"
+    )
+
+    target_date_line_html = (
+        f"• <strong>Required Expected Receiving Date:</strong> {expected_receiving_date}<br>"
+        if expected_receiving_date
+        else "• <strong>Delivery Schedule:</strong> Please provide your earliest possible delivery date / lead time<br>"
+    )
+
+    date_checklist_html = (
+        f"<li>Can you deliver by <strong>{expected_receiving_date}</strong>?</li>"
+        if expected_receiving_date
+        else "<li>Your <strong>Earliest Possible Delivery Date</strong> (or Lead Time in days)</li>"
     )
 
     html_body = f"""<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{subject}</title>
-  <style>
-    body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f8fafc; margin: 0; padding: 24px; color: #1e293b; }}
-    .card {{ max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 12px; border: 1px solid #e2e8f0; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); }}
-    .header {{ background: #0061f2; color: #ffffff; padding: 24px 30px; text-align: left; }}
-    .header h1 {{ margin: 0; font-size: 20px; font-weight: 700; }}
-    .header p {{ margin: 4px 0 0 0; font-size: 13px; opacity: 0.9; }}
-    .body {{ padding: 28px 30px; }}
-    .greeting {{ font-size: 15px; font-weight: 600; color: #0f172a; margin-bottom: 14px; }}
-    .intro {{ font-size: 14px; line-height: 1.6; color: #475569; margin-bottom: 20px; }}
-    .details-box {{ background: #f1f5f9; border-radius: 8px; padding: 18px 20px; margin-bottom: 24px; border-left: 4px solid #0061f2; }}
-    .detail-row {{ display: flex; justify-content: space-between; padding: 6px 0; font-size: 13.5px; }}
-    .detail-label {{ color: #64748b; font-weight: 500; }}
-    .detail-value {{ color: #0f172a; font-weight: 700; text-align: right; }}
-    .btn-container {{ text-align: center; margin: 30px 0 20px 0; }}
-    .btn {{ display: inline-block; background: #0061f2; color: #ffffff !important; text-decoration: none; padding: 13px 32px; border-radius: 8px; font-size: 14.5px; font-weight: 700; letter-spacing: 0.2px; box-shadow: 0 4px 10px rgba(0,97,242,0.3); }}
-    .link-alt {{ font-size: 12px; color: #94a3b8; word-break: break-all; margin-top: 18px; text-align: center; }}
-    .footer {{ border-top: 1px solid #f1f5f9; padding: 20px 30px; text-align: center; font-size: 12px; color: #94a3b8; }}
-  </style>
 </head>
-<body>
-  <div class="card">
-    <div class="header">
-      <h1>Request for Quotation</h1>
-      <p>Yinglima Procurement System</p>
-    </div>
-    <div class="body">
-      <div class="greeting">Dear {contact_name},</div>
-      <div class="intro">
-        We would like to invite <strong>{company_name}</strong> to provide your quotation for the product detailed below:
-      </div>
-      
-      <div class="details-box">
-        <div class="detail-row">
-          <span class="detail-label">Product Name:</span>
-          <span class="detail-value">{product_name}</span>
-        </div>
-        {f'<div class="detail-row"><span class="detail-label">Item Code:</span><span class="detail-value">{product_code}</span></div>' if product_code else ''}
-        <div class="detail-row">
-          <span class="detail-label">Required Quantity:</span>
-          <span class="detail-value">{quantity} units</span>
-        </div>
-        {f'<div class="detail-row"><span class="detail-label">Required Date:</span><span class="detail-value">{expected_receiving_date}</span></div>' if expected_receiving_date else ''}
-        {f'<div class="detail-row"><span class="detail-label">Instructions:</span><span class="detail-value">{notes}</span></div>' if notes else ''}
-      </div>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; font-size: 14.5px; line-height: 1.7; color: #1e293b; margin: 0; padding: 12px;">
+  <p>Dear <strong>{contact_name} ({company_name})</strong>,</p>
+  
+  <p>We are from <strong>Yinglima Procurement Team</strong>. We are requesting your quotation for:</p>
 
-      <div class="btn-container">
-        <a href="{quote_url}" class="btn" target="_blank">View Specs & Submit Quotation →</a>
-      </div>
+  <p style="margin: 12px 0 16px 0; line-height: 1.8;">
+    • <strong>Product:</strong> {product_name}{code_display}<br>
+    • <strong>Quantity:</strong> <strong>{quantity} units</strong><br>
+    {target_date_line_html}
+    {f'• <strong>Notes / Specifications:</strong> {notes}<br>' if notes else ''}
+  </p>
 
-      <div class="link-alt">
-        If the button above does not work, copy and paste this link into your browser:<br>
-        <a href="{quote_url}" style="color: #0061f2;">{quote_url}</a>
-      </div>
-    </div>
-    <div class="footer">
-      This is an automated procurement inquiry from Yinglima Management.<br>
-      © 2026 Yinglima. All rights reserved.
-    </div>
-  </div>
+  <p>👉 <strong>Please provide:</strong></p>
+  <ol style="margin-top: 6px; padding-left: 24px; line-height: 1.8;">
+    <li>Best <strong>Unit Price</strong> (Currency: CNY ¥ / USD $ / INR ₹)</li>
+    {date_checklist_html}
+    <li><strong>Payment & Price Terms</strong> (FOB / Ex-Factory, Deposit %)</li>
+  </ol>
+
+  <p style="color: #475569; font-size: 14px; margin-top: 20px;">
+    You can reply directly to this email with your quote or attach your quotation PDF / photo sheet.
+  </p>
+
+  <p style="margin-top: 24px;">
+    Thank you,<br>
+    <strong>Yinglima Procurement Team</strong>
+  </p>
 </body>
 </html>
 """

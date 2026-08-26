@@ -269,6 +269,8 @@ class Quotation(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
     expected_receiving_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     terms_and_conditions: Mapped[str | None] = mapped_column(Text, nullable=True)
     remarks: Mapped[str | None] = mapped_column(Text, nullable=True)
+    attachment_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    attachment_filename: Mapped[str | None] = mapped_column(String(255), nullable=True)
     status: Mapped[QuotationStatus] = mapped_column(
         SAEnum(QuotationStatus, name="quotation_status", native_enum=False, length=20),
         default=QuotationStatus.PENDING,

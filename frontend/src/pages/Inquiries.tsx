@@ -950,6 +950,7 @@ function ItemsView({
   const [remarksTarget, setRemarksTarget] = useState<InquiryItem | null>(null);
   const [addQuoteOpen, setAddQuoteOpen] = useState(false);
   const [rfqOpen, setRfqOpen] = useState(false);
+  const [aiQuoteOpen, setAiQuoteOpen] = useState(false);
   const [viewTermsTarget, setViewTermsTarget] = useState<Quotation | null>(null);
   const [productInfoTarget, setProductInfoTarget] = useState<InquiryItem | null>(null);
   const [activeActionMenuId, setActiveActionMenuId] = useState<string | null>(null);
@@ -975,10 +976,11 @@ function ItemsView({
   }, [load]);
 
   // Live real-time WebSocket subscription: updates quietly when a supplier submits a quotation
-  useLiveModule("inquiries", () => {
+  useLiveModule("inquiries", (_event) => {
     void load(true);
-    if (selectedItemId) {
-      void loadQuotations(selectedItemId, true);
+    const activeId = selectedItem?.id || selectedItemId;
+    if (activeId) {
+      void loadQuotations(activeId, true);
     }
   });
 
@@ -1011,14 +1013,15 @@ function ItemsView({
     }
   }, [selectedItem?.id, loadQuotations]);
 
-  // Seamless silent auto-sync every 3s so mobile submissions appear instantly on screen
+  // Seamless dynamic live sync every 2 seconds: ensures newly arriving quotes appear immediately without manual refresh
   useEffect(() => {
-    if (!selectedItem?.id) return;
+    const activeId = selectedItem?.id || selectedItemId;
+    if (!activeId) return;
     const interval = setInterval(() => {
-      void loadQuotations(selectedItem.id, true);
-    }, 3000);
+      void loadQuotations(activeId, true);
+    }, 2000);
     return () => clearInterval(interval);
-  }, [selectedItem?.id, loadQuotations]);
+  }, [selectedItem?.id, selectedItemId, loadQuotations]);
 
   // Filtered products on left
   const filteredProducts = useMemo(() => {
@@ -1668,6 +1671,27 @@ function ItemsView({
 
                   <button
                     type="button"
+                    onClick={() => setAiQuoteOpen(true)}
+                    style={{
+                      background: "linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)",
+                      color: "#ffffff",
+                      border: "none",
+                      padding: "8px 16px",
+                      borderRadius: "8px",
+                      fontSize: "13px",
+                      fontWeight: 700,
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "6px",
+                      boxShadow: "0 2px 6px rgba(124,58,237,0.25)",
+                    }}
+                  >
+                    ✨ AI Parse Quote
+                  </button>
+
+                  <button
+                    type="button"
                     onClick={() => setAddQuoteOpen(true)}
                     style={{
                       background: "#eff6ff",
@@ -2081,6 +2105,20 @@ function ItemsView({
         />
       )}
 
+      {/* 1.1 AI Parse Quotation Modal */}
+      {aiQuoteOpen && selectedItem && (
+        <AIParseQuotationModal
+          item={selectedItem}
+          onClose={() => setAiQuoteOpen(false)}
+          onCreated={() => {
+            setAiQuoteOpen(false);
+            if (selectedItem.id) void loadQuotations(selectedItem.id);
+            void load();
+          }}
+          onError={onError}
+        />
+      )}
+
       {/* 2. Request Quotation Drawer (Image 5) */}
       {rfqOpen && selectedItem && (
         <RequestQuotationDrawer
@@ -2184,6 +2222,570 @@ function ItemsView({
 /* ------------------------------------------------------------------ */
 /* Drawers & Sub-Modals for Quotations & RFQs                          */
 /* ------------------------------------------------------------------ */
+
+// =============================================================================
+// AI Parse Quotation Modal (Gemini 2.0/3.6 Flash + OpenAI Fallback)
+// =============================================================================
+
+function AIParseQuotationModal({
+  item,
+  onClose,
+  onCreated,
+  onError,
+}: {
+  item: InquiryItem;
+  onClose: () => void;
+  onCreated: () => void;
+  onError: (err: unknown) => void;
+}) {
+  const [supplierId, setSupplierId] = useState("");
+  const [rawText, setRawText] = useState("");
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [extracting, setExtracting] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [extracted, setExtracted] = useState<any | null>(null);
+  const [activeInputTab, setActiveInputTab] = useState<"text" | "file">("text");
+
+  // Editable Form fields populated by extraction
+  const [unitPrice, setUnitPrice] = useState("");
+  const [quantity, setQuantity] = useState(String(item.quantity || 1));
+  const [currency, setCurrency] = useState("CNY");
+  const [totalCost, setTotalCost] = useState("");
+  const [expDate, setExpDate] = useState("");
+  const [terms, setTerms] = useState("");
+  const [remarks, setRemarks] = useState("");
+  const [errors, setErrors] = useState<Record<string, string>>({});
+
+  const [productMeta, setProductMeta] = useState<{
+    categoryId?: string;
+    categoryName?: string;
+    subCategoryId?: string;
+    subCategoryName?: string;
+  } | null>(null);
+  const [supplierFilterScope, setSupplierFilterScope] = useState<"sub_category" | "category" | "all">("sub_category");
+
+  // load product meta for supplier filtering
+  useEffect(() => {
+    if (!item.product_id) return;
+    let isMounted = true;
+    (async () => {
+      try {
+        const { data: prod } = await apiGet<any>(`/masters/products/${item.product_id}`);
+        if (!prod || !isMounted) return;
+
+        let catName = "";
+        let subCatName = "";
+
+        if (prod.category_id) {
+          try {
+            const { data: cat } = await apiGet<any>(`/masters/product-categories/${prod.category_id}`);
+            catName = cat?.name || "";
+          } catch {}
+        }
+        if (prod.sub_category_id) {
+          try {
+            const { data: subCat } = await apiGet<any>(`/masters/product-sub-categories/${prod.sub_category_id}`);
+            subCatName = subCat?.name || "";
+          } catch {}
+        }
+
+        if (!isMounted) return;
+        setProductMeta({
+          categoryId: prod.category_id || undefined,
+          categoryName: catName,
+          subCategoryId: prod.sub_category_id || undefined,
+          subCategoryName: subCatName,
+        });
+
+        if (prod.sub_category_id) {
+          setSupplierFilterScope("sub_category");
+        } else if (prod.category_id) {
+          setSupplierFilterScope("category");
+        } else {
+          setSupplierFilterScope("all");
+        }
+      } catch {}
+    })();
+    return () => {
+      isMounted = false;
+    };
+  }, [item.product_id]);
+
+  const fetchSuppliers = useCallback(
+    async (term: string) => {
+      try {
+        let url = `/suppliers?search=${encodeURIComponent(term)}&limit=100&sort_by=company_name&sort_order=asc`;
+        if (supplierFilterScope === "sub_category" && productMeta?.subCategoryId) {
+          url += `&sub_category_id=${productMeta.subCategoryId}`;
+        } else if (supplierFilterScope === "category" && productMeta?.categoryId) {
+          url += `&category_id=${productMeta.categoryId}`;
+        }
+        const res = await apiGet<any>(url);
+        const list = Array.isArray(res.data) ? res.data : res.data?.data || [];
+        return list.map((s: any) => ({ value: s.id, label: s.company_name || s.name || "Supplier" }));
+      } catch {
+        return [];
+      }
+    },
+    [supplierFilterScope, productMeta]
+  );
+
+  const fetchSupplierLabel = useCallback(async (id: string) => {
+    try {
+      const res = await apiGet<any>(`/suppliers/${id}`);
+      return res.data?.company_name || res.data?.name || id;
+    } catch {
+      return id;
+    }
+  }, []);
+
+  const handleUnitPriceChange = (val: string) => {
+    setUnitPrice(val);
+    const q = parseFloat(quantity);
+    const u = parseFloat(val);
+    if (!isNaN(q) && !isNaN(u)) {
+      setTotalCost((q * u).toFixed(2));
+    }
+  };
+
+  const handleExtract = async () => {
+    if (!rawText.trim() && !selectedFile) {
+      alert("Please paste a supplier chat/message or attach a quotation PDF/image first.");
+      return;
+    }
+    setExtracting(true);
+    setErrors({});
+    try {
+      const formData = new FormData();
+      if (rawText.trim()) formData.append("raw_text", rawText.trim());
+      if (supplierId) formData.append("supplier_id", supplierId);
+      if (selectedFile) formData.append("file", selectedFile);
+
+      const res = await apiPost<any>(`/inquiries/items/${item.id}/ai-parse-quote`, formData);
+      const data = res.data;
+      setExtracted(data);
+
+      if (data) {
+        if (!data.is_quotation_detected) {
+          alert("Notice: No quotation figures or price terms were detected in this message. Please review the text.");
+        }
+        if (data.unit_price !== null && data.unit_price !== undefined) {
+          setUnitPrice(String(data.unit_price));
+          const q = data.quantity || item.quantity || 1;
+          setQuantity(String(q));
+          setTotalCost((Number(data.unit_price) * Number(q)).toFixed(2));
+        }
+        if (data.currency) setCurrency(data.currency);
+        if (data.earliest_available_date) setExpDate(data.earliest_available_date);
+        
+        const termsParts: string[] = [];
+        if (data.price_terms) termsParts.push(data.price_terms);
+        if (data.payment_terms) termsParts.push(data.payment_terms);
+        if (termsParts.length > 0) setTerms(termsParts.join(" • "));
+        
+        if (data.remarks) setRemarks(data.remarks);
+      }
+    } catch (err: any) {
+      alert(err?.response?.data?.detail || "AI Extraction failed. Please try again.");
+    } finally {
+      setExtracting(false);
+    }
+  };
+
+  const handleSaveQuotation = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const newErrors: Record<string, string> = {};
+    if (!supplierId) newErrors.supplier = "Supplier is required";
+    if (!unitPrice || isNaN(parseFloat(unitPrice)) || parseFloat(unitPrice) < 0) {
+      newErrors.unitPrice = "Valid Unit Price is required";
+    }
+    if (!totalCost || isNaN(parseFloat(totalCost)) || parseFloat(totalCost) < 0) {
+      newErrors.totalCost = "Valid Total Cost is required";
+    }
+
+    if (Object.keys(newErrors).length > 0) {
+      setErrors(newErrors);
+      return;
+    }
+
+    setSaving(true);
+    try {
+      await apiPost(`/inquiries/items/${item.id}/quotations`, {
+        supplier_id: supplierId,
+        quantity: parseFloat(quantity) || item.quantity || 1,
+        unit_price: parseFloat(unitPrice),
+        total_cost: parseFloat(totalCost),
+        currency: currency.toUpperCase(),
+        expected_receiving_date: expDate || null,
+        terms_and_conditions: terms.trim() || null,
+        remarks: remarks.trim() || null,
+      });
+      onCreated();
+    } catch (err) {
+      onError(err);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 100010, display: "flex", justifyContent: "flex-end" }}>
+      <div style={{ position: "absolute", inset: 0, background: "rgba(15,23,42,0.5)", backdropFilter: "blur(3px)" }} onClick={onClose} />
+      <div
+        style={{
+          position: "relative",
+          width: "560px",
+          maxWidth: "94vw",
+          height: "100%",
+          background: "#ffffff",
+          boxShadow: "-10px 0 35px rgba(0,0,0,0.18)",
+          display: "flex",
+          flexDirection: "column",
+          overflowY: "auto",
+        }}
+      >
+        {/* Header */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "18px 24px", borderBottom: "1px solid #e2e8f0", background: "linear-gradient(135deg, #f8fafc 0%, #ede9fe 100%)" }}>
+          <div>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <span style={{ fontSize: "18px" }}>✨</span>
+              <h3 style={{ margin: 0, fontSize: "17px", fontWeight: 800, color: "#4338ca" }}>AI Smart Quote Extractor</h3>
+            </div>
+            <div style={{ fontSize: "12px", color: "#6366f1", marginTop: "2px" }}>
+              Powered by Gemini 2.0/3.6 Flash • Multi-Key Pool &amp; OpenAI Fallback
+            </div>
+          </div>
+          <button type="button" onClick={onClose} style={{ background: "none", border: "none", fontSize: "18px", cursor: "pointer", color: "#64748b" }}>✕</button>
+        </div>
+
+        {/* Body Content */}
+        <div style={{ padding: "20px 24px", display: "flex", flexDirection: "column", gap: "16px", flex: 1 }}>
+          {/* Target Product Strip */}
+          <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "10px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div>
+              <div style={{ fontSize: "13.5px", fontWeight: 700, color: "#0f172a" }}>
+                {item.product_name || item.product_name_tally}
+              </div>
+              <div style={{ fontSize: "12px", color: "#64748b" }}>
+                #{item.product_code || "PC10956df"}
+                {productMeta?.subCategoryName && ` • ${productMeta.subCategoryName}`}
+              </div>
+            </div>
+            <div style={{ fontSize: "13px", fontWeight: 700, color: "#334155" }}>
+              Qty: {item.quantity}
+            </div>
+          </div>
+
+          {/* Supplier Selector */}
+          <div>
+            <label style={{ display: "block", fontSize: "12.5px", fontWeight: 700, color: "#334155", marginBottom: "4px" }}>
+              *Supplier
+            </label>
+
+            {/* Filter Pills: Sub-Category / Category / All Suppliers */}
+            <div style={{ display: "flex", gap: "6px", marginBottom: "6px", flexWrap: "wrap" }}>
+              {productMeta?.subCategoryId && (
+                <button
+                  type="button"
+                  onClick={() => setSupplierFilterScope("sub_category")}
+                  style={{
+                    padding: "3px 8px",
+                    borderRadius: "12px",
+                    border: "none",
+                    fontSize: "11px",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    background: supplierFilterScope === "sub_category" ? "#4f46e5" : "#f1f5f9",
+                    color: supplierFilterScope === "sub_category" ? "#ffffff" : "#475569",
+                  }}
+                >
+                  🎯 {productMeta.subCategoryName || "Sub-Category"}
+                </button>
+              )}
+              {productMeta?.categoryId && (
+                <button
+                  type="button"
+                  onClick={() => setSupplierFilterScope("category")}
+                  style={{
+                    padding: "3px 8px",
+                    borderRadius: "12px",
+                    border: "none",
+                    fontSize: "11px",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    background: supplierFilterScope === "category" ? "#4f46e5" : "#f1f5f9",
+                    color: supplierFilterScope === "category" ? "#ffffff" : "#475569",
+                  }}
+                >
+                  📁 {productMeta.categoryName || "Category"}
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setSupplierFilterScope("all")}
+                style={{
+                  padding: "3px 8px",
+                  borderRadius: "12px",
+                  border: "none",
+                  fontSize: "11px",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  background: supplierFilterScope === "all" ? "#4f46e5" : "#f1f5f9",
+                  color: supplierFilterScope === "all" ? "#ffffff" : "#475569",
+                }}
+              >
+                🌐 All Suppliers
+              </button>
+            </div>
+
+            <SearchableDropdown
+              key={`ai-quote-sup-${supplierFilterScope}`}
+              value={supplierId || null}
+              onChange={(val) => {
+                setSupplierId(val || "");
+                setErrors((prev) => ({ ...prev, supplier: "" }));
+              }}
+              fetchOptions={fetchSuppliers}
+              fetchLabelForValue={fetchSupplierLabel}
+              placeholder="Select Supplier..."
+              hasError={Boolean(errors.supplier)}
+            />
+            {errors.supplier && <div style={{ color: "#ef4444", fontSize: "11.5px", marginTop: "3px" }}>⚠️ {errors.supplier}</div>}
+          </div>
+
+          {/* Input Tabs: Paste Chat vs Upload File */}
+          <div style={{ background: "#f1f5f9", padding: "3px", borderRadius: "8px", display: "flex", gap: "4px" }}>
+            <button
+              type="button"
+              onClick={() => setActiveInputTab("text")}
+              style={{
+                flex: 1,
+                padding: "6px 12px",
+                borderRadius: "6px",
+                border: "none",
+                fontSize: "12px",
+                fontWeight: 700,
+                cursor: "pointer",
+                background: activeInputTab === "text" ? "#ffffff" : "transparent",
+                color: activeInputTab === "text" ? "#4f46e5" : "#64748b",
+                boxShadow: activeInputTab === "text" ? "0 1px 3px rgba(0,0,0,0.1)" : "none",
+              }}
+            >
+              💬 Paste Chat / Email Message
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveInputTab("file")}
+              style={{
+                flex: 1,
+                padding: "6px 12px",
+                borderRadius: "6px",
+                border: "none",
+                fontSize: "12px",
+                fontWeight: 700,
+                cursor: "pointer",
+                background: activeInputTab === "file" ? "#ffffff" : "transparent",
+                color: activeInputTab === "file" ? "#4f46e5" : "#64748b",
+                boxShadow: activeInputTab === "file" ? "0 1px 3px rgba(0,0,0,0.1)" : "none",
+              }}
+            >
+              📄 Upload PDF / Image Quote Sheet
+            </button>
+          </div>
+
+          {activeInputTab === "text" ? (
+            <div>
+              <textarea
+                rows={4}
+                value={rawText}
+                onChange={(e) => setRawText(e.target.value)}
+                placeholder="Paste WeChat / WhatsApp chat or email content here (e.g. 50台单价180元，交期10天，定金30%出厂价 / For 50 pcs price is $26, delivery in 12 days...)"
+                style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1.5px solid #cbd5e1", fontSize: "13px", resize: "vertical" }}
+              />
+            </div>
+          ) : (
+            <div style={{ border: "2px dashed #cbd5e1", borderRadius: "8px", padding: "16px", textAlign: "center", background: "#f8fafc" }}>
+              <input
+                type="file"
+                accept=".pdf,.png,.jpg,.jpeg"
+                onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
+                style={{ fontSize: "13px" }}
+              />
+              <div style={{ fontSize: "11.5px", color: "#64748b", marginTop: "6px" }}>
+                Supports PDF quotation sheets, invoices, or product catalog photos.
+              </div>
+            </div>
+          )}
+
+          {/* Extract Button */}
+          <button
+            type="button"
+            disabled={extracting}
+            onClick={handleExtract}
+            style={{
+              width: "100%",
+              padding: "10px",
+              background: "linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)",
+              color: "#ffffff",
+              border: "none",
+              borderRadius: "8px",
+              fontSize: "13.5px",
+              fontWeight: 700,
+              cursor: extracting ? "wait" : "pointer",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: "8px",
+              boxShadow: "0 2px 8px rgba(99,102,241,0.3)",
+            }}
+          >
+            {extracting ? (
+              <><span>⏳</span> Extracting &amp; Analyzing with AI...</>
+            ) : (
+              <><span>✨</span> Extract Quote with AI</>
+            )}
+          </button>
+
+          {/* Extracted Data Card & Verification Form */}
+          {extracted && (
+            <form onSubmit={handleSaveQuotation} style={{ borderTop: "2px dashed #e2e8f0", paddingTop: "14px", display: "flex", flexDirection: "column", gap: "12px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div style={{ fontSize: "13px", fontWeight: 700, color: "#166534", display: "flex", alignItems: "center", gap: "6px" }}>
+                  <span>✓</span> Extracted Quotation Details
+                </div>
+                <span style={{ fontSize: "11px", fontWeight: 700, background: "#ede9fe", color: "#6d28d9", padding: "2px 8px", borderRadius: "12px" }}>
+                  ⚡ {extracted.provider_used || "Gemini 3.6 Flash"}
+                </span>
+              </div>
+
+              {/* Summary note if present */}
+              {extracted.supplier_notes_summary && (
+                <div style={{ fontSize: "12px", background: "#f0fdf4", border: "1px solid #bbf7d0", padding: "8px 10px", borderRadius: "6px", color: "#15803d" }}>
+                  💡 <strong>AI Summary:</strong> {extracted.supplier_notes_summary}
+                </div>
+              )}
+
+              {/* Unit Price, Currency, Total Cost */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "10px" }}>
+                <div>
+                  <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "#334155", marginBottom: "3px" }}>*Unit Price</label>
+                  <input
+                    type="number"
+                    step="any"
+                    value={unitPrice}
+                    onChange={(e) => handleUnitPriceChange(e.target.value)}
+                    style={{ width: "100%", padding: "7px 10px", borderRadius: "6px", border: errors.unitPrice ? "1.5px solid #ef4444" : "1px solid #cbd5e1", fontSize: "13px", fontWeight: 700 }}
+                  />
+                  {errors.unitPrice && <div style={{ color: "#ef4444", fontSize: "11px" }}>{errors.unitPrice}</div>}
+                </div>
+                <div>
+                  <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "#334155", marginBottom: "3px" }}>Currency</label>
+                  <select
+                    value={currency}
+                    onChange={(e) => setCurrency(e.target.value)}
+                    style={{ width: "100%", padding: "7px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px", fontWeight: 600 }}
+                  >
+                    <option value="CNY">CNY (¥)</option>
+                    <option value="USD">USD ($)</option>
+                    <option value="INR">INR (₹)</option>
+                    <option value="EUR">EUR (€)</option>
+                  </select>
+                </div>
+                <div>
+                  <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "#334155", marginBottom: "3px" }}>*Total Cost</label>
+                  <input
+                    type="number"
+                    step="any"
+                    value={totalCost}
+                    onChange={(e) => setTotalCost(e.target.value)}
+                    style={{ width: "100%", padding: "7px 10px", borderRadius: "6px", border: errors.totalCost ? "1.5px solid #ef4444" : "1px solid #cbd5e1", fontSize: "13px", fontWeight: 700 }}
+                  />
+                  {errors.totalCost && <div style={{ color: "#ef4444", fontSize: "11px" }}>{errors.totalCost}</div>}
+                </div>
+              </div>
+
+              {/* Quantity and Expected Receiving Date */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+                <div>
+                  <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#64748b", marginBottom: "3px" }}>Quantity</label>
+                  <input
+                    type="number"
+                    min={1}
+                    value={quantity}
+                    onChange={(e) => {
+                      setQuantity(e.target.value);
+                      const q = parseFloat(e.target.value);
+                      const u = parseFloat(unitPrice);
+                      if (!isNaN(q) && !isNaN(u)) setTotalCost((q * u).toFixed(2));
+                    }}
+                    style={{ width: "100%", padding: "7px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px" }}
+                  />
+                </div>
+                <div>
+                  <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#64748b", marginBottom: "3px" }}>
+                    Expected Receiving {extracted.lead_time_days ? `(${extracted.lead_time_days} days)` : ""}
+                  </label>
+                  <input
+                    type="date"
+                    value={expDate}
+                    onChange={(e) => setExpDate(e.target.value)}
+                    style={{ width: "100%", padding: "7px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px" }}
+                  />
+                </div>
+              </div>
+
+              {/* Terms & Conditions */}
+              <div>
+                <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#64748b", marginBottom: "3px" }}>Terms &amp; Conditions</label>
+                <input
+                  type="text"
+                  placeholder="Ex-Factory, 30% deposit, balance before dispatch"
+                  value={terms}
+                  onChange={(e) => setTerms(e.target.value)}
+                  style={{ width: "100%", padding: "7px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px" }}
+                />
+              </div>
+
+              {/* Remarks */}
+              <div>
+                <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#64748b", marginBottom: "3px" }}>Remarks / Notes</label>
+                <input
+                  type="text"
+                  placeholder="Packaging specifications or supplier remarks..."
+                  value={remarks}
+                  onChange={(e) => setRemarks(e.target.value)}
+                  style={{ width: "100%", padding: "7px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px" }}
+                />
+              </div>
+
+              {/* Save Button */}
+              <div style={{ marginTop: "8px" }}>
+                <button
+                  type="submit"
+                  disabled={saving}
+                  style={{
+                    width: "100%",
+                    padding: "10px",
+                    background: "#059669",
+                    color: "#ffffff",
+                    border: "none",
+                    borderRadius: "8px",
+                    fontSize: "14px",
+                    fontWeight: 700,
+                    cursor: saving ? "wait" : "pointer",
+                    boxShadow: "0 2px 6px rgba(5,150,105,0.3)",
+                  }}
+                >
+                  {saving ? "Saving Quotation..." : "✓ Confirm & Save to Quotations Table"}
+                </button>
+              </div>
+            </form>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function AddQuotationDrawer({
   item,

@@ -217,6 +217,7 @@ class PlanningRowRepository(BaseRepository[PlanningRow]):
         which record is #1, #2, #51, etc., or a page boundary could skip
         or duplicate a record.
         """
+        from sqlalchemy import func
         from app.masters.product_sub_categories.models import ProductSubCategory
         from app.masters.products.models import Product
 
@@ -226,8 +227,9 @@ class PlanningRowRepository(BaseRepository[PlanningRow]):
             .where(Product.deleted_at.is_(None))
             .order_by(
                 ProductSubCategory.name.is_(None),  # False (has a sub-category) sorts before True (none)
-                ProductSubCategory.name.asc(),
-                Product.created_at,
+                func.lower(ProductSubCategory.name).asc(),
+                func.lower(func.coalesce(Product.product_name_tally, Product.product_name)).asc(),
+                func.lower(Product.product_code).asc(),
                 Product.id,
             )
         )

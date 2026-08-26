@@ -102,6 +102,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     trash_purge_worker = TrashPurgeWorker()
     await trash_purge_worker.start()
 
+    # Start the automated inbound email quotation worker: polls the
+    # procurement inbox (SMTP_USER/SMTP_PASSWORD env vars) for supplier
+    # reply emails, extracts pricing via AI, and auto-creates Quotation
+    # records with zero manual clicks. No-ops silently if those env vars
+    # aren't set (see EmailInboundWorker._check_inbox_and_process), so
+    # this is safe to always start even on a backend instance that
+    # hasn't configured a mailbox.
+    from app.inquiries.email_inbound_worker import email_inbound_worker
+    await email_inbound_worker.start()
+
     yield
 
     logger.info("Application shutting down.")
@@ -114,6 +124,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # Stop the trash auto-purge worker.
     await trash_purge_worker.stop()
+
+    # Stop the email inbound worker.
+    await email_inbound_worker.stop()
 
     await dispose_engine()
 

@@ -59,6 +59,8 @@ export interface Quotation {
   expected_receiving_date?: string | null;
   terms_and_conditions?: string | null;
   remarks?: string | null;
+  attachment_url?: string | null;
+  attachment_filename?: string | null;
   status: "pending" | "approved" | "rejected" | "po_created";
   created_by: string;
   created_at: string;
@@ -122,4 +124,3 @@ export interface CompanySummary {
   consignment_codes: string[];
   updated_at?: string | null;
 }
-

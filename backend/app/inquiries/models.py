@@ -269,6 +269,13 @@ class Quotation(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
     expected_receiving_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     terms_and_conditions: Mapped[str | None] = mapped_column(Text, nullable=True)
     remarks: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Set when this quotation's price/terms were extracted from a supplier's
+    # attached PDF or image (via the AI quotation extractor -- manual
+    # "AI Parse" button, the automated email inbox worker, or the inbound
+    # WhatsApp/WeChat webhook). NULL for every quotation entered without an
+    # attached file.
+    attachment_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    attachment_filename: Mapped[str | None] = mapped_column(String(255), nullable=True)
     status: Mapped[QuotationStatus] = mapped_column(
         SAEnum(QuotationStatus, name="quotation_status", native_enum=False, length=20),
         default=QuotationStatus.PENDING,
@@ -305,4 +312,4 @@ class RFQ(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
 
     def __repr__(self) -> str:
         """Return a debug-friendly representation."""
-        return f"<RFQ id={self.id} inquiry_item_id={self.inquiry_item_id}>"
+        return f"<RFQ id={self.id} inquiry_item_id={self.inquiry_item_id}>"

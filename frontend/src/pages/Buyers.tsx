@@ -395,6 +395,27 @@ export function BuyersPage() {
   const [subCategoryFilter, setSubCategoryFilter] = useState("");
   const [isFilterPanelOpen, setIsFilterPanelOpen] = useState(false);
 
+  /* Sorting State */
+  const [sortColIndex, setSortColIndex] = useState<number | null>(null);
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
+
+  const handleHeaderSort = useCallback((colIdx: number) => {
+    setSortColIndex((prevCol) => {
+      if (prevCol === colIdx) {
+        if (sortDirection === "asc") {
+          setSortDirection("desc");
+          return colIdx;
+        } else {
+          setSortDirection("asc");
+          return null;
+        }
+      } else {
+        setSortDirection("asc");
+        return colIdx;
+      }
+    });
+  }, [sortDirection]);
+
   /* Selection & Detail View */
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [detailBuyer, setDetailBuyer] = useState<Buyer | null>(null);
@@ -2314,6 +2335,67 @@ export function BuyersPage() {
   /* ------------------------------------------------------------------------- */
   /* RENDER: MAIN BUYER MASTER LIST VIEW                                        */
   /* ------------------------------------------------------------------------- */
+  const sortedRows = useMemo(() => {
+    if (sortColIndex === null) return rows;
+    const list = [...rows];
+    list.sort((a, b) => {
+      let valA: string | number = "";
+      let valB: string | number = "";
+      switch (sortColIndex) {
+        case 1: {
+          const tA = (a as any).created_at ? new Date((a as any).created_at).getTime() : 0;
+          const tB = (b as any).created_at ? new Date((b as any).created_at).getTime() : 0;
+          return sortDirection === "asc" ? tA - tB : tB - tA;
+        }
+        case 2:
+          valA = a.company_name || "";
+          valB = b.company_name || "";
+          break;
+        case 3:
+          valA = a.buyer_type || "";
+          valB = b.buyer_type || "";
+          break;
+        case 4:
+          valA = (a.category_ids || []).map((id) => categories.items.find((c) => c.id === id)?.name || categoryNamesFallback.items.find((c) => c.id === id)?.name || "").filter(Boolean).join(", ");
+          valB = (b.category_ids || []).map((id) => categories.items.find((c) => c.id === id)?.name || categoryNamesFallback.items.find((c) => c.id === id)?.name || "").filter(Boolean).join(", ");
+          break;
+        case 5:
+          valA = (a.sub_category_ids || []).map((id) => subCategories.items.find((sc) => sc.id === id)?.name || subCategoryNamesFallback.items.find((sc) => sc.id === id)?.name || "").filter(Boolean).join(", ");
+          valB = (b.sub_category_ids || []).map((id) => subCategories.items.find((sc) => sc.id === id)?.name || subCategoryNamesFallback.items.find((sc) => sc.id === id)?.name || "").filter(Boolean).join(", ");
+          break;
+        case 6:
+          valA = countries.items.find((c) => c.id === a.country_id)?.name || "";
+          valB = countries.items.find((c) => c.id === b.country_id)?.name || "";
+          break;
+        case 7:
+          valA = a.current_status || "";
+          valB = b.current_status || "";
+          break;
+        case 8:
+          valA = a.potential || "";
+          valB = b.potential || "";
+          break;
+        case 9:
+          valA = a.buyer_grade || "";
+          valB = b.buyer_grade || "";
+          break;
+        case 10: {
+          const tA = (a as any).created_at ? new Date((a as any).created_at).getTime() : 0;
+          const tB = (b as any).created_at ? new Date((b as any).created_at).getTime() : 0;
+          return sortDirection === "asc" ? tA - tB : tB - tA;
+        }
+        default:
+          return 0;
+      }
+      const strA = String(valA).trim().toLowerCase();
+      const strB = String(valB).trim().toLowerCase();
+      return sortDirection === "asc"
+        ? strA.localeCompare(strB, undefined, { numeric: true, sensitivity: "base" })
+        : strB.localeCompare(strA, undefined, { numeric: true, sensitivity: "base" });
+    });
+    return list;
+  }, [rows, sortColIndex, sortDirection, categories.items, subCategories.items, countries.items, categoryNamesFallback.items, subCategoryNamesFallback.items]);
+
   return (
     <AppShell activeKey="buyers">
       <main className="page" style={{ padding: "20px", maxWidth: "1600px", margin: "0 auto" }}>
@@ -2686,12 +2768,8 @@ export function BuyersPage() {
               <thead>
                 <tr style={{ background: "#f8fafc", borderBottom: "1px solid #e2e8f0" }}>
                   {displayOrder.map((colIdx) => {
-                    const headers = [
-                      <input
-                        type="checkbox"
-                        checked={selectedIds.length > 0 && selectedIds.length === rows.length}
-                        onChange={(e) => setSelectedIds(e.target.checked ? rows.map((r) => r.id) : [])}
-                      />,
+                    const label = [
+                      "Checkbox",
                       "Sr. No.",
                       "Name of Company",
                       "Buyer Type",
@@ -2703,23 +2781,115 @@ export function BuyersPage() {
                       "Client Grade",
                       "Added On",
                       "Action",
-                    ];
+                    ][colIdx];
+                    const isPinned = Boolean(pinnedCols[colIdx]);
+                    const isSorted = sortColIndex === colIdx;
+                    const isSortable = colIdx >= 1 && colIdx <= 10;
                     return (
                       <th
                         key={colIdx}
                         style={{
                           padding: colIdx === 0 || colIdx === 1 ? "10px 8px" : "10px 14px",
-                          width: colIdx === 0 ? "40px" : colIdx === 1 ? "65px" : undefined,
-                          minWidth: colIdx === 0 ? "40px" : colIdx === 1 ? "65px" : undefined,
-                          maxWidth: colIdx === 0 ? "45px" : colIdx === 1 ? "75px" : undefined,
-                          textAlign: colIdx === 0 || colIdx === 1 ? "center" : "left",
+                          width: colIdx === 0 ? "40px" : colIdx === 1 ? "75px" : undefined,
+                          minWidth: colIdx === 0 ? "40px" : colIdx === 1 ? "75px" : undefined,
+                          maxWidth: colIdx === 0 ? "45px" : colIdx === 1 ? "85px" : undefined,
+                          textAlign: colIdx === 0 || colIdx === 1 ? "center" : colIdx === 11 ? "center" : "left",
                           fontWeight: 700,
                           color: "#475569",
                           whiteSpace: "nowrap",
                           ...getFreezeStyle(colIdx, true),
                         }}
                       >
-                        {headers[colIdx]}
+                        {colIdx === 0 ? (
+                          <input
+                            type="checkbox"
+                            checked={selectedIds.length > 0 && selectedIds.length === rows.length}
+                            onChange={(e) => setSelectedIds(e.target.checked ? rows.map((r) => r.id) : [])}
+                            style={{ cursor: "pointer", width: "16px", height: "16px" }}
+                          />
+                        ) : isSortable ? (
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: colIdx === 1 ? "center" : "space-between", gap: "4px" }}>
+                            <div
+                              onClick={() => handleHeaderSort(colIdx)}
+                              style={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: "5px",
+                                cursor: "pointer",
+                                userSelect: "none",
+                                flex: colIdx === 1 ? undefined : 1,
+                                minWidth: 0,
+                                padding: "2px 0",
+                              }}
+                              title={
+                                isSorted
+                                  ? `Sorted by ${label} (${sortDirection === "asc" ? "Ascending — click for Descending" : "Descending — click to reset"})`
+                                  : `Click to sort by ${label} (Ascending)`
+                              }
+                            >
+                              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                {label}
+                              </span>
+                              {isSorted ? (
+                                <span
+                                  style={{
+                                    display: "inline-flex",
+                                    alignItems: "center",
+                                    color: "#0284c7",
+                                    fontSize: "10px",
+                                    fontWeight: 800,
+                                    background: "#e0f2fe",
+                                    padding: "1px 4px",
+                                    borderRadius: "3px",
+                                    border: "1px solid #bae6fd",
+                                    lineHeight: 1,
+                                    flexShrink: 0,
+                                  }}
+                                >
+                                  {sortDirection === "asc" ? "▲" : "▼"}
+                                </span>
+                              ) : (
+                                <span
+                                  style={{
+                                    fontSize: "10px",
+                                    color: "#94a3b8",
+                                    opacity: 0.45,
+                                    lineHeight: 1,
+                                    flexShrink: 0,
+                                  }}
+                                >
+                                  ↕
+                                </span>
+                              )}
+                            </div>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                togglePin(colIdx);
+                              }}
+                              style={{ background: "none", border: "none", cursor: "pointer", fontSize: "11px", opacity: isPinned ? 1 : 0.3, padding: "0 2px", flexShrink: 0 }}
+                              title={isPinned ? "Unfreeze column" : "Freeze column"}
+                            >
+                              📌
+                            </button>
+                          </div>
+                        ) : (
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "4px" }}>
+                            <span>{label}</span>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                togglePin(colIdx);
+                              }}
+                              style={{ background: "none", border: "none", cursor: "pointer", fontSize: "11px", opacity: isPinned ? 1 : 0.3, padding: "0 2px", flexShrink: 0 }}
+                              title={isPinned ? "Unfreeze column" : "Freeze column"}
+                            >
+                              📌
+                            </button>
+                          </div>
+                        )}
                       </th>
                     );
                   })}
@@ -2728,14 +2898,14 @@ export function BuyersPage() {
               <tbody>
                 {loading ? (
                   <BuyerSkeletonRows count={8} displayOrder={displayOrder} getFreezeStyle={getFreezeStyle} />
-                ) : rows.length === 0 ? (
+                ) : sortedRows.length === 0 ? (
                   <tr>
                     <td colSpan={12} style={{ textAlign: "center", padding: "30px", color: "#64748b" }}>
                       No buyer profiles found.
                     </td>
                   </tr>
                 ) : (
-                  rows.map((r, rowIndex) => {
+                  sortedRows.map((r, rowIndex) => {
                     const countryName = countries.items.find((c) => c.id === r.country_id)?.name || "—";
                     const isExisting = r.current_status === "existing";
                     const isPotentialYes = r.potential === "yes";

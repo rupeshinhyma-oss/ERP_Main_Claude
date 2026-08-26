@@ -1002,6 +1002,98 @@ export function SuppliersPage() {
     return `${data.product_code} — ${data.product_name}`;
   }, []);
 
+  const [sortColIndex, setSortColIndex] = useState<number | null>(null);
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
+
+  const handleHeaderSort = useCallback((colIdx: number) => {
+    setSortColIndex((prevCol) => {
+      if (prevCol === colIdx) {
+        if (sortDirection === "asc") {
+          setSortDirection("desc");
+          return colIdx;
+        } else {
+          setSortDirection("asc");
+          return null;
+        }
+      } else {
+        setSortDirection("asc");
+        return colIdx;
+      }
+    });
+  }, [sortDirection]);
+
+  const sortedRows = useMemo(() => {
+    if (sortColIndex === null) return rows;
+    const list = [...rows];
+    list.sort((a, b) => {
+      let valA: string | number = "";
+      let valB: string | number = "";
+      switch (sortColIndex) {
+        case 1: {
+          const tA = (a as any).created_at ? new Date((a as any).created_at).getTime() : 0;
+          const tB = (b as any).created_at ? new Date((b as any).created_at).getTime() : 0;
+          return sortDirection === "asc" ? tA - tB : tB - tA;
+        }
+        case 2:
+          valA = a.company_name || "";
+          valB = b.company_name || "";
+          break;
+        case 3:
+          valA = (a.category_ids || []).map((id) => resolver.get("categories", id) || "").filter(Boolean).join(", ");
+          valB = (b.category_ids || []).map((id) => resolver.get("categories", id) || "").filter(Boolean).join(", ");
+          break;
+        case 4:
+          valA = (a.sub_category_ids || []).map((id) => resolver.get("subCategories", id) || "").filter(Boolean).join(", ");
+          valB = (b.sub_category_ids || []).map((id) => resolver.get("subCategories", id) || "").filter(Boolean).join(", ");
+          break;
+        case 5:
+          valA = (a.product_ids || []).map((id) => resolver.get("products", id) || "").filter(Boolean).join(", ");
+          valB = (b.product_ids || []).map((id) => resolver.get("products", id) || "").filter(Boolean).join(", ");
+          break;
+        case 6:
+          valA = a.secondary_products_description || "";
+          valB = b.secondary_products_description || "";
+          break;
+        case 7:
+          valA = resolver.get("countries", a.country_id) || "";
+          valB = resolver.get("countries", b.country_id) || "";
+          break;
+        case 8:
+          valA = `${resolver.get("cities", a.city_id) || ""}, ${resolver.get("states", a.state_id) || ""}`;
+          valB = `${resolver.get("cities", b.city_id) || ""}, ${resolver.get("states", b.state_id) || ""}`;
+          break;
+        case 9:
+          valA = a.brand_description || "";
+          valB = b.brand_description || "";
+          break;
+        case 10:
+          valA = a.supplier_type || "";
+          valB = b.supplier_type || "";
+          break;
+        case 11:
+          valA = a.current_status || "";
+          valB = b.current_status || "";
+          break;
+        case 12:
+          valA = a.supplier_grade || "";
+          valB = b.supplier_grade || "";
+          break;
+        case 13:
+          valA = a.potential || "";
+          valB = b.potential || "";
+          break;
+        default:
+          return 0;
+      }
+      const strA = String(valA).trim().toLowerCase();
+      const strB = String(valB).trim().toLowerCase();
+      return sortDirection === "asc"
+        ? strA.localeCompare(strB, undefined, { numeric: true, sensitivity: "base" })
+        : strB.localeCompare(strA, undefined, { numeric: true, sensitivity: "base" });
+    });
+    return list;
+  }, [rows, sortColIndex, sortDirection, resolver, namesVersion]);
+
   /* --- Search debounce with Sr. No. jump --- */
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -3852,17 +3944,83 @@ export function SuppliersPage() {
                       ][idx];
                       const isPinned = Boolean(pinnedCols[idx]);
                       const isSrNo = idx === 1;
+                      const isAction = idx === 14;
+                      const isSorted = sortColIndex === idx;
                       return (
                         <th
                           key={`col-${idx}-${label}`}
                           style={{
-                            ...(isSrNo ? { width: "65px", minWidth: "65px", maxWidth: "75px", textAlign: "center" } : idx === 14 ? { textAlign: "center" } : {}),
+                            ...(isSrNo ? { width: "75px", minWidth: "75px", maxWidth: "85px", textAlign: "center" } : isAction ? { textAlign: "center" } : {}),
                             ...getFreezeStyle(idx, true),
                           }}
                         >
-                          <div style={{ display: "flex", alignItems: "center", justifyContent: idx === 14 || isSrNo ? "center" : "space-between", gap: "2px" }}>
-                            <span style={isSrNo ? { whiteSpace: "nowrap" } : {}}>{label}</span>
-                            <button type="button" onClick={() => togglePin(idx)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: "11px", opacity: isPinned ? 1 : 0.3, padding: "0 2px" }} title={isPinned ? "Unfreeze column" : "Freeze column"}>
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: isAction ? "center" : "space-between", gap: "4px" }}>
+                            {isAction ? (
+                              <span>{label}</span>
+                            ) : (
+                              <div
+                                onClick={() => handleHeaderSort(idx)}
+                                style={{
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: "5px",
+                                  cursor: "pointer",
+                                  userSelect: "none",
+                                  flex: isSrNo ? undefined : 1,
+                                  minWidth: 0,
+                                  padding: "2px 0",
+                                }}
+                                title={
+                                  isSorted
+                                    ? `Sorted by ${label} (${sortDirection === "asc" ? "Ascending — click for Descending" : "Descending — click to reset"})`
+                                    : `Click to sort by ${label} (Ascending)`
+                                }
+                              >
+                                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                  {label}
+                                </span>
+                                {isSorted ? (
+                                  <span
+                                    style={{
+                                      display: "inline-flex",
+                                      alignItems: "center",
+                                      color: "#0284c7",
+                                      fontSize: "10px",
+                                      fontWeight: 800,
+                                      background: "#e0f2fe",
+                                      padding: "1px 4px",
+                                      borderRadius: "3px",
+                                      border: "1px solid #bae6fd",
+                                      lineHeight: 1,
+                                      flexShrink: 0,
+                                    }}
+                                  >
+                                    {sortDirection === "asc" ? "▲" : "▼"}
+                                  </span>
+                                ) : (
+                                  <span
+                                    style={{
+                                      fontSize: "10px",
+                                      color: "#94a3b8",
+                                      opacity: 0.45,
+                                      lineHeight: 1,
+                                      flexShrink: 0,
+                                    }}
+                                  >
+                                    ↕
+                                  </span>
+                                )}
+                              </div>
+                            )}
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                togglePin(idx);
+                              }}
+                              style={{ background: "none", border: "none", cursor: "pointer", fontSize: "11px", opacity: isPinned ? 1 : 0.3, padding: "0 2px", flexShrink: 0 }}
+                              title={isPinned ? "Unfreeze column" : "Freeze column"}
+                            >
                               📌
                             </button>
                           </div>
@@ -3874,10 +4032,10 @@ export function SuppliersPage() {
                 <tbody ref={tableBodyRef} data-names-version={namesVersion}>
                   {loading ? (
                     <SupplierSkeletonRows count={8} displayOrder={displayOrder} getFreezeStyle={getFreezeStyle} />
-                  ) : rows.length === 0 ? (
+                  ) : sortedRows.length === 0 ? (
                     <TableMessageRow colSpan={15}>No suppliers found.</TableMessageRow>
                   ) : (
-                    rows.map((s, index) => (
+                    sortedRows.map((s, index) => (
                       <tr key={s.id}>
                         {displayOrder.map((idx) => {
                           switch (idx) {

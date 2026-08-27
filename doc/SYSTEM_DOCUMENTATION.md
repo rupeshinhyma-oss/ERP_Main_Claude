@@ -318,7 +318,7 @@ $$\text{Total CBM} = \text{CBM per Package} \times \text{Total Packages}$$
 | `PATCH` | `/inquiries/quotations/{quotation_id}` | Edit quotation details (qty, price, currency, terms, remarks) | `inquiry.update` |
 | `PATCH` | `/inquiries/quotations/{quotation_id}/status` | Approve or reject quotation | `inquiry.approve` |
 | `DELETE` | `/inquiries/quotations/{quotation_id}` | Soft-delete quotation and auto-resync item status & KPIs | `inquiry.delete` |
-| `POST` | `/inquiries/items/{item_id}/ai-parse-quote` | AI-powered extraction from text/chat/PDF (GPT-4o-mini) | `inquiry.action` |
+| `POST` | `/inquiries/inbound-webhook` | Webhook for WeChat, WhatsApp & Email quotation auto-ingestion | Public (API / Webhook) |
 | `GET` | `/inquiries/items/{item_id}/quotations` | List all quotations with supplier turnaround & RFQ dates | `inquiry.read` |
 | `GET` | `/inquiries/quotations/documents` | Fetch all quotation sheets for Product & Supplier Gallery | `inquiry.read` |
 | `POST` | `/inquiries/bulk-tally-post` | Bulk mark multiple items as Tally Entry Posted | `inquiry.update` |

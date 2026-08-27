@@ -157,5 +157,7 @@ Merged remote-tracking branch `origin/main` with the local workspace to unify al
 - **Verification:**
   - `npx tsc --noEmit` verified with **0 errors**.
   - Python interpreter verified all backend modules with **0 syntax/import errors**.
-  - Working tree clean, strictly **0 pushes** performed to remote.
+  - Removed manual "AI Parse Quote" button, drawer, and `POST /items/{item_id}/ai-parse-quote` endpoint; fully transitioned quotation ingestion to the background automated email worker (`email_inbound_worker.py`) and inbound webhook.
+  - Working tree clean.
+
 

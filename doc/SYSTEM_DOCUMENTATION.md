@@ -1,7 +1,7 @@
 # Enterprise ERP System — Complete Architecture, Feature & Developer Integration Manual
 
 > **System Version:** 1.0.0 (Production)  
-> **Last Updated:** August 2026  
+> **Last Updated:** August 27, 2026  
 > **Architectural Pattern:** Modular Async Monolith (FastAPI) + React 18 SPA (Vite) + Real-Time WebSocket Event Bus  
 > **Target Audience:** Systems Architects, Software Engineers, and Autonomous AI Coding Agents.
 
@@ -170,38 +170,37 @@ $$\text{EffectivePermissions} = \left( \bigcup_{r \in \text{UserRoles}} \text{Ro
 
 ### 4.1. Inquiries & Automated AI Quotation Extractor
 
-**File:** `backend/app/inquiries/ai_extractor.py` & `email_inbound_worker.py`
+**Files:** `backend/app/inquiries/ai_extractor.py`, `backend/app/inquiries/email_inbound_worker.py`, `frontend/src/pages/Inquiries.tsx`
 
-#### Extraction Workflow
-1. **Source Ingestion**: Inbound email with quotation attachment (PDF/Excel) or raw chat text is received.
-2. **Text & Vision Processing**:
-   - PDFs are parsed using `pypdf.PdfReader` to extract native text.
-   - For image attachments, images are Base64-encoded for multimodal vision models.
-3. **LLM Extraction Call**: Prompted with inquiry target data (Product Name, SKU, Target Quantity, Target Date).
-4. **Structured JSON Output**:
-```json
-{
-  "is_quotation_detected": true,
-  "unit_price": 185.50,
-  "currency": "CNY",
-  "quantity": 500.0,
-  "can_meet_target_date": true,
-  "earliest_available_date": "2026-09-15",
-  "lead_time_days": 18,
-  "price_terms": "FOB Ningbo",
-  "payment_terms": "30% deposit, balance before shipment",
-  "remarks": "Standard seaworthy packaging included.",
-  "supplier_notes_summary": "Supplier confirmed quotation of 185.50 CNY per piece with 18 days lead time.",
-  "provider_used": "openai-gpt-4o-mini"
-}
-```
-5. **Persistence**: Extracted quotes are saved to `inquiry_supplier_quotes` with `is_ai_extracted=True` and instantly visible in the Quotation Comparison Matrix.
+#### Inbound Email & AI Ingestion Architecture
+1. **Background Polling Daemon**: `email_inbound_worker.py` runs as an asynchronous background worker polling configured IMAP mailboxes for inbound quotation replies from suppliers.
+2. **Consignment & Item Resolution**:
+   - Matches consignment codes from email subject tags (e.g., `[#FB1]`) or tokenized reply metadata.
+   - Queries active (non-deleted) inquiry line items (`deleted_at IS NULL`) linked to the consignment.
+3. **Multimodal & Text Processing**:
+   - Parses email text bodies and extracts text from attached quotation PDFs using `pypdf`.
+   - Extracts images or screenshots via OpenAI GPT-4o-mini multimodal vision extraction.
+4. **Structured Multi-Product AI Extraction**:
+   - Prompts the LLM with active candidate items (Product Name, SKU / Product Code, Target Quantity).
+   - Automatically converts relative supplier production lead time durations (e.g., `"15–20 working days"`) into precise calendar dates based on quotation received timestamps.
+5. **Weighted Model Token Matching**:
+   - Employs token-weighted matching to ensure accurate separation between closely named variants (e.g., `DBF 1000AN`, `DBF 900`, `FR 900A`).
+6. **Strict 1-Initial-Quote Rule per (Supplier, Item) Pair**:
+   - Ingests the initial quotation for each (Supplier, Product) pair.
+   - Subsequent back-and-forth negotiation emails from the same supplier for that product are not duplicated as new rows in the ERP, preventing table flooding.
+7. **Quotation Management & Live Revision**:
+   - **Turnaround Tracking**: Tracks elapsed turnaround time between RFQ dispatch (`rfq_sent_at`) and quotation receipt (`created_at`).
+   - **Interactive Edit Drawer (`EditQuotationModal`)**: Sales personnel can adjust Quantity, Unit Price, Currency, Expected Receiving Date, Terms & Conditions, and Negotiation Remarks via `PATCH /api/v1/inquiries/quotations/{id}` with live WebSockets.
 
 ---
 
-### 4.2. Master Shipment Planning & Container Calculations
+### 4.2. Master Shipment Planning & Multi-Column Sorting
 
-**File:** `backend/app/planning/service.py` & `frontend/src/pages/Planning.tsx`
+**Files:** `backend/app/planning/service.py`, `backend/app/planning/repository.py`, `frontend/src/pages/Planning.tsx`
+
+#### Alphabetical & Multi-Column Sorting Engine
+1. **Hierarchical Group Sorting**: Planning rows are grouped and ordered alphabetically by Subcategory Name, followed by Product Name (`Product.sub_category_id`, `Product.product_name_tally / product_name`).
+2. **Interactive Column Sorting**: The planning grid supports clicking column headers for ascending/descending order with visual indicators.
 
 #### Container Calculation Engine
 Given dimensions $(L, W, H \text{ in cm})$ and packing count:
@@ -307,14 +306,22 @@ $$\text{Total CBM} = \text{CBM per Package} \times \text{Total Packages}$$
 ### 6.5. Inquiries & Quotations (`/api/v1/inquiries`)
 | Method | Path | Summary | Permission Required |
 | :--- | :--- | :--- | :--- |
-| `GET` | `/inquiries` | List RFQ inquiries with status filters | `inquiry.read` |
-| `POST` | `/inquiries` | Create new inquiry RFQ | `inquiry.create` |
+| `GET` | `/inquiries` | List RFQ inquiries with status filters & company summaries | `inquiry.read` |
+| `POST` | `/inquiries` | Create new inquiry consignment header | `inquiry.create` |
 | `GET` | `/inquiries/{id}` | Full inquiry breakdown with line items | `inquiry.read` |
 | `PATCH` | `/inquiries/{id}` | Update inquiry header / status | `inquiry.update` |
 | `POST` | `/inquiries/{id}/items` | Add line item to inquiry | `inquiry.update` |
-| `POST` | `/inquiries/{id}/generate-quote-link` | Generate tokenized supplier quote portal link | `inquiry.action` |
-| `POST` | `/inquiries/{id}/ai-extract-quote` | Trigger AI extraction from document | `inquiry.action` |
-| `GET` | `/inquiries/{id}/compare-matrix` | Multi-vendor quotation comparison matrix | `inquiry.read` |
+| `POST` | `/inquiries/{id}/items/bulk` | Bulk add line items to consignment | `inquiry.update` |
+| `POST` | `/inquiries/{id}/bulk-rfqs` | Dispatch consolidated multi-item RFQ emails to suppliers | `inquiry.action` |
+| `POST` | `/inquiries/items/{item_id}/rfqs` | Dispatch single-item RFQ and generate tokenized links | `inquiry.action` |
+| `POST` | `/inquiries/items/{item_id}/quotations` | Manually record supplier quotation | `inquiry.update` |
+| `PATCH` | `/inquiries/quotations/{quotation_id}` | Edit quotation details (qty, price, currency, terms, remarks) | `inquiry.update` |
+| `PATCH` | `/inquiries/quotations/{quotation_id}/status` | Approve or reject quotation | `inquiry.approve` |
+| `DELETE` | `/inquiries/quotations/{quotation_id}` | Soft-delete quotation and auto-resync item status & KPIs | `inquiry.delete` |
+| `POST` | `/inquiries/items/{item_id}/ai-parse-quote` | AI-powered extraction from text/chat/PDF (GPT-4o-mini) | `inquiry.action` |
+| `GET` | `/inquiries/items/{item_id}/quotations` | List all quotations with supplier turnaround & RFQ dates | `inquiry.read` |
+| `GET` | `/inquiries/quotations/documents` | Fetch all quotation sheets for Product & Supplier Gallery | `inquiry.read` |
+| `POST` | `/inquiries/bulk-tally-post` | Bulk mark multiple items as Tally Entry Posted | `inquiry.update` |
 
 ### 6.6. Public Supplier Quote Portal (`/api/v1/public/quotes`)
 | Method | Path | Summary | Permission Required |

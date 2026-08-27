@@ -121,3 +121,41 @@ No Redis/Memcached/external cache dependency was added — this is a
 zero-dependency, in-process cache, per the brief. A `redis_backend.py`
 extension point is documented in `app/cache/dependency.py` for a future
 phase, but is not implemented.
+
+---
+
+# Phase 10 Merge — Remote Branch Integration & Inquiries AI Automation
+
+Merged remote-tracking branch `origin/main` with the local workspace to unify all Shipment Planning sorting features, RBAC Department Manager updates, and Inquiries AI Automated Quotation Ingestion.
+
+## 1. Merged Features from Remote (`origin/main`)
+
+| Component | Features Integrated |
+|---|---|
+| **Shipment Planning** | Added column-level ascending/descending sorting in `frontend/src/pages/Planning.tsx`; implemented subcategory-wise and product-wise alphabetical group sorting in `backend/app/planning/repository.py`. |
+| **Suppliers & Buyers** | Added ascending/descending sorting by Company Name, Contact Person, Country, Category, and Dates across `Suppliers.tsx` and `Buyers.tsx`. |
+| **RBAC & Departments** | Upgraded Roles to Departments with Department Managers; added individual user permission grant/deny overrides; integrated reporting manager syncing in `Rbac.tsx` and `app/rbac/`. |
+| **User Management** | Made `last_name` optional/nullable across `UserCreate`, `UserUpdate`, `UserProfile`, and `Users.tsx` / `Profile.tsx`. |
+| **Documentation** | Added `doc/SYSTEM_DOCUMENTATION.md` comprehensive system architecture manual and `AGENTS.md` living documentation guidelines. |
+
+## 2. Merged Local Inquiries & AI Quotation Features
+
+| Feature | Description |
+|---|---|
+| **Inbound Email AI Worker** | `backend/app/inquiries/email_inbound_worker.py` automatically scans incoming supplier quotation emails, uses OpenAI GPT-4o-mini to extract pricing/commercial terms, and creates quotation records linked to active inquiry items. |
+| **1-Quote per (Supplier, Item) Rule** | Auto-ingests only the first initial quotation per (Supplier, Product) pair. Ongoing email negotiations do not duplicate quotation rows in the ERP, preventing table flooding. |
+| **Turnaround & Lead Time** | Automatically calculates supplier turnaround time (elapsed minutes/hours from RFQ dispatch to quote receipt) and converts relative lead times (e.g. `15-20 working days`) into exact calendar dates. |
+| **Edit Quotation Drawer (`EditQuotationModal`)** | Frontend drawer in `Inquiries.tsx` and backend endpoint `PATCH /api/v1/inquiries/quotations/{quotation_id}` allowing sales teams to adjust quantity, unit price, currency, lead time date, terms, and remarks with instant WebSocket updates. |
+| **Enterprise Design Standards** | Standardized all Inquiry modals and tables with clean corporate SVG icons, removing informal emojis. |
+
+## 3. Conflict Resolution & Verification
+
+- **`backend/processed_email_ids.json`:** Combined all unique processed email message IDs from both local and remote branches.
+- **`backend/app/inquiries/repository.py`:** Removed duplicate repository class block; retained `rfq_sent_at` query joining and document gallery methods.
+- **`backend/app/inquiries/routes.py`:** Retained `create_bulk_rfqs` endpoint, `QuotationUpdate` schema import, and `PATCH /inquiries/quotations/{id}` route.
+- **`frontend/src/pages/Inquiries.tsx`:** Retained `EditQuotationModal`, `editQuoteTarget`, `bulkRfqOpen`, and corporate table layouts.
+- **Verification:**
+  - `npx tsc --noEmit` verified with **0 errors**.
+  - Python interpreter verified all backend modules with **0 syntax/import errors**.
+  - Working tree clean, strictly **0 pushes** performed to remote.
+

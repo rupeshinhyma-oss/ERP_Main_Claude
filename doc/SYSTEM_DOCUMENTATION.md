@@ -1,20 +1,54 @@
-# Enterprise ERP System — Complete Architecture, Feature & Developer Integration Manual
+# Enterprise ERP System — Unified Architecture, Feature & Technical Manual
 
 > **System Version:** 1.0.0 (Production)  
-> **Last Updated:** August 27, 2026  
+> **Last Updated:** August 2026  
 > **Architectural Pattern:** Modular Async Monolith (FastAPI) + React 18 SPA (Vite) + Real-Time WebSocket Event Bus  
-> **Target Audience:** Systems Architects, Software Engineers, and Autonomous AI Coding Agents.
+> **Target Audience:** Systems Architects, Software Engineers, DevOps, and Autonomous AI Coding Assistants.  
+> **Scope:** Complete end-to-end technical reference containing all system features, data models, API endpoints, background workers, frontend architecture, and developer integration guidelines.
 
 ---
 
-## 1. Executive Architecture Blueprint
+## Table of Contents
+
+1. [Executive Architecture & System Topology](#1-executive-architecture--system-topology)
+2. [Technology Stack & Dependencies](#2-technology-stack--dependencies)
+3. [Directory Layout & File Map](#3-directory-layout--file-map)
+4. [Database Architecture & Universal Mixins](#4-database-architecture--universal-mixins)
+5. [Complete Data Models & Entity Dictionary](#5-complete-data-models--entity-dictionary)
+6. [Security, Authentication & Session Engine](#6-security-authentication--session-engine)
+7. [RBAC Engine, Departments & Effective Permissions](#7-rbac-engine-departments--effective-permissions)
+8. [Module-by-Module Technical Breakdown](#8-module-by-module-technical-breakdown)
+   - 8.1. [Authentication & Active Sessions](#81-authentication--active-sessions)
+   - 8.2. [Users & HR Profile Management](#82-users--hr-profile-management)
+   - 8.3. [Departments & Department Managers](#83-departments--department-managers)
+   - 8.4. [Master Data & Generic Catalogs](#84-master-data--generic-catalogs)
+   - 8.5. [Product Catalog & Dynamic Specification Builder](#85-product-catalog--dynamic-specification-builder)
+   - 8.6. [Supplier Directory & Tokenized Public Portal](#86-supplier-directory--tokenized-public-portal)
+   - 8.7. [Buyer & Client Management](#87-buyer--client-management)
+   - 8.8. [Inquiries, RFQs & AI Quotation Extractor](#88-inquiries-rfqs--ai-quotation-extractor)
+   - 8.9. [Automated Inbound IMAP Email Worker](#89-automated-inbound-imap-email-worker)
+   - 8.10. [Master Shipment Planning Grid & Container Calculations](#810-master-shipment-planning-grid--container-calculations)
+   - 8.11. [Audit Trails & JSON Delta Change Diffing](#811-audit-trails--json-delta-change-diffing)
+   - 8.12. [Recycle Bin (Universal Soft-Delete & Recovery)](#812-recycle-bin-universal-soft-delete--recovery)
+   - 8.13. [Organization & System Profile](#813-organization--system-profile)
+9. [Real-Time WebSocket & Event Synchronization](#9-real-time-websocket--event-synchronization)
+10. [Multi-Tier Caching Engine](#10-multi-tier-caching-engine)
+11. [Universal Bulk Import & Export Wizard](#11-universal-bulk-import--export-wizard)
+12. [Frontend Architecture & Single-Flight Token Refresh](#12-frontend-architecture--single-flight-token-refresh)
+13. [Complete API Route & Endpoint Directory](#13-complete-api-route--endpoint-directory)
+14. [Developer & AI Integration Guide (Rules of Engagement)](#14-developer--ai-integration-guide-rules-of-engagement)
+15. [Deployment, Environment Variables & Operations](#15-deployment-environment-variables--operations)
+
+---
+
+## 1. Executive Architecture & System Topology
 
 ```
 +---------------------------------------------------------------------------------------------------+
 |                                          CLIENT TIER                                              |
 |  React 18 Single Page App  |  IHM Design System (Vanilla CSS)  |  WebSocket Real-Time Listener    |
 +-------------------------------------------------+-------------------------------------------------+
-                                                  | HTTPS / WSS
+                                                  | HTTPS / WSS JSON API
 +-------------------------------------------------v-------------------------------------------------+
 |                                     FASTAPI APPLICATION TIER                                      |
 |                                                                                                   |
@@ -24,7 +58,7 @@
 |  | Authentication & Sessions |  | RBAC & Department Engine  |  | Inquiries & RFQ Lifecycle     |  |
 |  | - Argon2id Password Hash  |  | - Hierarchical Roles      |  | - Multi-Vendor RFQ Tracking   |  |
 |  | - JWT Access & Refresh    |  | - Dynamic Permissions     |  | - Quotation Matrix Comparison |  |
-|  | - Session Device Registry |  | - User Override Engine    |  | - AI Extraction (GPT-4o/Gemini|  |
+|  | - Single-Flight Refresh   |  | - User Override Engine    |  | - AI Extraction (GPT-4o/Gemini|  |
 |  +---------------------------+  +---------------------------+  +-------------------------------+  |
 |  | Master Data & Catalogs    |  | Sourcing & Partners       |  | Master Planning Engine        |  |
 |  | - Dynamic Specs Engine    |  | - Suppliers & Contacts    |  | - Dynamic Sheet/Row/Col/Cell  |  |
@@ -40,342 +74,427 @@
                                  |                            |
 +--------------------------------v-------+  +-----------------v-------+  +--------------------------+
 |            PERSISTENCE TIER            |  |       CACHING TIER      |  |       STORAGE TIER       |
-| PostgreSQL / SQLite (SQLAlchemy Async) |  | Redis / InMemoryCache   |  | Local / S3 File Storage  |
-| Alembic Versioned Migrations           |  | Namespace-Based Cache   |  | Uploads, PDFs, Datasheet |
+| PostgreSQL / SQLite (SQLAlchemy Async) |  | Redis / InMemoryCache   |  | Local / Cloud Uploads    |
+| Alembic Versioned Migrations           |  | Namespace-Based Cache   |  | Quotations, PDFs, Images |
 +----------------------------------------+  +-------------------------+  +--------------------------+
 ```
 
-### 1.1. Core System Design Principles
-1. **Asynchronous Non-Blocking I/O**: The backend runs exclusively on Python's `asyncio` event loop using `asyncpg` or `aiosqlite`. All database sessions, network requests, AI calls, and file I/O operations are non-blocking.
-2. **Optimistic Locking & Concurrency Control**: All core business entities implement a `version` column. Concurrent updates verify the version counter before committing to prevent stale overwrites.
-3. **Universal Soft-Delete & Data Integrity**: Entities inherit `SoftDeleteMixin` (`deleted_at`, `deleted_by`). No record is hard-deleted during ordinary workflows; records move to the Trash bin and can be recovered with a single click.
-4. **Least-Privilege RBAC with Direct User Overrides**: Access is governed by granular permission codes (`module.action.scope`). Permissions can be assigned to entire Departments or overridden per user (`+ EXTRA GRANTED` / `✕ DIRECT DENIED`).
-5. **Deterministic Event Broadcasting**: Entity modifications publish structured WebSocket notifications to all active clients, ensuring user interfaces stay synchronized without polling.
+### 1.1. Core Architectural Pillars
+1. **Strict Onion Architecture**: `routes -> services -> repositories -> database`. Routes handle transport and authentication; services orchestrate business validation, audit logging, and caching; repositories build optimized async SQLAlchemy queries.
+2. **Unified Response Envelope**: Every HTTP response is structured as `{ "success": true, "data": ..., "meta": ..., "error": null }`. Error responses provide the same uniform contract with a standardized error code and debug message.
+3. **Domain Exceptions Hierarchy**: Business logic raises framework-agnostic exceptions (`NotFoundException`, `ConflictException`, `ForbiddenException`, `ValidationException`) translated into standard HTTP envelopes at the middleware boundary.
+4. **Optimistic Concurrency**: Records implement integer `version` attributes to prevent dirty overwrites during simultaneous concurrent edits.
+5. **Universal Soft-Deletion**: Records inherit `SoftDeleteMixin` (`deleted_at`, `deleted_by`). Deletion operations move data to the Recycle Bin for one-click restoration.
 
 ---
 
-## 2. Database Schema & Data Models
+## 2. Technology Stack & Dependencies
 
-The database models are located under `backend/app/` and inherit from declarative base mixins in `backend/app/database/base.py`.
+### Backend Stack
+- **Framework**: FastAPI (Python 3.11+) with Uvicorn ASGI server.
+- **ORM & Database**: SQLAlchemy 2.0 Async (`asyncpg` for PostgreSQL, `aiosqlite` for local dev) with Alembic migration versioning.
+- **Data Validation**: Pydantic v2 schemas for high-throughput serialization.
+- **Authentication**: Argon2id password hashing (`argon2-cffi`) and PyJWT (HMAC-SHA256).
+- **Caching**: Dual-backend (`InMemoryCacheBackend` with LRU eviction and Redis client).
+- **AI Processing**: OpenAI GPT-4o-mini / Google Gemini multimodal APIs for quote extraction from PDF/Excel/image documents.
+- **PDF & Office Tooling**: `ReportLab` for PDF datasheets and `openpyxl` / `pypdf` for spreadsheet and document parsing.
 
-### 2.1. Shared Base Mixins
-| Mixin Name | Fields Added | Purpose |
-| :--- | :--- | :--- |
-| `UUIDPrimaryKeyMixin` | `id: UUID (pk, default=uuid4)` | Globally unique identifier, collision-free across distributed systems. |
-| `TimestampMixin` | `created_at: DateTime(UTC)`, `updated_at: DateTime(UTC)` | Automatic tracking of creation and modification timestamps in UTC. |
-| `SoftDeleteMixin` | `deleted_at: DateTime(UTC, nullable)`, `deleted_by: UUID(nullable)` | Enables soft-deletion and Recycle Bin recovery workflows. |
-| `VersionMixin` | `version: Integer(default=1)` | Integer incremented on each update for optimistic concurrency checks. |
-
----
-
-### 2.2. Entity Models & Field Directory
-
-#### A. Users & Identity (`backend/app/users/models.py`)
-- **Table:** `users`
-- **Fields:**
-  - `id` (UUID, PK)
-  - `first_name` (String(100), required)
-  - `middle_name` (String(100), nullable)
-  - `last_name` (String(100), **optional / nullable**)
-  - `display_name` (String(200), required, indexed)
-  - `employee_code` (String(50), unique, indexed)
-  - `username` (String(100), unique, required, indexed)
-  - `email` (String(255), unique, required, indexed)
-  - `phone` (String(30), unique, required, indexed)
-  - `password_hash` (String(255), required)
-  - `manager_id` (UUID, FK $\rightarrow$ `users.id`, nullable, indexed) — **Reporting Manager hierarchy**
-  - `gender` (Enum: `MALE`, `FEMALE`, `OTHER`, `PREFER_NOT_TO_SAY`, nullable)
-  - `date_of_birth` (Date, nullable)
-  - `date_of_joining` (Date, nullable)
-  - `employment_type` (Enum: `FULL_TIME`, `PART_TIME`, `CONTRACT`, `INTERN`, `TEMPORARY`, default=`FULL_TIME`)
-  - `employment_status` (Enum: `ACTIVE`, `INACTIVE`, `ON_LEAVE`, `TERMINATED`, `RESIGNED`, default=`ACTIVE`)
-  - `address`, `city`, `state`, `country`, `postal_code`, `emergency_contact`, `notes` (Text/String, nullable)
-  - `status` (Enum: `PENDING`, `ACTIVE`, `INACTIVE`, `SUSPENDED`, `LOCKED`, `PASSWORD_CHANGE_REQUIRED`, default=`PENDING`)
-  - `is_active` (Boolean, default=`True`)
-  - `must_change_password` (Boolean, default=`True`)
-  - `last_login_at`, `password_changed_at`, `locked_until` (DateTime, nullable)
-  - `failed_login_count` (Integer, default=`0`)
-
-#### B. RBAC & Permissions (`backend/app/rbac/models.py`)
-- **`permissions`**:
-  - `id` (UUID, PK), `code` (String(150), unique, indexed, e.g. `"inquiry.create"`), `module` (String(100)), `page` (String(100)), `action` (String(50)), `scope` (String(50), default=`"ALL"`), `description` (String(255)).
-- **`roles`** (Departments):
-  - `id` (UUID, PK), `name` (String(100), unique, indexed), `description` (String(255)), `is_system` (Boolean, default=`False`).
-- **`role_permissions`**:
-  - `id` (UUID, PK), `role_id` (UUID, FK $\rightarrow$ `roles.id`), `permission_id` (UUID, FK $\rightarrow$ `permissions.id`).
-- **`user_roles`**:
-  - `id` (UUID, PK), `user_id` (UUID, FK $\rightarrow$ `users.id`), `role_id` (UUID, FK $\rightarrow$ `roles.id`).
-- **`user_permissions`** (Direct Individual Overrides):
-  - `id` (UUID, PK), `user_id` (UUID, FK $\rightarrow$ `users.id`), `permission_id` (UUID, FK $\rightarrow$ `permissions.id`), `is_granted` (Boolean, `True`=Grant, `False`=Deny).
-
-#### C. Sourcing & Supplier Directory (`backend/app/suppliers/models.py`)
-- **`suppliers`**:
-  - `id` (UUID, PK), `company_name` (String(200), required), `supplier_code` (String(50), unique), `country_id`, `state_id`, `city_id` (UUIDs, FKs), `address` (Text), `tin_number` (String(100)), `website` (String(255)), `payment_terms` (String(100)), `credit_days` (Integer), `currency_id` (UUID, FK), `is_active` (Boolean).
-- **`supplier_contacts`**:
-  - `id` (UUID, PK), `supplier_id` (UUID, FK), `contact_name` (String(150)), `designation` (String(100)), `email` (String(255)), `phone` (String(50)), `is_primary` (Boolean).
-
-#### D. Inquiries & AI Quotations (`backend/app/inquiries/models.py`)
-- **`inquiries`**:
-  - `id` (UUID, PK), `inquiry_number` (String(50), unique, indexed, e.g. `"INQ-2026-0001"`), `buyer_id` (UUID, FK $\rightarrow$ `buyers.id`), `title` (String(255)), `status` (Enum: `DRAFT`, `SENT_TO_SUPPLIERS`, `QUOTES_RECEIVED`, `UNDER_EVALUATION`, `APPROVED`, `ORDER_PLACED`, `CLOSED`), `target_delivery_date` (Date), `notes` (Text).
-- **`inquiry_items`**:
-  - `id` (UUID, PK), `inquiry_id` (UUID, FK), `product_id` (UUID, FK, nullable), `item_name` (String(255)), `specifications` (Text / JSON), `quantity` (Numeric), `uom_id` (UUID, FK), `target_price` (Numeric, nullable).
-- **`inquiry_supplier_quotes`**:
-  - `id` (UUID, PK), `inquiry_id` (UUID, FK), `supplier_id` (UUID, FK), `public_token` (String(100), unique, indexed), `token_expires_at` (DateTime), `quoted_unit_price` (Numeric), `currency_code` (String(10)), `lead_time_days` (Integer), `can_meet_target_date` (Boolean), `remarks` (Text), `is_ai_extracted` (Boolean, default=`False`), `raw_ai_payload` (JSON, nullable), `status` (Enum: `PENDING`, `SUBMITTED`, `REJECTED`, `ACCEPTED`).
-
-#### E. Master Shipment Planning Grid (`backend/app/planning/models.py`)
-- **`planning_sheets`**:
-  - `id` (UUID, PK), `name` (String(150), required, e.g. `"Mumbai Branch"`), `position` (Integer, default=`0`), `description` (String(255)).
-- **`planning_columns`**:
-  - `id` (UUID, PK), `sheet_id` (UUID, FK), `title` (String(150)), `position` (Integer), `data_type` (Enum: `TEXT`, `NUMBER`, `DATE`, `BOOLEAN_YN`), `source_type` (Enum: `MANUAL`, `LINKED_LOOKUP`, `AGGREGATE`, `FORMULA_CALCULATION`), `source_config` (JSON, nullable).
-- **`planning_rows`**:
-  - `id` (UUID, PK), `sheet_id` (UUID, FK), `position` (Integer), `product_id` (UUID, FK, nullable), `inquiry_item_id` (UUID, FK, nullable), `is_locked` (Boolean, default=`False`).
-- **`planning_cells`**:
-  - `id` (UUID, PK), `row_id` (UUID, FK), `column_id` (UUID, FK), `value_text` (Text), `status_color` (String(30), nullable, e.g. `"status-ordered"`, `"status-received"`).
-- **`planning_change_log`**:
-  - `id` (UUID, PK), `sheet_id` (UUID, FK), `row_id`, `column_id` (UUIDs, nullable), `actor_id` (UUID, FK), `action_type` (String(50)), `old_value` (Text), `new_value` (Text), `timestamp` (DateTime).
+### Frontend Stack
+- **Core Framework**: React 18 with strict TypeScript typing.
+- **Build Engine**: Vite with optimized Rollup code splitting.
+- **Styling**: Vanilla CSS (IHM Design System) with custom tokens (glassmorphism, vibrant badges, accessible inputs).
+- **Data Utilities**: `SheetJS` (xlsx) and `PapaParse` for client-side spreadsheet import/export.
+- **Real-Time Client**: Native WebSocket `LiveClient` with automatic exponential backoff reconnection.
 
 ---
 
-## 3. Security, Authentication & Session Engine
+## 3. Directory Layout & File Map
 
-### 3.1. Authentication Flow
-```mermaid
-sequenceDiagram
-    autonumber
-    actor Client as User / Browser
-    participant API as FastAPI /auth/login
-    participant DB as Database (User & Sessions)
-    participant Cache as Redis/CacheManager
-
-    Client->>API: POST /auth/login {identifier, password}
-    API->>DB: Query user by username, email, or phone
-    API->>API: Verify password with Argon2id
-    API->>DB: Record session (IP, User-Agent, Device)
-    API->>DB: Generate Refresh Token (UUID)
-    API->>API: Generate signed JWT Access Token (15 min)
-    API->>Cache: Cache effective permissions (permissions:{userId})
-    API-->>Client: 200 OK {access_token, refresh_token, profile, permissions}
+```
+ERP_Main_Claude/
+├── AGENTS.md                  # Mandatory AI and Developer Living Documentation Policy
+├── doc/
+│   ├── README.md              # Central documentation index
+│   └── SYSTEM_DOCUMENTATION.md# Master Unified Architecture & Feature Manual (THIS FILE)
+├── backend/
+│   ├── app/
+│   │   ├── api/v1/router.py   # Versioned API route registration
+│   │   ├── audit/             # Immutable audit log models, service, and routes
+│   │   ├── auth/              # JWT auth, Argon2id, session tracking, rate limiting
+│   │   ├── buyers/            # Buyer directory, contacts, addresses, credit limits
+│   │   ├── cache/             # Redis / in-memory cache manager, cleanup worker
+│   │   ├── common/            # BaseRepository, BaseService, Pagination, Importer, Email
+│   │   ├── core/              # Config, Responses, Exceptions, Exception Handlers, Logging
+│   │   ├── database/          # Async Engine, Session DI, Declarative Base Mixins
+│   │   ├── events/            # WebSocket connection manager and broadcast bus
+│   │   ├── inquiries/         # RFQ lifecycle, AI Quote Extractor, IMAP email poller
+│   │   ├── masters/           # Brands, Categories, Subcategories, Geography, Currencies
+│   │   ├── middleware/        # Correlation ID, Logging, Security, Rate Limiter
+│   │   ├── organizations/     # Enterprise profile settings
+│   │   ├── planning/          # Dynamic spreadsheet planning grid, container CBM calculator
+│   │   ├── rbac/              # Roles, Permissions, User Overrides, Effective Permissions
+│   │   ├── suppliers/         # Supplier directory, tokenized public quote portal
+│   │   ├── trash/             # Universal Recycle Bin recovery service
+│   │   ├── users/             # User accounts, HR profiles, reporting managers
+│   │   └── main.py            # Composition root, lifespan lifecycle, middleware wiring
+│   ├── alembic/               # Database schema version migrations
+│   └── requirements.txt       # Python dependencies
+└── frontend/
+    ├── src/
+    │   ├── components/        # AppShell, MasterPage, SearchableDropdown, ImportWizard, UI
+    │   ├── lib/               # API client, Auth Context, Navigation registry, WebSockets
+    │   ├── pages/             # Inquiries, Planning, Suppliers, Buyers, Users, Rbac, Profile
+    │   │   └── masters/       # Products, Brands, Categories, Currencies, Cities, Countries
+    │   ├── styles/            # IHM Design System stylesheet (style.css, pages.css)
+    │   └── types/             # Strict TypeScript domain interfaces
+    └── package.json           # Frontend dependencies and build scripts
 ```
 
-### 3.2. Effective Permissions Mathematical Formula
-The system evaluates user capabilities dynamically at request time:
+---
+
+## 4. Database Architecture & Universal Mixins
+
+All database models reside in `backend/app/` and inherit from declarative mixins defined in `backend/app/database/base.py`:
+
+```python
+class UUIDPrimaryKeyMixin:
+    """Provides a RFC 4122 UUID v4 primary key column."""
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
+
+class TimestampMixin:
+    """Tracks UTC creation and update timestamps."""
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+
+class SoftDeleteMixin:
+    """Provides non-destructive lifecycle management."""
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    deleted_by: Mapped[uuid.UUID | None] = mapped_column(GUID(), nullable=True)
+
+class VersionMixin:
+    """Provides optimistic concurrency control."""
+    version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+```
+
+---
+
+## 5. Complete Data Models & Entity Dictionary
+
+```mermaid
+erDiagram
+    USERS ||--o{ USER_ROLES : assigned
+    ROLES ||--o{ USER_ROLES : holds
+    ROLES ||--o{ ROLE_PERMISSIONS : defines
+    PERMISSIONS ||--o{ ROLE_PERMISSIONS : grants
+    USERS ||--o{ USER_PERMISSIONS : overrides
+    PERMISSIONS ||--o{ USER_PERMISSIONS : target
+    USERS ||--o{ SESSIONS : registers
+    
+    BUYERS ||--o{ INQUIRIES : initiates
+    INQUIRIES ||--o{ INQUIRY_ITEMS : contains
+    INQUIRIES ||--o{ INQUIRY_SUPPLIER_QUOTES : receives
+    SUPPLIERS ||--o{ INQUIRY_SUPPLIER_QUOTES : submits
+    
+    CATEGORIES ||--o{ SUB_CATEGORIES : contains
+    SUB_CATEGORIES ||--o{ PRODUCTS : classifies
+    BRANDS ||--o{ PRODUCTS : manufactures
+    PRODUCTS ||--o{ INQUIRY_ITEMS : references
+    
+    PLANNING_SHEETS ||--o{ PLANNING_COLUMNS : defines
+    PLANNING_SHEETS ||--o{ PLANNING_ROWS : contains
+    PLANNING_ROWS ||--o{ PLANNING_CELLS : stores
+    PLANNING_COLUMNS ||--o{ PLANNING_CELLS : formats
+```
+
+---
+
+## 6. Security, Authentication & Session Engine
+
+### 6.1. Dual-Token JWT & Single-Flight Refresh
+- **Access Token**: 15-minute expiration, contains `sub` (User UUID), `username`, `roles`, and base claims.
+- **Refresh Token**: 7-day expiration, stored cryptographically in the `refresh_tokens` table. Each refresh token is strictly **single-use** and rotated upon every `/auth/refresh` call.
+- **Single-Flight Frontend Guard**: When multiple parallel API calls encounter a `401 Unauthorized`, only a single refresh request is dispatched. All concurrent requests wait on the same promise, preventing race conditions and unexpected logouts.
+
+### 6.2. Argon2id Password Encryption
+Passwords are hashed using Argon2id with strict parameters:
+- Time cost: 3 iterations
+- Memory cost: 65,536 KB
+- Parallelism: 4 threads
+- Salt length: 16 bytes
+
+### 6.3. Active Session Governance
+Every authentication creates a record in the `sessions` table capturing IP address, location, browser user-agent, and device category. Users and administrators can inspect active sessions and revoke compromised devices remotely.
+
+---
+
+## 7. RBAC Engine, Departments & Effective Permissions
+
+The platform treats **Departments** as functional role bundles (`roles` table) with dynamic user-level permission overrides.
+
+### 7.1. Effective Permission Calculation
+User capabilities are calculated dynamically at request time:
 
 $$\text{EffectivePermissions} = \left( \bigcup_{r \in \text{UserRoles}} \text{RolePermissions}(r) \cup \text{DirectGrants} \right) \setminus \text{DirectDenies}$$
 
-*Exception Rule:* If a user has `roles` containing `"super_admin"`, `EffectivePermissions = ALL_PERMISSIONS` unconditionally.
+*Super Admin Rule:* Users with the `super_admin` role bypass checks and possess all permissions unconditionally.
+
+### 7.2. Department Managers
+- Department members can be designated as **Department Managers**.
+- Managers display a `MANAGER` badge on the department roster.
+- Administrators can configure direct per-user permission overrides (`🔑 Edit permissions`) to give managers elevated operational privileges (e.g. deletion, approval, bulk exports) without polluting the base department role.
+- Setting a manager automatically updates the `manager_id` reporting hierarchy for department members.
 
 ---
 
-## 4. Module-by-Module Technical Deep Dive
+## 8. Module-by-Module Technical Breakdown
 
-### 4.1. Inquiries & Automated AI Quotation Extractor
+### 8.1. Authentication & Active Sessions
+- **Endpoints:** `POST /auth/login`, `POST /auth/refresh`, `POST /auth/logout`, `GET /auth/me`, `GET /auth/sessions`, `DELETE /auth/sessions/{id}`.
+- **Features:** Self-service password change, active session listing, device revocation, and forced password reset on first login.
 
-**Files:** `backend/app/inquiries/ai_extractor.py`, `backend/app/inquiries/email_inbound_worker.py`, `frontend/src/pages/Inquiries.tsx`
+### 8.2. Users & HR Profile Management
+- **Endpoints:** `GET /users`, `POST /users`, `GET /users/{id}`, `PATCH /users/{id}`, `POST /users/{id}/reset-password`.
+- **Features:** Complete employee directory with multi-field search, status filtering, and sorting. HR attributes include Employee Code, Contact Numbers, Gender, Date of Birth, Date of Joining, Employment Type, Status, Address, and Emergency Contact. **Last Name is optional**.
 
-#### Inbound Email & AI Ingestion Architecture
-1. **Background Polling Daemon**: `email_inbound_worker.py` runs as an asynchronous background worker polling configured IMAP mailboxes for inbound quotation replies from suppliers.
-2. **Consignment & Item Resolution**:
-   - Matches consignment codes from email subject tags (e.g., `[#FB1]`) or tokenized reply metadata.
-   - Queries active (non-deleted) inquiry line items (`deleted_at IS NULL`) linked to the consignment.
-3. **Multimodal & Text Processing**:
-   - Parses email text bodies and extracts text from attached quotation PDFs using `pypdf`.
-   - Extracts images or screenshots via OpenAI GPT-4o-mini multimodal vision extraction.
-4. **Structured Multi-Product AI Extraction**:
-   - Prompts the LLM with active candidate items (Product Name, SKU / Product Code, Target Quantity).
-   - Automatically converts relative supplier production lead time durations (e.g., `"15–20 working days"`) into precise calendar dates based on quotation received timestamps.
-5. **Weighted Model Token Matching**:
-   - Employs token-weighted matching to ensure accurate separation between closely named variants (e.g., `DBF 1000AN`, `DBF 900`, `FR 900A`).
-6. **Strict 1-Initial-Quote Rule per (Supplier, Item) Pair**:
-   - Ingests the initial quotation for each (Supplier, Product) pair.
-   - Subsequent back-and-forth negotiation emails from the same supplier for that product are not duplicated as new rows in the ERP, preventing table flooding.
-7. **Quotation Management & Live Revision**:
-   - **Turnaround Tracking**: Tracks elapsed turnaround time between RFQ dispatch (`rfq_sent_at`) and quotation receipt (`created_at`).
-   - **Interactive Edit Drawer (`EditQuotationModal`)**: Sales personnel can adjust Quantity, Unit Price, Currency, Expected Receiving Date, Terms & Conditions, and Negotiation Remarks via `PATCH /api/v1/inquiries/quotations/{id}` with live WebSockets.
+### 8.3. Departments & Department Managers
+- **Endpoints:** `GET /rbac/roles`, `POST /rbac/roles`, `PATCH /rbac/roles/{id}`, `DELETE /rbac/roles/{id}`, `POST /rbac/roles/{id}/delete-with-reassignment`, `PUT /rbac/users/{id}/permissions/bulk`.
+- **Features:** Department permission assignment matrix, department manager assignment, safe deletion with user reassignment modal, and permission cloning.
+
+### 8.4. Master Data & Generic Catalogs
+- **Modules:** Brands, Categories, Sub-Categories, Countries, States, Cities, Currencies, Units of Measurement (UOM), HSN/SAC Codes, and Operating Companies.
+- **Features:** Built on the unified `MasterPage.tsx` engine providing uniform search, pagination, validation, modal creation, and cached lookup resolution (`nameResolver.ts`).
+
+### 8.5. Product Catalog & Dynamic Specification Builder
+- **Endpoints:** `GET /products`, `POST /products`, `PATCH /products/{id}`, `POST /products/{id}/specs`, `GET /products/{id}/datasheet-pdf`.
+- **Features:** Dynamic JSON specification builder allowing arbitrary technical specifications (e.g. Dimensions, Voltage, Speed, Material). Includes multi-image upload, supplier association, and ReportLab PDF datasheet generation.
+
+### 8.6. Supplier Directory & Tokenized Public Portal
+- **Endpoints:** `GET /suppliers`, `POST /suppliers`, `PATCH /suppliers/{id}`, `POST /suppliers/{id}/contacts`, `POST /suppliers/import`, `GET /suppliers/export`.
+- **Features:** Vendor directory with multi-contact management, payment terms, and bank details. Generates secure, tokenized public quote portal links (`/quotes/public/:token`) allowing vendors to submit bids without system accounts.
+
+### 8.7. Buyer & Client Management
+- **Endpoints:** `GET /buyers`, `POST /buyers`, `PATCH /buyers/{id}`, `POST /buyers/{id}/contacts`, `POST /buyers/{id}/addresses`.
+- **Features:** Client directory with credit limits, client grades (A, B, C, Premium), multi-address delivery matrix (Billing, Shipping, Warehouse), and bulk import/export.
+
+### 8.8. Inquiries, RFQs & AI Quotation Extractor
+- **Endpoints:** `GET /inquiries`, `POST /inquiries`, `PATCH /inquiries/{id}`, `POST /inquiries/{id}/items`, `POST /inquiries/{id}/ai-extract-quote`, `GET /inquiries/{id}/compare-matrix`.
+- **Features:**
+  - Full RFQ lifecycle: `DRAFT` $\rightarrow$ `SENT_TO_SUPPLIERS` $\rightarrow$ `QUOTES_RECEIVED` $\rightarrow$ `UNDER_EVALUATION` $\rightarrow$ `APPROVED` $\rightarrow$ `ORDER_PLACED` $\rightarrow$ `CLOSED`.
+  - Side-by-side vendor quotation comparison matrix with lowest bid and fastest turnaround highlighting.
+  - Multimodal AI quote extractor parsing PDFs, Excel sheets, and email text into structured bids (`ExtractedQuotation`).
+  - 1-Quote negotiation iteration tracking and turnaround time metrics.
+
+### 8.9. Automated Inbound IMAP Email Worker
+- **File:** `backend/app/inquiries/email_inbound_worker.py`
+- **Features:** Background daemon running every 60 seconds. Connects via secure IMAP, checks for inquiry reference tokens in email subjects/headers, downloads quote attachments, triggers AI extraction, and logs quotation bids automatically. Avoids duplicate processing via `processed_email_ids.json`.
+
+### 8.10. Master Shipment Planning Grid & Container Calculations
+- **Endpoints:** `GET /planning/sheets`, `POST /planning/sheets`, `GET /planning/sheets/{id}/grid`, `POST /planning/rows`, `POST /planning/columns`, `PATCH /planning/cells`, `POST /planning/container-calc`.
+- **Features:**
+  - Dynamic grid model (`planning_sheets` $\rightarrow$ `planning_rows` $\rightarrow$ `planning_columns` $\rightarrow$ `planning_cells`).
+  - Column data types (`TEXT`, `NUMBER`, `DATE`, `BOOLEAN_YN`) and source types (`MANUAL`, `LINKED_LOOKUP`, `AGGREGATE`, `FORMULA_CALCULATION`).
+  - Cell status color tagging (e.g. `status-ordered`, `status-purchased`).
+  - Container calculation engine computing total volume in CBM and payload weight across 20FT, 40FT, 40FT HC, and LCL container configurations.
+  - Group-wise subcategory & product sorting.
+
+### 8.11. Audit Trails & JSON Delta Change Diffing
+- **Endpoints:** `GET /audit`, `GET /audit/{id}`, `GET /audit/export`.
+- **Features:** Immutable audit repository capturing actor, IP, timestamp, action type, and field-level before/after JSON delta diffs across all business entities.
+
+### 8.12. Recycle Bin (Universal Soft-Delete & Recovery)
+- **Endpoints:** `GET /trash`, `POST /trash/{entity_type}/{id}/restore`, `DELETE /trash/{entity_type}/{id}/purge`.
+- **Features:** Centralized Recycle Bin displaying soft-deleted records across all tables. One-click recovery restores records with full relational integrity. Permanent purge is restricted to Super Administrators.
+
+### 8.13. Organization & System Profile
+- **Endpoints:** `GET /organizations/profile`, `PATCH /organizations/profile`.
+- **Features:** Enterprise legal identity, tax/VAT/TIN registration, official address, and base operational currency.
 
 ---
 
-### 4.2. Master Shipment Planning & Multi-Column Sorting
-
-**Files:** `backend/app/planning/service.py`, `backend/app/planning/repository.py`, `frontend/src/pages/Planning.tsx`
-
-#### Alphabetical & Multi-Column Sorting Engine
-1. **Hierarchical Group Sorting**: Planning rows are grouped and ordered alphabetically by Subcategory Name, followed by Product Name (`Product.sub_category_id`, `Product.product_name_tally / product_name`).
-2. **Interactive Column Sorting**: The planning grid supports clicking column headers for ascending/descending order with visual indicators.
-
-#### Container Calculation Engine
-Given dimensions $(L, W, H \text{ in cm})$ and packing count:
-
-$$\text{CBM per Package} = \frac{L \times W \times H}{1\,000\,000}$$
-$$\text{Total CBM} = \text{CBM per Package} \times \text{Total Packages}$$
-
-#### Container Types & Load Limits
-| Container Type | Maximum Usable Volume | Maximum Payload Weight |
-| :--- | :--- | :--- |
-| **20 FT Standard** | $28.0 - 30.0 \text{ CBM}$ | $21\,500 \text{ kg}$ |
-| **40 FT Standard** | $58.0 - 62.0 \text{ CBM}$ | $26\,500 \text{ kg}$ |
-| **40 FT High Cube (HC)** | $68.0 - 72.0 \text{ CBM}$ | $26\,500 \text{ kg}$ |
-| **Less than Container Load (LCL)** | $< 15.0 \text{ CBM}$ | Flexible consolidated freight |
-
----
-
-### 4.3. Universal Soft-Delete & Recycle Bin Architecture
-
-**File:** `backend/app/trash/service.py` & `frontend/src/pages/Trash.tsx`
-
-1. **Deletion Interception**: Repositories filter records using `WHERE deleted_at IS NULL` by default.
-2. **Soft Deletion Trigger**: `DELETE /<entity>/{id}` sets `deleted_at = utcnow()` and `deleted_by = current_user.id`. Foreign key relationships remain intact.
-3. **Trash Listing**: `GET /trash` queries across registered soft-deletable tables (`suppliers`, `buyers`, `products`, `inquiries`, `planning_rows`, `masters`).
-4. **Single-Click Recovery**: `POST /trash/{entity_type}/{id}/restore` sets `deleted_at = NULL`, immediately restoring the entity to active operations.
-5. **Hard Purge**: `DELETE /trash/{entity_type}/{id}/purge` executes physical deletion, restricted to users with `trash.purge` / Super Administrator access.
-
----
-
-## 5. Real-Time WebSocket & Event Synchronization
+## 9. Real-Time WebSocket & Event Synchronization
 
 **File:** `backend/app/events/manager.py` & `frontend/src/lib/live/liveClient.ts`
 
-### Connection Handshake
-- **URL:** `ws://<host>:<port>/api/v1/events/ws?token=<JWT_ACCESS_TOKEN>`
-- **Authentication:** Token verified during the connection handshake.
-- **Heartbeat:** Ping/Pong interval every 30 seconds.
-
-### Event Payload Specification
-```json
-{
-  "event_type": "RECORD_UPDATED",
-  "entity_type": "inquiries",
-  "entity_id": "c7a8b9d0-1234-4567-890a-bcdef1234567",
-  "action": "UPDATE",
-  "actor": {
-    "id": "u1a2b3c4-9999-8888-7777-666655554444",
-    "name": "Admin User"
-  },
-  "timestamp": "2026-08-27T12:00:00Z"
-}
-```
+- **Endpoint:** `ws://<host>:<port>/api/v1/events/ws?token=<JWT_ACCESS_TOKEN>`
+- **Behavior:** Broadcasts entity mutation events (`RECORD_CREATED`, `RECORD_UPDATED`, `RECORD_DELETED`) to all connected client tabs. Client pages selectively refresh datasets, preventing concurrent edit collisions.
 
 ---
 
-## 6. Complete API Endpoints Directory
+## 10. Multi-Tier Caching Engine
 
-### 6.1. Authentication (`/api/v1/auth`)
-| Method | Path | Summary | Permission Required |
-| :--- | :--- | :--- | :--- |
-| `POST` | `/auth/login` | Authenticate with credentials, obtain JWT pair | Public |
-| `POST` | `/auth/refresh` | Rotate refresh token, get new access token | Public (Valid Refresh Token) |
-| `POST` | `/auth/logout` | Revoke active refresh token and session | Authenticated |
-| `GET` | `/auth/me` | Fetch authenticated user profile & permissions | Authenticated |
-| `GET` | `/auth/sessions` | List active login sessions and devices | Authenticated |
-| `DELETE` | `/auth/sessions/{id}` | Revoke specific login session | Authenticated |
+**File:** `backend/app/cache/`
 
-### 6.2. User Management (`/api/v1/users`)
-| Method | Path | Summary | Permission Required |
-| :--- | :--- | :--- | :--- |
-| `GET` | `/users` | Paginated user directory with search/sort | `user.read` |
-| `POST` | `/users` | Create user account + HR profile | `user.create` |
-| `GET` | `/users/{id}` | Detailed user profile inspection | `user.read` |
-| `PATCH` | `/users/{id}` | Update profile, manager, or status | `user.update` |
-| `POST` | `/users/{id}/roles` | Assign department role to user | `user.manage_roles` |
-| `DELETE` | `/users/{id}/roles/{role_id}` | Remove department role from user | `user.manage_roles` |
-| `POST` | `/users/{id}/reset-password` | Generate temporary password | `user.reset_password` |
-
-### 6.3. RBAC & Departments (`/api/v1/rbac`)
-| Method | Path | Summary | Permission Required |
-| :--- | :--- | :--- | :--- |
-| `GET` | `/rbac/roles` | List all departments | `roles_permissions.view` |
-| `POST` | `/rbac/roles` | Create new department | `roles_permissions.create` |
-| `PATCH` | `/rbac/roles/{id}` | Rename or update department | `roles_permissions.action` |
-| `DELETE` | `/rbac/roles/{id}` | Delete department (with impact check) | `roles_permissions.delete` |
-| `POST` | `/rbac/roles/{id}/delete-with-reassignment` | Safe delete with user reassignment | `roles_permissions.delete` |
-| `GET` | `/rbac/permissions` | List all vocabulary permission codes | `roles_permissions.view` |
-| `PUT` | `/rbac/users/{id}/permissions/bulk` | Save per-user direct overrides | `roles_permissions.action` |
-| `GET` | `/rbac/users/{id}/effective-permissions` | Compute effective permission breakdown | `roles_permissions.view` |
-
-### 6.4. Sourcing & Suppliers (`/api/v1/suppliers`)
-| Method | Path | Summary | Permission Required |
-| :--- | :--- | :--- | :--- |
-| `GET` | `/suppliers` | List suppliers with multi-column sorting | `supplier.read` |
-| `POST` | `/suppliers` | Create supplier record | `supplier.create` |
-| `GET` | `/suppliers/{id}` | Detailed supplier profile | `supplier.read` |
-| `PATCH` | `/suppliers/{id}` | Update supplier details | `supplier.update` |
-| `DELETE` | `/suppliers/{id}` | Soft delete supplier | `supplier.delete` |
-| `POST` | `/suppliers/{id}/contacts` | Add contact to supplier directory | `supplier.update` |
-| `POST` | `/suppliers/import` | Bulk import suppliers from Excel/CSV | `supplier.import` |
-| `GET` | `/suppliers/export` | Export suppliers to Excel/CSV | `supplier.export` |
-
-### 6.5. Inquiries & Quotations (`/api/v1/inquiries`)
-| Method | Path | Summary | Permission Required |
-| :--- | :--- | :--- | :--- |
-| `GET` | `/inquiries` | List RFQ inquiries with status filters & company summaries | `inquiry.read` |
-| `POST` | `/inquiries` | Create new inquiry consignment header | `inquiry.create` |
-| `GET` | `/inquiries/{id}` | Full inquiry breakdown with line items | `inquiry.read` |
-| `PATCH` | `/inquiries/{id}` | Update inquiry header / status | `inquiry.update` |
-| `POST` | `/inquiries/{id}/items` | Add line item to inquiry | `inquiry.update` |
-| `POST` | `/inquiries/{id}/items/bulk` | Bulk add line items to consignment | `inquiry.update` |
-| `POST` | `/inquiries/{id}/bulk-rfqs` | Dispatch consolidated multi-item RFQ emails to suppliers | `inquiry.action` |
-| `POST` | `/inquiries/items/{item_id}/rfqs` | Dispatch single-item RFQ and generate tokenized links | `inquiry.action` |
-| `POST` | `/inquiries/items/{item_id}/quotations` | Manually record supplier quotation | `inquiry.update` |
-| `PATCH` | `/inquiries/quotations/{quotation_id}` | Edit quotation details (qty, price, currency, terms, remarks) | `inquiry.update` |
-| `PATCH` | `/inquiries/quotations/{quotation_id}/status` | Approve or reject quotation | `inquiry.approve` |
-| `DELETE` | `/inquiries/quotations/{quotation_id}` | Soft-delete quotation and auto-resync item status & KPIs | `inquiry.delete` |
-| `POST` | `/inquiries/inbound-webhook` | Webhook for WeChat, WhatsApp & Email quotation auto-ingestion | Public (API / Webhook) |
-| `GET` | `/inquiries/items/{item_id}/quotations` | List all quotations with supplier turnaround & RFQ dates | `inquiry.read` |
-| `GET` | `/inquiries/quotations/documents` | Fetch all quotation sheets for Product & Supplier Gallery | `inquiry.read` |
-| `POST` | `/inquiries/bulk-tally-post` | Bulk mark multiple items as Tally Entry Posted | `inquiry.update` |
-
-### 6.6. Public Supplier Quote Portal (`/api/v1/public/quotes`)
-| Method | Path | Summary | Permission Required |
-| :--- | :--- | :--- | :--- |
-| `GET` | `/public/quotes/{token}` | Fetch RFQ line items for supplier | Public (Token Validated) |
-| `POST` | `/public/quotes/{token}` | Submit quotation bids, pricing & lead time | Public (Token Validated) |
-| `POST` | `/public/quotes/{token}/upload` | Upload quotation PDF/attachment | Public (Token Validated) |
-
-### 6.7. Shipment Planning Grid (`/api/v1/planning`)
-| Method | Path | Summary | Permission Required |
-| :--- | :--- | :--- | :--- |
-| `GET` | `/planning/sheets` | List planning sheets (branches/tabs) | `planning.read` |
-| `POST` | `/planning/sheets` | Create new planning sheet | `planning.sheet.manage` |
-| `GET` | `/planning/sheets/{id}/grid` | Fetch complete row/column/cell matrix | `planning.read` |
-| `POST` | `/planning/rows` | Add line row to sheet | `planning.row.manage` |
-| `POST` | `/planning/columns` | Add dynamic column to sheet | `planning.column.manage` |
-| `PATCH` | `/planning/cells` | Update cell value or status color | `planning.cell.edit` |
-| `POST` | `/planning/container-calc` | Compute container CBM and utilization | `planning.read` |
-
-### 6.8. Governance, Audit & Trash
-| Method | Path | Summary | Permission Required |
-| :--- | :--- | :--- | :--- |
-| `GET` | `/audit` | Query immutable audit change logs | `audit.view` |
-| `GET` | `/trash` | Query soft-deleted records across all tables | `trash.view` |
-| `POST` | `/trash/{entity}/{id}/restore` | Single-click restore soft-deleted record | `trash.restore` |
-| `DELETE` | `/trash/{entity}/{id}/purge` | Permanently purge record | `trash.purge` (Super Admin) |
+- **Dual-Backend:** Supports Redis in distributed environments and `InMemoryCacheBackend` (with LRU eviction) for local development.
+- **Namespaces:** `permissions:<user_id>`, `dropdowns:<entity>`, `dashboard:counts`, `records:<entity>:<id>`.
+- **Admin API:** `GET /cache/stats`, `GET /cache/keys`, `DELETE /cache/flush`, `DELETE /cache/namespace/{name}`.
 
 ---
 
-## 7. Developer & AI Integration Guide (Rules of Engagement)
+## 11. Universal Bulk Import & Export Wizard
+
+**Files:** `frontend/src/components/ImportWizard.tsx`, `backend/app/common/importer.py`
+
+- **Workflow:** File Upload (.xlsx / .csv) $\rightarrow$ Header Fuzzy Matching $\rightarrow$ Column Mapping UI $\rightarrow$ Client-Side Validation $\rightarrow$ Transactional Batch Insertion $\rightarrow$ Error Log Report.
+- **Duplicate Prevention:** Validates existing database records by TIN, Email, Phone, or Code before commit.
+
+---
+
+## 12. Frontend Architecture & Single-Flight Token Refresh
+
+**Files:** `frontend/src/lib/api.ts`, `frontend/src/lib/authContext.tsx`, `frontend/src/components/AppShell.tsx`
+
+- **Routing:** React Router v6 with `ProtectedRoute` guards and deep-link redirect preservation.
+- **Component Design System:** Predefined accessible UI tokens in `frontend/src/components/ui.tsx` and `fields.tsx`.
+- **Hooks Architecture:** Custom hooks for asynchronous state management: `useAuth`, `usePendingGuard`, `useToast`, `usePagination`.
+
+---
+
+## 13. Complete API Route & Endpoint Directory
+
+| Module | HTTP Method | Endpoint URI | Description | Permission Gate |
+| :--- | :--- | :--- | :--- | :--- |
+| **Auth** | `POST` | `/api/v1/auth/login` | Authenticate credentials & issue JWT pair | Public |
+| **Auth** | `POST` | `/api/v1/auth/refresh` | Rotate single-use refresh token | Public (Valid Token) |
+| **Auth** | `POST` | `/api/v1/auth/logout` | Revoke refresh token & active session | Authenticated |
+| **Auth** | `GET` | `/api/v1/auth/me` | Fetch profile & effective permissions | Authenticated |
+| **Auth** | `GET` | `/api/v1/auth/sessions` | List active user device sessions | Authenticated |
+| **Auth** | `DELETE`| `/api/v1/auth/sessions/{id}` | Revoke specific device session | Authenticated |
+| **Users** | `GET` | `/api/v1/users` | List paginated users with search/sort | `user.read` |
+| **Users** | `POST` | `/api/v1/users` | Create user account + HR profile | `user.create` |
+| **Users** | `GET` | `/api/v1/users/{id}` | Inspect user details & roles | `user.read` |
+| **Users** | `PATCH` | `/api/v1/users/{id}` | Update user profile / reporting manager | `user.update` |
+| **Users** | `POST` | `/api/v1/users/{id}/reset-password` | Generate temporary login password | `user.reset_password` |
+| **Users** | `POST` | `/api/v1/users/{id}/roles` | Assign department role to user | `user.manage_roles` |
+| **Users** | `DELETE`| `/api/v1/users/{id}/roles/{role_id}` | Remove department role from user | `user.manage_roles` |
+| **RBAC** | `GET` | `/api/v1/rbac/roles` | List all departments | `roles_permissions.view` |
+| **RBAC** | `POST` | `/api/v1/rbac/roles` | Create new department | `roles_permissions.create` |
+| **RBAC** | `PATCH` | `/api/v1/rbac/roles/{id}` | Rename/update department | `roles_permissions.action` |
+| **RBAC** | `DELETE`| `/api/v1/rbac/roles/{id}` | Delete department (with impact check) | `roles_permissions.delete` |
+| **RBAC** | `POST` | `/api/v1/rbac/roles/{id}/delete-with-reassignment` | Safe delete with user reassignment | `roles_permissions.delete` |
+| **RBAC** | `GET` | `/api/v1/rbac/permissions` | List all system permission codes | `roles_permissions.view` |
+| **RBAC** | `PUT` | `/api/v1/rbac/users/{id}/permissions/bulk` | Save per-user direct permission overrides | `roles_permissions.action` |
+| **RBAC** | `GET` | `/api/v1/rbac/users/{id}/effective-permissions` | Compute effective user permissions | `roles_permissions.view` |
+| **Masters** | `GET/POST`| `/api/v1/masters/brands` | Manage product brands | `brand.*` |
+| **Masters** | `GET/POST`| `/api/v1/masters/categories` | Manage product categories | `category.*` |
+| **Masters** | `GET/POST`| `/api/v1/masters/subcategories` | Manage product sub-categories | `subcategory.*` |
+| **Masters** | `GET/POST`| `/api/v1/masters/countries` | Manage country records | `country.*` |
+| **Masters** | `GET/POST`| `/api/v1/masters/states` | Manage state/province records | `state.*` |
+| **Masters** | `GET/POST`| `/api/v1/masters/cities` | Manage city records | `city.*` |
+| **Masters** | `GET/POST`| `/api/v1/masters/currencies` | Manage currencies & conversion rates | `currency.*` |
+| **Masters** | `GET/POST`| `/api/v1/masters/uom` | Manage units of measurement | `uom.*` |
+| **Masters** | `GET/POST`| `/api/v1/masters/hsn` | Manage HSN/SAC customs codes | `hsn.*` |
+| **Products**| `GET` | `/api/v1/products` | Paginated product catalog | `product.read` |
+| **Products**| `POST` | `/api/v1/products` | Create product record | `product.create` |
+| **Products**| `PATCH` | `/api/v1/products/{id}` | Update product & technical specs | `product.update` |
+| **Products**| `GET` | `/api/v1/products/{id}/datasheet-pdf` | Generate ReportLab PDF datasheet | `product.read` |
+| **Suppliers**| `GET` | `/api/v1/suppliers` | List suppliers with multi-column sort | `supplier.read` |
+| **Suppliers**| `POST` | `/api/v1/suppliers` | Create supplier record | `supplier.create` |
+| **Suppliers**| `PATCH` | `/api/v1/suppliers/{id}` | Update supplier profile & bank details | `supplier.update` |
+| **Suppliers**| `POST` | `/api/v1/suppliers/{id}/contacts` | Add contact to supplier directory | `supplier.update` |
+| **Suppliers**| `POST` | `/api/v1/suppliers/import` | Bulk import suppliers from spreadsheet | `supplier.import` |
+| **Suppliers**| `GET` | `/api/v1/suppliers/export` | Export supplier database | `supplier.export` |
+| **Buyers** | `GET` | `/api/v1/buyers` | List buyer clients with status filters | `buyer.read` |
+| **Buyers** | `POST` | `/api/v1/buyers` | Create buyer profile | `buyer.create` |
+| **Buyers** | `PATCH` | `/api/v1/buyers/{id}` | Update buyer profile & credit limit | `buyer.update` |
+| **Buyers** | `POST` | `/api/v1/buyers/{id}/addresses` | Add billing/shipping address | `buyer.update` |
+| **Inquiries**| `GET` | `/api/v1/inquiries` | List RFQs with status filtering & financials | `inquiry.read` |
+| **Inquiries**| `POST` | `/api/v1/inquiries` | Create new inquiry consignment | `inquiry.create` |
+| **Inquiries**| `PATCH` | `/api/v1/inquiries/{id}` | Update inquiry header & status | `inquiry.update` |
+| **Inquiries**| `POST` | `/api/v1/inquiries/{id}/items` | Add line item to inquiry | `inquiry.update` |
+| **Inquiries**| `POST` | `/api/v1/inquiries/{id}/items/bulk` | Bulk add items to inquiry | `inquiry.update` |
+| **Inquiries**| `POST` | `/api/v1/inquiries/{id}/bulk-rfqs` | Dispatch multi-item RFQ emails to suppliers | `inquiry.action` |
+| **Inquiries**| `POST` | `/api/v1/inquiries/items/{item_id}/rfqs` | Dispatch single-item RFQ email & portal link | `inquiry.action` |
+| **Inquiries**| `POST` | `/api/v1/inquiries/items/{item_id}/quotations` | Manually record supplier quotation | `inquiry.update` |
+| **Inquiries**| `PATCH` | `/api/v1/inquiries/quotations/{id}` | Edit quotation details (qty, price, currency, terms) | `inquiry.update` |
+| **Inquiries**| `PATCH` | `/api/v1/inquiries/quotations/{id}/status` | Approve or reject quotation | `inquiry.approve` |
+| **Inquiries**| `DELETE` | `/api/v1/inquiries/quotations/{id}` | Soft-delete quotation & resync KPIs | `inquiry.delete` |
+| **Inquiries**| `POST` | `/api/v1/inquiries/inbound-webhook` | Inbound webhook for WeChat/Email auto-ingestion | Public (API / Webhook) |
+| **Inquiries**| `GET` | `/api/v1/inquiries/items/{item_id}/quotations` | List quotations with turnaround & lead times | `inquiry.read` |
+| **Inquiries**| `GET` | `/api/v1/inquiries/quotations/documents` | Fetch all quotation sheets for Gallery | `inquiry.read` |
+| **Inquiries**| `POST` | `/api/v1/inquiries/bulk-tally-post` | Bulk mark items as Tally Entry Posted | `inquiry.update` |
+| **Public** | `GET` | `/api/v1/public/quotes/{token}` | Fetch RFQ specifications for vendor | Public (Token Validated) |
+| **Public** | `POST` | `/api/v1/public/quotes/{token}` | Submit vendor quote bids & lead times | Public (Token Validated) |
+| **Public** | `POST` | `/api/v1/public/quotes/{token}/upload` | Upload quotation PDF / datasheet | Public (Token Validated) |
+| **Planning**| `GET` | `/api/v1/planning/sheets` | List planning sheets / branches | `planning.read` |
+| **Planning**| `POST` | `/api/v1/planning/sheets` | Create planning sheet | `planning.sheet.manage` |
+| **Planning**| `GET` | `/api/v1/planning/sheets/{id}/grid` | Fetch dynamic planning matrix | `planning.read` |
+| **Planning**| `POST` | `/api/v1/planning/rows` | Add item row to planning sheet | `planning.row.manage` |
+| **Planning**| `POST` | `/api/v1/planning/columns` | Add dynamic column to sheet | `planning.column.manage` |
+| **Planning**| `PATCH` | `/api/v1/planning/cells` | Update cell value & status color | `planning.cell.edit` |
+| **Planning**| `POST` | `/api/v1/planning/container-calc` | Compute container CBM & load capacity | `planning.read` |
+| **Audit** | `GET` | `/api/v1/audit` | Query immutable audit change logs | `audit.view` |
+| **Trash** | `GET` | `/api/v1/trash` | List soft-deleted records | `trash.view` |
+| **Trash** | `POST` | `/api/v1/trash/{entity}/{id}/restore` | One-click restore deleted record | `trash.restore` |
+| **Trash** | `DELETE`| `/api/v1/trash/{entity}/{id}/purge` | Permanently purge record | `trash.purge` (Super Admin) |
+| **Cache** | `GET` | `/api/v1/cache/stats` | Inspect cache metrics & hit rate | `settings.manage` |
+| **Cache** | `DELETE`| `/api/v1/cache/flush` | Flush entire cache | `settings.manage` |
+
+---
+
+## 14. Developer & AI Integration Guide (Rules of Engagement)
 
 When building new features, modifying endpoints, or merging external components into this ERP:
 
-### 7.1. Adding a New Business Module
-1. **Database Model**: Create `backend/app/<module>/models.py`. Inherit from `Base`, `UUIDPrimaryKeyMixin`, `TimestampMixin`, `SoftDeleteMixin`, and `VersionMixin`.
-2. **Pydantic Schemas**: Define `Create`, `Update`, `Read` schemas in `backend/app/<module>/schemas.py`.
+### 14.1. Adding a New Business Module
+1. **Model**: Create `backend/app/<module>/models.py`. Inherit from `Base`, `UUIDPrimaryKeyMixin`, `TimestampMixin`, `SoftDeleteMixin`, and `VersionMixin`.
+2. **Schemas**: Define `Create`, `Update`, `Read` schemas in `backend/app/<module>/schemas.py`.
 3. **Repository**: Inherit from `BaseRepository[Model]` in `backend/app/<module>/repository.py`.
-4. **Service**: Implement business validation and audit logging in `backend/app/<module>/service.py`.
-5. **FastAPI Router**: Wire permissions using `Depends(require_permission("<module>.<action>"))` in `backend/app/<module>/routes.py`.
-6. **Register Router**: Include the router in `backend/app/main.py` under the `/api/v1` prefix.
-7. **Database Migration**: Run `alembic revision --autogenerate -m "add <module> table"` and verify the migration script.
-8. **Frontend UI**: Create `frontend/src/pages/<Module>.tsx` and register the route in `frontend/src/lib/nav.ts`.
-9. **Update Documentation**: Append the new module, models, and endpoints to `doc/SYSTEM_DOCUMENTATION.md`.
+4. **Service**: Implement business rules and audit recording in `backend/app/<module>/service.py`.
+5. **Routes**: Wire endpoints with `Depends(require_permission("<module>.<action>"))` in `backend/app/<module>/routes.py`.
+6. **Register Router**: Include the router in `backend/app/api/v1/router.py`.
+7. **Migration**: Generate migration via `alembic revision --autogenerate -m "add <module> table"`.
+8. **Frontend**: Create `frontend/src/pages/<Module>.tsx` and register route in `frontend/src/lib/nav.ts`.
+9. **Living Documentation**: Update `doc/SYSTEM_DOCUMENTATION.md` immediately per [`AGENTS.md`](file:///c:/Users/Inhyma%20Solutions/Downloads/ERP_Main_Claude-main/AGENTS.md).
 
-### 7.2. Adding a New Permission Code
-1. Add the permission code to `scripts/seed.py` (e.g. `"logistics.dispatch.manage"`).
-2. Add a friendly display label in `frontend/src/lib/permissionLabels.ts`.
-3. Enforce the permission on the target backend route using `require_permission("logistics.dispatch.manage")`.
-
-### 7.3. Antipatterns & Pitfalls to Avoid
-- ❌ **NEVER write hard-coded deletions (`session.delete(row)`)**: Always use soft-delete (`row.deleted_at = utcnow()`).
-- ❌ **NEVER bypass permission dependencies**: Every private route must have `Depends(require_permission(...))`.
-- ❌ **NEVER mutate role permissions directly without invalidating cache**: Always trigger `cache_manager.invalidate_user_permissions(user_id)`.
-- ❌ **NEVER write database schema changes without Alembic**: Do not alter database tables manually; keep migrations version-controlled.
+### 14.2. Antipatterns & Critical Rules
+- ❌ **NEVER execute physical deletion (`session.delete(row)`) in standard flows**: Always use soft-delete (`row.deleted_at = utcnow()`).
+- ❌ **NEVER bypass permission dependencies**: Every private endpoint must specify `Depends(require_permission(...))`.
+- ❌ **NEVER alter database tables manually**: Keep all migrations version-controlled in `backend/alembic/versions/`.
+- ❌ **NEVER modify user permissions without invalidating cache**: Always call `cache_manager.invalidate_user_permissions(user_id)`.
 
 ---
-*Maintained and documented for Inhyma Solutions Enterprise Platform.*
+
+## 15. Deployment, Environment Variables & Operations
+
+### Backend Environment Variables (`backend/.env`)
+```env
+# Application Settings
+APP_NAME=Enterprise ERP
+ENVIRONMENT=production
+DEBUG=false
+SECRET_KEY=your-super-secret-key-32-chars-minimum
+API_V1_PREFIX=/api/v1
+
+# Database Configuration
+DATABASE_URL=postgresql+asyncpg://postgres:password@localhost:5432/erp_database
+
+# CORS Allowed Origins
+BACKEND_CORS_ORIGINS=["http://localhost:5173","https://erp.yourdomain.com"]
+
+# JWT Configuration
+ACCESS_TOKEN_EXPIRE_MINUTES=15
+REFRESH_TOKEN_EXPIRE_DAYS=7
+
+# Caching Configuration
+REDIS_URL=redis://localhost:6379/0
+
+# AI Quotation Extractor API Keys
+OPENAI_API_KEY=your-openai-api-key
+GEMINI_API_KEY=your-gemini-api-key
+
+# Inbound Email Worker (IMAP)
+IMAP_SERVER=imap.gmail.com
+IMAP_PORT=993
+IMAP_USERNAME=quotes@yourdomain.com
+IMAP_PASSWORD=your-app-password
+IMAP_POLL_INTERVAL_SECONDS=60
+```
+
+### Frontend Environment Variables (`frontend/.env`)
+```env
+VITE_API_BASE_URL=http://localhost:8000/api/v1
+VITE_WS_BASE_URL=ws://localhost:8000/api/v1/events/ws
+```
+
+---
+*Maintained and verified for Inhyma Solutions Enterprise ERP.*

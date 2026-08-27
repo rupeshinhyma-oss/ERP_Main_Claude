@@ -44,9 +44,8 @@ cleanup.py        BackgroundCleanupWorker: asyncio task that periodically
                   sweeps expired entries so memory is reclaimed even for
                   keys nobody ever reads again.
 manager.py        CacheManager: the high-level developer API, with named
-                  helpers for permissions, roles, settings, departments,
-                  designations, dropdown data, dashboard counts, and
-                  generic records.
+                  helpers for permissions, roles, settings, master lists,
+                  dropdown data, dashboard counts, and generic records.
 dependency.py     FastAPI DI wiring: get_cache(), get_cache_manager(),
                   get_cleanup_worker().
 routes.py         Admin API: GET /cache/stats, GET /cache/keys,

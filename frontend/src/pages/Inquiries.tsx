@@ -641,7 +641,7 @@ function CompaniesView({
               <th style={thStyle}>Total CBM</th>
               <th style={thStyle}>Total Weight</th>
               <th style={thStyle}>Updated Date</th>
-              <th style={{ ...thStyle, textAlign: "center" }}>Action</th>
+              <th style={thStyle}>Action</th>
             </tr>
           </thead>
           <tbody>
@@ -698,8 +698,8 @@ function CompaniesView({
                   <td style={tdStyle}>{s.total_cbm.toFixed(3)}</td>
                   <td style={tdStyle}>{s.total_weight.toFixed(2)}</td>
                   <td style={tdStyle}>{s.updated_at ? new Date(s.updated_at).toLocaleDateString() : "-"}</td>
-                  <td style={{ ...tdStyle, textAlign: "center" }}>
-                    <div style={{ display: "flex", gap: "6px", justifyContent: "center", alignItems: "center" }}>
+                  <td style={tdStyle}>
+                    <div style={{ display: "flex", gap: "6px" }}>
                       <button
                         type="button"
                         onClick={() => onOpenCompany(s.buyer_id)}
@@ -832,7 +832,7 @@ function ConsignmentsView({
               <th style={thStyle}>Total CBM</th>
               <th style={thStyle}>Total Weight</th>
               <th style={thStyle}>Updated</th>
-              <th style={{ ...thStyle, textAlign: "center" }}>Action</th>
+              <th style={thStyle}>Action</th>
             </tr>
           </thead>
           <tbody>
@@ -855,8 +855,8 @@ function ConsignmentsView({
                   <td style={tdStyle}>{r.total_cbm.toFixed(3)}</td>
                   <td style={tdStyle}>{r.total_weight.toFixed(2)}</td>
                   <td style={tdStyle}>{new Date(r.updated_at).toLocaleDateString()}</td>
-                  <td style={{ ...tdStyle, textAlign: "center" }}>
-                    <div style={{ display: "flex", gap: 6, justifyContent: "center", alignItems: "center" }}>
+                  <td style={tdStyle}>
+                    <div style={{ display: "flex", gap: 6 }}>
                       <button type="button" onClick={() => onOpenConsignment(r.id)} className="btn-link">View</button>
                       <Can permission="inquiry.delete">
                         <button
@@ -925,6 +925,7 @@ function ItemsView({
   const [inquiry, setInquiry] = useState<Inquiry | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
+  const [aiQuoteOpen, setAiQuoteOpen] = useState(false);
   const [productTab, setProductTab] = useState<"all" | "approved" | "pending">("all");
   const [productSearch, setProductSearch] = useState("");
   const [quotationSearch, setQuotationSearch] = useState("");
@@ -1170,10 +1171,10 @@ function ItemsView({
                     ? "#0284c7"
                     : "#b45309",
               border: `1px solid ${inquiry?.consignment_status === "fully_approved"
-                  ? "#bbf7d0"
-                  : inquiry?.consignment_status === "partial_approved"
-                    ? "#bae6fd"
-                    : "#fde68a"
+                ? "#bbf7d0"
+                : inquiry?.consignment_status === "partial_approved"
+                  ? "#bae6fd"
+                  : "#fde68a"
                 }`,
             }}
           >
@@ -2467,13 +2468,13 @@ function AIParseQuotationModal({
           try {
             const { data: cat } = await apiGet<any>(`/masters/product-categories/${prod.category_id}`);
             catName = cat?.name || "";
-          } catch {}
+          } catch { }
         }
         if (prod.sub_category_id) {
           try {
             const { data: subCat } = await apiGet<any>(`/masters/product-sub-categories/${prod.sub_category_id}`);
             subCatName = subCat?.name || "";
-          } catch {}
+          } catch { }
         }
 
         if (!isMounted) return;
@@ -2491,7 +2492,7 @@ function AIParseQuotationModal({
         } else {
           setSupplierFilterScope("all");
         }
-      } catch {}
+      } catch { }
     })();
     return () => {
       isMounted = false;
@@ -2564,12 +2565,12 @@ function AIParseQuotationModal({
         }
         if (data.currency) setCurrency(data.currency);
         if (data.earliest_available_date) setExpDate(data.earliest_available_date);
-        
+
         const termsParts: string[] = [];
         if (data.price_terms) termsParts.push(data.price_terms);
         if (data.payment_terms) termsParts.push(data.payment_terms);
         if (termsParts.length > 0) setTerms(termsParts.join(" • "));
-        
+
         if (data.remarks) setRemarks(data.remarks);
       }
     } catch (err: any) {
@@ -3606,7 +3607,7 @@ function RequestQuotationDrawer({
         setSentEmailSuccess(initialSent);
         setDispatchedData(res.data);
       } else {
-        alert("Request for Quotation successfully created!");
+        alert("Request for Quotation successfully sent to suppliers!");
         onDispatched();
       }
     } catch (err) {
@@ -3704,7 +3705,7 @@ function RequestQuotationDrawer({
               {dispatchedData.supplier_links?.map((sup: any) => {
                 const host = window.location.hostname;
                 const isLocal = host === "localhost" || host === "127.0.0.1";
-                const baseOrigin = isLocal ? `${window.location.protocol}//192.168.1.28:${window.location.port}` : window.location.origin;
+                const baseOrigin = isLocal ? `${window.location.protocol}//192.168.1.23:${window.location.port}` : window.location.origin;
                 const fullQuoteUrl = `${baseOrigin}${sup.quote_path}`;
                 const prodTitle = item.product_name || item.product_name_tally || "Product";
                 const waText = `Hello ${sup.contact_name},\n\nWe have an RFQ for ${item.quantity} units of *${prodTitle}* (#${item.product_code || "PC"}).\n\nPlease submit your best quotation with price and lead time using this link:\n\n${fullQuoteUrl}\n\nThank you!\nfrom Yinglima`;
@@ -3772,7 +3773,7 @@ function RequestQuotationDrawer({
                         ) : sentEmailSuccess[sup.token] ? (
                           <><span>✓</span> Email Sent!</>
                         ) : (
-                          <><span>⚡</span> Send Email</>
+                          <><span>⚡</span> Auto-Send Email</>
                         )}
                       </button>
 

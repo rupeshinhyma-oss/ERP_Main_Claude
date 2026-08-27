@@ -14,15 +14,18 @@ import { Breadcrumb } from "@/components/Breadcrumb";
 import { ActionDropdown, type ActionDropdownEntry } from "@/components/ActionDropdown";
 import { Banner, Modal } from "@/components/ui";
 import { TextField } from "@/components/fields";
-import { apiDelete, apiGet, apiPatch, apiPost } from "@/lib/api";
+import { apiDelete, apiGet, apiPatch, apiPost, apiPut } from "@/lib/api";
 import { useAuth, usePendingGuard } from "@/lib/hooks";
 import { useToast } from "@/lib/toast";
 import type {
+  BulkPermissionOverrideItem,
+  EffectivePermissionsBreakdown,
   ItemsPage,
   Permission,
   Role,
   RoleDeletionImpact,
   User,
+  UserPermissionOverride,
 } from "@/types";
 
 import {
@@ -129,6 +132,22 @@ export function RbacPage() {
   const [checkedCodes, setCheckedCodes] = useState<Set<string>>(new Set());
   const [selectedUserToAdd, setSelectedUserToAdd] = useState("");
   const [userActionLoading, setUserActionLoading] = useState(false);
+  const [selectedManagerToAdd, setSelectedManagerToAdd] = useState("");
+
+  /* Per-user Permission Overrides drawer (opened from "Managers in this
+   * Department" -- "Edit permissions" for one specific manager). Ported
+   * from Users.tsx's identical drawer (same backend endpoints, same
+   * override-resolution logic) so a manager's individual extra
+   * permissions can be set directly on them, without any separate
+   * "Manager role" object involved. */
+  const [overridesUserId, setOverridesUserId] = useState<string | null>(null);
+  const [overridesUsername, setOverridesUsername] = useState("");
+  const [overridesBreakdown, setOverridesBreakdown] = useState<EffectivePermissionsBreakdown | null>(null);
+  const [overridesChecked, setOverridesChecked] = useState<Set<string>>(new Set());
+  const [overridesSearch, setOverridesSearch] = useState("");
+  const [overridesLoading, setOverridesLoading] = useState(false);
+  const [overridesSaving, setOverridesSaving] = useState(false);
+  const [managerActionLoading, setManagerActionLoading] = useState(false);
 
   /* Clone modal */
   const [cloneOpen, setCloneOpen] = useState(false);
@@ -214,6 +233,7 @@ export function RbacPage() {
       setCheckedCodes(new Set(role.permissions || []));
     }
     setSelectedUserToAdd("");
+    setSelectedManagerToAdd("");
   }
 
   function closeRoleView() {
@@ -221,6 +241,8 @@ export function RbacPage() {
     setRoleName("");
     setRoleDescription("");
     setCheckedCodes(new Set());
+    setSelectedUserToAdd("");
+    setSelectedManagerToAdd("");
   }
 
   function toggleCode(code: string) {
@@ -264,12 +286,44 @@ export function RbacPage() {
     return allUsers.filter((u) => !(u.roles || []).includes(viewingRole.name));
   }, [allUsers, viewingRole]);
 
+  /* Managers for viewingRole */
+  const assignedManagers = useMemo(() => {
+    if (!viewingRole || !viewingRole.name) return [];
+    const managerIdsInDept = new Set<string>();
+    assignedUsers.forEach((u) => {
+      if (u.manager_id) managerIdsInDept.add(u.manager_id);
+    });
+    return allUsers.filter((u) => managerIdsInDept.has(u.id));
+  }, [allUsers, viewingRole, assignedUsers]);
+
+  /**
+   * Who's eligible to be PROMOTED to manager of this department.
+   *
+   * Deliberately drawn from `assignedUsers` (existing department members)
+   * rather than `allUsers` (every user in the system) -- a manager IS a
+   * regular member of this department, just with extra permissions on
+   * top, not a separate person picked from anywhere. Offering the entire
+   * user base here let someone be added as manager while a completely
+   * unrelated person also sat in "Users in this Department" as if they
+   * were two disconnected concepts, when they should be exactly the same
+   * pool with an extra flag. Add someone to "Users in this Department"
+   * first, then promote them here.
+   */
+  const unassignedManagers = useMemo(() => {
+    if (!viewingRole || !viewingRole.name) return [];
+    const assignedManagerIds = new Set(assignedManagers.map((m) => m.id));
+    return assignedUsers.filter((u) => !assignedManagerIds.has(u.id));
+  }, [assignedUsers, viewingRole, assignedManagers]);
+
   async function handleAddUserToRole() {
     if (!selectedUserToAdd || !viewingRole?.id) return;
     setUserActionLoading(true);
     try {
       await apiPost(`/users/${selectedUserToAdd}/roles`, { role_id: viewingRole.id });
-      showToast("User role updated.", "success");
+      if (assignedManagers.length > 0) {
+        await apiPatch(`/users/${selectedUserToAdd}`, { manager_id: assignedManagers[0].id });
+      }
+      showToast("User department updated.", "success");
       setSelectedUserToAdd("");
       await loadUsers();
     } catch (err) {
@@ -284,7 +338,7 @@ export function RbacPage() {
     setUserActionLoading(true);
     try {
       await apiDelete(`/users/${userId}/roles/${viewingRole.id}`);
-      showToast("User removed from role (reassigned to User role).", "success");
+      showToast("User removed from department (reassigned to User department).", "success");
       await loadUsers();
     } catch (err) {
       setError(err);
@@ -293,13 +347,123 @@ export function RbacPage() {
     }
   }
 
+  async function handleAddManagerToRole() {
+    if (!selectedManagerToAdd || !viewingRole?.id || !viewingRole.name) return;
+    setManagerActionLoading(true);
+    try {
+      // Keep the existing org-chart convenience: point every other member
+      // of this department at the new manager (who they report to).
+      const targets = assignedUsers.filter((u) => u.id !== selectedManagerToAdd);
+      for (const u of targets) {
+        await apiPatch(`/users/${u.id}`, { manager_id: selectedManagerToAdd });
+      }
+      if (targets.length === 0) {
+        await apiPatch(`/users/${selectedManagerToAdd}`, { manager_id: selectedManagerToAdd });
+      }
+      showToast("Department manager assigned.", "success");
+      setSelectedManagerToAdd("");
+      await loadUsers();
+    } catch (err) {
+      setError(err);
+    } finally {
+      setManagerActionLoading(false);
+    }
+  }
+
+  async function handleRemoveManagerFromRole(managerId: string) {
+    if (!viewingRole?.id) return;
+    setManagerActionLoading(true);
+    try {
+      const targets = assignedUsers.filter((u) => u.manager_id === managerId || u.id === managerId);
+      for (const u of targets) {
+        if (u.manager_id === managerId) {
+          await apiPatch(`/users/${u.id}`, { manager_id: null });
+        }
+      }
+      showToast("Department manager removed.", "success");
+      await loadUsers();
+    } catch (err) {
+      setError(err);
+    } finally {
+      setManagerActionLoading(false);
+    }
+  }
+
+  /**
+   * Open the Permission Overrides drawer for ONE specific user -- ported
+   * from Users.tsx's identical function (same endpoints, same
+   * override-resolution logic: checked = explicit GRANT, or
+   * department-inherited and not explicitly DENYed).
+   */
+  async function openUserOverridesModal(userId: string, username: string) {
+    setOverridesUserId(userId);
+    setOverridesUsername(username);
+    setOverridesSearch("");
+    setOverridesLoading(true);
+    setOverridesBreakdown(null);
+    setOverridesChecked(new Set());
+    try {
+      let perms = allPermissions;
+      if (!perms || perms.length === 0) {
+        const permsRes = await apiGet<Permission[]>("/rbac/permissions");
+        perms = permsRes.data || [];
+        setAllPermissions(perms);
+      }
+      const [effRes, userPermsRes] = await Promise.all([
+        apiGet<EffectivePermissionsBreakdown>(`/rbac/users/${userId}/effective-permissions`),
+        apiGet<UserPermissionOverride[]>(`/rbac/users/${userId}/permissions`),
+      ]);
+      setOverridesBreakdown(effRes.data);
+
+      const overrideMap = new Map((userPermsRes.data || []).map((o) => [o.code, o.is_granted]));
+      const roleGranted = new Set(effRes.data.role_permissions || []);
+      const initialChecked = new Set<string>();
+      for (const code of new Set([...overrideMap.keys(), ...roleGranted])) {
+        const override = overrideMap.get(code);
+        const checked = override === true || (override === undefined && roleGranted.has(code));
+        if (checked) initialChecked.add(code);
+      }
+      setOverridesChecked(initialChecked);
+    } catch (err) {
+      setError(err);
+    } finally {
+      setOverridesLoading(false);
+    }
+  }
+
+  /** Bulk-diff save: only sends an override for codes that differ from the department-inherited default, ported from Users.tsx. */
+  async function handleSaveUserOverrides() {
+    if (!overridesUserId || !overridesBreakdown) return;
+    setOverridesSaving(true);
+    try {
+      const roleGranted = new Set(overridesBreakdown.role_permissions || []);
+      const overrides: BulkPermissionOverrideItem[] = [];
+      for (const p of allPermissions) {
+        const checked = overridesChecked.has(p.code);
+        const isRoleGranted = roleGranted.has(p.code);
+        if (checked && !isRoleGranted) {
+          overrides.push({ permission_id: p.id, is_granted: true });
+        } else if (!checked && isRoleGranted) {
+          overrides.push({ permission_id: p.id, is_granted: false });
+        }
+      }
+      await apiPut(`/rbac/users/${overridesUserId}/permissions/bulk`, { overrides });
+      showToast("Permissions updated for user.", "success");
+      setOverridesUserId(null);
+    } catch (err) {
+      setError(err);
+    } finally {
+      setOverridesSaving(false);
+    }
+  }
+
   async function handleSaveRoleView() {
     if (!roleName.trim()) {
-      showToast("Role name cannot be empty", "error");
+      showToast("Department name cannot be empty", "error");
       return;
     }
     if (!viewingRole?.id && RESERVED_ROLE_NAMES.has(roleName.trim().toLowerCase())) {
-      showToast(`"${roleName.trim()}" is a reserved system role name and cannot be used.`, "error");
+      showToast(`"${roleName.trim()}" is a reserved system department name and cannot be used.`, "error");
       return;
     }
     setRoleSaving(true);
@@ -336,7 +500,7 @@ export function RbacPage() {
         }
       }
 
-      showToast("Role and permissions saved successfully!", "success");
+      showToast("Department and permissions saved successfully!", "success");
       await loadRoles();
       await loadUsers();
       closeRoleView();
@@ -359,11 +523,11 @@ export function RbacPage() {
     try {
       const { data: impact } = await apiGet<RoleDeletionImpact>(`/rbac/roles/${roleId}/deletion-impact`);
       if (!impact.affected_user_count) {
-        if (!confirm(`Are you sure you want to delete role '${roleNameStr}'?`)) return;
+        if (!confirm(`Are you sure you want to delete department '${roleNameStr}'?`)) return;
         await guardRowAction(`delete-role:${roleId}`, async () => {
           try {
             await apiDelete(`/rbac/roles/${roleId}`);
-            showToast(`Role '${roleNameStr}' deleted successfully.`, "success");
+            showToast(`Department '${roleNameStr}' deleted successfully.`, "success");
             await loadRoles();
           } catch (err) {
             setError(err);
@@ -401,7 +565,7 @@ export function RbacPage() {
         allRoles.find((r) => r.id === reassignToRoleId)?.name || ""
       );
       showToast(
-        `Role '${roleDisplayName(deleteImpact.role_name)}' deleted. ` +
+        `Department '${roleDisplayName(deleteImpact.role_name)}' deleted. ` +
         `${data.reassigned_user_count} user(s) moved to '${targetName}'.`,
         "success"
       );
@@ -425,7 +589,7 @@ export function RbacPage() {
         target_type: "role",
         target_id: cloneTargetId,
       });
-      showToast("Permissions cloned successfully!", "success");
+      showToast("Department permissions cloned successfully!", "success");
       setCloneOpen(false);
       await loadRoles();
     } catch (err) {
@@ -453,10 +617,10 @@ export function RbacPage() {
   return (
     <AppShell activeKey="rbac" pageClassName="page-rbac">
       <main className="page">
-        <Breadcrumb trail={["Roles & Permissions"]} />
+        <Breadcrumb trail={["Departments & Permissions"]} />
 
         {viewingRole ? (
-          /* Merged View / Edit Role Screen */
+          /* Merged View / Edit Department Screen */
           <div className="view-edit-role-container">
             <div className="page-header" style={{ marginBottom: "16px" }}>
               <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
@@ -466,14 +630,14 @@ export function RbacPage() {
                   onClick={closeRoleView}
                   style={{ padding: "6px 12px" }}
                 >
-                  ← Back to Roles
+                  ← Back to Departments
                 </button>
                 <div>
                   <h1 style={{ fontSize: "20px", fontWeight: 700, margin: 0 }}>
-                    {viewingRole.id ? `Role: ${roleDisplayName(viewingRole.name)}` : "Create New Role"}
+                    {viewingRole.id ? `Department: ${roleDisplayName(viewingRole.name)}` : "Create New Department"}
                   </h1>
                   <p className="page-subtitle" style={{ margin: "2px 0 0", fontSize: "13px" }}>
-                    Configure role details, assigned permissions, and user memberships.
+                    Configure department details, assigned permissions, and user memberships.
                   </p>
                 </div>
               </div>
@@ -488,7 +652,7 @@ export function RbacPage() {
                     disabled={roleSaving}
                     onClick={handleSaveRoleView}
                   >
-                    {roleSaving ? "Saving..." : "Save Role"}
+                    {roleSaving ? "Saving..." : "Save Department"}
                   </button>
                 )}
               </div>
@@ -497,21 +661,21 @@ export function RbacPage() {
             <Banner error={error} />
 
             <div style={{ display: "grid", gridTemplateColumns: "minmax(340px, 380px) 1fr", gap: "20px", alignItems: "start" }}>
-              {/* Left Column: Role Details & Users */}
+              {/* Left Column: Department Details & Users */}
               <div style={{ display: "flex", flexDirection: "column", gap: "16px", minWidth: 0 }}>
                 <div className="card" style={{ padding: "20px" }}>
-                  <h3 style={{ fontSize: "15px", fontWeight: 600, margin: "0 0 16px" }}>Role Details</h3>
+                  <h3 style={{ fontSize: "15px", fontWeight: 600, margin: "0 0 16px" }}>Department Details</h3>
                   <div className="field" style={{ marginBottom: "14px" }}>
                     <TextField
                       id="role-name-input"
-                      label="Role Name *"
+                      label="Department Name *"
                       value={roleName}
                       onChange={setRoleName}
                       readOnly={!canManageOrCreate || viewingRole.is_system}
                     />
                     {viewingRole.is_system && (
                       <span className="muted" style={{ fontSize: "12px", marginTop: "4px", display: "block" }}>
-                        System role names cannot be renamed.
+                        System department names cannot be renamed.
                       </span>
                     )}
                   </div>
@@ -528,9 +692,193 @@ export function RbacPage() {
 
                 {viewingRole.id && (
                   <div className="card" style={{ padding: "20px" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
+                      <h3 style={{ fontSize: "15px", fontWeight: 700, margin: 0, color: "#0f172a" }}>
+                        Managers in this Department
+                      </h3>
+                      <span style={{ fontSize: "11.5px", background: "#fef3c7", color: "#92400e", padding: "2px 8px", borderRadius: "10px", fontWeight: 700 }}>
+                        {assignedManagers.length} manager{assignedManagers.length === 1 ? "" : "s"}
+                      </span>
+                    </div>
+                    <p style={{ fontSize: "12.5px", color: "#64748b", margin: "0 0 14px" }}>
+                      Each manager can be given extra permissions individually, on top of what other{" "}
+                      {viewingRole.name} members already have. Click <strong>"Edit permissions"</strong> next
+                      to a manager below to set what they can do specifically.
+                    </p>
+
+                    {canManageOrCreate && (
+                      <div style={{ display: "flex", gap: "8px", marginBottom: "16px", alignItems: "center", width: "100%" }}>
+                        <select
+                          id="add-manager-to-role-select"
+                          value={selectedManagerToAdd}
+                          onChange={(e) => setSelectedManagerToAdd(e.target.value)}
+                          style={{
+                            flex: 1,
+                            minWidth: 0,
+                            height: "38px",
+                            padding: "0 10px",
+                            borderRadius: "6px",
+                            border: "1px solid #cbd5e1",
+                            fontSize: "13px",
+                            background: "#ffffff",
+                            color: "#1e293b",
+                            outline: "none",
+                            boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
+                            cursor: "pointer",
+                            textOverflow: "ellipsis",
+                            overflow: "hidden",
+                          }}
+                        >
+                          <option value="">-- Select manager to add --</option>
+                          {unassignedManagers.map((u) => {
+                            const currentRole = u.roles?.length ? roleDisplayName(u.roles[0]) : "User";
+                            return (
+                              <option key={u.id} value={u.id}>
+                                {u.display_name || u.username} ({currentRole})
+                              </option>
+                            );
+                          })}
+                        </select>
+                        <button
+                          type="button"
+                          className="btn btn-primary"
+                          disabled={!selectedManagerToAdd || managerActionLoading}
+                          onClick={handleAddManagerToRole}
+                          style={{
+                            flexShrink: 0,
+                            whiteSpace: "nowrap",
+                            height: "38px",
+                            padding: "0 14px",
+                            borderRadius: "6px",
+                            fontWeight: 600,
+                            fontSize: "13px",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "6px",
+                            cursor: !selectedManagerToAdd || managerActionLoading ? "not-allowed" : "pointer",
+                            opacity: !selectedManagerToAdd ? 0.6 : 1,
+                          }}
+                        >
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                            <line x1="12" y1="5" x2="12" y2="19"></line>
+                            <line x1="5" y1="12" x2="19" y2="12"></line>
+                          </svg>
+                          {managerActionLoading ? "Adding..." : "Add"}
+                        </button>
+                      </div>
+                    )}
+
+                    <div style={{ maxHeight: "280px", overflowY: "auto", border: "1px solid #e2e8f0", borderRadius: "8px", background: "#f8fafc" }}>
+                      {assignedManagers.length ? (
+                        <div style={{ display: "flex", flexDirection: "column" }}>
+                          {assignedManagers.map((u) => {
+                            const initials = (u.display_name || u.username || "M").slice(0, 2).toUpperCase();
+                            return (
+                              <div
+                                key={u.id}
+                                style={{
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "space-between",
+                                  padding: "10px 14px",
+                                  borderBottom: "1px solid #f1f5f9",
+                                  background: "#ffffff",
+                                }}
+                              >
+                                <div style={{ display: "flex", alignItems: "center", gap: "10px", minWidth: 0 }}>
+                                  <div
+                                    style={{
+                                      width: "32px",
+                                      height: "32px",
+                                      borderRadius: "50%",
+                                      background: "#fef3c7",
+                                      color: "#92400e",
+                                      fontWeight: 700,
+                                      fontSize: "12px",
+                                      display: "flex",
+                                      alignItems: "center",
+                                      justifyContent: "center",
+                                      flexShrink: 0,
+                                    }}
+                                  >
+                                    {initials}
+                                  </div>
+                                  <div style={{ minWidth: 0 }}>
+                                    <div style={{ fontWeight: 600, color: "#1e293b", fontSize: "13px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                                      {u.display_name || u.username}
+                                    </div>
+                                    <div style={{ fontSize: "11.5px", color: "#64748b", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                                      {u.email || u.username}
+                                    </div>
+                                  </div>
+                                </div>
+                                <div style={{ display: "flex", gap: "6px", flexShrink: 0, marginLeft: "8px" }}>
+                                  {canManageOrCreate && (
+                                    <button
+                                      type="button"
+                                      className="btn btn-small"
+                                      style={{
+                                        color: "#2563eb",
+                                        background: "#eff6ff",
+                                        border: "1px solid #bfdbfe",
+                                        borderRadius: "4px",
+                                        cursor: "pointer",
+                                        fontSize: "12px",
+                                        fontWeight: 600,
+                                        padding: "4px 8px",
+                                      }}
+                                      onClick={() => openUserOverridesModal(u.id, u.display_name || u.username)}
+                                      title="Set this manager's individual extra permissions"
+                                    >
+                                      🔑 Edit permissions
+                                    </button>
+                                  )}
+                                  {canManageOrCreate && (
+                                    <button
+                                      type="button"
+                                      className="btn btn-small"
+                                      style={{
+                                        color: "#ef4444",
+                                        background: "#fef2f2",
+                                        border: "1px solid #fecaca",
+                                        borderRadius: "4px",
+                                        cursor: "pointer",
+                                        fontSize: "12px",
+                                        fontWeight: 600,
+                                        padding: "4px 8px",
+                                      }}
+                                      disabled={managerActionLoading}
+                                      onClick={() => handleRemoveManagerFromRole(u.id)}
+                                      title="Remove manager from this department"
+                                    >
+                                      Remove
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <div style={{ textAlign: "center", padding: "28px 16px", color: "#64748b", fontSize: "13px" }}>
+                          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth="1.5" style={{ margin: "0 auto 8px", display: "block" }}>
+                            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                            <circle cx="9" cy="7" r="4"></circle>
+                            <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+                            <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+                          </svg>
+                          No managers currently assigned.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {viewingRole.id && (
+                  <div className="card" style={{ padding: "20px" }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px" }}>
                       <h3 style={{ fontSize: "15px", fontWeight: 700, margin: 0, color: "#0f172a" }}>
-                        Users in this Role
+                        Users in this Department
                       </h3>
                       <span style={{ fontSize: "11.5px", background: "#e0e7ff", color: "#3730a3", padding: "2px 8px", borderRadius: "10px", fontWeight: 700 }}>
                         {assignedUsers.length} user{assignedUsers.length === 1 ? "" : "s"}
@@ -604,6 +952,7 @@ export function RbacPage() {
                         <div style={{ display: "flex", flexDirection: "column" }}>
                           {assignedUsers.map((u) => {
                             const initials = (u.display_name || u.username || "U").slice(0, 2).toUpperCase();
+                            const isThisDeptManager = assignedManagers.some((m) => m.id === u.id);
                             return (
                               <div
                                 key={u.id}
@@ -635,8 +984,23 @@ export function RbacPage() {
                                     {initials}
                                   </div>
                                   <div style={{ minWidth: 0 }}>
-                                    <div style={{ fontWeight: 600, color: "#1e293b", fontSize: "13px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                                    <div style={{ fontWeight: 600, color: "#1e293b", fontSize: "13px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", display: "flex", alignItems: "center", gap: "6px" }}>
                                       {u.display_name || u.username}
+                                      {isThisDeptManager && (
+                                        <span
+                                          style={{
+                                            fontSize: "10px",
+                                            fontWeight: 700,
+                                            color: "#92400e",
+                                            background: "#fef3c7",
+                                            padding: "1px 6px",
+                                            borderRadius: "10px",
+                                            flexShrink: 0,
+                                          }}
+                                        >
+                                          MANAGER
+                                        </span>
+                                      )}
                                     </div>
                                     <div style={{ fontSize: "11.5px", color: "#64748b", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                                       {u.email || u.username}
@@ -661,7 +1025,7 @@ export function RbacPage() {
                                     }}
                                     disabled={userActionLoading}
                                     onClick={() => handleRemoveUserFromRole(u.id)}
-                                    title="Remove user from this role"
+                                    title="Remove user from this department"
                                   >
                                     Remove
                                   </button>
@@ -694,7 +1058,7 @@ export function RbacPage() {
                       Assigned Permissions ({checkedCodes.size} / {allPermissions.length})
                     </h3>
                     <span className="muted" style={{ fontSize: "12.5px" }}>
-                      Toggle permissions granted to anyone holding this role.
+                      Toggle permissions granted to anyone in this department.
                     </span>
                   </div>
                   {canManageOrCreate && (
@@ -769,8 +1133,8 @@ export function RbacPage() {
           <>
             <div className="page-header">
               <div>
-                <h1>Roles &amp; Permissions</h1>
-                <div className="page-subtitle">Configure user access roles, system privileges, and permissions.</div>
+                <h1>Departments &amp; Permissions</h1>
+                <div className="page-subtitle">Configure user access departments, system privileges, and permissions.</div>
               </div>
               <div className="page-header-actions">
                 {canCreateRole && (
@@ -789,7 +1153,7 @@ export function RbacPage() {
                     disabled={bulkDeleting}
                     onClick={async () => {
                       if (!selectedRoleIds.length) {
-                        showToast("Please select at least one role to delete", "info");
+                        showToast("Please select at least one department to delete", "info");
                         return;
                       }
                       const targets = selectedRoleIds.filter((id) => {
@@ -797,10 +1161,10 @@ export function RbacPage() {
                         return r && !RESERVED_ROLE_NAMES.has(r.name);
                       });
                       if (!targets.length) {
-                        showToast("The selected role(s) are system roles and cannot be deleted.", "error");
+                        showToast("The selected department(s) are system departments and cannot be deleted.", "error");
                         return;
                       }
-                      if (!confirm(`Are you sure you want to delete ${targets.length} selected role(s)?`)) {
+                      if (!confirm(`Are you sure you want to delete ${targets.length} selected department(s)?`)) {
                         return;
                       }
                       setBulkDeleting(true);
@@ -819,11 +1183,11 @@ export function RbacPage() {
                       setBulkDeleting(false);
                       await loadRoles();
                       if (succeeded && !failed) {
-                        showToast(`${succeeded} role(s) deleted successfully.`, "success");
+                        showToast(`${succeeded} department(s) deleted successfully.`, "success");
                       } else if (succeeded && failed) {
-                        showToast(`${succeeded} role(s) deleted; ${failed} could not be deleted.`, "info");
+                        showToast(`${succeeded} department(s) deleted; ${failed} could not be deleted.`, "info");
                       } else {
-                        showToast("No roles could be deleted.", "error");
+                        showToast("No departments could be deleted.", "error");
                       }
                     }}
                   >
@@ -840,7 +1204,7 @@ export function RbacPage() {
                       setCloneOpen(true);
                     }}
                   >
-                    Clone Role Permissions
+                    Clone Department Permissions
                   </button>
                 )}
               </div>
@@ -903,83 +1267,85 @@ export function RbacPage() {
                     {rolesLoading ? (
                       <RolesTableSkeletonRows count={6} />
                     ) : filteredRoles.length ? (
-                      filteredRoles.slice(0, rolePageSize).map((role, idx) => {
-                        const isSelected = selectedRoleIds.includes(role.id);
-                        const isReserved = RESERVED_ROLE_NAMES.has(role.name);
-                        const isSystem = Boolean(role.is_system) || isReserved;
-                        const canDeleteThisRole = canManage && !isSystem;
-                        const formattedCreated = formatRoleCreatedAt(
-                          (role as unknown as Record<string, unknown>).created_at
-                        );
+                      filteredRoles
+                        .slice(0, rolePageSize)
+                        .map((role, idx) => {
+                          const isSelected = selectedRoleIds.includes(role.id);
+                          const isReserved = RESERVED_ROLE_NAMES.has(role.name);
+                          const isSystem = Boolean(role.is_system) || isReserved;
+                          const canDeleteThisRole = canManage && !isSystem;
+                          const formattedCreated = formatRoleCreatedAt(
+                            (role as unknown as Record<string, unknown>).created_at
+                          );
 
-                        const rowActions: ActionDropdownEntry[] = [];
-                        if (canManage) {
-                          rowActions.push({
-                            key: "view",
-                            label: "📝 View",
-                            onClick: () => openRoleView(role),
-                          });
-
-                          if (canDeleteThisRole) {
+                          const rowActions: ActionDropdownEntry[] = [];
+                          if (canManage) {
                             rowActions.push({
-                              key: "delete",
-                              label: deleteImpactLoading ? "🗑️ Checking…" : "🗑️ Delete",
-                              danger: true,
-                              onClick: () => handleDeleteRole(role.id, role.name),
+                              key: "view",
+                              label: "📝 View",
+                              onClick: () => openRoleView(role),
                             });
-                          }
-                        }
 
-                        return (
-                          <tr key={role.id}>
-                            <td style={{ textAlign: "center" }}>
-                              <input
-                                type="checkbox"
-                                checked={isSelected}
-                                disabled={isReserved}
-                                title={isReserved ? "System roles cannot be deleted." : undefined}
-                                onChange={(e) => {
-                                  if (e.target.checked) {
-                                    setSelectedRoleIds((prev) => [...prev, role.id]);
-                                  } else {
-                                    setSelectedRoleIds((prev) => prev.filter((id) => id !== role.id));
-                                  }
-                                }}
-                              />
-                            </td>
-                            <td style={{ color: "#64748b" }}>{filteredRoles.length - idx}</td>
-                            <td style={{ fontWeight: 600, color: "#1e293b" }}>
-                              {roleDisplayName(role.name)}
-                              {isSystem && (
-                                <span
-                                  style={{
-                                    marginLeft: 8,
-                                    fontSize: 10,
-                                    fontWeight: 700,
-                                    color: "#475569",
-                                    background: "#e2e8f0",
-                                    padding: "2px 6px",
-                                    borderRadius: 10,
-                                    verticalAlign: "middle",
+                            if (canDeleteThisRole) {
+                              rowActions.push({
+                                key: "delete",
+                                label: deleteImpactLoading ? "🗑️ Checking…" : "🗑️ Delete",
+                                danger: true,
+                                onClick: () => handleDeleteRole(role.id, role.name),
+                              });
+                            }
+                          }
+
+                          return (
+                            <tr key={role.id}>
+                              <td style={{ textAlign: "center" }}>
+                                <input
+                                  type="checkbox"
+                                  checked={isSelected}
+                                  disabled={isReserved}
+                                  title={isReserved ? "System departments cannot be deleted." : undefined}
+                                  onChange={(e) => {
+                                    if (e.target.checked) {
+                                      setSelectedRoleIds((prev) => [...prev, role.id]);
+                                    } else {
+                                      setSelectedRoleIds((prev) => prev.filter((id) => id !== role.id));
+                                    }
                                   }}
-                                >
-                                  SYSTEM
-                                </span>
-                              )}
-                            </td>
-                            <td style={{ color: "#64748b", fontSize: "13px" }}>{formattedCreated}</td>
-                            <td style={{ textAlign: "center" }}>
-                              {canManage && rowActions.length > 0 ? (
-                                <ActionDropdown items={rowActions} iconOnly={true} />
-                              ) : null}
-                            </td>
-                          </tr>
-                        );
-                      })
+                                />
+                              </td>
+                              <td style={{ color: "#64748b" }}>{filteredRoles.length - idx}</td>
+                              <td style={{ fontWeight: 600, color: "#1e293b" }}>
+                                {roleDisplayName(role.name)}
+                                {isSystem && (
+                                  <span
+                                    style={{
+                                      marginLeft: 8,
+                                      fontSize: 10,
+                                      fontWeight: 700,
+                                      color: "#475569",
+                                      background: "#e2e8f0",
+                                      padding: "2px 6px",
+                                      borderRadius: 10,
+                                      verticalAlign: "middle",
+                                    }}
+                                  >
+                                    SYSTEM
+                                  </span>
+                                )}
+                              </td>
+                              <td style={{ color: "#64748b", fontSize: "13px" }}>{formattedCreated}</td>
+                              <td style={{ textAlign: "center" }}>
+                                {canManage && rowActions.length > 0 ? (
+                                  <ActionDropdown items={rowActions} iconOnly={true} />
+                                ) : null}
+                              </td>
+                            </tr>
+                          );
+                        })
                     ) : (
                       <tr>
                         <td colSpan={5} style={{ textAlign: "center", padding: "24px" }} className="muted">
-                          No roles found.
+                          No departments found.
                         </td>
                       </tr>
                     )}
@@ -991,25 +1357,25 @@ export function RbacPage() {
         )}
       </main>
 
-      {/* Clone Role Modal */}
+      {/* Clone Department Modal */}
       <Modal
         open={cloneOpen}
         variant="center"
-        title="Clone Role Permissions"
+        title="Clone Department Permissions"
         onClose={() => setCloneOpen(false)}
         cardStyle={{ maxWidth: "500px" }}
       >
         <form onSubmit={handleClone}>
           <div style={{ padding: "20px 24px" }}>
             <div className="field" style={{ marginBottom: "16px" }}>
-              <label htmlFor="cloneSourceId">Source Role (Copy From) *</label>
+              <label htmlFor="cloneSourceId">Source Department (Copy From) *</label>
               <select
                 id="cloneSourceId"
                 required
                 value={cloneSourceId}
                 onChange={(e) => setCloneSourceId(e.target.value)}
               >
-                <option value="">-- Select Source Role --</option>
+                <option value="">-- Select Source Department --</option>
                 {allRoles.map((r) => (
                   <option key={r.id} value={r.id}>
                     {roleDisplayName(r.name) + (r.is_system ? " (System)" : "")}
@@ -1019,14 +1385,14 @@ export function RbacPage() {
             </div>
 
             <div className="field">
-              <label htmlFor="cloneTargetId">Target Role (Apply To) *</label>
+              <label htmlFor="cloneTargetId">Target Department (Apply To) *</label>
               <select
                 id="cloneTargetId"
                 required
                 value={cloneTargetId}
                 onChange={(e) => setCloneTargetId(e.target.value)}
               >
-                <option value="">-- Select Target Role --</option>
+                <option value="">-- Select Target Department --</option>
                 {allRoles
                   .filter((r) => r.id !== cloneSourceId && !RESERVED_ROLE_NAMES.has(r.name))
                   .map((r) => (
@@ -1036,7 +1402,7 @@ export function RbacPage() {
                   ))}
               </select>
               <span className="muted" style={{ fontSize: "12px", marginTop: "4px", display: "block" }}>
-                System roles (Admin, User) cannot be overwritten as a clone target.
+                System departments (Admin, User) cannot be overwritten as a clone target.
               </span>
             </div>
           </div>
@@ -1061,11 +1427,11 @@ export function RbacPage() {
         </form>
       </Modal>
 
-      {/* Delete Role -- Reassign Affected Users Modal */}
+      {/* Delete Department -- Reassign Affected Users Modal */}
       <Modal
         open={Boolean(deleteImpact)}
         variant="center"
-        title="Delete Role & Reassign Users"
+        title="Delete Department & Reassign Users"
         onClose={closeDeleteImpactModal}
         cardStyle={{ maxWidth: "520px" }}
         locked={deleteSubmitting}
@@ -1089,7 +1455,7 @@ export function RbacPage() {
                 <div style={{ fontSize: "13px", color: "#92400e", lineHeight: "1.4" }}>
                   <strong>{deleteImpact.affected_user_count}</strong> user
                   {deleteImpact.affected_user_count === 1 ? " is" : "s are"} currently assigned to the{" "}
-                  <strong>{roleDisplayName(deleteImpact.role_name)}</strong> role. Since each user must have an active role, please choose which role to move them to before deleting.
+                  <strong>{roleDisplayName(deleteImpact.role_name)}</strong> department. Since each user must have an active department, please choose which department to move them to before deleting.
                 </div>
               </div>
 
@@ -1141,7 +1507,7 @@ export function RbacPage() {
                     color: "#1e293b",
                   }}
                 >
-                  <option value="">-- Select Role --</option>
+                  <option value="">-- Select Department --</option>
                   {allRoles
                     .filter((r) => r.id !== deleteImpact.role_id && r.name !== "super_admin")
                     .map((r) => (
@@ -1151,7 +1517,7 @@ export function RbacPage() {
                     ))}
                 </select>
                 <span className="muted" style={{ fontSize: "12px", marginTop: "4px", display: "block" }}>
-                  Defaults to the "User" role -- the standard fallback for anyone who loses a role.
+                  Defaults to the "User" department -- the standard fallback for anyone who loses a department.
                 </span>
               </div>
             </div>
@@ -1190,9 +1556,338 @@ export function RbacPage() {
                 disabled={!reassignToRoleId || deleteSubmitting}
                 onClick={handleConfirmDeleteWithReassignment}
               >
-                {deleteSubmitting ? "Deleting…" : "Reassign & Delete Role"}
+                {deleteSubmitting ? "Deleting…" : "Reassign & Delete Department"}
               </button>
             </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* Per-user Permission Overrides (opened from "Edit permissions" next to a manager above) */}
+      <Modal
+        open={Boolean(overridesUserId)}
+        title={`🔑 Manage Permission Overrides — ${overridesUsername}`}
+        onClose={() => setOverridesUserId(null)}
+        cardStyle={{ maxWidth: "820px", width: "100%", height: "100vh", maxHeight: "100vh", display: "flex", flexDirection: "column", padding: 0 }}
+      >
+        {overridesLoading || !overridesBreakdown ? (
+          <div className="muted" style={{ textAlign: "center", padding: "40px" }}>
+            Loading user permissions...
+          </div>
+        ) : overridesBreakdown.is_super_admin ? (
+          <div className="muted" style={{ padding: "20px 24px" }}>
+            This user is a Super Administrator and always has every permission — individual
+            overrides do not apply.
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", flex: 1, height: "calc(100vh - 65px)", overflow: "hidden" }}>
+            {/* Scrollable Body */}
+            <div style={{ flex: 1, overflowY: "auto", padding: "18px 24px", display: "flex", flexDirection: "column", gap: "16px" }}>
+              {/* User Info & Assigned Departments Summary Banner */}
+              <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "12px 16px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px" }}>
+                  <div>
+                    <span style={{ fontWeight: 600, color: "#0f172a", fontSize: "14px" }}>User: {overridesUsername}</span>
+                    {overridesBreakdown.user_info?.employee_name && (
+                      <span style={{ color: "#64748b", fontSize: "13px", marginLeft: "8px" }}>
+                        ({overridesBreakdown.user_info.employee_name})
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ display: "flex", gap: "6px", alignItems: "center", flexWrap: "wrap" }}>
+                    <span style={{ fontSize: "12px", color: "#64748b", fontWeight: 500 }}>Assigned Departments:</span>
+                    {(overridesBreakdown.user_info?.system_roles || []).length > 0 ? (
+                      (overridesBreakdown.user_info?.system_roles || []).map((r) => (
+                        <span key={r} className="badge" style={{ background: "#dbeafe", color: "#1d4ed8", fontWeight: 600, fontSize: "11px", padding: "2px 8px" }}>
+                          🛡️ {roleDisplayName(r)}
+                        </span>
+                      ))
+                    ) : (
+                      <span className="badge" style={{ background: "#f1f5f9", color: "#64748b", fontSize: "11px" }}>No Departments</span>
+                    )}
+                  </div>
+                </div>
+                <div style={{ fontSize: "12px", color: "#475569", marginTop: "8px", lineHeight: 1.4 }}>
+                  💡 Permissions marked <span className="chip-role" style={{ fontSize: "10px", padding: "1px 6px", borderRadius: "4px" }}>FROM DEPARTMENT</span> are inherited from assigned departments. Check extra permissions to grant direct overrides (<span className="chip-grant" style={{ fontSize: "10px", padding: "1px 6px", borderRadius: "4px" }}>+ EXTRA GRANTED</span>). Uncheck department permissions to deny them (<span className="chip-deny" style={{ fontSize: "10px", padding: "1px 6px", borderRadius: "4px" }}>✕ DIRECT DENIED</span>).
+                </div>
+              </div>
+
+              {/* Search & Bulk Action Toolbar */}
+              <div
+                style={{
+                  display: "flex",
+                  gap: "10px",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  flexWrap: "wrap",
+                }}
+              >
+                <div style={{ position: "relative", flex: 1, minWidth: "240px" }}>
+                  <input
+                    type="text"
+                    placeholder="🔍 Search permission code or description..."
+                    style={{
+                      width: "100%",
+                      padding: "8px 30px 8px 12px",
+                      border: "1px solid #cbd5e1",
+                      borderRadius: "6px",
+                      fontSize: "13.5px",
+                      background: "#ffffff",
+                      boxSizing: "border-box",
+                    }}
+                    value={overridesSearch}
+                    onChange={(e) => setOverridesSearch(e.target.value)}
+                  />
+                  {overridesSearch && (
+                    <button
+                      type="button"
+                      onClick={() => setOverridesSearch("")}
+                      style={{
+                        position: "absolute",
+                        right: 8,
+                        top: "50%",
+                        transform: "translateY(-50%)",
+                        background: "none",
+                        border: "none",
+                        color: "#94a3b8",
+                        cursor: "pointer",
+                        fontSize: 14,
+                      }}
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+                <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                  <button
+                    type="button"
+                    className="btn btn-small"
+                    style={{ background: "#dcfce7", color: "#166534", border: "1px solid #bbf7d0", fontWeight: 600 }}
+                    onClick={() => setOverridesChecked(new Set(allPermissions.map((p) => p.code)))}
+                  >
+                    🟢 Grant All
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-small"
+                    style={{ background: "#fee2e2", color: "#991b1b", border: "1px solid #fca5a5", fontWeight: 600 }}
+                    onClick={() => setOverridesChecked(new Set())}
+                  >
+                    🔴 Deny All
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-small"
+                    style={{ background: "#f1f5f9", color: "#475569", border: "1px solid #cbd5e1", fontWeight: 600 }}
+                    onClick={() => {
+                      setOverridesChecked(new Set(overridesBreakdown.role_permissions || []));
+                    }}
+                  >
+                    🔄 Reset to Departments
+                  </button>
+                </div>
+              </div>
+
+              {/* Permission Groups */}
+              {(() => {
+                const groups = groupPermissionsByModule(allPermissions);
+                const q = overridesSearch.trim().toLowerCase();
+                const roleGranted = new Set(overridesBreakdown.role_permissions || []);
+                const modKeys = Object.keys(groups)
+                  .sort()
+                  .filter((modKey) =>
+                    !q
+                      ? true
+                      : groups[modKey].some(
+                        (p) =>
+                          p.code.toLowerCase().includes(q) ||
+                          (p.description || "").toLowerCase().includes(q) ||
+                          modKey.toLowerCase().includes(q)
+                      )
+                  );
+
+                if (modKeys.length === 0) {
+                  return (
+                    <div className="muted" style={{ textAlign: "center", padding: "40px" }}>
+                      No permissions match your search query.
+                    </div>
+                  );
+                }
+
+                return modKeys.map((modKey) => {
+                  const items = q
+                    ? groups[modKey].filter(
+                      (p) =>
+                        p.code.toLowerCase().includes(q) ||
+                        (p.description || "").toLowerCase().includes(q) ||
+                        modKey.toLowerCase().includes(q)
+                    )
+                    : groups[modKey];
+                  const allCheckedInMod = items.every((p) => overridesChecked.has(p.code));
+                  const checkedCountInMod = items.filter((p) => overridesChecked.has(p.code)).length;
+
+                  return (
+                    <div className="permission-group" key={modKey}>
+                      <div className="permission-group-header">
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <span className="permission-group-title">
+                            {MODULE_NAMES[modKey] || modKey.toUpperCase()}
+                          </span>
+                          <span style={{ fontSize: 11, background: "#e2e8f0", color: "#475569", padding: "1px 6px", borderRadius: 10, fontWeight: 600 }}>
+                            {checkedCountInMod} / {items.length} active
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          className="toggle-btn"
+                          onClick={() => {
+                            setOverridesChecked((prev) => {
+                              const next = new Set(prev);
+                              items.forEach((p) => {
+                                if (allCheckedInMod) next.delete(p.code);
+                                else next.add(p.code);
+                              });
+                              return next;
+                            });
+                          }}
+                        >
+                          {allCheckedInMod ? "Deselect Group" : "Select Group"}
+                        </button>
+                      </div>
+                      <div className="permission-checks">
+                        {items.map((p) => {
+                          const checked = overridesChecked.has(p.code);
+                          const isRoleGranted = roleGranted.has(p.code);
+                          return (
+                            <label
+                              key={p.code}
+                              style={{
+                                border: checked
+                                  ? isRoleGranted
+                                    ? "1px solid #bfdbfe"
+                                    : "1px solid #86efac"
+                                  : isRoleGranted
+                                    ? "1px solid #fca5a5"
+                                    : "1px solid #e2e8f0",
+                                background: checked
+                                  ? isRoleGranted
+                                    ? "#eff6ff"
+                                    : "#f0fdf4"
+                                  : isRoleGranted
+                                    ? "#fef2f2"
+                                    : "#ffffff",
+                              }}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={() => {
+                                  setOverridesChecked((prev) => {
+                                    const next = new Set(prev);
+                                    if (next.has(p.code)) next.delete(p.code);
+                                    else next.add(p.code);
+                                    return next;
+                                  });
+                                }}
+                              />
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, flexWrap: "wrap" }}>
+                                  <span style={{ fontSize: 13, fontWeight: 600, color: "#1e293b" }}>
+                                    {friendlyPermissionLabel(p.code)}
+                                  </span>
+                                  {checked && !isRoleGranted && (
+                                    <span className="chip-grant" style={{ fontSize: 10, padding: "1px 6px", borderRadius: 4 }}>
+                                      + EXTRA GRANTED
+                                    </span>
+                                  )}
+                                  {!checked && isRoleGranted && (
+                                    <span className="chip-deny" style={{ fontSize: 10, padding: "1px 6px", borderRadius: 4 }}>
+                                      ✕ DIRECT DENIED
+                                    </span>
+                                  )}
+                                  {checked && isRoleGranted && (
+                                    <span className="chip-role" style={{ fontSize: 10, padding: "1px 6px", borderRadius: 4 }}>
+                                      FROM DEPARTMENT
+                                    </span>
+                                  )}
+                                </div>
+                                <div style={{ fontSize: 11, color: "#64748b", fontFamily: "monospace", marginTop: 2 }}>
+                                  {p.code}
+                                </div>
+                              </div>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                });
+              })()}
+            </div>
+
+            {/* Sticky Drawer Footer */}
+            {(() => {
+              const roleGranted = new Set(overridesBreakdown.role_permissions || []);
+              let extraGrants = 0;
+              let roleInherited = 0;
+              let directDenies = 0;
+              for (const code of overridesChecked) {
+                if (roleGranted.has(code)) roleInherited++;
+                else extraGrants++;
+              }
+              for (const code of roleGranted) {
+                if (!overridesChecked.has(code)) directDenies++;
+              }
+
+              return (
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    padding: "16px 24px",
+                    background: "#ffffff",
+                    borderTop: "1px solid #e2e8f0",
+                    flexWrap: "wrap",
+                    gap: 12,
+                  }}
+                >
+                  <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", fontSize: "12.5px" }}>
+                    <span style={{ fontWeight: 600, color: "#0f172a" }}>
+                      {overridesChecked.size} active permission{overridesChecked.size === 1 ? "" : "s"}
+                    </span>
+                    {roleInherited > 0 && (
+                      <span className="chip-role" style={{ fontSize: 11, padding: "2px 8px", borderRadius: 4 }}>
+                        {roleInherited} from department
+                      </span>
+                    )}
+                    {extraGrants > 0 && (
+                      <span className="chip-grant" style={{ fontSize: 11, padding: "2px 8px", borderRadius: 4 }}>
+                        +{extraGrants} extra direct grant{extraGrants === 1 ? "" : "s"}
+                      </span>
+                    )}
+                    {directDenies > 0 && (
+                      <span className="chip-deny" style={{ fontSize: 11, padding: "2px 8px", borderRadius: 4 }}>
+                        -{directDenies} denied
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ display: "flex", gap: 12 }}>
+                    <button type="button" className="btn" onClick={() => setOverridesUserId(null)}>
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      disabled={overridesSaving}
+                      onClick={() => void handleSaveUserOverrides()}
+                    >
+                      {overridesSaving ? "Saving..." : "Save Permission Overrides"}
+                    </button>
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         )}
       </Modal>

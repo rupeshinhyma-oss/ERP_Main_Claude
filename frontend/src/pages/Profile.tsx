@@ -227,7 +227,7 @@ export function ProfilePage() {
 
               <div>
                 <label style={{ display: "block", fontSize: "14px", fontWeight: 600, color: "#334155", marginBottom: "8px" }}>
-                  Last Name <span style={{ color: "#dc2626" }}>*</span>
+                  Last Name
                 </label>
                 <input
                   type="text"
@@ -244,7 +244,6 @@ export function ProfilePage() {
                     color: "#0f172a",
                     outline: "none",
                   }}
-                  required
                 />
               </div>
 

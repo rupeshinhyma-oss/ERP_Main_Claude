@@ -755,7 +755,7 @@ export function UsersPage() {
                   <th>Employee</th>
                   <th>Username</th>
                   <th>Email</th>
-                  <th>Role</th>
+                  <th>Department</th>
                   <th>Status</th>
                   <th>Last Login</th>
                   <th>Actions</th>
@@ -805,7 +805,7 @@ export function UsersPage() {
                         }
                         actions.push({
                           key: "assign-role",
-                          label: "🛡️ Assign Role",
+                          label: "🛡️ Assign Department",
                           onClick: () => {
                             setRoleModalUserId(u.id);
                             setAssignRoleId("");
@@ -917,7 +917,7 @@ export function UsersPage() {
                               </span>
                             ))
                           ) : (
-                            <em>No Role</em>
+                            <em>No Department</em>
                           )}
                         </td>
                         <td>
@@ -983,8 +983,7 @@ export function UsersPage() {
             />
             <TextField
               id="last_name"
-              label="Last Name *"
-              required
+              label="Last Name"
               maxLength={100}
               placeholder="e.g. Doe"
               value={createForm.last_name}
@@ -1017,7 +1016,7 @@ export function UsersPage() {
             <TextField id="password" label="Password *" type="password" required minLength={1} placeholder="Set the user's initial password" value={createForm.password} onChange={(v) => setCreateForm((f) => ({ ...f, password: v }))} />
             <SelectField
               id="role_id"
-              label="Assign Initial Role"
+              label="Assign Initial Department"
               value={createForm.role_id}
               onChange={(v) => setCreateForm((f) => ({ ...f, role_id: v }))}
               style={{ gridColumn: "span 2" }}
@@ -1032,8 +1031,8 @@ export function UsersPage() {
                 ))}
             </SelectField>
             <span className="muted" style={{ fontSize: "12px", gridColumn: "span 2", marginTop: "-8px" }}>
-              Leave unselected to assign the default "User" role automatically. The Admin
-              role is reserved for the system's bootstrap account and cannot be assigned here.
+              Leave unselected to assign the default "User" department automatically. The Admin
+              department is reserved for the system's bootstrap account and cannot be assigned here.
             </span>
           </div>
           <div className="form-actions">
@@ -1425,10 +1424,10 @@ export function UsersPage() {
                 </div>
               )}
 
-              {/* Section 6: Assigned Roles & Access */}
+              {/* Section 6: Assigned Departments & Access */}
               {renderDetailSection(
                 "🔐",
-                "Assigned Roles & Access",
+                "Assigned Departments & Access",
                 <div
                   style={{
                     padding: "12px 14px",
@@ -1460,7 +1459,7 @@ export function UsersPage() {
                       ))}
                     </div>
                   ) : (
-                    <span style={{ color: "#94a3b8", fontStyle: "italic", fontSize: "13px" }}>— (No roles assigned)</span>
+                    <span style={{ color: "#94a3b8", fontStyle: "italic", fontSize: "13px" }}>— (No departments assigned)</span>
                   )}
                 </div>
               )}
@@ -1577,23 +1576,23 @@ export function UsersPage() {
         )}
       </Modal>
 
-      {/* Assign Role */}
+      {/* Assign Department */}
       <Modal
         open={Boolean(roleModalUserId)}
-        title="Assign Role"
+        title="Assign Department"
         onClose={() => setRoleModalUserId(null)}
         cardStyle={{ maxWidth: "500px" }}
       >
         <form onSubmit={handleAssignRole}>
           <div className="field" style={{ marginBottom: "16px" }}>
-            <label htmlFor="assignRoleId">Select Role to Assign</label>
+            <label htmlFor="assignRoleId">Select Department to Assign</label>
             <select
               id="assignRoleId"
               required
               value={assignRoleId}
               onChange={(e) => setAssignRoleId(e.target.value)}
             >
-              <option value="">-- Select Role --</option>
+              <option value="">-- Select Department --</option>
               {roles
                 .filter((r) => r.name !== "super_admin")
                 .map((r) => (
@@ -1603,12 +1602,12 @@ export function UsersPage() {
                 ))}
             </select>
             <span className="muted" style={{ fontSize: "12px", marginTop: "4px", display: "block" }}>
-              The Admin role is reserved for the system's bootstrap account and cannot be assigned here.
+              The Admin department is reserved for the system's bootstrap account and cannot be assigned here.
             </span>
           </div>
           <div className="form-actions">
             <button type="submit" className="btn btn-primary" disabled={assignRoleSubmitting}>
-              {assignRoleSubmitting ? "Assigning…" : "Assign Role"}
+              {assignRoleSubmitting ? "Assigning…" : "Assign Department"}
             </button>
             <button type="button" className="btn" onClick={() => setRoleModalUserId(null)}>
               Cancel
@@ -1650,7 +1649,7 @@ export function UsersPage() {
                     )}
                   </div>
                   <div style={{ display: "flex", gap: "6px", alignItems: "center", flexWrap: "wrap" }}>
-                    <span style={{ fontSize: "12px", color: "#64748b", fontWeight: 500 }}>Assigned Roles:</span>
+                    <span style={{ fontSize: "12px", color: "#64748b", fontWeight: 500 }}>Assigned Departments:</span>
                     {(overridesBreakdown.user_info?.system_roles || []).length > 0 ? (
                       (overridesBreakdown.user_info?.system_roles || []).map((r) => (
                         <span key={r} className="badge" style={{ background: "#dbeafe", color: "#1d4ed8", fontWeight: 600, fontSize: "11px", padding: "2px 8px" }}>
@@ -1658,12 +1657,12 @@ export function UsersPage() {
                         </span>
                       ))
                     ) : (
-                      <span className="badge" style={{ background: "#f1f5f9", color: "#64748b", fontSize: "11px" }}>No Roles</span>
+                      <span className="badge" style={{ background: "#f1f5f9", color: "#64748b", fontSize: "11px" }}>No Departments</span>
                     )}
                   </div>
                 </div>
                 <div style={{ fontSize: "12px", color: "#475569", marginTop: "8px", lineHeight: 1.4 }}>
-                  💡 Permissions marked <span className="chip-role" style={{ fontSize: "10px", padding: "1px 6px", borderRadius: "4px" }}>FROM ROLE</span> are inherited from assigned roles. Check extra permissions to grant direct overrides (<span className="chip-grant" style={{ fontSize: "10px", padding: "1px 6px", borderRadius: "4px" }}>+ EXTRA GRANTED</span>). Uncheck role permissions to deny them (<span className="chip-deny" style={{ fontSize: "10px", padding: "1px 6px", borderRadius: "4px" }}>✕ DIRECT DENIED</span>).
+                  💡 Permissions marked <span className="chip-role" style={{ fontSize: "10px", padding: "1px 6px", borderRadius: "4px" }}>FROM DEPARTMENT</span> are inherited from assigned departments. Check extra permissions to grant direct overrides (<span className="chip-grant" style={{ fontSize: "10px", padding: "1px 6px", borderRadius: "4px" }}>+ EXTRA GRANTED</span>). Uncheck department permissions to deny them (<span className="chip-deny" style={{ fontSize: "10px", padding: "1px 6px", borderRadius: "4px" }}>✕ DIRECT DENIED</span>).
                 </div>
               </div>
 
@@ -1738,7 +1737,7 @@ export function UsersPage() {
                       setOverridesChecked(new Set(overridesBreakdown.role_permissions || []));
                     }}
                   >
-                    🔄 Reset to Roles
+                    🔄 Reset to Departments
                   </button>
                 </div>
               </div>
@@ -1862,7 +1861,7 @@ export function UsersPage() {
                                   )}
                                   {checked && isRoleGranted && (
                                     <span className="chip-role" style={{ fontSize: 10, padding: "1px 6px", borderRadius: 4 }}>
-                                      FROM ROLE
+                                      FROM DEPARTMENT
                                     </span>
                                   )}
                                 </div>
@@ -1913,7 +1912,7 @@ export function UsersPage() {
                     </span>
                     {roleInherited > 0 && (
                       <span className="chip-role" style={{ fontSize: 11, padding: "2px 8px", borderRadius: 4 }}>
-                        {roleInherited} from role
+                        {roleInherited} from department
                       </span>
                     )}
                     {extraGrants > 0 && (

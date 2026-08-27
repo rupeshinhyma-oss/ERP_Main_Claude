@@ -2340,6 +2340,62 @@ export function PlanningPage() {
       return next;
     });
   };
+
+  /* Sorting State */
+  const [sortColumnId, setSortColumnId] = useState<string | null>(null);
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
+
+  useEffect(() => {
+    setSortColumnId(null);
+    setSortDirection("asc");
+  }, [activeSheetId]);
+
+  const handleSortColumn = useCallback((colId: string) => {
+    setSortColumnId((prev) => {
+      if (prev === colId) {
+        if (sortDirection === "asc") {
+          setSortDirection("desc");
+          return colId;
+        } else {
+          setSortDirection("asc");
+          return null;
+        }
+      } else {
+        setSortDirection("asc");
+        return colId;
+      }
+    });
+  }, [sortDirection]);
+
+  const displayedRows = useMemo(() => {
+    if (!sortColumnId) return rows;
+    const list = [...rows];
+    list.sort((a, b) => {
+      let rawA = "";
+      let rawB = "";
+      if (sortColumnId === "item-header-col") {
+        rawA = (a.label || "").trim();
+        rawB = (b.label || "").trim();
+      } else {
+        const cellA = cellByRowColumn.get(`${a.id}:${sortColumnId}`);
+        const cellB = cellByRowColumn.get(`${b.id}:${sortColumnId}`);
+        rawA = (cellA?.display_value ?? cellA?.value ?? "").trim();
+        rawB = (cellB?.display_value ?? cellB?.value ?? "").trim();
+      }
+      const numA = Number(rawA);
+      const numB = Number(rawB);
+      if (rawA !== "" && rawB !== "" && !isNaN(numA) && !isNaN(numB)) {
+        return sortDirection === "asc" ? numA - numB : numB - numA;
+      }
+      if (!rawA && rawB) return 1;
+      if (rawA && !rawB) return -1;
+      return sortDirection === "asc"
+        ? rawA.localeCompare(rawB, undefined, { numeric: true, sensitivity: "base" })
+        : rawB.localeCompare(rawA, undefined, { numeric: true, sensitivity: "base" });
+    });
+    return list;
+  }, [rows, sortColumnId, sortDirection, cellByRowColumn]);
+
   const orderedColumns = useMemo(() => {
     const testCols = visibleColumns.filter((c) => isTestColumn(c.name));
     const appCols = visibleColumns.filter((c) => isApprovalDateColumn(c.name));
@@ -3169,6 +3225,9 @@ export function PlanningPage() {
                       isLastFrozen={lastFrozenColumnId === null}
                       isFiltered={!!(activeColumnFilters[`${activeSheetId}:item-header-col`]?.selectedValues?.size || activeColumnFilters[`${activeSheetId}:item-header-col`]?.textQuery)}
                       onOpenFilter={(anchor) => setFilterPopover({ anchor, columnId: "item-header-col", columnName: itemColumn.name })}
+                      isSorted={sortColumnId === "item-header-col"}
+                      sortDirection={sortDirection}
+                      onSort={() => handleSortColumn("item-header-col")}
                     />
                     {orderedColumns.map((col) => (
                       <ColumnHeader
@@ -3185,6 +3244,9 @@ export function PlanningPage() {
                         onOpenFilter={(anchor) => setFilterPopover({ anchor, columnId: col.id, columnName: col.name })}
                         width={effectiveColumnWidth(col)}
                         onResize={canManageColumns ? (widthPx) => handleResizeColumn(col.id, widthPx) : undefined}
+                        isSorted={sortColumnId === col.id}
+                        sortDirection={sortDirection}
+                        onSort={() => handleSortColumn(col.id)}
                       />
                     ))}
                   </tr>
@@ -3192,7 +3254,7 @@ export function PlanningPage() {
                 <tbody>
                   {loading ? (
                     <PlanningGridSkeletonRows columns={orderedColumns} count={10} />
-                  ) : rows.length === 0 ? (
+                  ) : displayedRows.length === 0 ? (
                     <TableMessageRow colSpan={orderedColumns.length + 1}>
                       {activeFilterCount > 0 ? (
                         <>
@@ -3210,7 +3272,7 @@ export function PlanningPage() {
                       )}
                     </TableMessageRow>
                   ) : (
-                    rows.map((row) => (
+                    displayedRows.map((row) => (
                       <tr key={row.id}>
                         <EditableRowLabel
                           label={row.label}
@@ -3658,6 +3720,9 @@ function ColumnHeader({
   onOpenFilter,
   width,
   onResize,
+  isSorted,
+  sortDirection,
+  onSort,
 }: {
   column: PlanningColumn;
   canManage: boolean;
@@ -3673,6 +3738,9 @@ function ColumnHeader({
   width?: number;
   /** Called with the final width (px) once the user releases a drag-resize. Omit to disable resizing (e.g. the ITEM column, which has its own header component). */
   onResize?: (widthPx: number) => void;
+  isSorted?: boolean;
+  sortDirection?: "asc" | "desc";
+  onSort?: () => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(column.name);
@@ -3775,11 +3843,14 @@ function ColumnHeader({
           <>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 3, width: "100%", minWidth: 0 }}>
               <span
-                onClick={() => canManage && setEditing(true)}
+                onClick={() => {
+                  if (onSort) onSort();
+                  else if (canManage) setEditing(true);
+                }}
                 style={{
-                  cursor: canManage ? "text" : "default",
+                  cursor: "pointer",
                   fontWeight: 600,
-                  color: "#334155",
+                  color: isSorted ? "#0284c7" : "#334155",
                   textAlign: "center",
                   padding: "0 2px",
                   whiteSpace: "normal",
@@ -3788,10 +3859,57 @@ function ColumnHeader({
                   minWidth: 0,
                   overflow: "hidden",
                 }}
-                title={column.name}
+                title={
+                  isSorted
+                    ? `Sorted by ${column.name} (${sortDirection === "asc" ? "Ascending — click for Descending" : "Descending — click to reset"})`
+                    : `Click to sort by ${column.name} (Ascending)`
+                }
               >
                 {column.name}
               </span>
+              {isSorted ? (
+                <span
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onSort?.();
+                  }}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    color: "#0284c7",
+                    fontSize: "10px",
+                    fontWeight: 800,
+                    background: "#e0f2fe",
+                    padding: "1px 4px",
+                    borderRadius: "3px",
+                    border: "1px solid #bae6fd",
+                    lineHeight: 1,
+                    flexShrink: 0,
+                    cursor: "pointer",
+                  }}
+                  title={sortDirection === "asc" ? "Ascending (click for Descending)" : "Descending (click to reset)"}
+                >
+                  {sortDirection === "asc" ? "▲" : "▼"}
+                </span>
+              ) : (
+                <span
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onSort?.();
+                  }}
+                  style={{
+                    fontSize: "10px",
+                    color: "#94a3b8",
+                    opacity: 0.45,
+                    lineHeight: 1,
+                    flexShrink: 0,
+                    cursor: "pointer",
+                  }}
+                  title={`Sort by ${column.name}`}
+                >
+                  ↕
+                </span>
+              )}
               {sourceBadge && (
                 <span
                   title={sourceBadge.title}
@@ -3920,6 +4038,9 @@ function EditableItemHeader({
   isLastFrozen,
   isFiltered,
   onOpenFilter,
+  isSorted,
+  sortDirection,
+  onSort,
 }: {
   column: PlanningColumn;
   canManage: boolean;
@@ -3929,6 +4050,9 @@ function EditableItemHeader({
   isLastFrozen?: boolean;
   isFiltered?: boolean;
   onOpenFilter?: (anchor: HTMLElement) => void;
+  isSorted?: boolean;
+  sortDirection?: "asc" | "desc";
+  onSort?: () => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(column.name);
@@ -4001,12 +4125,19 @@ function EditableItemHeader({
           <>
             <div style={{ display: "flex", alignItems: "center", gap: 3, width: "100%", minWidth: 0 }}>
               <span
-                onClick={() => canManage && setEditing(true)}
-                title={canManage ? "Click to rename header" : undefined}
+                onClick={() => {
+                  if (onSort) onSort();
+                  else if (canManage) setEditing(true);
+                }}
+                title={
+                  isSorted
+                    ? `Sorted by ${column.name} (${sortDirection === "asc" ? "Ascending — click for Descending" : "Descending — click to reset"})`
+                    : `Click to sort by ${column.name} (Ascending)`
+                }
                 style={{
-                  cursor: canManage ? "pointer" : "default",
+                  cursor: "pointer",
                   fontWeight: 600,
-                  color: "#334155",
+                  color: isSorted ? "#0284c7" : "#334155",
                   minWidth: 0,
                   flex: "1 1 auto",
                   overflow: "hidden",
@@ -4016,6 +4147,49 @@ function EditableItemHeader({
               >
                 {column.name}
               </span>
+              {isSorted ? (
+                <span
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onSort?.();
+                  }}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    color: "#0284c7",
+                    fontSize: "10px",
+                    fontWeight: 800,
+                    background: "#e0f2fe",
+                    padding: "1px 4px",
+                    borderRadius: "3px",
+                    border: "1px solid #bae6fd",
+                    lineHeight: 1,
+                    flexShrink: 0,
+                    cursor: "pointer",
+                  }}
+                  title={sortDirection === "asc" ? "Ascending (click for Descending)" : "Descending (click to reset)"}
+                >
+                  {sortDirection === "asc" ? "▲" : "▼"}
+                </span>
+              ) : (
+                <span
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onSort?.();
+                  }}
+                  style={{
+                    fontSize: "10px",
+                    color: "#94a3b8",
+                    opacity: 0.45,
+                    lineHeight: 1,
+                    flexShrink: 0,
+                    cursor: "pointer",
+                  }}
+                  title="Sort by Item"
+                >
+                  ↕
+                </span>
+              )}
               {sourceBadge && (
                 <span
                   title={sourceBadge.title}

@@ -73,7 +73,7 @@ export const NAV_SECTIONS: NavSection[] = [
     label: "USER MANAGEMENT",
     items: [
       { key: "users", label: "Users", path: "/users", icon: "user", permission: "user.view" },
-      { key: "rbac", label: "Roles & Permissions", path: "/rbac", icon: "shield", permission: "roles_permissions.view" },
+      { key: "rbac", label: "Departments & Permissions", path: "/rbac", icon: "shield", permission: "roles_permissions.view" },
     ],
   },
   {
@@ -125,7 +125,7 @@ export const PAGE_TITLES: Record<string, string> = {
   "masters-products": "Product Master",
   suppliers: "Suppliers",
   audit: "Audit Log",
-  rbac: "Roles & Permissions",
+  rbac: "Departments & Permissions",
   "effective-permissions": "Effective Permissions Inspector",
   "employee-form": "Employee Form",
   "employee-detail": "Employee Detail",

@@ -289,4 +289,3 @@ class CompanySummaryRead(BaseModel):
     consignment_status: InquiryConsignmentStatus = InquiryConsignmentStatus.PROPOSED
     consignment_codes: list[str] = Field(default_factory=list)
     updated_at: datetime | None = None
-

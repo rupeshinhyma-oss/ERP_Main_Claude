@@ -20,8 +20,8 @@ actually changes), not the consignment level.
 
 from __future__ import annotations
 
-from datetime import datetime
 import uuid
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
 from pydantic import BaseModel, Field
@@ -40,6 +40,7 @@ from app.events.channels import module_channel
 from app.events.dependencies import get_event_dispatcher
 from app.events.dispatcher import EventDispatcher
 from app.events.models import Event
+from app.inquiries.ai_extractor import extract_supplier_quotation
 from app.inquiries.dependencies import get_inquiry_service
 from app.inquiries.public_quotes import generate_rfq_token
 from app.masters.products.models import Product
@@ -840,17 +841,28 @@ async def create_item_rfq(
         changes={"rfq_id": str(rfq.id)},
     )
 
-    # Fetch product information for automated email dispatch
+    # Fetch product information (needed both for "all suppliers" category
+    # matching below, and for the automated email dispatch that follows).
     item = await service.item_repository.get_by_id(item_id) if service.item_repository else None
     prod = (await db.execute(select(Product).where(Product.id == item.product_id))).scalars().first() if item else None
     product_name = (prod.product_name or prod.product_name_tally) if prod else "Product"
     product_code = prod.product_code if prod else None
     quantity = item.quantity if item else 1
 
-    # Generate public supplier quotation links
+    # Generate public supplier quotation links.
+    #
+    # supplier_type == "all": resolve every ACTIVE supplier linked to this
+    # product's Category and/or Sub-Category (via SupplierCategoryLink /
+    # SupplierSubCategoryLink), falling back to every active supplier if
+    # the product has no category/sub-category set. This matches the
+    # "All Suppliers (Category & Sub-Category)" option in the Request
+    # Quotation dialog on the frontend.
+    #
+    # Otherwise (or if the frontend already resolved and sent explicit
+    # supplier_ids): use exactly the suppliers given.
     supplier_uuids = [uuid.UUID(sid) for sid in (rfq.supplier_ids or []) if sid]
     supplier_links = []
-    
+
     if not supplier_uuids and rfq.supplier_type == "all":
         conditions = []
         if prod and prod.sub_category_id:
@@ -884,13 +896,33 @@ async def create_item_rfq(
             "quote_path": f"/quote/{token}",
         })
 
+    # Automatically dispatch emails in the background for suppliers with email addresses
+    base_host = request.headers.get("origin") or "http://192.168.1.23:5173"
+    for link in supplier_links:
+        if link.get("emails"):
+            full_quote_url = f"{base_host}{link['quote_path']}"
+            import asyncio
+            asyncio.create_task(
+                send_rfq_email(
+                    to_emails=link["emails"],
+                    contact_name=link["contact_name"],
+                    company_name=link["company_name"],
+                    product_name=product_name,
+                    product_code=product_code,
+                    quantity=quantity,
+                    quote_url=full_quote_url,
+                    expected_receiving_date=str(rfq.expected_receiving_date) if rfq.expected_receiving_date else None,
+                    notes=rfq.notes,
+                )
+            )
+
     rfq_data = RFQRead.model_validate(rfq).model_dump(mode="json")
     rfq_data["supplier_links"] = supplier_links
 
     return build_success_response(
         data=rfq_data,
         request_id=request.state.request_id,
-        message="Request For Quotation created successfully. You can now dispatch emails or share links.",
+        message="Request For Quotation dispatched and automated emails sent successfully.",
     )
 
 
@@ -1102,10 +1134,6 @@ async def create_bulk_rfqs(
         message=f"Consolidated RFQ email for {len(product_summary_list)} items successfully dispatched to {len(dispatched_suppliers)} suppliers.",
     )
 
-
-from app.inquiries.ai_extractor import extract_supplier_quotation
-
-
 @router.post("/items/{item_id}/ai-parse-quote", summary="AI-powered extraction of supplier quotes from text/chat/PDF")
 async def ai_parse_item_quotation(
     item_id: uuid.UUID,
@@ -1114,10 +1142,10 @@ async def ai_parse_item_quotation(
     supplier_id: str | None = Form(None),
     file: UploadFile | None = File(None),
     session: AsyncSession = Depends(get_db_session),
-    service = Depends(get_inquiry_service),
+    service: InquiryService = Depends(get_inquiry_service),
     current_user: CurrentUser = Depends(get_current_user),
 ) -> dict:
-    """Parse supplier quote text, WhatsApp/WeChat chat, or PDF quotation sheets using Gemini 2.0 Flash / OpenAI."""
+    """Parse supplier quote text, WhatsApp/WeChat chat, or PDF quotation sheets using OpenAI GPT-4o-mini."""
     from app.inquiries.models import InquiryItem, RFQ
 
     stmt = select(InquiryItem).where(InquiryItem.id == item_id)
@@ -1126,14 +1154,17 @@ async def ai_parse_item_quotation(
     if not item:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inquiry item not found")
 
-    prod_name = item.product_name or None
+    # InquiryItem has no product_name/product_code of its own -- both live
+    # on the linked Product (via product_id), same as everywhere else in
+    # this file resolves a display name/code for an item.
+    prod_name = None
     prod_code = None
     if item.product_id:
         p_res = await session.execute(select(Product).where(Product.id == item.product_id))
         p = p_res.scalar_one_or_none()
         if p:
-            prod_name = prod_name or p.name
-            prod_code = p.code
+            prod_name = p.product_name_tally or p.product_name
+            prod_code = p.product_code
 
     rfq_res = await session.execute(select(RFQ).where(RFQ.inquiry_item_id == item_id).order_by(RFQ.created_at.desc()))
     rfq = rfq_res.scalars().first()
@@ -1260,11 +1291,22 @@ async def inbound_quotation_webhook(
     if not item:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inquiry line item not found")
 
+    # Same as above: InquiryItem has no product_name/product_code of its
+    # own, look them up via the linked Product.
+    prod_name = None
+    prod_code = None
+    if item.product_id:
+        p_res = await session.execute(select(Product).where(Product.id == item.product_id))
+        p = p_res.scalar_one_or_none()
+        if p:
+            prod_name = p.product_name_tally or p.product_name
+            prod_code = p.product_code
+
     # Run AI Extractor
     ai_result = await extract_supplier_quotation(
         text_content=payload.text,
-        product_name=item.product_name,
-        product_code=item.product_code,
+        product_name=prod_name,
+        product_code=prod_code,
         target_quantity=float(item.quantity) if item.quantity else None,
     )
 
@@ -1276,7 +1318,7 @@ async def inbound_quotation_webhook(
         )
 
     # Insert Quotation
-    quote_supplier_id = supplier.id if supplier else item.created_by
+    quote_supplier_id = supplier.id if supplier else item.proposed_by
     quote_count_res = await session.execute(select(Quotation).where(Quotation.inquiry_item_id == item.id))
     existing_count = len(quote_count_res.scalars().all())
     quote_number = f"QT-WEBHOOK-{existing_count + 1:02d}"
@@ -1299,7 +1341,7 @@ async def inbound_quotation_webhook(
         terms_and_conditions=f"{ai_result.price_terms or ''} • {ai_result.payment_terms or ''}".strip(" •") or None,
         remarks=ai_result.remarks or f"Auto-ingested via {payload.channel} from {payload.sender}",
         status=QuotationStatus.PENDING,
-        created_by=item.created_by,
+        created_by=item.proposed_by,
     )
     session.add(new_quotation)
     await session.commit()

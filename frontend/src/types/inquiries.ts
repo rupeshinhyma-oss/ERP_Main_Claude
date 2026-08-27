@@ -125,4 +125,3 @@ export interface CompanySummary {
   consignment_codes: string[];
   updated_at?: string | null;
 }
-

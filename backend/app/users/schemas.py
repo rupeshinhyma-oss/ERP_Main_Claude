@@ -15,7 +15,7 @@ class UserCreate(BaseModel):
 
     first_name: str = Field(..., min_length=1, max_length=100)
     middle_name: str | None = Field(default=None, max_length=100)
-    last_name: str = Field(..., min_length=1, max_length=100)
+    last_name: str | None = Field(default=None, max_length=100)
     display_name: str = Field(
         ..., min_length=1, max_length=200, description="Required. Shown throughout the system in place of the username."
     )

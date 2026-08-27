@@ -147,9 +147,9 @@ class UserService:
         phone: str,
         password: str,
         first_name: str,
-        last_name: str,
         display_name: str,
         created_by: uuid.UUID,
+        last_name: str | None = None,
         username: str | None = None,
         middle_name: str | None = None,
         employee_code: str | None = None,
@@ -172,9 +172,9 @@ class UserService:
         """
         Create a new user account.
 
-        ``email``, ``phone``, ``password``, ``first_name``, ``last_name``, and
-        ``display_name`` are always required. ``username`` is optional: if the
-        admin doesn't supply one, the system generates a unique username
+        ``email``, ``phone``, ``password``, ``first_name``, and
+        ``display_name`` are required. ``last_name`` and ``username`` are optional: if the
+        admin doesn't supply a username, the system generates a unique username
         automatically (derived from the email, falling back to the phone
         number). Any of username / email / phone can later be used to log in.
         ``display_name`` is what's shown throughout the rest of the system
@@ -185,8 +185,6 @@ class UserService:
         """
         if not first_name or not first_name.strip():
             raise ConflictException("First name is required.")
-        if not last_name or not last_name.strip():
-            raise ConflictException("Last name is required.")
         if not display_name or not display_name.strip():
             raise ConflictException("Display name is required.")
 
@@ -210,7 +208,7 @@ class UserService:
         user = await self.user_repository.create(
             first_name=first_name.strip(),
             middle_name=middle_name,
-            last_name=last_name.strip(),
+            last_name=last_name.strip() if last_name and last_name.strip() else None,
             display_name=display_name.strip(),
             employee_code=employee_code,
             username=resolved_username,

@@ -983,8 +983,7 @@ export function UsersPage() {
             />
             <TextField
               id="last_name"
-              label="Last Name *"
-              required
+              label="Last Name"
               maxLength={100}
               placeholder="e.g. Doe"
               value={createForm.last_name}

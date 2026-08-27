@@ -1,477 +1,374 @@
-# Enterprise ERP System — Comprehensive Architecture & Feature Documentation
+# Enterprise ERP System — Complete Architecture, Feature & Developer Integration Manual
 
-> **Version:** 1.0.0 (Production)  
-> **Last Updated:** August 2026   
-> **Architecture Style:** Decoupled Async REST API (FastAPI) + Single Page Application (React / Vite) with Real-Time WebSockets.
-
----
-
-## Table of Contents
-
-1. [System Overview & Architecture](#1-system-overview--architecture)
-2. [Technology Stack](#2-technology-stack)
-3. [Database Architecture & Data Models](#3-database-architecture--data-models)
-4. [Security, Authentication & Session Engine](#4-security-authentication--session-engine)
-5. [Role-Based Access Control (RBAC) & Departments](#5-role-based-access-control-rbac--departments)
-6. [Module-by-Module Feature Breakdown](#6-module-by-module-feature-breakdown)
-   - 6.1. [Authentication & Account Management](#61-authentication--account-management)
-   - 6.2. [Users & HR Profile Management](#62-users--hr-profile-management)
-   - 6.3. [Departments & Permissions (RBAC)](#63-departments--permissions-rbac)
-   - 6.4. [Master Data & Configurations](#64-master-data--configurations)
-   - 6.5. [Product Catalog & Specification Builder](#65-product-catalog--specification-builder)
-   - 6.6. [Supplier Management & Public Quote Portal](#66-supplier-management--public-quote-portal)
-   - 6.7. [Buyer & Client Management](#67-buyer--client-management)
-   - 6.8. [Inquiries, RFQs & AI Quotation Extraction](#68-inquiries-rfqs--ai-quotation-extraction)
-   - 6.9. [Shipment Planning & Container Optimization](#69-shipment-planning--container-optimization)
-   - 6.10. [Audit Trails & Change Logging](#610-audit-trails--change-logging)
-   - 6.11. [Recycle Bin (Trash & Recovery Engine)](#611-recycle-bin-trash--recovery-engine)
-   - 6.12. [Organization & Global Settings](#612-organization--global-settings)
-7. [Real-Time WebSocket & Event Synchronization](#7-real-time-websocket--event-synchronization)
-8. [Multi-Tier Caching System](#8-multi-tier-caching-system)
-9. [Bulk Data Import & Export Engine](#9-bulk-data-import--export-engine)
-10. [API Route Directory & Endpoints](#10-api-route-directory--endpoints)
-11. [Frontend Code Structure & Component Map](#11-frontend-code-structure--component-map)
-12. [Deployment & Environment Configuration](#12-deployment--environment-configuration)
+> **System Version:** 1.0.0 (Production)  
+> **Last Updated:** August 2026  
+> **Architectural Pattern:** Modular Async Monolith (FastAPI) + React 18 SPA (Vite) + Real-Time WebSocket Event Bus  
+> **Target Audience:** Systems Architects, Software Engineers, and Autonomous AI Coding Agents.
 
 ---
 
-## 1. System Overview & Architecture
-
-The Enterprise Resource Planning (ERP) platform is a high-performance, modular enterprise web platform designed for international manufacturing, trade, sourcing, supply chain planning, and multi-department governance.
+## 1. Executive Architecture Blueprint
 
 ```
-+---------------------------------------------------------------------------------------+
-|                                    CLIENT LAYER                                       |
-|  React 18 SPA (TypeScript + Vite)  |  IHM Design System  |  WebSocket Live Listener   |
-+-------------------------------------------+-------------------------------------------+
-                                            | (HTTPS / WSS JSON API)
-+-------------------------------------------v-------------------------------------------+
-|                               FASTAPI APPLICATION LAYER                               |
-|  +---------------------+  +---------------------+  +-------------------------------+  |
-|  | Authentication &    |  | Role-Based Access   |  | Inquiries & AI Quote Engine   |  |
-|  | Session Security    |  | Control (RBAC)      |  | (Gemini / Claude Vision / LLM)|  |
-|  +---------------------+  +---------------------+  +-------------------------------+  |
-|  | Master Data &       |  | Sourcing, Buyers &  |  | Container & Shipment          |  |
-|  | Product Catalogs    |  | Suppliers Engine    |  | Planning Calculator           |  |
-|  +---------------------+  +---------------------+  +-------------------------------+  |
-|  | Audit Trail Engine  |  | Universal Soft      |  | Background Email Poller       |  |
-|  | & Change Diffing    |  | Delete & Recycle    |  | & Inbound Parser              |  |
-|  +---------------------+  +---------------------+  +-------------------------------+  |
-+--------------------+----------------------+--------------------+----------------------+
-                     |                      |                    |
-+--------------------v----+  +--------------v-----+  +-----------v------------+
-|   DATABASE LAYER        |  |    CACHE LAYER     |  |     STORAGE LAYER      |
-| PostgreSQL / SQLite     |  | In-Memory & Redis  |  | Local / Cloud Uploads  |
-| (SQLAlchemy 2.0 Async)  |  | Fallback Engine    |  | (PDFs, Images, Quotes) |
-+-------------------------+  +--------------------+  +------------------------+
++---------------------------------------------------------------------------------------------------+
+|                                          CLIENT TIER                                              |
+|  React 18 Single Page App  |  IHM Design System (Vanilla CSS)  |  WebSocket Real-Time Listener    |
++-------------------------------------------------+-------------------------------------------------+
+                                                  | HTTPS / WSS
++-------------------------------------------------v-------------------------------------------------+
+|                                     FASTAPI APPLICATION TIER                                      |
+|                                                                                                   |
+|  [Middleware Pipeline: CORS -> Rate Limiting -> Request Logging -> Security Headers -> Context]   |
+|                                                                                                   |
+|  +---------------------------+  +---------------------------+  +-------------------------------+  |
+|  | Authentication & Sessions |  | RBAC & Department Engine  |  | Inquiries & RFQ Lifecycle     |  |
+|  | - Argon2id Password Hash  |  | - Hierarchical Roles      |  | - Multi-Vendor RFQ Tracking   |  |
+|  | - JWT Access & Refresh    |  | - Dynamic Permissions     |  | - Quotation Matrix Comparison |  |
+|  | - Session Device Registry |  | - User Override Engine    |  | - AI Extraction (GPT-4o/Gemini|  |
+|  +---------------------------+  +---------------------------+  +-------------------------------+  |
+|  | Master Data & Catalogs    |  | Sourcing & Partners       |  | Master Planning Engine        |  |
+|  | - Dynamic Specs Engine    |  | - Suppliers & Contacts    |  | - Dynamic Sheet/Row/Col/Cell  |  |
+|  | - Multilevel Categories   |  | - Public Tokenized Portal |  | - Container CBM Optimization  |  |
+|  | - Currencies & Geography  |  | - Buyers & Credit Limits  |  | - Cell Status Tagging Engine  |  |
+|  +---------------------------+  +---------------------------+  +-------------------------------+  |
+|  | Background Workers        |  | Real-Time Event Engine    |  | Governance & Recovery         |  |
+|  | - IMAP Email Inbound Poll |  | - WebSocket Manager       |  | - Immutable Audit Logger      |  |
+|  | - AI Attachment Extractor |  | - JSON Mutation Broadcast |  | - Universal Soft-Delete / Bin |  |
+|  | - Cache Eviction Daemon   |  | - Conflict Prevention     |  | - Field-Level JSON Delta Diff |  |
+|  +---------------------------+  +---------------------------+  +-------------------------------+  |
++--------------------------------+----------------------------+-------------------------------------+
+                                 |                            |
++--------------------------------v-------+  +-----------------v-------+  +--------------------------+
+|            PERSISTENCE TIER            |  |       CACHING TIER      |  |       STORAGE TIER       |
+| PostgreSQL / SQLite (SQLAlchemy Async) |  | Redis / InMemoryCache   |  | Local / S3 File Storage  |
+| Alembic Versioned Migrations           |  | Namespace-Based Cache   |  | Uploads, PDFs, Datasheet |
++----------------------------------------+  +-------------------------+  +--------------------------+
 ```
 
-### Key Architectural Principles
-1. **Async-First Execution**: The backend runs purely asynchronous I/O using Python `asyncio` and `asyncpg`/`aiosqlite` through SQLAlchemy 2.0 async sessions.
-2. **Strict RBAC & Least Privilege**: Every endpoint enforces granular permission checks (`<module>.<action>.<scope>`). Direct user-level overrides allow surgical permission grants or denials on top of departmental assignments.
-3. **Optimistic Locking & Concurrency Control**: Models implement `VersionMixin` (version counter) to detect concurrent modifications and prevent dirty overwrites.
-4. **Non-Destructive Operations (Soft Delete)**: Entities inherit `SoftDeleteMixin` (`deleted_at`, `deleted_by`). No customer, transaction, or configuration data is lost upon deletion; records move to the Trash bin for full restoration or administrative audit.
-5. **Real-Time Live Collaboration**: A global WebSocket connection manager broadcasts entity mutations across active browser sessions, ensuring data consistency across tabs without polling.
+### 1.1. Core System Design Principles
+1. **Asynchronous Non-Blocking I/O**: The backend runs exclusively on Python's `asyncio` event loop using `asyncpg` or `aiosqlite`. All database sessions, network requests, AI calls, and file I/O operations are non-blocking.
+2. **Optimistic Locking & Concurrency Control**: All core business entities implement a `version` column. Concurrent updates verify the version counter before committing to prevent stale overwrites.
+3. **Universal Soft-Delete & Data Integrity**: Entities inherit `SoftDeleteMixin` (`deleted_at`, `deleted_by`). No record is hard-deleted during ordinary workflows; records move to the Trash bin and can be recovered with a single click.
+4. **Least-Privilege RBAC with Direct User Overrides**: Access is governed by granular permission codes (`module.action.scope`). Permissions can be assigned to entire Departments or overridden per user (`+ EXTRA GRANTED` / `✕ DIRECT DENIED`).
+5. **Deterministic Event Broadcasting**: Entity modifications publish structured WebSocket notifications to all active clients, ensuring user interfaces stay synchronized without polling.
 
 ---
 
-## 2. Technology Stack
+## 2. Database Schema & Data Models
 
-### Backend Technologies
-| Component | Technology | Description |
-| :--- | :--- | :--- |
-| **Framework** | FastAPI (Python 3.11+) | High-speed, async Python web API framework with automatic OpenAPI/Swagger generation |
-| **ORM & Database** | SQLAlchemy 2.0 (Async) | Declarative ORM with explicit relationships, eager joins, and migration safety |
-| **Migrations** | Alembic | Version-controlled, reproducible database schema migrations |
-| **Authentication** | PyJWT & Argon2-cffi | Cryptographically secure JWT tokens (access + refresh) with Argon2id password hashing |
-| **Validation** | Pydantic v2 | High-throughput schema serialization, parsing, and type validation |
-| **Caching** | Redis / InMemoryCache | Multi-backend cache with namespace-based invalidation |
-| **AI Integration** | Google Generative AI (Gemini) / Anthropic Claude | Automated supplier quotation parsing from PDFs, spreadsheets, and emails |
-| **Background Tasks** | Asyncio Background Workers | Email IMAP poller, cache sweeps, and quotation extractor queue |
-| **File Generation** | ReportLab & OpenPyXL | High-resolution PDF datasheets, comparison exports, and Excel workbooks |
+The database models are located under `backend/app/` and inherit from declarative base mixins in `backend/app/database/base.py`.
 
-### Frontend Technologies
-| Component | Technology | Description |
+### 2.1. Shared Base Mixins
+| Mixin Name | Fields Added | Purpose |
 | :--- | :--- | :--- |
-| **Framework** | React 18 (TypeScript) | Declarative UI framework with functional hooks and strict typing |
-| **Build Tool** | Vite | Lightning-fast HMR and optimized production bundling |
-| **Styling** | Vanilla CSS (IHM Design System) | Modern, responsive CSS design tokens (glassmorphism, vibrant badges, accessible inputs) |
-| **Data Parsing** | SheetJS (XLSX) & PapaParse | Client-side spreadsheet parsing and CSV generation for import/export wizards |
-| **Networking** | Custom Fetch Client & WebSocket | Type-safe REST client with automatic token refreshing, queue locks, and live socket client |
+| `UUIDPrimaryKeyMixin` | `id: UUID (pk, default=uuid4)` | Globally unique identifier, collision-free across distributed systems. |
+| `TimestampMixin` | `created_at: DateTime(UTC)`, `updated_at: DateTime(UTC)` | Automatic tracking of creation and modification timestamps in UTC. |
+| `SoftDeleteMixin` | `deleted_at: DateTime(UTC, nullable)`, `deleted_by: UUID(nullable)` | Enables soft-deletion and Recycle Bin recovery workflows. |
+| `VersionMixin` | `version: Integer(default=1)` | Integer incremented on each update for optimistic concurrency checks. |
 
 ---
 
-## 3. Database Architecture & Data Models
+### 2.2. Entity Models & Field Directory
 
-The database models are structured under `backend/app/` using shared base mixins defined in `backend/app/database/base.py`:
-- `UUIDPrimaryKeyMixin`: Generates RFC 4122 v4 UUID identifiers.
-- `TimestampMixin`: Tracks `created_at` and `updated_at` in timezone-aware UTC.
-- `SoftDeleteMixin`: Manages `deleted_at` and `deleted_by` for full lifecycle recovery.
-- `VersionMixin`: Integer `version` column incremented on every update for optimistic locking.
+#### A. Users & Identity (`backend/app/users/models.py`)
+- **Table:** `users`
+- **Fields:**
+  - `id` (UUID, PK)
+  - `first_name` (String(100), required)
+  - `middle_name` (String(100), nullable)
+  - `last_name` (String(100), **optional / nullable**)
+  - `display_name` (String(200), required, indexed)
+  - `employee_code` (String(50), unique, indexed)
+  - `username` (String(100), unique, required, indexed)
+  - `email` (String(255), unique, required, indexed)
+  - `phone` (String(30), unique, required, indexed)
+  - `password_hash` (String(255), required)
+  - `manager_id` (UUID, FK $\rightarrow$ `users.id`, nullable, indexed) — **Reporting Manager hierarchy**
+  - `gender` (Enum: `MALE`, `FEMALE`, `OTHER`, `PREFER_NOT_TO_SAY`, nullable)
+  - `date_of_birth` (Date, nullable)
+  - `date_of_joining` (Date, nullable)
+  - `employment_type` (Enum: `FULL_TIME`, `PART_TIME`, `CONTRACT`, `INTERN`, `TEMPORARY`, default=`FULL_TIME`)
+  - `employment_status` (Enum: `ACTIVE`, `INACTIVE`, `ON_LEAVE`, `TERMINATED`, `RESIGNED`, default=`ACTIVE`)
+  - `address`, `city`, `state`, `country`, `postal_code`, `emergency_contact`, `notes` (Text/String, nullable)
+  - `status` (Enum: `PENDING`, `ACTIVE`, `INACTIVE`, `SUSPENDED`, `LOCKED`, `PASSWORD_CHANGE_REQUIRED`, default=`PENDING`)
+  - `is_active` (Boolean, default=`True`)
+  - `must_change_password` (Boolean, default=`True`)
+  - `last_login_at`, `password_changed_at`, `locked_until` (DateTime, nullable)
+  - `failed_login_count` (Integer, default=`0`)
 
-### Core Entity Relationships
+#### B. RBAC & Permissions (`backend/app/rbac/models.py`)
+- **`permissions`**:
+  - `id` (UUID, PK), `code` (String(150), unique, indexed, e.g. `"inquiry.create"`), `module` (String(100)), `page` (String(100)), `action` (String(50)), `scope` (String(50), default=`"ALL"`), `description` (String(255)).
+- **`roles`** (Departments):
+  - `id` (UUID, PK), `name` (String(100), unique, indexed), `description` (String(255)), `is_system` (Boolean, default=`False`).
+- **`role_permissions`**:
+  - `id` (UUID, PK), `role_id` (UUID, FK $\rightarrow$ `roles.id`), `permission_id` (UUID, FK $\rightarrow$ `permissions.id`).
+- **`user_roles`**:
+  - `id` (UUID, PK), `user_id` (UUID, FK $\rightarrow$ `users.id`), `role_id` (UUID, FK $\rightarrow$ `roles.id`).
+- **`user_permissions`** (Direct Individual Overrides):
+  - `id` (UUID, PK), `user_id` (UUID, FK $\rightarrow$ `users.id`), `permission_id` (UUID, FK $\rightarrow$ `permissions.id`), `is_granted` (Boolean, `True`=Grant, `False`=Deny).
 
+#### C. Sourcing & Supplier Directory (`backend/app/suppliers/models.py`)
+- **`suppliers`**:
+  - `id` (UUID, PK), `company_name` (String(200), required), `supplier_code` (String(50), unique), `country_id`, `state_id`, `city_id` (UUIDs, FKs), `address` (Text), `tin_number` (String(100)), `website` (String(255)), `payment_terms` (String(100)), `credit_days` (Integer), `currency_id` (UUID, FK), `is_active` (Boolean).
+- **`supplier_contacts`**:
+  - `id` (UUID, PK), `supplier_id` (UUID, FK), `contact_name` (String(150)), `designation` (String(100)), `email` (String(255)), `phone` (String(50)), `is_primary` (Boolean).
+
+#### D. Inquiries & AI Quotations (`backend/app/inquiries/models.py`)
+- **`inquiries`**:
+  - `id` (UUID, PK), `inquiry_number` (String(50), unique, indexed, e.g. `"INQ-2026-0001"`), `buyer_id` (UUID, FK $\rightarrow$ `buyers.id`), `title` (String(255)), `status` (Enum: `DRAFT`, `SENT_TO_SUPPLIERS`, `QUOTES_RECEIVED`, `UNDER_EVALUATION`, `APPROVED`, `ORDER_PLACED`, `CLOSED`), `target_delivery_date` (Date), `notes` (Text).
+- **`inquiry_items`**:
+  - `id` (UUID, PK), `inquiry_id` (UUID, FK), `product_id` (UUID, FK, nullable), `item_name` (String(255)), `specifications` (Text / JSON), `quantity` (Numeric), `uom_id` (UUID, FK), `target_price` (Numeric, nullable).
+- **`inquiry_supplier_quotes`**:
+  - `id` (UUID, PK), `inquiry_id` (UUID, FK), `supplier_id` (UUID, FK), `public_token` (String(100), unique, indexed), `token_expires_at` (DateTime), `quoted_unit_price` (Numeric), `currency_code` (String(10)), `lead_time_days` (Integer), `can_meet_target_date` (Boolean), `remarks` (Text), `is_ai_extracted` (Boolean, default=`False`), `raw_ai_payload` (JSON, nullable), `status` (Enum: `PENDING`, `SUBMITTED`, `REJECTED`, `ACCEPTED`).
+
+#### E. Master Shipment Planning Grid (`backend/app/planning/models.py`)
+- **`planning_sheets`**:
+  - `id` (UUID, PK), `name` (String(150), required, e.g. `"Mumbai Branch"`), `position` (Integer, default=`0`), `description` (String(255)).
+- **`planning_columns`**:
+  - `id` (UUID, PK), `sheet_id` (UUID, FK), `title` (String(150)), `position` (Integer), `data_type` (Enum: `TEXT`, `NUMBER`, `DATE`, `BOOLEAN_YN`), `source_type` (Enum: `MANUAL`, `LINKED_LOOKUP`, `AGGREGATE`, `FORMULA_CALCULATION`), `source_config` (JSON, nullable).
+- **`planning_rows`**:
+  - `id` (UUID, PK), `sheet_id` (UUID, FK), `position` (Integer), `product_id` (UUID, FK, nullable), `inquiry_item_id` (UUID, FK, nullable), `is_locked` (Boolean, default=`False`).
+- **`planning_cells`**:
+  - `id` (UUID, PK), `row_id` (UUID, FK), `column_id` (UUID, FK), `value_text` (Text), `status_color` (String(30), nullable, e.g. `"status-ordered"`, `"status-received"`).
+- **`planning_change_log`**:
+  - `id` (UUID, PK), `sheet_id` (UUID, FK), `row_id`, `column_id` (UUIDs, nullable), `actor_id` (UUID, FK), `action_type` (String(50)), `old_value` (Text), `new_value` (Text), `timestamp` (DateTime).
+
+---
+
+## 3. Security, Authentication & Session Engine
+
+### 3.1. Authentication Flow
 ```mermaid
-erDiagram
-    USERS ||--o{ USER_ROLES : has
-    ROLES ||--o{ USER_ROLES : assigned
-    ROLES ||--o{ ROLE_PERMISSIONS : grants
-    PERMISSIONS ||--o{ ROLE_PERMISSIONS : defines
-    USERS ||--o{ USER_PERMISSIONS : overrides
-    PERMISSIONS ||--o{ USER_PERMISSIONS : applies
-    USERS ||--o{ SESSIONS : establishes
-    
-    USERS ||--o{ INQUIRIES : creates
-    INQUIRIES ||--o{ INQUIRY_ITEMS : contains
-    INQUIRIES ||--o{ INQUIRY_SUPPLIER_QUOTES : receives
-    SUPPLIERS ||--o{ INQUIRY_SUPPLIER_QUOTES : submits
-    
-    PRODUCTS ||--o{ INQUIRY_ITEMS : referenced_in
-    CATEGORIES ||--o{ SUB_CATEGORIES : contains
-    SUB_CATEGORIES ||--o{ PRODUCTS : categorizes
-    BRANDS ||--o{ PRODUCTS : produces
-    
-    BUYERS ||--o{ BUYER_CONTACTS : has
-    BUYERS ||--o{ INQUIRIES : requests
-    SUPPLIERS ||--o{ SUPPLIER_CONTACTS : has
-    
-    INQUIRY_ITEMS ||--o{ SHIPMENT_PLANNING_ITEMS : transitions_to
+sequenceDiagram
+    autonumber
+    actor Client as User / Browser
+    participant API as FastAPI /auth/login
+    participant DB as Database (User & Sessions)
+    participant Cache as Redis/CacheManager
+
+    Client->>API: POST /auth/login {identifier, password}
+    API->>DB: Query user by username, email, or phone
+    API->>API: Verify password with Argon2id
+    API->>DB: Record session (IP, User-Agent, Device)
+    API->>DB: Generate Refresh Token (UUID)
+    API->>API: Generate signed JWT Access Token (15 min)
+    API->>Cache: Cache effective permissions (permissions:{userId})
+    API-->>Client: 200 OK {access_token, refresh_token, profile, permissions}
 ```
 
----
+### 3.2. Effective Permissions Mathematical Formula
+The system evaluates user capabilities dynamically at request time:
 
-## 4. Security, Authentication & Session Engine
+$$\text{EffectivePermissions} = \left( \bigcup_{r \in \text{UserRoles}} \text{RolePermissions}(r) \cup \text{DirectGrants} \right) \setminus \text{DirectDenies}$$
 
-**Location:** `backend/app/auth/` & `frontend/src/lib/authContext.tsx`
-
-### 1. Dual-Token Architecture
-- **Access Token**: Short-lived JWT (default 15 minutes) containing `sub` (User UUID), `username`, `roles`, and initial permissions.
-- **Refresh Token**: Long-lived secure token stored securely in the database (`refresh_tokens` table) with single-use rotation, expiration enforcement, and instant blacklisting upon logout.
-
-### 2. Password Security & Argon2id
-- Passwords are encrypted using Argon2id with salt generation and configurable time/memory costs.
-- **Password History**: Prevents users from reusing their last $N$ passwords (`password_histories` table).
-- **Temporary Passwords**: Generated cryptographically during admin creation or reset. Automatically forces `must_change_password=True` on subsequent login.
-
-### 3. Brute-Force Protection & Lockout
-- Failed login attempts are recorded (`failed_login_count`).
-- Exceeding the maximum threshold locks the account (`locked_until`) and records an audit log.
-
-### 4. Active Session Governance
-- Every login creates a session record (`sessions` table) storing:
-  - User ID & Refresh Token ID
-  - IP Address & Country/Location
-  - Browser User-Agent & Device Type
-  - Last Activity Timestamp
-- Users and administrators can inspect active sessions on `Profile.tsx` and `Users.tsx` and selectively revoke suspicious devices or perform a global "Logout Everywhere".
+*Exception Rule:* If a user has `roles` containing `"super_admin"`, `EffectivePermissions = ALL_PERMISSIONS` unconditionally.
 
 ---
 
-## 5. Role-Based Access Control (RBAC) & Departments
+## 4. Module-by-Module Technical Deep Dive
 
-**Location:** `backend/app/rbac/`, `frontend/src/pages/Rbac.tsx`, `frontend/src/pages/EffectivePermissions.tsx`
+### 4.1. Inquiries & Automated AI Quotation Extractor
 
-The platform utilizes a multi-tiered permission system that treats **Departments** as functional role bundles, while providing individual user-level fine-tuning.
+**File:** `backend/app/inquiries/ai_extractor.py` & `email_inbound_worker.py`
 
+#### Extraction Workflow
+1. **Source Ingestion**: Inbound email with quotation attachment (PDF/Excel) or raw chat text is received.
+2. **Text & Vision Processing**:
+   - PDFs are parsed using `pypdf.PdfReader` to extract native text.
+   - For image attachments, images are Base64-encoded for multimodal vision models.
+3. **LLM Extraction Call**: Prompted with inquiry target data (Product Name, SKU, Target Quantity, Target Date).
+4. **Structured JSON Output**:
+```json
+{
+  "is_quotation_detected": true,
+  "unit_price": 185.50,
+  "currency": "CNY",
+  "quantity": 500.0,
+  "can_meet_target_date": true,
+  "earliest_available_date": "2026-09-15",
+  "lead_time_days": 18,
+  "price_terms": "FOB Ningbo",
+  "payment_terms": "30% deposit, balance before shipment",
+  "remarks": "Standard seaworthy packaging included.",
+  "supplier_notes_summary": "Supplier confirmed quotation of 185.50 CNY per piece with 18 days lead time.",
+  "provider_used": "openai-gpt-4o-mini"
+}
 ```
-+-------------------------------------------------------------------------------+
-|                             DEPARTMENT BASE ROLES                             |
-|          (e.g., Sales, Planning, Procurement, Quality, Logistics)            |
-|                     Assigned to all department members.                       |
-+---------------------------------------+---------------------------------------+
-                                        | (Inherited)
-+---------------------------------------v---------------------------------------+
-|                    DEPARTMENT MANAGERS & DIRECT OVERRIDES                     |
-|  +-------------------------------------------------------------------------+  |
-|  | + EXTRA GRANTS : Specific additional permissions (e.g., delete, export) |  |
-|  | x DIRECT DENIES: Specific revocations overriding departmental defaults  |  |
-|  +-------------------------------------------------------------------------+  |
-+---------------------------------------+---------------------------------------+
-                                        | (Calculated)
-+---------------------------------------v---------------------------------------+
-|                         FINAL EFFECTIVE PERMISSIONS                           |
-|       Computed at runtime & embedded in authorization dependency gate.        |
-+-------------------------------------------------------------------------------+
-```
-
-### Key Capabilities
-- **Department Permissions Matrix**: Intuitive checkbox grid categorized by module, with select-all and deselect-all per group.
-- **Managers in Department**: Designate department heads and managers. Managers display a prominent `MANAGER` badge and allow direct access to their individual permission overrides drawer (`🔑 Edit permissions`).
-- **Reporting Hierarchy**: Automatically syncs department managers with reporting members (`User.manager_id`).
-- **Clone Department Permissions**: Clones an entire permission profile from a source department to a target department with duplicate validation.
-- **Safe Department Deletion & User Reassignment**: When deleting a department that currently contains members, the system prompts the administrator to reassign all affected users to a fallback department (defaults to `User`), preventing orphaned accounts.
+5. **Persistence**: Extracted quotes are saved to `inquiry_supplier_quotes` with `is_ai_extracted=True` and instantly visible in the Quotation Comparison Matrix.
 
 ---
 
-## 6. Module-by-Module Feature Breakdown
+### 4.2. Master Shipment Planning & Container Calculations
 
-### 6.1. Authentication & Account Management
-- **Files**: `backend/app/auth/routes.py`, `backend/app/auth/service.py`, `frontend/src/pages/Login.tsx`, `frontend/src/pages/Profile.tsx`
-- **Features**:
-  - Secure login with email/username and password.
-  - Profile viewer and self-service password update.
-  - Active login sessions manager with individual device revocation.
-  - Live permission viewer displaying the current user's active permissions.
+**File:** `backend/app/planning/service.py` & `frontend/src/pages/Planning.tsx`
 
-### 6.2. Users & HR Profile Management
-- **Files**: `backend/app/users/routes.py`, `backend/app/users/service.py`, `frontend/src/pages/Users.tsx`
-- **Features**:
-  - Employee directory with pagination, multi-field search, status filtering, and sorting.
-  - Complete HR profile: Employee Code, Contact Numbers, Gender, Date of Birth, Date of Joining, Employment Type (Full-Time, Part-Time, Contract, Intern), Employment Status, Address, and Emergency Contacts.
-  - Reporting Manager assignment with hierarchical lookup.
-  - User Action Menu:
-    - 👁️ **View Details**: Full profile breakdown, assigned departments, and live sessions.
-    - ✏️ **Edit Profile**: Modify non-credential profile attributes.
-    - 🔑 **Reset Password**: Generate one-time temporary passwords.
-    - 🛡️ **Assign Department**: Update primary department.
-    - 🔑 **Manage Permission Overrides**: Slide-over drawer to configure direct user-level grants and denials.
+#### Container Calculation Engine
+Given dimensions $(L, W, H \text{ in cm})$ and packing count:
 
-### 6.3. Departments & Permissions (RBAC)
-- **Files**: `backend/app/rbac/routes.py`, `backend/app/rbac/service.py`, `frontend/src/pages/Rbac.tsx`
-- **Features**:
-  - Department list with system protection indicators (Admin and User system roles are protected).
-  - Dedicated Department Manager card with live member counter and reporting manager synchronization.
-  - Granular permission assignment by business module.
-  - Role cloning and safe deletion with user reassignment modal.
+$$\text{CBM per Package} = \frac{L \times W \times H}{1\,000\,000}$$
+$$\text{Total CBM} = \text{CBM per Package} \times \text{Total Packages}$$
 
-### 6.4. Master Data & Configurations
-- **Files**: `backend/app/masters/`, `frontend/src/pages/masters/`
-- **Sub-Modules**:
-  1. **Brands (`Brands.tsx`)**: Global brand directory linked to products and suppliers.
-  2. **Product Categories & Sub-Categories (`Categories.tsx`, `SubCategories.tsx`)**: Multi-level hierarchical categorization.
-  3. **Geography (`Countries.tsx`, `States.tsx`, `Cities.tsx`)**: Global location records with cascading relationships and dial code lookups.
-  4. **Currencies & Exchange Rates (`Currencies.tsx`)**: Multi-currency configuration with ISO codes, symbols, and live conversion rate factors.
-  5. **Units of Measurement (`Uom.tsx`)**: Standardized measurement units (kg, meters, pieces, sets, rolls).
-  6. **HSN / SAC Codes (`Hsn.tsx`)**: Harmonized System codes for international taxation and customs compliance.
-  7. **Business Entities (`CompanyList.tsx`)**: Internal legal operating entities.
-  8. **Buyer & Supplier Classifications (`BuyerTypes.tsx`, `SupplierTypes.tsx`)**: Segmentations for vendor and client profiling.
-
-### 6.5. Product Catalog & Specification Builder
-- **Files**: `backend/app/masters/products_routes.py`, `frontend/src/pages/masters/Products.tsx`, `frontend/src/pages/ProductGallery.tsx`
-- **Features**:
-  - Product record management with SKU, Part Number, Category, Sub-Category, Brand, and HSN links.
-  - **Dynamic Specification Builder**: Key-value technical specification engine allowing custom product attributes (e.g. Dimensions, Voltage, Speed, Material).
-  - **Supplier Association**: Associate authorized suppliers with default purchase pricing and lead times.
-  - **Media Gallery & Document Center**: Image uploads, technical PDF datasheets, and certificates.
-  - **Visual Product Gallery (`ProductGallery.tsx`)**: Grid and card layout with live filtering by category, brand, and specifications.
-
-### 6.6. Supplier Management & Public Quote Portal
-- **Files**: `backend/app/suppliers/`, `frontend/src/pages/Suppliers.tsx`, `frontend/src/pages/PublicSupplierQuotePage.tsx`
-- **Features**:
-  - Complete vendor records: Corporate identity, Tax/TIN numbers, Address, Bank details, Certifications, Payment Terms, and Brands represented.
-  - Multi-contact directory per supplier (Sales, Technical, Accounts).
-  - Ascending and descending multi-column table sorting.
-  - **Public Supplier Quotation Portal**: Generate secure, tokenized public links (`/quotes/public/:token`) allowing vendors to submit line-item bids, pricing, lead times, and quote attachments directly into the ERP without requiring a system account.
-  - Bulk Import/Export wizard with automated validation and duplicate prevention.
-
-### 6.7. Buyer & Client Management
-- **Files**: `backend/app/buyers/`, `frontend/src/pages/Buyers.tsx`
-- **Features**:
-  - Comprehensive buyer profiles with client grade (A, B, C, Premium), credit limit, currency preferences, and payment terms.
-  - Multi-address directory (Billing, Factory, Shipping, Warehouse).
-  - Multi-contact directory with designation and direct communication channels.
-  - Multi-column sortable table with status filters and Excel/CSV bulk import/export.
-
-### 6.8. Inquiries, RFQs & AI Quotation Extraction
-- **Files**: `backend/app/inquiries/`, `frontend/src/pages/Inquiries.tsx`, `backend/app/inquiries/quote_extractor.py`, `backend/app/inquiries/email_inbound.py`
-- **Features**:
-  - Complete Request for Quotation (RFQ) lifecycle tracking: `DRAFT` $\rightarrow$ `SENT_TO_SUPPLIERS` $\rightarrow$ `QUOTES_RECEIVED` $\rightarrow$ `UNDER_EVALUATION` $\rightarrow$ `APPROVED` $\rightarrow$ `ORDER_PLACED` $\rightarrow$ `CLOSED`.
-  - Line-item specifications: Item name, description, target unit price, quantity, UOM, required delivery dates, and technical files.
-  - **Quotation Comparison Matrix**: Side-by-side multi-vendor comparison table highlighting lowest bids, best lead times, and terms.
-  - **AI Quotation Extractor Engine**:
-    - Uses Google Gemini / Claude multimodal AI to automatically parse unstructured supplier quotation PDFs, scanned documents, Excel sheets, and email bodies into structured line-item bids.
-  - **Automated Inbound Email Worker**:
-    - Background task (`email_inbound.py`) connects via IMAP to monitor inquiry inboxes, match incoming emails to RFQs, download attachments, trigger AI extraction, and log quotation records automatically.
-
-### 6.9. Shipment Planning & Container Optimization
-- **Files**: `backend/app/planning/`, `frontend/src/pages/Planning.tsx`
-- **Features**:
-  - Bridges confirmed orders and sourcing lines into logistical shipment planning.
-  - **Container Calculator**: Computes Total CBM (Cubic Meters), Gross Weight, Net Weight, and suggests container utilization (20FT, 40FT, 40FT HC, LCL).
-  - **Milestone Tracking**: Production readiness, Pre-shipment Inspection (PSI), Container Stuffing, Bill of Lading (BL) issue, Customs Clearance, Port of Loading (POL), Port of Discharge (POD), and Final Delivery.
-  - Group-wise subcategory & product sorting, multi-column sorting, and bulk updates.
-
-### 6.10. Audit Trails & Change Logging
-- **Files**: `backend/app/audit/`, `frontend/src/pages/Audit.tsx`
-- **Features**:
-  - Immutable audit logs capturing every creation, update, deletion, login, permission override, and bulk operation.
-  - **Field-Level Diffing**: Stores before-and-after JSON snapshots showing exact attribute modifications.
-  - Captures Actor (User ID, Name), IP Address, User-Agent, Action Type, Target Entity, and UTC Timestamp.
-  - Filterable by date range, action type, user, and entity type.
-
-### 6.11. Recycle Bin (Trash & Recovery Engine)
-- **Files**: `backend/app/trash/`, `frontend/src/pages/Trash.tsx`
-- **Features**:
-  - Centralized repository of all soft-deleted records across all system modules (Suppliers, Buyers, Products, Inquiries, Planning items, Master records).
-  - Displays original deletion timestamp and user who deleted the record.
-  - **Single-Click Restore**: Instantly recovers deleted records back to active system views without breaking foreign-key references.
-  - **Permanent Purge**: Restricted to Super Administrators for GDPR/compliance data destruction.
-
-### 6.12. Organization & Global Settings
-- **Files**: `backend/app/organizations/`, `frontend/src/pages/Organization.tsx`
-- **Features**:
-  - Enterprise profile management: Legal Name, Trade Name, Registration Numbers, Tax/VAT/GST IDs, Corporate Address, Official Contact, and Base Currency.
-  - System-wide default configurations.
-
----
-
-## 7. Real-Time WebSocket & Event Synchronization
-
-**Location:** `backend/app/events/manager.py` & `frontend/src/lib/live/liveClient.ts`
-
-To support high-concurrency multi-user environments without dirty overwrites:
-1. When any client modifies a record (e.g. saves an inquiry, updates shipment planning, modifies a supplier), the backend publishes an event through `ConnectionManager`.
-2. The WebSocket manager broadcasts a lightweight JSON payload containing `event_type`, `entity_type`, `entity_id`, and `updated_by_user_id`.
-3. Client tabs receive the event and selectively refresh active tables or alert the user if another user is actively modifying the same record.
-
----
-
-## 8. Multi-Tier Caching System
-
-**Location:** `backend/app/cache/`
-
-The caching engine (`CacheManager`) operates with a dual-backend strategy:
-- **Redis Backend**: Used in distributed production environments.
-- **InMemory Backend**: Zero-dependency high-speed fallback for local development or single-node deployments.
-
-### Namespaces & TTL Configurations
-- `permissions:<user_id>`: User permission set cache (invalidated immediately upon department or override changes).
-- `dropdowns:<entity>`: Cached master dropdown datasets (Countries, Currencies, Categories, Brands).
-- `dashboard:counts`: Cached dashboard aggregate metrics.
-- `records:<entity>:<id>`: Hot-path entity lookup caching.
-
----
-
-## 9. Bulk Data Import & Export Engine
-
-**Location:** `frontend/src/components/ImportWizard.tsx`, `backend/app/common/importer.py`
-
-### Import Workflow
-```
-[Select File (.xlsx / .csv)] 
-       │
-       ▼
-[Auto-Detect & Map Columns] ───► [Column Mapping Override UI]
-       │
-       ▼
-[Client-Side Validation & Duplicate Check]
-       │
-       ▼
-[Batch Upload to API] ───► [Transactional Database Insertion]
-       │
-       ▼
-[Import Summary & Error Log Report]
-```
-
-- Supports fuzzy column header matching (e.g., "Company Name", "Supplier", "vendor_name" $\rightarrow$ `name`).
-- Detects existing duplicate records by TIN, Email, Phone, or Code.
-- Provides downloadable error reports for failed rows.
-
----
-
-## 10. API Route Directory & Endpoints
-
-| Module | Route Prefix | Primary Operations |
+#### Container Types & Load Limits
+| Container Type | Maximum Usable Volume | Maximum Payload Weight |
 | :--- | :--- | :--- |
-| **Auth** | `/api/v1/auth` | `/login`, `/refresh`, `/logout`, `/sessions`, `/sessions/revoke` |
-| **Users** | `/api/v1/users` | `/`, `/{id}`, `/{id}/roles`, `/{id}/reset-password`, `/profile` |
-| **RBAC** | `/api/v1/rbac` | `/roles`, `/roles/{id}`, `/permissions`, `/users/{id}/permissions/bulk` |
-| **Masters** | `/api/v1/masters` | `/brands`, `/categories`, `/subcategories`, `/countries`, `/states`, `/cities`, `/currencies`, `/uom`, `/hsn` |
-| **Products** | `/api/v1/products` | `/`, `/{id}`, `/{id}/specs`, `/{id}/datasheet-pdf`, `/{id}/images` |
-| **Suppliers** | `/api/v1/suppliers` | `/`, `/{id}`, `/{id}/contacts`, `/{id}/public-quote-link`, `/import`, `/export` |
-| **Buyers** | `/api/v1/buyers` | `/`, `/{id}`, `/{id}/contacts`, `/{id}/addresses`, `/import`, `/export` |
-| **Inquiries** | `/api/v1/inquiries` | `/`, `/{id}`, `/{id}/items`, `/{id}/quotes`, `/{id}/ai-extract-quote`, `/{id}/compare-matrix` |
-| **Public Quotes** | `/api/v1/public/quotes` | `/{token}` (Submit quote, upload files, read RFQ details) |
-| **Planning** | `/api/v1/planning` | `/items`, `/items/{id}`, `/items/bulk-update`, `/container-calc` |
-| **Audit** | `/api/v1/audit` | `/`, `/{id}`, `/export` |
-| **Trash** | `/api/v1/trash` | `/`, `/{entity_type}/{id}/restore`, `/{entity_type}/{id}/purge` |
-| **Organization**| `/api/v1/organizations` | `/profile`, `/settings` |
-| **Cache** | `/api/v1/cache` | `/stats`, `/keys`, `/flush`, `/clear-namespace` |
+| **20 FT Standard** | $28.0 - 30.0 \text{ CBM}$ | $21\,500 \text{ kg}$ |
+| **40 FT Standard** | $58.0 - 62.0 \text{ CBM}$ | $26\,500 \text{ kg}$ |
+| **40 FT High Cube (HC)** | $68.0 - 72.0 \text{ CBM}$ | $26\,500 \text{ kg}$ |
+| **Less than Container Load (LCL)** | $< 15.0 \text{ CBM}$ | Flexible consolidated freight |
 
 ---
 
-## 11. Frontend Code Structure & Component Map
+### 4.3. Universal Soft-Delete & Recycle Bin Architecture
 
-```
-frontend/src/
-├── components/
-│   ├── ui.tsx                 # Modal, Card, Button, Badge, Skeleton Loaders
-│   ├── fields.tsx             # Accessible TextField, SelectField, CheckboxField
-│   ├── AppShell.tsx           # Global responsive layout, sidebar, header, user menu
-│   ├── ActionDropdown.tsx     # Context action menus for data tables
-│   ├── Pagination.tsx         # Unified table pagination bar
-│   ├── ImportWizard.tsx       # Universal spreadsheet import wizard modal
-│   └── TableComponents.tsx    # Sortable table headers, empty rows, status badges
-├── pages/
-│   ├── Dashboard.tsx          # Analytics and metric overview
-│   ├── Login.tsx              # Split-screen modern authentication portal
-│   ├── Users.tsx              # User directory, HR profiles, and permission overrides
-│   ├── Rbac.tsx               # Departments, Managers, and permission matrix
-│   ├── EffectivePermissions.tsx# Live permission calculator & simulation tool
-│   ├── Suppliers.tsx          # Supplier database with sorting, contacts, quote links
-│   ├── Buyers.tsx             # Client management, multi-address directory
-│   ├── Inquiries.tsx          # RFQs, quotation comparison, and AI quotation extraction
-│   ├── Planning.tsx           # Shipment planning, container volume, milestone tracking
-│   ├── ProductGallery.tsx     # Visual catalog with filter sidebar and specs viewer
-│   ├── Audit.tsx              # System audit trails and change delta inspector
-│   ├── Trash.tsx              # Recycle bin and record recovery center
-│   ├── Organization.tsx       # Enterprise settings and configurations
-│   ├── Profile.tsx            # Current user settings, password update, active sessions
-│   ├── PublicSupplierQuotePage.tsx # Tokenized standalone vendor quote portal
-│   └── masters/               # Master data management pages (Brands, Categories, etc.)
-├── lib/
-│   ├── api.ts                 # Type-safe API client with automatic token refreshing
-│   ├── authContext.tsx        # React authentication context & session state
-│   ├── nav.ts                 # Navigation route registry and permission mapping
-│   ├── permissionLabels.ts    # Human-friendly labels for permission codes & modules
-│   └── live/                  # Real-time WebSocket client and event dispatchers
-└── styles/
-    └── style.css              # IHM Design System CSS stylesheet
+**File:** `backend/app/trash/service.py` & `frontend/src/pages/Trash.tsx`
+
+1. **Deletion Interception**: Repositories filter records using `WHERE deleted_at IS NULL` by default.
+2. **Soft Deletion Trigger**: `DELETE /<entity>/{id}` sets `deleted_at = utcnow()` and `deleted_by = current_user.id`. Foreign key relationships remain intact.
+3. **Trash Listing**: `GET /trash` queries across registered soft-deletable tables (`suppliers`, `buyers`, `products`, `inquiries`, `planning_rows`, `masters`).
+4. **Single-Click Recovery**: `POST /trash/{entity_type}/{id}/restore` sets `deleted_at = NULL`, immediately restoring the entity to active operations.
+5. **Hard Purge**: `DELETE /trash/{entity_type}/{id}/purge` executes physical deletion, restricted to users with `trash.purge` / Super Administrator access.
+
+---
+
+## 5. Real-Time WebSocket & Event Synchronization
+
+**File:** `backend/app/events/manager.py` & `frontend/src/lib/live/liveClient.ts`
+
+### Connection Handshake
+- **URL:** `ws://<host>:<port>/api/v1/events/ws?token=<JWT_ACCESS_TOKEN>`
+- **Authentication:** Token verified during the connection handshake.
+- **Heartbeat:** Ping/Pong interval every 30 seconds.
+
+### Event Payload Specification
+```json
+{
+  "event_type": "RECORD_UPDATED",
+  "entity_type": "inquiries",
+  "entity_id": "c7a8b9d0-1234-4567-890a-bcdef1234567",
+  "action": "UPDATE",
+  "actor": {
+    "id": "u1a2b3c4-9999-8888-7777-666655554444",
+    "name": "Admin User"
+  },
+  "timestamp": "2026-08-27T12:00:00Z"
+}
 ```
 
 ---
 
-## 12. Deployment & Environment Configuration
+## 6. Complete API Endpoints Directory
 
-### Backend Environment Variables (`backend/.env`)
-```env
-# Application Settings
-APP_NAME=Enterprise ERP
-ENVIRONMENT=production
-DEBUG=false
-SECRET_KEY=your-super-secret-key-32-chars-minimum
-API_V1_PREFIX=/api/v1
+### 6.1. Authentication (`/api/v1/auth`)
+| Method | Path | Summary | Permission Required |
+| :--- | :--- | :--- | :--- |
+| `POST` | `/auth/login` | Authenticate with credentials, obtain JWT pair | Public |
+| `POST` | `/auth/refresh` | Rotate refresh token, get new access token | Public (Valid Refresh Token) |
+| `POST` | `/auth/logout` | Revoke active refresh token and session | Authenticated |
+| `GET` | `/auth/me` | Fetch authenticated user profile & permissions | Authenticated |
+| `GET` | `/auth/sessions` | List active login sessions and devices | Authenticated |
+| `DELETE` | `/auth/sessions/{id}` | Revoke specific login session | Authenticated |
 
-# Database Configuration
-DATABASE_URL=postgresql+asyncpg://postgres:password@localhost:5432/erp_database
+### 6.2. User Management (`/api/v1/users`)
+| Method | Path | Summary | Permission Required |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/users` | Paginated user directory with search/sort | `user.read` |
+| `POST` | `/users` | Create user account + HR profile | `user.create` |
+| `GET` | `/users/{id}` | Detailed user profile inspection | `user.read` |
+| `PATCH` | `/users/{id}` | Update profile, manager, or status | `user.update` |
+| `POST` | `/users/{id}/roles` | Assign department role to user | `user.manage_roles` |
+| `DELETE` | `/users/{id}/roles/{role_id}` | Remove department role from user | `user.manage_roles` |
+| `POST` | `/users/{id}/reset-password` | Generate temporary password | `user.reset_password` |
 
-# CORS Allowed Origins
-BACKEND_CORS_ORIGINS=["http://localhost:5173","https://erp.yourdomain.com"]
+### 6.3. RBAC & Departments (`/api/v1/rbac`)
+| Method | Path | Summary | Permission Required |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/rbac/roles` | List all departments | `roles_permissions.view` |
+| `POST` | `/rbac/roles` | Create new department | `roles_permissions.create` |
+| `PATCH` | `/rbac/roles/{id}` | Rename or update department | `roles_permissions.action` |
+| `DELETE` | `/rbac/roles/{id}` | Delete department (with impact check) | `roles_permissions.delete` |
+| `POST` | `/rbac/roles/{id}/delete-with-reassignment` | Safe delete with user reassignment | `roles_permissions.delete` |
+| `GET` | `/rbac/permissions` | List all vocabulary permission codes | `roles_permissions.view` |
+| `PUT` | `/rbac/users/{id}/permissions/bulk` | Save per-user direct overrides | `roles_permissions.action` |
+| `GET` | `/rbac/users/{id}/effective-permissions` | Compute effective permission breakdown | `roles_permissions.view` |
 
-# JWT Configuration
-ACCESS_TOKEN_EXPIRE_MINUTES=15
-REFRESH_TOKEN_EXPIRE_DAYS=7
+### 6.4. Sourcing & Suppliers (`/api/v1/suppliers`)
+| Method | Path | Summary | Permission Required |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/suppliers` | List suppliers with multi-column sorting | `supplier.read` |
+| `POST` | `/suppliers` | Create supplier record | `supplier.create` |
+| `GET` | `/suppliers/{id}` | Detailed supplier profile | `supplier.read` |
+| `PATCH` | `/suppliers/{id}` | Update supplier details | `supplier.update` |
+| `DELETE` | `/suppliers/{id}` | Soft delete supplier | `supplier.delete` |
+| `POST` | `/suppliers/{id}/contacts` | Add contact to supplier directory | `supplier.update` |
+| `POST` | `/suppliers/import` | Bulk import suppliers from Excel/CSV | `supplier.import` |
+| `GET` | `/suppliers/export` | Export suppliers to Excel/CSV | `supplier.export` |
 
-# Caching Configuration
-REDIS_URL=redis://localhost:6379/0
+### 6.5. Inquiries & Quotations (`/api/v1/inquiries`)
+| Method | Path | Summary | Permission Required |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/inquiries` | List RFQ inquiries with status filters | `inquiry.read` |
+| `POST` | `/inquiries` | Create new inquiry RFQ | `inquiry.create` |
+| `GET` | `/inquiries/{id}` | Full inquiry breakdown with line items | `inquiry.read` |
+| `PATCH` | `/inquiries/{id}` | Update inquiry header / status | `inquiry.update` |
+| `POST` | `/inquiries/{id}/items` | Add line item to inquiry | `inquiry.update` |
+| `POST` | `/inquiries/{id}/generate-quote-link` | Generate tokenized supplier quote portal link | `inquiry.action` |
+| `POST` | `/inquiries/{id}/ai-extract-quote` | Trigger AI extraction from document | `inquiry.action` |
+| `GET` | `/inquiries/{id}/compare-matrix` | Multi-vendor quotation comparison matrix | `inquiry.read` |
 
-# AI Quotation Extractor API Keys
-GEMINI_API_KEY=your-gemini-api-key
-ANTHROPIC_API_KEY=your-anthropic-api-key
+### 6.6. Public Supplier Quote Portal (`/api/v1/public/quotes`)
+| Method | Path | Summary | Permission Required |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/public/quotes/{token}` | Fetch RFQ line items for supplier | Public (Token Validated) |
+| `POST` | `/public/quotes/{token}` | Submit quotation bids, pricing & lead time | Public (Token Validated) |
+| `POST` | `/public/quotes/{token}/upload` | Upload quotation PDF/attachment | Public (Token Validated) |
 
-# Inbound Email Worker (IMAP)
-IMAP_SERVER=imap.gmail.com
-IMAP_PORT=993
-IMAP_USERNAME=quotes@yourdomain.com
-IMAP_PASSWORD=your-app-password
-IMAP_POLL_INTERVAL_SECONDS=60
-```
+### 6.7. Shipment Planning Grid (`/api/v1/planning`)
+| Method | Path | Summary | Permission Required |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/planning/sheets` | List planning sheets (branches/tabs) | `planning.read` |
+| `POST` | `/planning/sheets` | Create new planning sheet | `planning.sheet.manage` |
+| `GET` | `/planning/sheets/{id}/grid` | Fetch complete row/column/cell matrix | `planning.read` |
+| `POST` | `/planning/rows` | Add line row to sheet | `planning.row.manage` |
+| `POST` | `/planning/columns` | Add dynamic column to sheet | `planning.column.manage` |
+| `PATCH` | `/planning/cells` | Update cell value or status color | `planning.cell.edit` |
+| `POST` | `/planning/container-calc` | Compute container CBM and utilization | `planning.read` |
 
-### Frontend Environment Variables (`frontend/.env`)
-```env
-VITE_API_BASE_URL=http://localhost:8000/api/v1
-VITE_WS_BASE_URL=ws://localhost:8000/api/v1/events/ws
-```
+### 6.8. Governance, Audit & Trash
+| Method | Path | Summary | Permission Required |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/audit` | Query immutable audit change logs | `audit.view` |
+| `GET` | `/trash` | Query soft-deleted records across all tables | `trash.view` |
+| `POST` | `/trash/{entity}/{id}/restore` | Single-click restore soft-deleted record | `trash.restore` |
+| `DELETE` | `/trash/{entity}/{id}/purge` | Permanently purge record | `trash.purge` (Super Admin) |
 
 ---
-*Documented and verified by Antigravity IDE for Inhyma Solutions.*
+
+## 7. Developer & AI Integration Guide (Rules of Engagement)
+
+When building new features, modifying endpoints, or merging external components into this ERP:
+
+### 7.1. Adding a New Business Module
+1. **Database Model**: Create `backend/app/<module>/models.py`. Inherit from `Base`, `UUIDPrimaryKeyMixin`, `TimestampMixin`, `SoftDeleteMixin`, and `VersionMixin`.
+2. **Pydantic Schemas**: Define `Create`, `Update`, `Read` schemas in `backend/app/<module>/schemas.py`.
+3. **Repository**: Inherit from `BaseRepository[Model]` in `backend/app/<module>/repository.py`.
+4. **Service**: Implement business validation and audit logging in `backend/app/<module>/service.py`.
+5. **FastAPI Router**: Wire permissions using `Depends(require_permission("<module>.<action>"))` in `backend/app/<module>/routes.py`.
+6. **Register Router**: Include the router in `backend/app/main.py` under the `/api/v1` prefix.
+7. **Database Migration**: Run `alembic revision --autogenerate -m "add <module> table"` and verify the migration script.
+8. **Frontend UI**: Create `frontend/src/pages/<Module>.tsx` and register the route in `frontend/src/lib/nav.ts`.
+9. **Update Documentation**: Append the new module, models, and endpoints to `doc/SYSTEM_DOCUMENTATION.md`.
+
+### 7.2. Adding a New Permission Code
+1. Add the permission code to `scripts/seed.py` (e.g. `"logistics.dispatch.manage"`).
+2. Add a friendly display label in `frontend/src/lib/permissionLabels.ts`.
+3. Enforce the permission on the target backend route using `require_permission("logistics.dispatch.manage")`.
+
+### 7.3. Antipatterns & Pitfalls to Avoid
+- ❌ **NEVER write hard-coded deletions (`session.delete(row)`)**: Always use soft-delete (`row.deleted_at = utcnow()`).
+- ❌ **NEVER bypass permission dependencies**: Every private route must have `Depends(require_permission(...))`.
+- ❌ **NEVER mutate role permissions directly without invalidating cache**: Always trigger `cache_manager.invalidate_user_permissions(user_id)`.
+- ❌ **NEVER write database schema changes without Alembic**: Do not alter database tables manually; keep migrations version-controlled.
+
+---
+*Maintained and documented for Inhyma Solutions Enterprise Platform.*

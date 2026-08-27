@@ -65,6 +65,7 @@ export interface Quotation {
   created_by: string;
   created_at: string;
   updated_at: string;
+  rfq_sent_at?: string | null;
 }
 
 export interface RFQ {

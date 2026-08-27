@@ -28,7 +28,7 @@ from app.events.channels import module_channel
 from app.events.dispatcher import EventDispatcher
 from app.events.models import Event
 from app.inquiries.ai_extractor import extract_supplier_quotation
-from app.inquiries.models import Inquiry, InquiryItem, Quotation, QuotationStatus, RFQ
+from app.inquiries.models import ConsignmentCode, Inquiry, InquiryItem, Quotation, QuotationStatus, RFQ
 from app.inquiries.public_quotes import decode_rfq_token
 from app.masters.products.models import Product
 from app.suppliers.models import Supplier
@@ -292,80 +292,106 @@ class EmailInboundWorker:
                 if s_contact:
                     supplier = await session.get(Supplier, s_contact.supplier_id)
 
-            # 2. Match RFQ / Inquiry Item
-            matched_item_id: uuid.UUID | None = None
+            # 2. Match Consignment / Inquiry
+            matched_inquiry_id: uuid.UUID | None = None
             target_rfq: RFQ | None = None
 
+            # A) Try RFQ token if present in body/subject
             token_match = re.search(r"rfq[_-]([a-zA-Z0-9_\-]+)", full_body_text + " " + subject, re.IGNORECASE)
             if token_match:
                 token_str = token_match.group(1)
                 try:
                     payload = decode_rfq_token(token_str)
-                    matched_item_id = uuid.UUID(payload["inquiry_item_id"])
+                    token_item_id = uuid.UUID(payload["inquiry_item_id"])
+                    item_obj = await session.get(InquiryItem, token_item_id)
+                    if item_obj:
+                        matched_inquiry_id = item_obj.inquiry_id
                 except Exception:
                     pass
 
-            # B) Match by product code or name in subject/body
-            matched_product: Product | None = None
-            if not matched_item_id:
+            # B) Match Consignment Code from Subject / Body (e.g. [TES1] or #TES1)
+            if not matched_inquiry_id:
+                code_match = re.search(r"\[([a-zA-Z0-9_\-]+)\]", subject) or re.search(r"#([a-zA-Z0-9_\-]+)", subject)
+                if code_match:
+                    found_code = code_match.group(1).strip()
+                    cc_res = await session.execute(
+                        select(ConsignmentCode).where(ConsignmentCode.code.ilike(found_code))
+                    )
+                    cc_obj = cc_res.scalars().first()
+                    if cc_obj:
+                        inq_res = await session.execute(
+                            select(Inquiry).where(Inquiry.consignment_code_id == cc_obj.id)
+                        )
+                        inq_obj = inq_res.scalars().first()
+                        if inq_obj:
+                            matched_inquiry_id = inq_obj.id
+
+            # C) If active RFQ sent to this supplier
+            if not matched_inquiry_id and supplier:
+                rfq_res = await session.execute(
+                    select(RFQ, InquiryItem)
+                    .join(InquiryItem, RFQ.inquiry_item_id == InquiryItem.id)
+                    .order_by(RFQ.created_at.desc())
+                    .limit(10)
+                )
+                for r, r_item in rfq_res.all():
+                    if r.supplier_ids and str(supplier.id) in r.supplier_ids:
+                        matched_inquiry_id = r_item.inquiry_id
+                        target_rfq = r
+                        break
+
+            # D) Fallback: Match by product code or name in recent inquiries
+            if not matched_inquiry_id:
                 all_items_res = await session.execute(
                     select(InquiryItem, Product)
                     .join(Product, InquiryItem.product_id == Product.id)
                     .order_by(InquiryItem.created_at.desc())
-                    .limit(20)
+                    .limit(30)
                 )
                 for itm, prod in all_items_res.all():
                     if prod.product_code and prod.product_code.lower() in (subject + " " + full_body_text).lower():
-                        matched_item_id = itm.id
-                        matched_product = prod
+                        matched_inquiry_id = itm.inquiry_id
                         break
-                    if prod.product_name and len(prod.product_name) > 3 and prod.product_name.lower() in (subject + " " + full_body_text).lower():
-                        matched_item_id = itm.id
-                        matched_product = prod
+                    if prod.product_name and len(prod.product_name) > 4 and prod.product_name.lower() in (subject + " " + full_body_text).lower():
+                        matched_inquiry_id = itm.inquiry_id
                         break
 
-            # C) If active RFQ sent to this supplier
-            if not matched_item_id and supplier:
-                rfq_res = await session.execute(
-                    select(RFQ).order_by(RFQ.created_at.desc()).limit(10)
-                )
-                recent_rfqs = rfq_res.scalars().all()
-                for r in recent_rfqs:
-                    if r.supplier_ids and str(supplier.id) in r.supplier_ids:
-                        matched_item_id = r.inquiry_item_id
-                        target_rfq = r
-                        break
-
-            if not matched_item_id:
-                logger.info("Inbound email received from %s, but no matching open inquiry item was found.", sender_email)
+            if not matched_inquiry_id:
+                logger.info("Inbound email received from %s, but no matching consignment was found.", sender_email)
                 return
 
-            # Check if this exact quotation was already recorded (deduplicate)
-            existing_remark_check = await session.execute(
-                select(Quotation).where(
-                    Quotation.inquiry_item_id == matched_item_id,
-                    Quotation.remarks.ilike(f"%{msg_id[:30]}%") if msg_id else False,
+            # Fetch all candidate items in this consignment for multi-product extraction & mapping
+            consignment_items_res = await session.execute(
+                select(InquiryItem, Product)
+                .join(Product, InquiryItem.product_id == Product.id)
+                .where(
+                    InquiryItem.inquiry_id == matched_inquiry_id,
+                    InquiryItem.deleted_at.is_(None),
                 )
             )
-            if existing_remark_check.scalars().first():
+            consignment_items = consignment_items_res.all()
+            if not consignment_items:
+                logger.info("No active items found in consignment %s.", matched_inquiry_id)
                 return
 
-            # Fetch InquiryItem details
-            item_res = await session.execute(select(InquiryItem).where(InquiryItem.id == matched_item_id))
-            item = item_res.scalars().first()
-            if not item:
-                return
+            candidate_items_list = [
+                {
+                    "item_id": str(ci.id),
+                    "product_code": cp.product_code or "N/A",
+                    "product_name": cp.product_name or cp.product_name_tally or "Product",
+                    "quantity": float(ci.quantity or 1.0),
+                }
+                for ci, cp in consignment_items
+            ]
 
-            if not matched_product:
-                p_res = await session.execute(select(Product).where(Product.id == item.product_id))
-                matched_product = p_res.scalars().first()
-
-            prod_name = matched_product.product_name if matched_product else "Product"
-            prod_code = matched_product.product_code if matched_product else None
+            first_item, first_prod = consignment_items[0]
+            prod_name = first_prod.product_name or first_prod.product_name_tally or "Product"
+            prod_code = first_prod.product_code
+            target_qty = float(first_item.quantity) if first_item.quantity else None
 
             target_date_str = str(target_rfq.expected_receiving_date) if target_rfq and target_rfq.expected_receiving_date else None
 
-            # 3. Extract Quotation with AI (Gemini 2.5 Flash / OpenAI fallback)
+            # 3. Extract Quotation with AI (OpenAI GPT-4o-mini with Candidate Disambiguation)
             primary_attachment = attachments[0] if attachments else None
             ai_result = await extract_supplier_quotation(
                 text_content=full_body_text,
@@ -373,92 +399,169 @@ class EmailInboundWorker:
                 mime_type=primary_attachment["content_type"] if primary_attachment else None,
                 product_name=prod_name,
                 product_code=prod_code,
-                target_quantity=float(item.quantity) if item.quantity else None,
+                target_quantity=target_qty,
                 target_date=target_date_str,
+                candidate_items=candidate_items_list,
             )
 
-            # 4. If AI detected a valid quotation, insert into DB!
-            if ai_result.is_quotation_detected and ai_result.unit_price is not None and ai_result.unit_price > 0:
-                # Resolve creator user ID from parent Inquiry or default User
-                inquiry_res = await session.execute(select(Inquiry).where(Inquiry.id == item.inquiry_id))
-                parent_inquiry = inquiry_res.scalars().first()
-                creator_user_id = parent_inquiry.created_by if parent_inquiry else None
-                if not creator_user_id:
-                    user_res = await session.execute(select(User.id).limit(1))
-                    creator_user_id = user_res.scalar_one()
+            # 4. Save quotation attachment file once to uploads/quotations if present
+            saved_attachment_url = None
+            saved_attachment_filename = None
+            if attachments:
+                first_att = attachments[0]
+                raw_fname = first_att.get("filename") or "quote_document.pdf"
+                clean_fname = re.sub(r"[^\w\-.]", "_", raw_fname)
+                unique_fname = f"{uuid.uuid4().hex[:10]}_{clean_fname}"
+                quotation_dir = Path("uploads/quotations")
+                quotation_dir.mkdir(parents=True, exist_ok=True)
+                file_path = quotation_dir / unique_fname
+                try:
+                    with open(file_path, "wb") as f:
+                        f.write(first_att["bytes"])
+                    saved_attachment_url = f"/uploads/quotations/{unique_fname}"
+                    saved_attachment_filename = raw_fname
+                    logger.info("Saved supplier attachment to %s", saved_attachment_url)
+                except Exception as save_err:
+                    logger.error("Failed to save quotation attachment: %s", str(save_err))
 
-                # Resolve supplier ID
-                quote_supplier_id = supplier.id if supplier else None
-                if not quote_supplier_id:
-                    first_supp = await session.execute(select(Supplier.id).limit(1))
-                    quote_supplier_id = first_supp.scalar_one()
+            # Resolve creator user ID from parent Inquiry or default User
+            inquiry_res = await session.execute(select(Inquiry).where(Inquiry.id == matched_inquiry_id))
+            parent_inquiry = inquiry_res.scalars().first()
+            creator_user_id = parent_inquiry.created_by if parent_inquiry else None
+            if not creator_user_id:
+                user_res = await session.execute(select(User.id).limit(1))
+                creator_user_id = user_res.scalar_one()
 
-                quoted_qty = ai_result.quantity or float(item.quantity or 1.0)
-                quoted_unit_price = float(ai_result.unit_price)
-                quote_currency = ai_result.currency or "CNY"
+            # Resolve supplier ID
+            quote_supplier_id = supplier.id if supplier else None
+            if not quote_supplier_id:
+                first_supp = await session.execute(select(Supplier.id).limit(1))
+                quote_supplier_id = first_supp.scalar_one()
 
-                # Check if this exact email message was already processed (Deduplicate by Message-ID)
-                if msg_id and len(msg_id) > 5:
-                    clean_msg_sig = msg_id.strip("<>").strip()[:25]
-                    existing_dup_check = await session.execute(
-                        select(Quotation).where(
-                            Quotation.inquiry_item_id == item.id,
-                            Quotation.remarks.ilike(f"%{clean_msg_sig}%"),
-                        )
+            quotes_to_process = ai_result.quotes if ai_result.quotes else []
+            if not quotes_to_process and ai_result.unit_price:
+                quotes_to_process = [{
+                    "product_name": prod_name,
+                    "product_code": prod_code,
+                    "unit_price": ai_result.unit_price,
+                    "currency": ai_result.currency,
+                    "quantity": ai_result.quantity,
+                    "earliest_available_date": ai_result.earliest_available_date,
+                    "price_terms": ai_result.price_terms,
+                    "payment_terms": ai_result.payment_terms,
+                    "remarks": ai_result.remarks,
+                }]
+
+            created_quotes_count = 0
+            for q_obj in quotes_to_process:
+                q_dict = q_obj if isinstance(q_obj, dict) else q_obj.model_dump()
+                unit_p = q_dict.get("unit_price")
+                if not unit_p or float(unit_p) <= 0:
+                    continue
+
+                # Direct & High-Precision Match against consignment items
+                target_item = None
+                ai_pcode = re.sub(r"[^a-z0-9]", "", (q_dict.get("product_code") or "").lower())
+                ai_pname = (q_dict.get("product_name") or "").lower().strip()
+
+                if consignment_items:
+                    # 1. Direct code lookup matching AI's resolved candidate code
+                    if ai_pcode:
+                        for c_item, c_prod in consignment_items:
+                            cp_code = re.sub(r"[^a-z0-9]", "", (c_prod.product_code or "").lower())
+                            if cp_code and (ai_pcode == cp_code or (len(ai_pcode) >= 5 and (ai_pcode in cp_code or cp_code in ai_pcode))):
+                                target_item = c_item
+                                break
+
+                    # 2. High-precision token overlap with model number sensitivity
+                    if not target_item and ai_pname:
+                        GENERIC_STOP_WORDS = {
+                            "product", "for", "the", "and", "with", "in", "of", "to", "at", "by", "a", "an", "is", "pcs", "unit", "units"
+                        }
+                        q_tokens = set(re.findall(r"[a-z0-9]+", ai_pname)) - GENERIC_STOP_WORDS
+                        best_score = 0
+                        for c_item, c_prod in consignment_items:
+                            cp_name = (c_prod.product_name or c_prod.product_name_tally or "").lower()
+                            cp_tokens = set(re.findall(r"[a-z0-9]+", cp_name)) - GENERIC_STOP_WORDS
+                            overlap = q_tokens & cp_tokens
+                            
+                            # Extra weight for exact model numbers (e.g. 1000an, 900, 900a, msv, msh)
+                            score = len(overlap)
+                            for tok in overlap:
+                                if any(ch.isdigit() for ch in tok) or tok in ["msv", "msh", "ssh", "fr", "dbf"]:
+                                    score += 3
+                            
+                            if score > best_score:
+                                best_score = score
+                                target_item = c_item
+
+                if not target_item:
+                    target_item = consignment_items[0][0]
+
+                # RULE: Only 1 initial quotation per (Supplier + Product Item) pair is auto-created.
+                # If a quote from this supplier already exists for this item, skip auto-creation
+                # so ongoing email negotiations do not flood the inquiry with duplicate quote rows.
+                existing_supp_quote = await session.execute(
+                    select(Quotation).where(
+                        Quotation.inquiry_item_id == target_item.id,
+                        Quotation.supplier_id == quote_supplier_id,
+                        Quotation.deleted_at.is_(None),
                     )
-                    if existing_dup_check.scalars().first():
-                        logger.info("Email message %s already recorded for item %s. Skipping.", msg_id, item.id)
-                        return
+                )
+                if existing_supp_quote.scalars().first():
+                    logger.info(
+                        "Supplier %s already has an active quote for item %s. Skipping auto-creation so sales team can manage manual negotiation updates.",
+                        quote_supplier_id,
+                        target_item.id,
+                    )
+                    continue
 
-                # Generate clean quote number
+                quoted_qty = q_dict.get("quantity") or float(target_item.quantity or 1.0)
+                quoted_unit_price = float(unit_p)
+                quote_currency = q_dict.get("currency") or ai_result.currency or "CNY"
+                total_cost = round(quoted_qty * quoted_unit_price, 2)
+
                 quote_count_res = await session.execute(
-                    select(Quotation).where(Quotation.inquiry_item_id == item.id)
+                    select(Quotation).where(
+                        Quotation.inquiry_item_id == target_item.id,
+                        Quotation.deleted_at.is_(None),
+                    )
                 )
                 existing_count = len(quote_count_res.scalars().all())
                 quote_number = f"QT-AUTO-{existing_count + 1:02d}"
 
-                total_cost = round(quoted_qty * quoted_unit_price, 2)
+                t_parts: list[str] = []
+                if q_dict.get("price_terms"):
+                    t_parts.append(q_dict["price_terms"])
+                elif ai_result.price_terms:
+                    t_parts.append(ai_result.price_terms)
+                if q_dict.get("payment_terms"):
+                    t_parts.append(q_dict["payment_terms"])
+                elif ai_result.payment_terms:
+                    t_parts.append(ai_result.payment_terms)
+                terms_combined = " • ".join(t_parts) if t_parts else None
 
-                terms_parts: list[str] = []
-                if ai_result.price_terms:
-                    terms_parts.append(ai_result.price_terms)
-                if ai_result.payment_terms:
-                    terms_parts.append(ai_result.payment_terms)
-                terms_combined = " • ".join(terms_parts) if terms_parts else None
+                q_rem = q_dict.get("remarks") or ai_result.remarks or ""
+                dedup_remark = f"{q_rem + ' | ' if q_rem else ''}Auto-extracted from {sender_email} [msg:{msg_id[:30]}]"
 
-                # 4. Save quotation attachment file to uploads/quotations if present
-                saved_attachment_url = None
-                saved_attachment_filename = None
-                if attachments:
-                    first_att = attachments[0]
-                    raw_fname = first_att.get("filename") or "quote_document.pdf"
-                    clean_fname = re.sub(r"[^\w\-.]", "_", raw_fname)
-                    unique_fname = f"{uuid.uuid4().hex[:10]}_{clean_fname}"
-                    quotation_dir = Path("uploads/quotations")
-                    quotation_dir.mkdir(parents=True, exist_ok=True)
-                    file_path = quotation_dir / unique_fname
+                exp_date = None
+                date_val = q_dict.get("earliest_available_date") or ai_result.earliest_available_date
+                if date_val:
                     try:
-                        with open(file_path, "wb") as f:
-                            f.write(first_att["bytes"])
-                        saved_attachment_url = f"/uploads/quotations/{unique_fname}"
-                        saved_attachment_filename = raw_fname
-                        logger.info("Saved supplier attachment to %s", saved_attachment_url)
-                    except Exception as save_err:
-                        logger.error("Failed to save quotation attachment: %s", str(save_err))
+                        exp_date = datetime.strptime(date_val, "%Y-%m-%d").date()
+                    except Exception:
+                        pass
 
-                dedup_remark = f"{ai_result.remarks + ' | ' if ai_result.remarks else ''}Auto-extracted from {sender_email} [msg:{msg_id[:30]}]"
                 new_quotation = Quotation(
                     id=uuid.uuid4(),
                     quote_number=quote_number,
-                    inquiry_item_id=item.id,
+                    inquiry_item_id=target_item.id,
                     supplier_id=quote_supplier_id,
                     quantity=quoted_qty,
                     unit_price=quoted_unit_price,
                     total_cost=total_cost,
                     currency=quote_currency,
-                    expected_receiving_date=datetime.strptime(ai_result.earliest_available_date, "%Y-%m-%d").date()
-                    if ai_result.earliest_available_date
-                    else None,
+                    expected_receiving_date=exp_date,
                     terms_and_conditions=terms_combined,
                     remarks=dedup_remark,
                     attachment_url=saved_attachment_url,
@@ -467,34 +570,31 @@ class EmailInboundWorker:
                     created_by=creator_user_id,
                 )
                 session.add(new_quotation)
-                await session.commit()
-                logger.info(
-                    "🎉 [AUTOMATED QUOTATION CREATED] Quote %s (Price: %s %s) saved for item %s from %s",
-                    quote_number,
-                    quoted_unit_price,
-                    ai_result.currency,
-                    item.id,
-                    sender_email,
-                )
+                created_quotes_count += 1
 
-                # 5. Broadcast real-time WebSocket event -> Updates ERP screen instantly!
+                # Broadcast real-time WebSocket event for each created quote
                 await self._dispatcher.publish(
                     module_channel("inquiries"),
                     Event(
                         entity="inquiry",
-                        entity_id=str(item.inquiry_id),
+                        entity_id=str(target_item.inquiry_id),
                         event_type="quotation.created",
                         changes={
                             "id": str(new_quotation.id),
-                            "inquiry_item_id": str(item.id),
-                            "inquiry_id": str(item.inquiry_id),
+                            "inquiry_item_id": str(target_item.id),
+                            "inquiry_id": str(target_item.inquiry_id),
                             "quote_number": quote_number,
                             "unit_price": quoted_unit_price,
-                            "currency": ai_result.currency,
+                            "currency": quote_currency,
                             "status": "pending",
                         },
                     ),
                 )
+                logger.info("Created quotation %s (%s %s) for item %s", quote_number, quoted_unit_price, quote_currency, target_item.id)
+
+            if created_quotes_count > 0:
+                await session.commit()
+                logger.info("Successfully saved %d quotations from email %s.", created_quotes_count, msg_id)
 
 
 # Global worker instance

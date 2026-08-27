@@ -408,7 +408,19 @@ class QuotationRepository(BaseRepository[Quotation]):
         super().__init__(session, Quotation)
 
     async def list_for_item_with_details(self, inquiry_item_id: uuid.UUID) -> list[dict]:
-        """Return quotations for an item joined with Supplier info."""
+        """Return quotations for an item joined with Supplier info and latest RFQ sent date."""
+        from app.inquiries.models import RFQ
+
+        # Fetch the latest RFQ created/dispatched date for this item
+        latest_rfq = (
+            await self.session.execute(
+                select(RFQ.created_at)
+                .where(RFQ.inquiry_item_id == inquiry_item_id, RFQ.deleted_at.is_(None))
+                .order_by(RFQ.created_at.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+
         stmt = (
             select(
                 Quotation,
@@ -441,6 +453,7 @@ class QuotationRepository(BaseRepository[Quotation]):
                 "created_by": q.created_by,
                 "created_at": q.created_at,
                 "updated_at": q.updated_at,
+                "rfq_sent_at": latest_rfq.isoformat() if latest_rfq else None,
             })
         return items
 

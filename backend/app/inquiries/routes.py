@@ -34,7 +34,7 @@ from app.audit.service import AuditService
 from app.auth.dependencies import get_current_user
 from app.auth.service import CurrentUser
 from app.core.responses import build_success_response
-from app.common.email import send_rfq_email
+from app.common.email import send_bulk_rfq_email, send_rfq_email
 from app.database.session import get_db_session
 from app.events.channels import module_channel
 from app.events.dependencies import get_event_dispatcher
@@ -45,6 +45,7 @@ from app.inquiries.public_quotes import generate_rfq_token
 from app.masters.products.models import Product
 from app.suppliers.models import Supplier, SupplierCategoryLink, SupplierSubCategoryLink
 from app.inquiries.schemas import (
+    BulkRFQCreate,
     BulkTallyPostRequest,
     BulkInquiryItemCreate,
     CompanySummaryRead,
@@ -60,6 +61,7 @@ from app.inquiries.schemas import (
     QuotationCreate,
     QuotationRead,
     QuotationStatusUpdate,
+    QuotationUpdate,
     RFQCreate,
     RFQRead,
 )
@@ -735,6 +737,43 @@ async def update_quotation_status(
     )
 
 
+@router.patch("/quotations/{quotation_id}", summary="Update quotation commercial details")
+async def update_quotation_details(
+    quotation_id: uuid.UUID,
+    payload: QuotationUpdate,
+    request: Request,
+    service: InquiryService = Depends(get_inquiry_service),
+    current_user: CurrentUser = Depends(get_current_user),
+    audit_service: AuditService = Depends(get_audit_service),
+    db: AsyncSession = Depends(get_db_session),
+    dispatcher: EventDispatcher = Depends(get_event_dispatcher),
+) -> dict:
+    """Update quotation commercial details (price, quantity, delivery date, currency, terms, remarks)."""
+    quote = await service.update_quotation(quotation_id, payload, user_id=current_user.id)
+    await _record_action(
+        audit_service=audit_service,
+        request=request,
+        action=AuditAction.UPDATE,
+        actor=current_user,
+        entity_id=quote.id,
+        description=f"Updated quotation {quote.quote_number} commercial details.",
+        new_values=payload.model_dump(exclude_unset=True),
+    )
+    await _publish_inquiry_event(
+        db=db,
+        dispatcher=dispatcher,
+        event_type="quotation.updated",
+        entity_id=quote.inquiry_item_id,
+        user_id=current_user.id,
+        changes={"quote_number": quote.quote_number, "quotation_id": str(quote.id)},
+    )
+    return build_success_response(
+        data=QuotationRead.model_validate(quote).model_dump(mode="json"),
+        request_id=request.state.request_id,
+        message=f"Quotation {quote.quote_number} updated successfully.",
+    )
+
+
 @router.delete("/quotations/{quotation_id}", summary="Delete a quotation")
 async def delete_quotation(
     quotation_id: uuid.UUID,
@@ -896,6 +935,171 @@ async def send_rfq_email_manual(
         data={"sent": True, "recipients": payload.to_emails},
         request_id=request.state.request_id,
         message=f"RFQ email successfully sent to {', '.join(payload.to_emails)}.",
+    )
+
+
+@router.post("/{inquiry_id}/bulk-rfqs", status_code=status.HTTP_201_CREATED, summary="Create and dispatch bulk RFQs for all or selected items in an inquiry consignment")
+async def create_bulk_rfqs(
+    inquiry_id: uuid.UUID,
+    payload: BulkRFQCreate,
+    request: Request,
+    service: InquiryService = Depends(get_inquiry_service),
+    current_user: CurrentUser = Depends(get_current_user),
+    audit_service: AuditService = Depends(get_audit_service),
+    db: AsyncSession = Depends(get_db_session),
+    dispatcher: EventDispatcher = Depends(get_event_dispatcher),
+) -> dict:
+    """Dispatches a consolidated RFQ email for multiple inquiry items directly to matching suppliers."""
+    import asyncio
+    from sqlalchemy.orm import selectinload
+    from app.inquiries.models import Inquiry, InquiryItem, RFQ, ConsignmentCode
+    from app.suppliers.models import SupplierEmail
+    
+    # 1. Fetch Inquiry and Items
+    inquiry = await db.get(Inquiry, inquiry_id)
+    if not inquiry:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inquiry consignment not found")
+
+    code_res = await db.get(ConsignmentCode, inquiry.consignment_code_id) if inquiry.consignment_code_id else None
+    consignment_code_str = code_res.code if code_res else "Inquiry"
+
+    items_query = (
+        select(InquiryItem, Product)
+        .join(Product, InquiryItem.product_id == Product.id)
+        .where(
+            InquiryItem.inquiry_id == inquiry_id,
+            InquiryItem.deleted_at.is_(None),
+        )
+    )
+    if payload.inquiry_item_ids:
+        items_query = items_query.where(InquiryItem.id.in_(payload.inquiry_item_ids))
+    
+    items_res = await db.execute(items_query)
+    inquiry_items = items_res.all()
+    if not inquiry_items:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No inquiry items found to request quotation for")
+
+    # 2. Record RFQ rows for each item
+    rfq_records = []
+    product_summary_list = []
+    category_ids = set()
+    sub_category_ids = set()
+
+    for itm, prod in inquiry_items:
+        exp_d = None
+        if payload.expected_receiving_date:
+            try:
+                exp_d = datetime.strptime(payload.expected_receiving_date, "%Y-%m-%d").date()
+            except Exception:
+                pass
+
+        rfq = RFQ(
+            id=uuid.uuid4(),
+            inquiry_item_id=itm.id,
+            expected_receiving_date=exp_d,
+            supplier_type=payload.supplier_type,
+            supplier_ids=[str(s) for s in payload.supplier_ids],
+            notes=payload.notes,
+            status="sent",
+            created_by=current_user.id,
+        )
+        db.add(rfq)
+        rfq_records.append(rfq)
+
+        p_name = prod.product_name or prod.product_name_tally or "Product"
+        product_summary_list.append({
+            "item_id": str(itm.id),
+            "product_name": p_name,
+            "product_code": prod.product_code,
+            "quantity": itm.quantity,
+            "expected_receiving_date": payload.expected_receiving_date,
+            "notes": itm.product_specs_remarks or payload.notes,
+        })
+        if prod.category_id:
+            category_ids.add(prod.category_id)
+        if prod.sub_category_id:
+            sub_category_ids.add(prod.sub_category_id)
+
+    await db.commit()
+
+    # 3. Resolve Suppliers with Eager-Loaded Emails
+    supplier_uuids = [sid for sid in payload.supplier_ids if sid]
+    if not supplier_uuids and payload.supplier_type == "all":
+        conditions = []
+        if sub_category_ids:
+            conditions.append(Supplier.sub_category_links.any(SupplierSubCategoryLink.sub_category_id.in_(sub_category_ids)))
+        if category_ids:
+            conditions.append(Supplier.category_links.any(SupplierCategoryLink.category_id.in_(category_ids)))
+        
+        base_query = select(Supplier).options(selectinload(Supplier.emails)).where(Supplier.is_active == True)
+        if conditions:
+            suppliers_res = (await db.execute(base_query.where(or_(*conditions)))).scalars().all()
+        else:
+            suppliers_res = (await db.execute(base_query)).scalars().all()
+    elif supplier_uuids:
+        suppliers_res = (
+            await db.execute(
+                select(Supplier).options(selectinload(Supplier.emails)).where(Supplier.id.in_(supplier_uuids))
+            )
+        ).scalars().all()
+    else:
+        suppliers_res = []
+
+    # 4. Dispatch Consolidated Email in Background
+    dispatched_suppliers = []
+    
+    if payload.custom_recipient_emails:
+        # User specified/edited recipient emails explicitly in Draft Mode
+        clean_custom_emails = [e.strip() for e in payload.custom_recipient_emails if e and "@" in e]
+        if clean_custom_emails:
+            asyncio.create_task(
+                send_bulk_rfq_email(
+                    to_emails=clean_custom_emails,
+                    contact_name="Valued Partner",
+                    company_name="Supplier Partner",
+                    consignment_code=consignment_code_str,
+                    items=product_summary_list,
+                    general_notes=payload.notes,
+                    custom_subject=payload.custom_subject,
+                    custom_body=payload.custom_body,
+                )
+            )
+            dispatched_suppliers.append({
+                "supplier_id": "custom",
+                "company_name": "Selected Recipients",
+                "emails": clean_custom_emails,
+            })
+    else:
+        for sup in suppliers_res:
+            all_emails = [e.email for e in sup.emails if getattr(e, "email", None)]
+            if all_emails:
+                asyncio.create_task(
+                    send_bulk_rfq_email(
+                        to_emails=all_emails,
+                        contact_name=sup.contact_full_name or "Valued Partner",
+                        company_name=sup.company_name,
+                        consignment_code=consignment_code_str,
+                        items=product_summary_list,
+                        general_notes=payload.notes,
+                        custom_subject=payload.custom_subject,
+                        custom_body=payload.custom_body,
+                    )
+                )
+                dispatched_suppliers.append({
+                    "supplier_id": str(sup.id),
+                    "company_name": sup.company_name,
+                    "emails": all_emails,
+                })
+
+    return build_success_response(
+        data={
+            "item_count": len(product_summary_list),
+            "dispatched_count": len(dispatched_suppliers),
+            "dispatched_suppliers": dispatched_suppliers,
+            "items": product_summary_list,
+        },
+        request_id=request.state.request_id,
+        message=f"Consolidated RFQ email for {len(product_summary_list)} items successfully dispatched to {len(dispatched_suppliers)} suppliers.",
     )
 
 

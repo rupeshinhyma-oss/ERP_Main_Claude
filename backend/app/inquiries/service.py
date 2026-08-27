@@ -389,11 +389,7 @@ class InquiryService:
     async def delete_item(self, inquiry_id: uuid.UUID, item_id: uuid.UUID) -> None:
         item = await self.get_item_or_raise(inquiry_id, item_id)
         await self.item_repository.delete(item)
-        remaining = await self.item_repository.list_for_inquiry(inquiry_id)
-        if not remaining:
-            await self.delete_consignment(inquiry_id)
-        else:
-            await self._refresh_rollup(inquiry_id)
+        await self._refresh_rollup(inquiry_id)
 
     # ------------------------------------------------------------------
     # Quotations & RFQs
@@ -480,6 +476,49 @@ class InquiryService:
             await self._refresh_rollup(item.inquiry_id)
 
         return updated_quote
+
+    async def update_quotation(
+        self, quotation_id: uuid.UUID, data: QuotationUpdate, *, user_id: uuid.UUID
+    ) -> Quotation:
+        """Update commercial details of a supplier quotation."""
+        if not self.quotation_repository:
+            raise BadRequestException("Quotation repository not initialized.")
+        quote = await self.quotation_repository.get_by_id(quotation_id)
+        if quote is None:
+            raise NotFoundException("Quotation not found.")
+
+        update_dict: dict[str, Any] = {}
+        if data.quantity is not None:
+            update_dict["quantity"] = data.quantity
+        if data.unit_price is not None:
+            update_dict["unit_price"] = data.unit_price
+        if data.total_cost is not None:
+            update_dict["total_cost"] = data.total_cost
+        elif data.quantity is not None or data.unit_price is not None:
+            qty = data.quantity if data.quantity is not None else (quote.quantity or 1.0)
+            uprice = data.unit_price if data.unit_price is not None else (quote.unit_price or 0.0)
+            update_dict["total_cost"] = round(qty * uprice, 2)
+        if data.currency is not None:
+            update_dict["currency"] = data.currency.upper()
+        if data.expected_receiving_date is not None:
+            from datetime import date
+            try:
+                update_dict["expected_receiving_date"] = (
+                    date.fromisoformat(data.expected_receiving_date) if data.expected_receiving_date else None
+                )
+            except ValueError:
+                pass
+        if data.terms_and_conditions is not None:
+            update_dict["terms_and_conditions"] = data.terms_and_conditions.strip() or None
+        if data.remarks is not None:
+            update_dict["remarks"] = data.remarks.strip() or None
+        if data.attachment_url is not None:
+            update_dict["attachment_url"] = data.attachment_url
+        if data.attachment_filename is not None:
+            update_dict["attachment_filename"] = data.attachment_filename
+
+        updated = await self.quotation_repository.update(quote, **update_dict)
+        return updated
 
     async def delete_quotation(
         self, quotation_id: uuid.UUID, *, user_id: uuid.UUID

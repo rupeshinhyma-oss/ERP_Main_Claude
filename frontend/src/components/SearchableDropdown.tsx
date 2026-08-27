@@ -1040,44 +1040,111 @@ export function SearchableDropdownMultiPanel({
             ) : options.length === 0 ? (
               <div style={{ padding: "10px 12px", fontSize: "13px", color: "#94a3b8", textAlign: "center" }}>No matching results</div>
             ) : (
-              options.map((opt) => {
-                const isChecked = selectedValues.has(opt.value);
-                return (
-                  <div
-                    key={opt.value}
-                    onMouseDown={(e) => { e.preventDefault(); toggleItem(opt); }}
-                    style={{
-                      padding: "8px 12px",
-                      fontSize: "13.5px",
-                      cursor: "pointer",
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "10px",
-                      background: isChecked ? "#eff6ff" : "transparent",
-                      color: "#1e293b",
-                      transition: "background 0.1s",
-                    }}
-                    onMouseOver={(e) => { if (!isChecked) e.currentTarget.style.background = "#f8fafc"; }}
-                    onMouseOut={(e) => { if (!isChecked) e.currentTarget.style.background = "transparent"; }}
-                  >
-                    <span style={{
-                      width: "16px",
-                      height: "16px",
-                      border: isChecked ? "2px solid #0061f2" : "2px solid #cbd5e1",
-                      borderRadius: "3px",
-                      background: isChecked ? "#0061f2" : "#ffffff",
-                      display: "inline-flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      flexShrink: 0,
-                      transition: "all 0.15s",
-                    }}>
-                      {isChecked && <span style={{ color: "#fff", fontSize: "10px", fontWeight: "bold" }}>✓</span>}
-                    </span>
-                    {opt.label}
-                  </div>
-                );
-              })
+              <>
+                {/* "Select All" Option */}
+                {(() => {
+                  const isAll = options.length > 0 && options.every((opt) => selectedValues.has(opt.value));
+                  const selectedInView = options.filter((opt) => selectedValues.has(opt.value)).length;
+                  return (
+                    <div
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        if (isAll) {
+                          const optValSet = new Set(options.map((o) => o.value));
+                          const next = selected.filter((s) => !optValSet.has(s.value));
+                          setSelected(next);
+                          onChange(next.map((s) => s.value));
+                        } else {
+                          const existingMap = new Map(selected.map((s) => [s.value, s]));
+                          for (const opt of options) {
+                            existingMap.set(opt.value, opt);
+                          }
+                          const next = Array.from(existingMap.values());
+                          setSelected(next);
+                          onChange(next.map((s) => s.value));
+                        }
+                      }}
+                      style={{
+                        padding: "8px 12px",
+                        fontSize: "13px",
+                        fontWeight: 600,
+                        cursor: "pointer",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "10px",
+                        background: isAll ? "#eff6ff" : "#f8fafc",
+                        color: isAll ? "#1d4ed8" : "#0f172a",
+                        borderBottom: "1px solid #e2e8f0",
+                        userSelect: "none",
+                        transition: "background 0.1s",
+                      }}
+                      onMouseOver={(e) => { e.currentTarget.style.background = isAll ? "#dbeafe" : "#f1f5f9"; }}
+                      onMouseOut={(e) => { e.currentTarget.style.background = isAll ? "#eff6ff" : "#f8fafc"; }}
+                    >
+                      <span style={{
+                        width: "16px",
+                        height: "16px",
+                        border: isAll ? "2px solid #0061f2" : "2px solid #cbd5e1",
+                        borderRadius: "3px",
+                        background: isAll ? "#0061f2" : selectedInView > 0 ? "#93c5fd" : "#ffffff",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        flexShrink: 0,
+                        transition: "all 0.15s",
+                      }}>
+                        {isAll && <span style={{ color: "#fff", fontSize: "10px", fontWeight: "bold" }}>✓</span>}
+                        {!isAll && selectedInView > 0 && <span style={{ width: "8px", height: "2px", background: "#ffffff", borderRadius: "1px" }} />}
+                      </span>
+                      <span style={{ flex: 1, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <span>Select All</span>
+                        <span style={{ fontSize: "11.5px", color: isAll ? "#2563eb" : "#64748b", fontWeight: 500 }}>
+                          ({selectedInView}/{options.length} selected)
+                        </span>
+                      </span>
+                    </div>
+                  );
+                })()}
+
+                {options.map((opt) => {
+                  const isChecked = selectedValues.has(opt.value);
+                  return (
+                    <div
+                      key={opt.value}
+                      onMouseDown={(e) => { e.preventDefault(); toggleItem(opt); }}
+                      style={{
+                        padding: "8px 12px",
+                        fontSize: "13.5px",
+                        cursor: "pointer",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "10px",
+                        background: isChecked ? "#eff6ff" : "transparent",
+                        color: "#1e293b",
+                        transition: "background 0.1s",
+                      }}
+                      onMouseOver={(e) => { if (!isChecked) e.currentTarget.style.background = "#f8fafc"; }}
+                      onMouseOut={(e) => { if (!isChecked) e.currentTarget.style.background = "transparent"; }}
+                    >
+                      <span style={{
+                        width: "16px",
+                        height: "16px",
+                        border: isChecked ? "2px solid #0061f2" : "2px solid #cbd5e1",
+                        borderRadius: "3px",
+                        background: isChecked ? "#0061f2" : "#ffffff",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        flexShrink: 0,
+                        transition: "all 0.15s",
+                      }}>
+                        {isChecked && <span style={{ color: "#fff", fontSize: "10px", fontWeight: "bold" }}>✓</span>}
+                      </span>
+                      {opt.label}
+                    </div>
+                  );
+                })}
+              </>
             )}
           </div>
 

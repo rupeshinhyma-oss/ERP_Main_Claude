@@ -192,6 +192,7 @@ class QuotationRead(BaseModel):
     created_by: uuid.UUID
     created_at: datetime
     updated_at: datetime
+    rfq_sent_at: datetime | str | None = None
 
 
 class RFQCreate(BaseModel):
@@ -199,6 +200,20 @@ class RFQCreate(BaseModel):
     supplier_type: str = Field(default="selected", description="all or selected")
     supplier_ids: list[uuid.UUID] = Field(default_factory=list)
     notes: str | None = None
+
+
+class BulkRFQCreate(BaseModel):
+    inquiry_item_ids: list[uuid.UUID] = Field(
+        default_factory=list,
+        description="Specific inquiry item IDs to include, or empty for all items in consignment",
+    )
+    expected_receiving_date: str | None = None
+    supplier_type: str = Field(default="all", description="all or selected")
+    supplier_ids: list[uuid.UUID] = Field(default_factory=list)
+    notes: str | None = None
+    custom_subject: str | None = None
+    custom_body: str | None = None
+    custom_recipient_emails: list[str] = Field(default_factory=list)
 
 
 class RFQRead(BaseModel):

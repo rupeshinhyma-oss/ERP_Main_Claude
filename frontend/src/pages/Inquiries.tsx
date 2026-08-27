@@ -137,6 +137,7 @@ export function InquiriesPage() {
 
   const navigateToView = useCallback(
     (nextView: View) => {
+      setError(null);
       if (nextView.layer === "items") {
         setSearchParams({ buyerId: nextView.buyerId, inquiryId: nextView.inquiryId });
       } else if (nextView.layer === "consignments") {
@@ -147,6 +148,10 @@ export function InquiriesPage() {
     },
     [setSearchParams]
   );
+
+  useEffect(() => {
+    setError(null);
+  }, [buyerIdParam, inquiryIdParam]);
 
   // Name caches, kept for optional fallbacks
   const [buyerNames, setBuyerNames] = useState<Record<string, string>>({});
@@ -251,23 +256,6 @@ export function InquiriesPage() {
               </div>
 
               <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
-                <button
-                  type="button"
-                  onClick={() => { setQuickAddInitialBuyerId(""); setQuickAddOpen(true); }}
-                  style={{
-                    background: "#0061f2",
-                    color: "#ffffff",
-                    border: "none",
-                    borderRadius: "6px",
-                    padding: "8px 16px",
-                    fontSize: "13px",
-                    fontWeight: 600,
-                    cursor: "pointer",
-                    boxShadow: "0 2px 4px rgba(0,97,242,0.2)",
-                  }}
-                >
-                  + Quick Add
-                </button>
                 <button
                   type="button"
                   onClick={() => { setQuickAddInitialBuyerId(""); setQuickAddOpen(true); }}
@@ -950,8 +938,10 @@ function ItemsView({
   const [remarksTarget, setRemarksTarget] = useState<InquiryItem | null>(null);
   const [addQuoteOpen, setAddQuoteOpen] = useState(false);
   const [rfqOpen, setRfqOpen] = useState(false);
+  const [bulkRfqOpen, setBulkRfqOpen] = useState(false);
   const [aiQuoteOpen, setAiQuoteOpen] = useState(false);
   const [viewTermsTarget, setViewTermsTarget] = useState<Quotation | null>(null);
+  const [editQuoteTarget, setEditQuoteTarget] = useState<Quotation | null>(null);
   const [productInfoTarget, setProductInfoTarget] = useState<InquiryItem | null>(null);
   const [activeActionMenuId, setActiveActionMenuId] = useState<string | null>(null);
   const [editQtyItem, setEditQtyItem] = useState<{ id: string; qty: number } | null>(null);
@@ -964,12 +954,16 @@ function ItemsView({
       const { data } = await apiGet<Inquiry>(`/inquiries/${inquiryId}`);
       setInquiry(data);
       setSelectedItemId((prev) => prev || (data.items && data.items.length > 0 ? data.items[0].id : ""));
-    } catch (err) {
-      if (!silent) onError(err);
+    } catch (err: any) {
+      if (err?.response?.status === 404 || err?.status === 404 || (typeof err === "object" && err?.message?.includes("not found"))) {
+        onBack();
+      } else if (!silent) {
+        onError(err);
+      }
     } finally {
       if (!silent) setLoading(false);
     }
-  }, [inquiryId, onError]);
+  }, [inquiryId, onError, onBack]);
 
   useEffect(() => {
     void load();
@@ -1144,7 +1138,7 @@ function ItemsView({
         setSelectedItemId(null);
       }
       void load();
-    } catch (err) {
+    } catch (err: any) {
       onError(err);
     }
   }
@@ -1183,7 +1177,11 @@ function ItemsView({
                 }`,
             }}
           >
-            {statusLabel(inquiry?.consignment_status || "proposed")}
+            {inquiry?.consignment_status === "fully_approved"
+              ? "Fully Approved"
+              : inquiry?.consignment_status === "partial_approved"
+                ? "Partial Approved"
+                : "Proposed"}
           </span>
           <button
             type="button"
@@ -1194,7 +1192,31 @@ function ItemsView({
           </button>
         </div>
 
-        <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+        {/* Action Buttons */}
+        <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+          {items.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setBulkRfqOpen(true)}
+              style={{
+                background: "#fef3c7",
+                color: "#92400e",
+                border: "1px solid #fde68a",
+                fontWeight: 600,
+                fontSize: "13px",
+                padding: "7px 14px",
+                borderRadius: "8px",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
+                boxShadow: "0 1px 2px rgba(217,119,6,0.15)",
+              }}
+              title="Request Quotation for all products in this consignment"
+            >
+              Request All Quotations
+            </button>
+          )}
           <button
             type="button"
             onClick={onBack}
@@ -1383,19 +1405,40 @@ function ItemsView({
             minHeight: "calc(100vh - 210px)",
           }}
         >
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px" }}>
             <h3 style={{ margin: 0, fontSize: "16px", fontWeight: 700, color: "#0f172a" }}>
               Products ({items.length})
             </h3>
-            <Can permission="inquiry.create">
-              <button
-                type="button"
-                onClick={() => setAddOpen(true)}
-                style={{ background: "none", border: "none", color: "#2563eb", fontSize: "13px", fontWeight: 600, cursor: "pointer" }}
-              >
-                + Add
-              </button>
-            </Can>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              {items.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setBulkRfqOpen(true)}
+                  style={{
+                    background: "#fef3c7",
+                    border: "1px solid #fde68a",
+                    color: "#92400e",
+                    fontSize: "12px",
+                    fontWeight: 600,
+                    padding: "3px 8px",
+                    borderRadius: "6px",
+                    cursor: "pointer",
+                  }}
+                  title="Send consolidated RFQ for all products"
+                >
+                  Request All RFQs
+                </button>
+              )}
+              <Can permission="inquiry.create">
+                <button
+                  type="button"
+                  onClick={() => setAddOpen(true)}
+                  style={{ background: "none", border: "none", color: "#2563eb", fontSize: "13px", fontWeight: 600, cursor: "pointer" }}
+                >
+                  + Add
+                </button>
+              </Can>
+            </div>
           </div>
 
           {/* Filter Tabs: All, Approved, Pending */}
@@ -1910,7 +1953,10 @@ function ItemsView({
                       </tr>
                     ) : (
                       filteredQuotations.map((quote) => {
-                        const usdAmount = Number((quote.total_cost / 7.25).toFixed(2)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                        const currSymbol = quote.currency === "USD" ? "$" : quote.currency === "INR" ? "₹" : quote.currency === "EUR" ? "€" : "¥";
+                        const usdAmount = quote.currency === "USD"
+                          ? Number(quote.total_cost).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                          : Number((quote.total_cost / 7.25).toFixed(2)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
                         const isQuoteApproved = quote.status === "approved";
                         const isActionOpen = activeActionMenuId === quote.id;
 
@@ -1924,14 +1970,14 @@ function ItemsView({
                             </td>
                             <td style={tdStyle}>{quote.quantity}</td>
                             <td style={{ ...tdStyle, fontWeight: 600 }}>
-                              ¥{quote.unit_price}
+                              {currSymbol}{quote.unit_price}
                             </td>
                             <td style={tdStyle}>
                               <div style={{ fontWeight: 700, color: "#0f172a" }}>
-                                ¥{quote.total_cost.toLocaleString()}
+                                {currSymbol}{quote.total_cost.toLocaleString()}
                               </div>
                               <div style={{ fontSize: "11px", color: "#2563eb" }}>
-                                ${usdAmount} <span style={{ color: "#94a3b8" }}>Inclusive Tax</span>
+                                ${usdAmount} {quote.currency !== "USD" && <span style={{ color: "#94a3b8" }}>Inclusive Tax</span>}
                               </div>
                             </td>
                             <td style={tdStyle}>
@@ -2045,7 +2091,40 @@ function ItemsView({
                                       onMouseEnter={(e) => (e.currentTarget.style.background = "#f1f5f9")}
                                       onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
                                     >
-                                      👁️ View Quote
+                                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                        <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" />
+                                        <circle cx="12" cy="12" r="3" />
+                                      </svg>
+                                      View Details
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setEditQuoteTarget(quote);
+                                        setActiveActionMenuId(null);
+                                      }}
+                                      style={{
+                                        padding: "8px 12px",
+                                        background: "none",
+                                        border: "none",
+                                        borderRadius: "6px",
+                                        textAlign: "left",
+                                        fontSize: "13px",
+                                        cursor: "pointer",
+                                        color: "#4338ca",
+                                        fontWeight: 600,
+                                        display: "flex",
+                                        alignItems: "center",
+                                        gap: "8px",
+                                      }}
+                                      onMouseEnter={(e) => (e.currentTarget.style.background = "#eef2ff")}
+                                      onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
+                                    >
+                                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                                        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                                      </svg>
+                                      Edit Quote
                                     </button>
                                     {quote.status !== "approved" && (
                                       <button
@@ -2198,7 +2277,7 @@ function ItemsView({
         />
       )}
 
-      {/* 2. Request Quotation Drawer (Image 5) */}
+      {/* 2. Request Quotation Drawer (Single Item) */}
       {rfqOpen && selectedItem && (
         <RequestQuotationDrawer
           item={selectedItem}
@@ -2211,9 +2290,38 @@ function ItemsView({
         />
       )}
 
+      {/* 2.1 Bulk Request Quotation Drawer (All Items in Consignment) */}
+      {bulkRfqOpen && (
+        <BulkRequestQuotationDrawer
+          inquiryId={inquiryId}
+          consignmentCode={inquiry?.consignment_code || undefined}
+          items={items}
+          onClose={() => setBulkRfqOpen(false)}
+          onDispatched={() => {
+            setBulkRfqOpen(false);
+            void load();
+          }}
+          onError={onError}
+        />
+      )}
+
       {/* 3. View Terms & Quotation Modal */}
       {viewTermsTarget && (
         <QuotationTermsModal quote={viewTermsTarget} onClose={() => setViewTermsTarget(null)} />
+      )}
+
+      {/* 3.1 Edit Quotation Modal */}
+      {editQuoteTarget && (
+        <EditQuotationModal
+          quote={editQuoteTarget}
+          onClose={() => setEditQuoteTarget(null)}
+          onSaved={() => {
+            setEditQuoteTarget(null);
+            if (selectedItem?.id) void loadQuotations(selectedItem.id);
+            void load();
+          }}
+          onError={onError}
+        />
       )}
 
       {/* 4. Product Info Modal */}
@@ -4093,43 +4201,1080 @@ function RequestQuotationDrawer({
   );
 }
 
-function QuotationTermsModal({ quote, onClose }: { quote: Quotation; onClose: () => void }) {
+function BulkRequestQuotationDrawer({
+  inquiryId,
+  consignmentCode,
+  items,
+  onClose,
+  onDispatched,
+  onError,
+}: {
+  inquiryId: string;
+  consignmentCode?: string;
+  items: InquiryItem[];
+  onClose: () => void;
+  onDispatched: () => void;
+  onError: (err: unknown) => void;
+}) {
+  const [selectedItemIds, setSelectedItemIds] = useState<string[]>(items.map((i) => i.id));
+  const [expDate, setExpDate] = useState("");
+  const [supplierType, setSupplierType] = useState<"all" | "selected">("all");
+  const [selectedSupplierIds, setSelectedSupplierIds] = useState<string[]>([]);
+  const [note, setNote] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [dispatchedResult, setDispatchedResult] = useState<any | null>(null);
+
+  // Send Mode: 'auto' (Automatic Send) vs 'draft' (Draft & Preview Email)
+  const [sendMode, setSendMode] = useState<"auto" | "draft">("auto");
+  const [resolvedSuppliers, setResolvedSuppliers] = useState<{ id: string; name: string; emails: string[] }[]>([]);
+  const [showAllMatchedSuppliers, setShowAllMatchedSuppliers] = useState(false);
+  const [customRecipientEmails, setCustomRecipientEmails] = useState<string>("");
+  const [customSubject, setCustomSubject] = useState<string>("");
+  const [customBody, setCustomBody] = useState<string>("");
+  const [loadingEmails, setLoadingEmails] = useState(false);
+
+  const toggleSelectAll = () => {
+    if (selectedItemIds.length === items.length) {
+      setSelectedItemIds([]);
+    } else {
+      setSelectedItemIds(items.map((i) => i.id));
+    }
+  };
+
+  const toggleItem = (id: string) => {
+    setSelectedItemIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+  };
+
+  const fetchSupplierOptions = useCallback(async (term: string) => {
+    try {
+      const res = await apiGet<any>(`/suppliers?search=${encodeURIComponent(term)}&limit=100&sort_by=company_name&sort_order=asc`);
+      const list = Array.isArray(res.data) ? res.data : res.data?.data || [];
+      return list.map((s: any) => ({ value: s.id, label: s.company_name || s.name || "Supplier" }));
+    } catch {
+      return [];
+    }
+  }, []);
+
+  const fetchSupplierLabel = useCallback(async (id: string) => {
+    try {
+      const res = await apiGet<any>(`/suppliers/${id}`);
+      return res.data?.company_name || res.data?.name || id;
+    } catch {
+      return id;
+    }
+  }, []);
+
+  // Resolve Supplier Emails whenever Supplier Type, Selected Suppliers, or Selected Products change
+  useEffect(() => {
+    let isMounted = true;
+    (async () => {
+      setLoadingEmails(true);
+      try {
+        if (supplierType === "selected") {
+          if (selectedSupplierIds.length === 0) {
+            if (isMounted) {
+              setResolvedSuppliers([]);
+              setCustomRecipientEmails("");
+            }
+            return;
+          }
+          const list: { id: string; name: string; emails: string[] }[] = [];
+          for (const sid of selectedSupplierIds) {
+            try {
+              const { data: s } = await apiGet<any>(`/suppliers/${sid}`);
+              if (s) {
+                const rawEmails = Array.isArray(s.emails) ? s.emails : [];
+                const ems: string[] = rawEmails
+                  .map((e: any) => (typeof e === "string" ? e : e?.email || "").trim())
+                  .filter((e: string) => e && e.includes("@"));
+                list.push({ id: s.id, name: s.company_name || s.name || "Supplier", emails: ems });
+              }
+            } catch {}
+          }
+          if (isMounted) {
+            setResolvedSuppliers(list);
+            const allEms = Array.from(new Set(list.flatMap((x) => x.emails)));
+            setCustomRecipientEmails(allEms.join(", "));
+          }
+        } else {
+          // "all" matching suppliers: filter by selected products' category & sub-category
+          const selectedItems = items.filter((i) => selectedItemIds.includes(i.id));
+          const prodCategoryIds = new Set<string>();
+          const prodSubCategoryIds = new Set<string>();
+
+          // Fetch product metadata for each selected item to extract category/subcategory IDs
+          await Promise.all(
+            selectedItems.map(async (itm) => {
+              if (itm.product_id) {
+                try {
+                  const { data: prod } = await apiGet<any>(`/masters/products/${itm.product_id}`);
+                  if (prod?.category_id) prodCategoryIds.add(String(prod.category_id));
+                  if (prod?.sub_category_id) prodSubCategoryIds.add(String(prod.sub_category_id));
+                } catch {}
+              }
+            })
+          );
+
+          const { data: sups } = await apiGet<any>("/suppliers?limit=200");
+          const supList = Array.isArray(sups) ? sups : sups?.data || [];
+          
+          // Filter suppliers whose category or subcategory links overlap with the products
+          const matchingSupStubs = supList.filter((s: any) => {
+            if (s.is_active === false) return false;
+            const supCatIds = (s.category_ids || []).map((id: any) => String(id));
+            const supSubCatIds = (s.sub_category_ids || []).map((id: any) => String(id));
+
+            if (prodCategoryIds.size === 0 && prodSubCategoryIds.size === 0) {
+              return true; // fallback to all active suppliers if products have no category
+            }
+
+            const catMatch = supCatIds.some((cid: string) => prodCategoryIds.has(cid));
+            const subCatMatch = supSubCatIds.some((scid: string) => prodSubCategoryIds.has(scid));
+            return catMatch || subCatMatch;
+          });
+
+          // Fetch full profile for matching suppliers to get their verified email list
+          const list: { id: string; name: string; emails: string[] }[] = [];
+          for (const stub of matchingSupStubs) {
+            try {
+              const { data: s } = await apiGet<any>(`/suppliers/${stub.id}`);
+              if (s) {
+                const rawEmails = Array.isArray(s.emails) ? s.emails : [];
+                const ems: string[] = rawEmails
+                  .map((e: any) => (typeof e === "string" ? e : e?.email || "").trim())
+                  .filter((e: string) => e && e.includes("@"));
+                list.push({ id: s.id, name: s.company_name || s.name || "Supplier", emails: ems });
+              }
+            } catch {}
+          }
+
+          if (isMounted) {
+            setResolvedSuppliers(list);
+            const allEms = Array.from(new Set(list.flatMap((x) => x.emails)));
+            setCustomRecipientEmails(allEms.join(", "));
+          }
+        }
+      } catch {
+        if (isMounted) {
+          setResolvedSuppliers([]);
+          setCustomRecipientEmails("");
+        }
+      } finally {
+        if (isMounted) setLoadingEmails(false);
+      }
+    })();
+    return () => {
+      isMounted = false;
+    };
+  }, [supplierType, selectedSupplierIds, selectedItemIds, items]);
+
+  // Auto-generate template text for the draft
+  useEffect(() => {
+    const codeTag = consignmentCode ? `[#${consignmentCode}]` : "";
+    setCustomSubject(`${codeTag} Request for Quotation (${selectedItemIds.length} Items) - Yinglima Procurement Team`);
+
+    const selectedItems = items.filter((i) => selectedItemIds.includes(i.id));
+    const itemsLines = selectedItems.map((itm, idx) => {
+      const pName = itm.product_name || itm.product_name_tally || "Product";
+      const pCode = itm.product_code ? ` (#${itm.product_code})` : "";
+      const pQty = itm.quantity || 1;
+      const pDate = expDate || "Earliest Possible";
+      const pNotes = itm.product_specs_remarks ? ` | Specs: ${itm.product_specs_remarks}` : "";
+      return `${idx + 1}. ${pName}${pCode} - Qty: ${pQty} units | Target Delivery: ${pDate}${pNotes}`;
+    }).join("\n");
+
+    const defaultBodyText = `Dear Valued Partner,\n\nWe are from Yinglima Procurement Team. We are requesting your best competitive quotation and delivery lead times for the following ${selectedItems.length} items:\n\n${itemsLines}\n\n${note.trim() ? `General Notes / Requirements:\n${note.trim()}\n\n` : ""}Please reply directly to this email with:\n1. Unit Price for each product (CNY / USD / INR / EUR)\n2. Earliest Production / Delivery Lead Time\n3. Payment Terms & Price Terms (Ex-Factory / FOB, Deposit %)\n\nYou can reply directly to this email or attach your official quotation PDF / sheet.\n\nBest regards,\nYinglima Procurement Team\nYinglima Packaging Machinery Co., Ltd.`;
+
+    setCustomBody(defaultBodyText);
+  }, [consignmentCode, selectedItemIds, items, expDate, note]);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (selectedItemIds.length === 0) {
+      alert("Please select at least one product item to request quotation for.");
+      return;
+    }
+    if (supplierType === "selected" && selectedSupplierIds.length === 0) {
+      alert("Please select at least one supplier.");
+      return;
+    }
+
+    const recipientList = customRecipientEmails
+      .split(",")
+      .map((e) => e.trim())
+      .filter((e) => e && e.includes("@"));
+
+    if (sendMode === "draft" && recipientList.length === 0) {
+      alert("Please provide at least one valid recipient supplier email in the draft To field.");
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const payload: any = {
+        inquiry_item_ids: selectedItemIds,
+        expected_receiving_date: expDate || null,
+        supplier_type: supplierType,
+        supplier_ids: selectedSupplierIds,
+        notes: note.trim() || null,
+      };
+
+      if (sendMode === "draft") {
+        payload.custom_subject = customSubject.trim() || null;
+        payload.custom_body = customBody.trim() || null;
+        payload.custom_recipient_emails = recipientList;
+      }
+
+      const res = await apiPost<any>(`/inquiries/${inquiryId}/bulk-rfqs`, payload);
+      const payloadData = res.data?.data || res.data || {};
+      setDispatchedResult(payloadData);
+    } catch (err) {
+      onError(err);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 100020, display: "flex", alignItems: "center", justifyContent: "center" }}>
+    <div style={{ position: "fixed", inset: 0, zIndex: 100010, display: "flex", justifyContent: "flex-end" }}>
       <div style={{ position: "absolute", inset: 0, background: "rgba(15,23,42,0.45)", backdropFilter: "blur(2px)" }} onClick={onClose} />
-      <div style={{ position: "relative", width: "480px", maxWidth: "92vw", background: "#ffffff", borderRadius: "12px", padding: "24px", boxShadow: "0 20px 40px rgba(0,0,0,0.2)" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", borderBottom: "1px solid #e2e8f0", paddingBottom: "10px" }}>
-          <h3 style={{ margin: 0, fontSize: "16px", fontWeight: 700, color: "#0f172a" }}>
-            Quotation Details — {quote.quote_number}
-          </h3>
+      <div
+        style={{
+          position: "relative",
+          width: "620px",
+          maxWidth: "94vw",
+          height: "100%",
+          background: "#ffffff",
+          boxShadow: "-10px 0 30px rgba(0,0,0,0.15)",
+          display: "flex",
+          flexDirection: "column",
+          overflowY: "auto",
+        }}
+      >
+        {/* Header */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "18px 24px", borderBottom: "1px solid #e2e8f0", background: "#f8fafc" }}>
+          <div>
+            <h3 style={{ margin: 0, fontSize: "17px", fontWeight: 700, color: "#0f172a" }}>
+              Request Quotation for All Items
+            </h3>
+            <div style={{ fontSize: "12.5px", color: "#64748b", marginTop: "2px" }}>
+              Consignment #{consignmentCode || "Inquiry"} • {items.length} Products
+            </div>
+          </div>
           <button type="button" onClick={onClose} style={{ background: "none", border: "none", fontSize: "18px", cursor: "pointer", color: "#64748b" }}>✕</button>
         </div>
 
-        <div style={{ display: "flex", flexDirection: "column", gap: "12px", fontSize: "13px" }}>
-          <div><strong>Supplier:</strong> {quote.supplier_name || "—"}</div>
-          <div><strong>Quantity:</strong> {quote.quantity}</div>
-          <div><strong>Unit Price:</strong> ¥{quote.unit_price}</div>
-          <div><strong>Total Cost:</strong> ¥{quote.total_cost.toLocaleString()} (${(quote.total_cost / 7.25).toFixed(2)})</div>
-          <div><strong>Expected Receiving:</strong> {quote.expected_receiving_date || "—"}</div>
-          <div>
-            <strong>Terms & Conditions:</strong>
-            <div style={{ background: "#f8fafc", padding: "10px", borderRadius: "6px", marginTop: "4px", border: "1px solid #e2e8f0", whiteSpace: "pre-wrap" }}>
-              {quote.terms_and_conditions || "Standard payment terms apply upon delivery."}
+        {dispatchedResult ? (
+          /* Dispatched Confirmation Screen */
+          <div style={{ padding: "24px", display: "flex", flexDirection: "column", gap: "18px" }}>
+            <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: "10px", padding: "16px 20px" }}>
+              <div style={{ fontSize: "15px", fontWeight: 700, color: "#166534", display: "flex", alignItems: "center", gap: "8px" }}>
+                <span>✓</span> Consolidated RFQ Email Dispatched!
+              </div>
+              <p style={{ margin: "8px 0 0 0", fontSize: "13px", color: "#15803d", lineHeight: 1.5 }}>
+                A consolidated RFQ email listing all <strong>{dispatchedResult.item_count} requested products</strong> was sent to <strong>{dispatchedResult.dispatched_count} suppliers</strong>.
+              </p>
+            </div>
+
+            <div style={{ fontSize: "13px", fontWeight: 700, color: "#0f172a" }}>
+              Dispatched Suppliers ({dispatchedResult.dispatched_suppliers?.length || 0}):
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: "8px", maxHeight: "260px", overflowY: "auto" }}>
+              {dispatchedResult.dispatched_suppliers?.map((sup: any, idx: number) => (
+                <div key={idx} style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "10px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: "13.5px", color: "#0f172a" }}>{sup.company_name}</div>
+                    <div style={{ fontSize: "12px", color: "#64748b" }}>{sup.emails?.join(", ")}</div>
+                  </div>
+                  <span style={{ fontSize: "11px", fontWeight: 700, background: "#dcfce7", color: "#166534", padding: "3px 8px", borderRadius: "12px" }}>
+                    Sent ✉️
+                  </span>
+                </div>
+              ))}
+            </div>
+
+            <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: "8px", padding: "12px 16px", fontSize: "12.5px", color: "#1e40af" }}>
+              <strong>Pure Email Ingestion:</strong> When suppliers reply to the email or attach their quotation sheets, the AI will automatically extract prices for all products and update your ERP table live!
+            </div>
+
+            <div style={{ marginTop: "auto", paddingTop: "12px" }}>
+              <button
+                type="button"
+                onClick={onDispatched}
+                style={{
+                  width: "100%",
+                  padding: "10px",
+                  background: "#2563eb",
+                  color: "#ffffff",
+                  border: "none",
+                  borderRadius: "8px",
+                  fontSize: "14px",
+                  fontWeight: 700,
+                  cursor: "pointer",
+                }}
+              >
+                Done
+              </button>
             </div>
           </div>
-          {quote.remarks && (
+        ) : (
+          /* Initial Bulk Form */
+          <form onSubmit={handleSubmit} style={{ padding: "20px 24px", display: "flex", flexDirection: "column", gap: "16px", flex: 1 }}>
+            {/* Products Selection Table */}
             <div>
-              <strong>Remarks:</strong>
-              <div style={{ background: "#f8fafc", padding: "10px", borderRadius: "6px", marginTop: "4px", border: "1px solid #e2e8f0", whiteSpace: "pre-wrap" }}>
-                {quote.remarks}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
+                <label style={{ fontSize: "12.5px", fontWeight: 700, color: "#334155" }}>
+                  Products to Include ({selectedItemIds.length}/{items.length})
+                </label>
+                <button
+                  type="button"
+                  onClick={toggleSelectAll}
+                  style={{ background: "none", border: "none", color: "#2563eb", fontSize: "12px", cursor: "pointer", fontWeight: 600 }}
+                >
+                  {selectedItemIds.length === items.length ? "Deselect All" : "Select All"}
+                </button>
+              </div>
+
+              <div style={{ border: "1px solid #e2e8f0", borderRadius: "8px", overflow: "hidden", maxHeight: "150px", overflowY: "auto" }}>
+                {items.map((itm) => (
+                  <div
+                    key={itm.id}
+                    onClick={() => toggleItem(itm.id)}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "10px",
+                      padding: "8px 12px",
+                      borderBottom: "1px solid #f1f5f9",
+                      background: selectedItemIds.includes(itm.id) ? "#f8fafc" : "#ffffff",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedItemIds.includes(itm.id)}
+                      onChange={() => {}}
+                      style={{ cursor: "pointer" }}
+                    />
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: "13px", fontWeight: 600, color: "#0f172a" }}>
+                        {itm.product_name || itm.product_name_tally || "Product"}
+                      </div>
+                      <div style={{ fontSize: "11.5px", color: "#64748b" }}>
+                        #{itm.product_code || "N/A"}
+                      </div>
+                    </div>
+                    <div style={{ fontSize: "12.5px", fontWeight: 600, color: "#475569" }}>
+                      {itm.quantity} units
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
-          )}
+
+            {/* Expected Receiving Date */}
+            <div>
+              <label style={{ display: "block", fontSize: "12.5px", fontWeight: 700, color: "#334155", marginBottom: "4px" }}>
+                Expected Receiving Date
+              </label>
+              <input
+                type="date"
+                value={expDate}
+                onChange={(e) => setExpDate(e.target.value)}
+                style={{ width: "100%", padding: "8px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px" }}
+              />
+            </div>
+
+            {/* Suppliers Selection */}
+            <div>
+              <label style={{ display: "block", fontSize: "12.5px", fontWeight: 700, color: "#334155", marginBottom: "6px" }}>
+                *Suppliers Type
+              </label>
+              <div style={{ display: "flex", gap: "20px" }}>
+                <label style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "13px", cursor: "pointer", fontWeight: supplierType === "all" ? 600 : 400 }}>
+                  <input
+                    type="radio"
+                    name="bulkSupplierType"
+                    value="all"
+                    checked={supplierType === "all"}
+                    onChange={() => setSupplierType("all")}
+                  />
+                  All Matching Suppliers (Category / Sub-Category)
+                </label>
+                <label style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "13px", cursor: "pointer", fontWeight: supplierType === "selected" ? 600 : 400 }}>
+                  <input
+                    type="radio"
+                    name="bulkSupplierType"
+                    value="selected"
+                    checked={supplierType === "selected"}
+                    onChange={() => setSupplierType("selected")}
+                  />
+                  Selected Suppliers
+                </label>
+              </div>
+
+              {/* Compact Matched Suppliers Summary Box (Visible when supplierType === 'all') */}
+              {supplierType === "all" && (
+                <div
+                  style={{
+                    marginTop: "10px",
+                    background: resolvedSuppliers.length > 0 ? "#f0fdf4" : "#fffbeb",
+                    border: `1px solid ${resolvedSuppliers.length > 0 ? "#bbf7d0" : "#fef08a"}`,
+                    borderRadius: "8px",
+                    padding: "10px 12px",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "8px",
+                  }}
+                >
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <div style={{ fontSize: "12px", fontWeight: 700, color: resolvedSuppliers.length > 0 ? "#166534" : "#854d0e", display: "flex", alignItems: "center", gap: "6px" }}>
+                      <span>{loadingEmails ? "⏳" : resolvedSuppliers.length > 0 ? "🎯" : "⚠️"}</span>
+                      <span>
+                        {loadingEmails
+                          ? "Matching suppliers for selected products..."
+                          : resolvedSuppliers.length > 0
+                            ? `${resolvedSuppliers.length} Supplier(s) Matched (${resolvedSuppliers.reduce((acc, s) => acc + s.emails.length, 0)} Email addresses)`
+                            : "No registered suppliers match these product categories"}
+                      </span>
+                    </div>
+                    {resolvedSuppliers.length > 3 && (
+                      <button
+                        type="button"
+                        onClick={() => setShowAllMatchedSuppliers(!showAllMatchedSuppliers)}
+                        style={{
+                          background: "none",
+                          border: "none",
+                          color: "#2563eb",
+                          fontSize: "11.5px",
+                          fontWeight: 600,
+                          cursor: "pointer",
+                          textDecoration: "underline",
+                        }}
+                      >
+                        {showAllMatchedSuppliers ? "Collapse" : `+${resolvedSuppliers.length - 3} more (View all)`}
+                      </button>
+                    )}
+                  </div>
+
+                  {resolvedSuppliers.length > 0 && (
+                    <div
+                      style={{
+                        display: "flex",
+                        flexWrap: "wrap",
+                        gap: "6px",
+                        maxHeight: showAllMatchedSuppliers ? "120px" : "auto",
+                        overflowY: showAllMatchedSuppliers ? "auto" : "visible",
+                      }}
+                    >
+                      {(showAllMatchedSuppliers ? resolvedSuppliers : resolvedSuppliers.slice(0, 3)).map((s) => (
+                        <span
+                          key={s.id}
+                          style={{
+                            fontSize: "11px",
+                            background: "#ffffff",
+                            color: "#166534",
+                            padding: "3px 8px",
+                            borderRadius: "6px",
+                            border: "1px solid #bbf7d0",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "4px",
+                            boxShadow: "0 1px 2px rgba(0,0,0,0.03)",
+                          }}
+                        >
+                          <strong>🏢 {s.name}</strong>
+                          <span style={{ color: s.emails.length > 0 ? "#15803d" : "#94a3b8", fontSize: "10.5px" }}>
+                            ({s.emails.length > 0 ? s.emails.join(", ") : "No email"})
+                          </span>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {supplierType === "selected" && (
+              <div>
+                <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#64748b", marginBottom: "4px" }}>
+                  Select Suppliers *
+                </label>
+                <SearchableDropdownMultiPanel
+                  values={selectedSupplierIds}
+                  onChange={setSelectedSupplierIds}
+                  placeholder="-- Select or search suppliers --"
+                  chipsPlacement="below"
+                  fetchOptions={fetchSupplierOptions}
+                  fetchLabelForValue={fetchSupplierLabel}
+                />
+              </div>
+            )}
+
+            {/* Note */}
+            <div>
+              <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#64748b", marginBottom: "4px" }}>
+                General Notes / Requirements
+              </label>
+              <textarea
+                rows={2}
+                placeholder="Specifications, payment terms, or delivery notes for all items..."
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+                style={{ width: "100%", padding: "8px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px", resize: "vertical" }}
+              />
+            </div>
+
+            {/* ------------------------------------------------------------- */}
+            {/* Sending Mode Selector (🔴 Send Automatically vs 🟡 Draft Email) */}
+            {/* ------------------------------------------------------------- */}
+            <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "12px 14px" }}>
+              <label style={{ display: "block", fontSize: "12.5px", fontWeight: 700, color: "#1e293b", marginBottom: "8px" }}>
+                Dispatch Option
+              </label>
+              <div style={{ display: "flex", gap: "16px", flexWrap: "wrap" }}>
+                <label
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
+                    fontSize: "13px",
+                    cursor: "pointer",
+                    padding: "6px 12px",
+                    borderRadius: "6px",
+                    background: sendMode === "auto" ? "#eff6ff" : "#ffffff",
+                    border: `1px solid ${sendMode === "auto" ? "#93c5fd" : "#cbd5e1"}`,
+                    fontWeight: sendMode === "auto" ? 600 : 400,
+                    color: sendMode === "auto" ? "#1d4ed8" : "#334155",
+                  }}
+                >
+                  <input
+                    type="radio"
+                    name="bulkSendMode"
+                    value="auto"
+                    checked={sendMode === "auto"}
+                    onChange={() => setSendMode("auto")}
+                  />
+                  <span>⚡ Send Email Automatically</span>
+                </label>
+
+                <label
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
+                    fontSize: "13px",
+                    cursor: "pointer",
+                    padding: "6px 12px",
+                    borderRadius: "6px",
+                    background: sendMode === "draft" ? "#fefce8" : "#ffffff",
+                    border: `1px solid ${sendMode === "draft" ? "#fde047" : "#cbd5e1"}`,
+                    fontWeight: sendMode === "draft" ? 600 : 400,
+                    color: sendMode === "draft" ? "#854d0e" : "#334155",
+                  }}
+                >
+                  <input
+                    type="radio"
+                    name="bulkSendMode"
+                    value="draft"
+                    checked={sendMode === "draft"}
+                    onChange={() => setSendMode("draft")}
+                  />
+                  <span>✏️ Draft & Preview Email</span>
+                </label>
+              </div>
+            </div>
+
+            {/* ------------------------------------------------------------- */}
+            {/* 🟠 Orange Area: Editable Draft View (Active when sendMode === 'draft') */}
+            {/* ------------------------------------------------------------- */}
+            {sendMode === "draft" && (
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "12px",
+                  background: "#fffbeb",
+                  border: "2px solid #f59e0b",
+                  borderRadius: "10px",
+                  padding: "16px",
+                  boxShadow: "0 4px 12px rgba(245, 158, 11, 0.12)",
+                }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div style={{ fontSize: "13.5px", fontWeight: 700, color: "#92400e", display: "flex", alignItems: "center", gap: "6px" }}>
+                    <span>📝</span> Editable RFQ Draft Preview
+                  </div>
+                  {loadingEmails && (
+                    <span style={{ fontSize: "12px", color: "#b45309" }}>Resolving supplier emails...</span>
+                  )}
+                </div>
+
+                {/* Recipient Emails (To Field) */}
+                <div>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
+                    <label style={{ fontSize: "12px", fontWeight: 700, color: "#78350f" }}>
+                      To (Recipient Supplier Emails) *
+                    </label>
+                    <span style={{ fontSize: "11px", color: "#92400e" }}>
+                      {customRecipientEmails ? customRecipientEmails.split(",").filter((x) => x.trim()).length : 0} Email(s)
+                    </span>
+                  </div>
+                  <input
+                    type="text"
+                    placeholder="e.g. supplier1@example.com, supplier2@example.com"
+                    value={customRecipientEmails}
+                    onChange={(e) => setCustomRecipientEmails(e.target.value)}
+                    style={{
+                      width: "100%",
+                      padding: "8px 10px",
+                      borderRadius: "6px",
+                      border: "1px solid #fcd34d",
+                      fontSize: "12.5px",
+                      background: "#ffffff",
+                      color: "#0f172a",
+                    }}
+                  />
+                </div>
+
+                {/* Subject Line */}
+                <div>
+                  <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "#78350f", marginBottom: "4px" }}>
+                    Subject Line *
+                  </label>
+                  <input
+                    type="text"
+                    value={customSubject}
+                    onChange={(e) => setCustomSubject(e.target.value)}
+                    style={{
+                      width: "100%",
+                      padding: "8px 10px",
+                      borderRadius: "6px",
+                      border: "1px solid #fcd34d",
+                      fontSize: "13px",
+                      fontWeight: 600,
+                      background: "#ffffff",
+                      color: "#0f172a",
+                    }}
+                  />
+                </div>
+
+                {/* Email Body */}
+                <div>
+                  <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "#78350f", marginBottom: "4px" }}>
+                    Email Body Text * (Editable)
+                  </label>
+                  <textarea
+                    rows={8}
+                    value={customBody}
+                    onChange={(e) => setCustomBody(e.target.value)}
+                    style={{
+                      width: "100%",
+                      padding: "10px",
+                      borderRadius: "6px",
+                      border: "1px solid #fcd34d",
+                      fontSize: "12.5px",
+                      fontFamily: "monospace, sans-serif",
+                      background: "#ffffff",
+                      color: "#0f172a",
+                      lineHeight: "1.5",
+                      resize: "vertical",
+                    }}
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Submit Button */}
+            <div style={{ marginTop: "auto", paddingTop: "16px" }}>
+              <button
+                type="submit"
+                disabled={submitting}
+                style={{
+                  width: "100%",
+                  padding: "12px",
+                  background: sendMode === "draft" ? "#d97706" : "#2563eb",
+                  color: "#ffffff",
+                  border: "none",
+                  borderRadius: "8px",
+                  fontSize: "14px",
+                  fontWeight: 700,
+                  cursor: submitting ? "not-allowed" : "pointer",
+                  boxShadow: sendMode === "draft" ? "0 2px 6px rgba(217,119,6,0.3)" : "0 2px 6px rgba(37,99,235,0.25)",
+                }}
+              >
+                {submitting
+                  ? "Dispatching Consolidated RFQs..."
+                  : sendMode === "draft"
+                    ? `✉️ Send Custom Draft RFQ for ${selectedItemIds.length} Items`
+                    : `Send RFQ for ${selectedItemIds.length} Items to Suppliers`}
+              </button>
+            </div>
+          </form>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function QuotationTermsModal({ quote, onClose }: { quote: Quotation; onClose: () => void }) {
+  const curr = (quote.currency || "USD").toUpperCase();
+  const currSym = curr === "CNY" ? "¥" : curr === "INR" ? "₹" : curr === "EUR" ? "€" : "$";
+
+  const rfqSentDate = quote.rfq_sent_at
+    ? new Date(quote.rfq_sent_at).toLocaleString("en-GB", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      })
+    : null;
+
+  const receivedDate = quote.created_at
+    ? new Date(quote.created_at).toLocaleString("en-GB", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      })
+    : "—";
+
+  let turnaroundText: string | null = null;
+  if (quote.rfq_sent_at && quote.created_at) {
+    const diffMs = new Date(quote.created_at).getTime() - new Date(quote.rfq_sent_at).getTime();
+    if (diffMs > 0) {
+      const mins = Math.round(diffMs / (1000 * 60));
+      if (mins < 60) {
+        turnaroundText = `${mins} min${mins === 1 ? "" : "s"}`;
+      } else {
+        const hours = Math.floor(mins / 60);
+        const remMins = mins % 60;
+        turnaroundText = `${hours}h ${remMins}m`;
+      }
+    }
+  }
+
+  const isAutoEmail = quote.remarks?.toLowerCase().includes("auto-extracted") || quote.quote_number?.startsWith("QT-AUTO");
+  const extractedEmailMatch = quote.remarks?.match(/from\s+([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/i);
+  const senderEmail = extractedEmailMatch ? extractedEmailMatch[1] : null;
+
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 100020, display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div style={{ position: "absolute", inset: 0, background: "rgba(15,23,42,0.45)", backdropFilter: "blur(2px)" }} onClick={onClose} />
+      <div style={{ position: "relative", width: "520px", maxWidth: "92vw", background: "#ffffff", borderRadius: "12px", padding: "24px", boxShadow: "0 20px 40px rgba(0,0,0,0.2)", maxHeight: "90vh", overflowY: "auto" }}>
+        
+        {/* Modal Header */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", borderBottom: "1px solid #e2e8f0", paddingBottom: "12px" }}>
+          <div>
+            <h3 style={{ margin: 0, fontSize: "16px", fontWeight: 700, color: "#0f172a" }}>
+              Quotation Details — {quote.quote_number}
+            </h3>
+            <div style={{ fontSize: "12px", color: "#64748b", marginTop: "2px" }}>
+              Supplier: <strong>{quote.supplier_name || "—"}</strong>
+            </div>
+          </div>
+          <button type="button" onClick={onClose} style={{ background: "none", border: "none", fontSize: "18px", cursor: "pointer", color: "#64748b" }}>✕</button>
         </div>
 
-        <div style={{ marginTop: "20px", textAlign: "right" }}>
-          <button type="button" onClick={onClose} className="btn btn-secondary" style={{ padding: "6px 14px", fontSize: "13px" }}>Close</button>
+        {/* Communication & Procurement Timeline Box */}
+        <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "12px 14px", marginBottom: "16px" }}>
+          <div style={{ fontSize: "12px", fontWeight: 700, color: "#334155", marginBottom: "8px", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+            Communication & Procurement Timeline
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", fontSize: "12.5px" }}>
+            <div>
+              <span style={{ color: "#64748b" }}>RFQ Sent Date:</span>
+              <div style={{ fontWeight: 600, color: "#0f172a", marginTop: "1px" }}>
+                {rfqSentDate ? rfqSentDate : "Dispatched via Bulk RFQ"}
+              </div>
+            </div>
+            <div>
+              <span style={{ color: "#64748b" }}>Quote Received Date:</span>
+              <div style={{ fontWeight: 600, color: "#0f172a", marginTop: "1px" }}>{receivedDate}</div>
+            </div>
+            {turnaroundText && (
+              <div>
+                <span style={{ color: "#64748b" }}>Supplier Turnaround:</span>
+                <div style={{ fontWeight: 600, color: "#166534", marginTop: "1px" }}>{turnaroundText}</div>
+              </div>
+            )}
+            <div>
+              <span style={{ color: "#64748b" }}>Expected Receiving (Lead Time):</span>
+              <div style={{ fontWeight: 600, color: "#0f172a", marginTop: "1px" }}>{quote.expected_receiving_date || "Earliest Possible"}</div>
+            </div>
+            <div style={{ gridColumn: "span 2" }}>
+              <span style={{ color: "#64748b" }}>Source Channel:</span>
+              <div style={{ fontWeight: 600, color: isAutoEmail ? "#166534" : "#475569", marginTop: "2px", display: "flex", alignItems: "center", gap: "6px" }}>
+                {isAutoEmail ? (
+                  <span style={{ background: "#dcfce7", color: "#166534", padding: "2px 8px", borderRadius: "6px", fontSize: "11px", border: "1px solid #bbf7d0" }}>
+                    Inbound Supplier Email {senderEmail ? `(${senderEmail})` : ""}
+                  </span>
+                ) : (
+                  <span style={{ background: "#f1f5f9", color: "#475569", padding: "2px 8px", borderRadius: "6px", fontSize: "11px", border: "1px solid #e2e8f0" }}>
+                    Manual ERP Entry
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
         </div>
+
+        {/* Pricing & Commercial Details */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", fontSize: "13px", marginBottom: "16px" }}>
+          <div>
+            <span style={{ color: "#64748b" }}>Quoted Quantity:</span>
+            <div style={{ fontWeight: 700, color: "#0f172a" }}>{quote.quantity} units</div>
+          </div>
+          <div>
+            <span style={{ color: "#64748b" }}>Unit Price:</span>
+            <div style={{ fontWeight: 700, color: "#0f172a" }}>{currSym}{quote.unit_price.toLocaleString()} {curr}</div>
+          </div>
+          <div style={{ gridColumn: "span 2", background: "#f1f5f9", padding: "8px 12px", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
+            <span style={{ color: "#475569", fontSize: "12px" }}>Total Quoted Value:</span>
+            <div style={{ fontWeight: 700, fontSize: "15px", color: "#0f172a" }}>
+              {currSym}{quote.total_cost.toLocaleString()} {curr}
+            </div>
+          </div>
+        </div>
+
+        {/* Terms & Conditions */}
+        <div style={{ fontSize: "13px", marginBottom: "12px" }}>
+          <strong style={{ color: "#334155" }}>Terms & Conditions:</strong>
+          <div style={{ background: "#f8fafc", padding: "10px", borderRadius: "6px", marginTop: "4px", border: "1px solid #e2e8f0", whiteSpace: "pre-wrap", color: quote.terms_and_conditions ? "#1e293b" : "#94a3b8", fontSize: "12.5px", fontStyle: quote.terms_and_conditions ? "normal" : "italic" }}>
+            {quote.terms_and_conditions || "Not specified by supplier in quotation response."}
+          </div>
+        </div>
+
+        {/* Remarks */}
+        {quote.remarks && (
+          <div style={{ fontSize: "13px" }}>
+            <strong style={{ color: "#334155" }}>Remarks & Extraction Audit:</strong>
+            <div style={{ background: "#f8fafc", padding: "10px", borderRadius: "6px", marginTop: "4px", border: "1px solid #e2e8f0", whiteSpace: "pre-wrap", color: "#475569", fontSize: "12px" }}>
+              {quote.remarks}
+            </div>
+          </div>
+        )}
+
+        {/* Footer */}
+        <div style={{ marginTop: "20px", textAlign: "right" }}>
+          <button type="button" onClick={onClose} className="btn btn-secondary" style={{ padding: "6px 16px", fontSize: "13px" }}>
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function EditQuotationModal({
+  quote,
+  onClose,
+  onSaved,
+  onError,
+}: {
+  quote: Quotation;
+  onClose: () => void;
+  onSaved: () => void;
+  onError: (err: any) => void;
+}) {
+  const [quantity, setQuantity] = useState(String(quote.quantity || 1));
+  const [unitPrice, setUnitPrice] = useState(String(quote.unit_price || 0));
+  const [totalCost, setTotalCost] = useState(String(quote.total_cost || 0));
+  const [currency, setCurrency] = useState(quote.currency || "USD");
+  const [expDate, setExpDate] = useState(quote.expected_receiving_date || "");
+  const [terms, setTerms] = useState(quote.terms_and_conditions || "");
+  const [remarks, setRemarks] = useState(quote.remarks || "");
+  const [saving, setSaving] = useState(false);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+
+  const handleUnitPriceChange = (val: string) => {
+    setUnitPrice(val);
+    const q = parseFloat(quantity);
+    const u = parseFloat(val);
+    if (!isNaN(q) && !isNaN(u)) {
+      setTotalCost((q * u).toFixed(2));
+    }
+  };
+
+  const handleQuantityChange = (val: string) => {
+    setQuantity(val);
+    const q = parseFloat(val);
+    const u = parseFloat(unitPrice);
+    if (!isNaN(q) && !isNaN(u)) {
+      setTotalCost((q * u).toFixed(2));
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const newErrors: Record<string, string> = {};
+    const q = parseFloat(quantity);
+    const u = parseFloat(unitPrice);
+    if (isNaN(q) || q <= 0) newErrors.quantity = "Valid quantity is required";
+    if (isNaN(u) || u < 0) newErrors.unitPrice = "Valid unit price is required";
+
+    if (Object.keys(newErrors).length > 0) {
+      setErrors(newErrors);
+      return;
+    }
+
+    setSaving(true);
+    try {
+      await apiPatch(`/inquiries/quotations/${quote.id}`, {
+        quantity: q,
+        unit_price: u,
+        total_cost: parseFloat(totalCost) || (q * u),
+        currency: currency.toUpperCase(),
+        expected_receiving_date: expDate || null,
+        terms_and_conditions: terms.trim() || null,
+        remarks: remarks.trim() || null,
+      });
+      onSaved();
+    } catch (err) {
+      onError(err);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const curr = currency.toUpperCase();
+  const currSym = curr === "CNY" ? "¥" : curr === "INR" ? "₹" : curr === "EUR" ? "€" : "$";
+
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 100020, display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div style={{ position: "absolute", inset: 0, background: "rgba(15,23,42,0.45)", backdropFilter: "blur(2px)" }} onClick={onClose} />
+      <div style={{ position: "relative", width: "540px", maxWidth: "94vw", background: "#ffffff", borderRadius: "12px", padding: "24px", boxShadow: "0 20px 40px rgba(0,0,0,0.2)", maxHeight: "90vh", overflowY: "auto" }}>
+        
+        {/* Header */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "18px", borderBottom: "1px solid #e2e8f0", paddingBottom: "12px" }}>
+          <div>
+            <h3 style={{ margin: 0, fontSize: "16px", fontWeight: 700, color: "#0f172a" }}>
+              Edit Quotation — {quote.quote_number}
+            </h3>
+            <div style={{ fontSize: "12px", color: "#64748b", marginTop: "2px" }}>
+              Supplier: <strong>{quote.supplier_name || "—"}</strong>
+            </div>
+          </div>
+          <button type="button" onClick={onClose} style={{ background: "none", border: "none", fontSize: "18px", cursor: "pointer", color: "#64748b" }}>✕</button>
+        </div>
+
+        <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+          {/* Quantity & Unit Price */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+            <div>
+              <label style={{ display: "block", fontSize: "12.5px", fontWeight: 600, color: "#334155", marginBottom: "4px" }}>
+                Quantity *
+              </label>
+              <input
+                type="number"
+                min="0.01"
+                step="any"
+                value={quantity}
+                onChange={(e) => handleQuantityChange(e.target.value)}
+                style={{ width: "100%", padding: "7px 10px", borderRadius: "6px", border: `1px solid ${errors.quantity ? "#ef4444" : "#cbd5e1"}`, fontSize: "13px" }}
+              />
+              {errors.quantity && <span style={{ color: "#ef4444", fontSize: "11px" }}>{errors.quantity}</span>}
+            </div>
+
+            <div>
+              <label style={{ display: "block", fontSize: "12.5px", fontWeight: 600, color: "#334155", marginBottom: "4px" }}>
+                Unit Price *
+              </label>
+              <input
+                type="number"
+                min="0"
+                step="any"
+                value={unitPrice}
+                onChange={(e) => handleUnitPriceChange(e.target.value)}
+                style={{ width: "100%", padding: "7px 10px", borderRadius: "6px", border: `1px solid ${errors.unitPrice ? "#ef4444" : "#cbd5e1"}`, fontSize: "13px" }}
+              />
+              {errors.unitPrice && <span style={{ color: "#ef4444", fontSize: "11px" }}>{errors.unitPrice}</span>}
+            </div>
+          </div>
+
+          {/* Currency & Total Value */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+            <div>
+              <label style={{ display: "block", fontSize: "12.5px", fontWeight: 600, color: "#334155", marginBottom: "4px" }}>
+                Currency
+              </label>
+              <select
+                value={currency}
+                onChange={(e) => setCurrency(e.target.value)}
+                style={{ width: "100%", padding: "7px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px" }}
+              >
+                <option value="USD">USD ($)</option>
+                <option value="CNY">CNY (¥)</option>
+                <option value="INR">INR (₹)</option>
+                <option value="EUR">EUR (€)</option>
+              </select>
+            </div>
+
+            <div>
+              <label style={{ display: "block", fontSize: "12.5px", fontWeight: 600, color: "#334155", marginBottom: "4px" }}>
+                Total Quoted Value
+              </label>
+              <div style={{ padding: "7px 10px", borderRadius: "6px", background: "#f1f5f9", border: "1px solid #e2e8f0", fontSize: "13px", fontWeight: 700, color: "#0f172a" }}>
+                {currSym}{parseFloat(totalCost || "0").toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {curr}
+              </div>
+            </div>
+          </div>
+
+          {/* Expected Receiving Date */}
+          <div>
+            <label style={{ display: "block", fontSize: "12.5px", fontWeight: 600, color: "#334155", marginBottom: "4px" }}>
+              Expected Receiving / Lead Time Date
+            </label>
+            <input
+              type="date"
+              value={expDate}
+              onChange={(e) => setExpDate(e.target.value)}
+              style={{ width: "100%", padding: "7px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px" }}
+            />
+          </div>
+
+          {/* Terms & Conditions */}
+          <div>
+            <label style={{ display: "block", fontSize: "12.5px", fontWeight: 600, color: "#334155", marginBottom: "4px" }}>
+              Terms & Conditions
+            </label>
+            <textarea
+              rows={2}
+              value={terms}
+              onChange={(e) => setTerms(e.target.value)}
+              placeholder="e.g. 30% deposit, balance before shipment, FOB Ningbo"
+              style={{ width: "100%", padding: "7px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px", resize: "vertical" }}
+            />
+          </div>
+
+          {/* Negotiation & Sales Remarks */}
+          <div>
+            <label style={{ display: "block", fontSize: "12.5px", fontWeight: 600, color: "#334155", marginBottom: "4px" }}>
+              Negotiation & Sales Remarks
+            </label>
+            <textarea
+              rows={2}
+              value={remarks}
+              onChange={(e) => setRemarks(e.target.value)}
+              placeholder="e.g. Final price negotiated down from 750 to 700"
+              style={{ width: "100%", padding: "7px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px", resize: "vertical" }}
+            />
+          </div>
+
+          {/* Footer Actions */}
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "10px", borderTop: "1px solid #e2e8f0", paddingTop: "14px" }}>
+            <button type="button" onClick={onClose} disabled={saving} className="btn btn-secondary" style={{ padding: "7px 16px", fontSize: "13px" }}>
+              Cancel
+            </button>
+            <button type="submit" disabled={saving} className="btn btn-primary" style={{ padding: "7px 20px", fontSize: "13px" }}>
+              {saving ? "Saving..." : "Save Changes"}
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   );
@@ -4765,8 +5910,8 @@ function QuickInquiryDrawer({
   }, [selectedBuyer, allConsignmentCodes]);
 
   useEffect(() => {
-    if (recommendedCode) {
-      setCustomNewCode((prev) => (isCreatingNewCode && (!prev || prev === "") ? recommendedCode : prev || recommendedCode));
+    if (recommendedCode && isCreatingNewCode) {
+      setCustomNewCode(recommendedCode);
     }
   }, [recommendedCode, isCreatingNewCode]);
 

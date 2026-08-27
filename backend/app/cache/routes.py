@@ -112,11 +112,11 @@ async def flush_cache_namespace(
     _current_user: CurrentUser = Depends(get_current_user),
 ) -> dict:
     """
-    Clear every key belonging to a single namespace (e.g. ``permissions``, ``departments``).
+    Clear every key belonging to a single namespace (e.g. ``permissions``, ``dropdowns``).
 
     Useful for surgical invalidation without a full flush -- e.g. after a
     bulk role-permission change, clear only ``permissions`` rather than
-    every cached department/setting/dropdown too.
+    every cached setting/dropdown too.
     """
     removed = await cache.delete_namespace(name)
     data = {"cleared": True, "namespace": name, "keys_removed": removed}

@@ -8,7 +8,7 @@ instance and adds:
 - ``get_or_set``: the "read-through" pattern almost every use case wants
   (return the cached value, or compute it, cache it, and return it).
 - Named, pre-configured helpers for the ERP's known hot-path use cases
-  (user permissions, roles, app settings, departments, designations,
+  (user permissions, roles, app settings, brands and other master lists,
   dropdown data, dashboard counts) so call sites don't have to know the
   right namespace or TTL for each -- they just call
   ``cache_manager.get_user_permissions(user_id)`` etc.
@@ -192,10 +192,10 @@ class CacheManager:
 
         This is the pattern almost every caching use case actually wants:
 
-            departments = await cache_manager.get_or_set(
-                "departments:all",
-                loader=lambda: department_repository.list_all(),
-                ttl_seconds=TTL_DEPARTMENTS,
+            brands = await cache_manager.get_or_set(
+                "brands:all",
+                loader=lambda: brand_repository.list_all(),
+                ttl_seconds=TTL_DROPDOWN_DATA,
             )
 
         The ``loader`` is only invoked on a cache miss, so an expensive

@@ -34,7 +34,7 @@ export const MODULE_NAMES: Record<string, string> = {
   organization: "Organizations",
   audit: "System Audit Logs",
   trash: "Trash",
-  roles_permissions: "Roles & Permissions",
+  roles_permissions: "Departments & Permissions",
 };
 
 const ACTION_LABELS: Record<string, string> = {

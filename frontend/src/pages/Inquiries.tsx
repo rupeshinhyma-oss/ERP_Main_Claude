@@ -925,7 +925,6 @@ function ItemsView({
   const [inquiry, setInquiry] = useState<Inquiry | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
-  const [aiQuoteOpen, setAiQuoteOpen] = useState(false);
   const [productTab, setProductTab] = useState<"all" | "approved" | "pending">("all");
   const [productSearch, setProductSearch] = useState("");
   const [quotationSearch, setQuotationSearch] = useState("");

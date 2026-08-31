@@ -22,6 +22,7 @@ from app.auth.dependencies import get_current_user
 from app.auth.service import CurrentUser
 from app.common.list_query import ListQueryParams, get_list_query_params
 from app.common.pagination import PageMeta
+from app.common.storage import save_uploaded_file
 from app.core.logging import get_logger
 from app.core.responses import build_success_response
 from app.database.session import get_db_session
@@ -202,84 +203,17 @@ async def upload_product_image(
     _current_user: CurrentUser = Depends(require_permission("product.create")),
 ) -> dict:
     """
-    Upload a product image to Supabase Storage, falling back to local disk.
-
-    Phase 3 performance/async-correctness fix: this used to call
-    ``urllib.request.urlopen`` (a fully synchronous, blocking network
-    call) and a blocking ``open(...).write(...)`` directly inside this
-    ``async def`` route -- both block FastAPI's single event-loop thread
-    for their entire duration, freezing EVERY other concurrent request
-    this worker is serving, not just this one. The Supabase upload now
-    uses ``httpx.AsyncClient`` (already a project dependency -- see
-    requirements.txt) instead of ``urllib``, and the local-disk fallback
-    write is offloaded to a worker thread via ``asyncio.to_thread`` so it
-    can't block the event loop either. Behavior (Supabase first, local
-    disk fallback, same response shape) is otherwise unchanged.
+    Upload a product image to Supabase Storage (bucket 'product-images'),
+    falling back to local disk (uploads/products/) if Supabase is unavailable.
     """
-    from pathlib import Path
-    import os
-    import httpx
-
     content = await file.read()
-    filename = f"{uuid.uuid4().hex}_{file.filename}"
-    supabase_project_id = os.getenv("SUPABASE_PROJECT_ID", "mpvzjzunkiqchhhvxrza")
-    supabase_key = os.getenv("SUPABASE_SERVICE_KEY") or os.getenv("SUPABASE_ANON_KEY", "")
-
-    if not supabase_key:
-        logger.warning(
-            "SUPABASE_SERVICE_KEY / SUPABASE_ANON_KEY not set on this backend instance -- "
-            "falling back to local disk. This image will NOT be visible from any other machine "
-            "or deployment. Set one of these environment variables to upload to Supabase Storage "
-            "instead.",
-            extra={"filename": filename},
-        )
-    else:
-        try:
-            supabase_upload_url = f"https://{supabase_project_id}.supabase.co/storage/v1/object/product-images/{filename}"
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                resp = await client.post(
-                    supabase_upload_url,
-                    content=content,
-                    headers={
-                        "Authorization": f"Bearer {supabase_key}",
-                        "Content-Type": file.content_type or "image/jpeg",
-                        "x-upsert": "true",
-                    },
-                )
-            if resp.status_code in (200, 201):
-                public_url = f"https://{supabase_project_id}.supabase.co/storage/v1/object/public/product-images/{filename}"
-                return {"success": True, "data": {"url": public_url}}
-            logger.warning(
-                "Supabase Storage rejected the upload -- falling back to local disk. This "
-                "image will NOT be visible from any other machine or deployment.",
-                extra={
-                    "filename": filename,
-                    "status_code": resp.status_code,
-                    "response_body": resp.text[:500],
-                },
-            )
-        except Exception as exc:
-            logger.warning(
-                "Request to Supabase Storage failed (network error, timeout, or similar) -- "
-                "falling back to local disk. This image will NOT be visible from any other machine "
-                "or deployment.",
-                extra={
-                    "filename": filename,
-                    "error": str(exc),
-                    "error_type": type(exc).__name__,
-                },
-            )
-
-    def _write_to_local_disk() -> str:
-        uploads_dir = Path("uploads/products")
-        uploads_dir.mkdir(parents=True, exist_ok=True)
-        file_path = uploads_dir / filename
-        with open(file_path, "wb") as f:
-            f.write(content)
-        return f"/uploads/products/{filename}"
-
-    import asyncio
-    image_url = await asyncio.to_thread(_write_to_local_disk)
+    image_url, _ = await save_uploaded_file(
+        content=content,
+        original_filename=file.filename or "product_image.jpg",
+        bucket="product-images",
+        local_subfolder="products",
+        content_type=file.content_type,
+    )
     return {"success": True, "data": {"url": image_url}}
 
 

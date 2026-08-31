@@ -20,8 +20,11 @@ actually changes), not the consignment level.
 
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import datetime
+
+logger = logging.getLogger("inquiry_routes")
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
 from pydantic import BaseModel, Field
@@ -58,6 +61,7 @@ from app.inquiries.schemas import (
     InquiryItemShift,
     InquiryItemUpdate,
     InquiryListItemRead,
+    InquiryMessageRead,
     InquiryRead,
     QuotationCreate,
     QuotationRead,
@@ -66,6 +70,8 @@ from app.inquiries.schemas import (
     RFQCreate,
     RFQRead,
 )
+from app.inquiries.models import InquiryMessage
+from app.inquiries.wechat_service import get_wecom_service
 from app.inquiries.service import InquiryService
 
 router = APIRouter(prefix="/inquiries", tags=["Inquiries"])
@@ -1077,39 +1083,21 @@ async def create_bulk_rfqs(
     else:
         suppliers_res = []
 
-    # 4. Dispatch Consolidated Email in Background
+    # 4. Dispatch Multi-Channel RFQs (Email and WeChat)
     dispatched_suppliers = []
-    
-    if payload.custom_recipient_emails:
-        # User specified/edited recipient emails explicitly in Draft Mode
-        clean_custom_emails = [e.strip() for e in payload.custom_recipient_emails if e and "@" in e]
-        if clean_custom_emails:
-            asyncio.create_task(
-                send_bulk_rfq_email(
-                    to_emails=clean_custom_emails,
-                    contact_name="Valued Partner",
-                    company_name="Supplier Partner",
-                    consignment_code=consignment_code_str,
-                    items=product_summary_list,
-                    general_notes=payload.notes,
-                    custom_subject=payload.custom_subject,
-                    custom_body=payload.custom_body,
-                )
-            )
-            dispatched_suppliers.append({
-                "supplier_id": "custom",
-                "company_name": "Selected Recipients",
-                "emails": clean_custom_emails,
-            })
-    else:
-        for sup in suppliers_res:
-            all_emails = [e.email for e in sup.emails if getattr(e, "email", None)]
-            if all_emails:
+    channels = payload.channels or ["email", "wechat"]
+    wecom = get_wecom_service()
+
+    # --- EMAIL DISPATCH ---
+    if "email" in channels:
+        if payload.custom_recipient_emails:
+            clean_custom_emails = [e.strip() for e in payload.custom_recipient_emails if e and "@" in e]
+            if clean_custom_emails:
                 asyncio.create_task(
                     send_bulk_rfq_email(
-                        to_emails=all_emails,
-                        contact_name=sup.contact_full_name or "Valued Partner",
-                        company_name=sup.company_name,
+                        to_emails=clean_custom_emails,
+                        contact_name="Valued Partner",
+                        company_name="Supplier Partner",
                         consignment_code=consignment_code_str,
                         items=product_summary_list,
                         general_notes=payload.notes,
@@ -1117,11 +1105,122 @@ async def create_bulk_rfqs(
                         custom_body=payload.custom_body,
                     )
                 )
+                # Log Outbound Email Message
+                single_item_id = payload.inquiry_item_ids[0] if (payload.inquiry_item_ids and len(payload.inquiry_item_ids) == 1) else (inquiry_items[0][0].id if len(inquiry_items) == 1 else None)
+                email_log = InquiryMessage(
+                    id=uuid.uuid4(),
+                    inquiry_id=inquiry_id,
+                    inquiry_item_id=single_item_id,
+                    channel="email",
+                    direction="outbound",
+                    sender_name="Yinglima Procurement",
+                    recipient_contact=", ".join(clean_custom_emails),
+                    message_text=payload.custom_body or f"Dispatched RFQ for {len(product_summary_list)} products.",
+                )
+                db.add(email_log)
                 dispatched_suppliers.append({
-                    "supplier_id": str(sup.id),
-                    "company_name": sup.company_name,
-                    "emails": all_emails,
+                    "supplier_id": "custom",
+                    "company_name": "Selected Recipients",
+                    "emails": clean_custom_emails,
+                    "channel": "email",
                 })
+        else:
+            single_item_id = payload.inquiry_item_ids[0] if (payload.inquiry_item_ids and len(payload.inquiry_item_ids) == 1) else (inquiry_items[0][0].id if len(inquiry_items) == 1 else None)
+            for sup in suppliers_res:
+                all_emails = [e.email for e in sup.emails if getattr(e, "email", None)]
+                if all_emails:
+                    asyncio.create_task(
+                        send_bulk_rfq_email(
+                            to_emails=all_emails,
+                            contact_name=sup.contact_full_name or "Valued Partner",
+                            company_name=sup.company_name,
+                            consignment_code=consignment_code_str,
+                            items=product_summary_list,
+                            general_notes=payload.notes,
+                            custom_subject=payload.custom_subject,
+                            custom_body=payload.custom_body,
+                        )
+                    )
+                    email_log = InquiryMessage(
+                        id=uuid.uuid4(),
+                        inquiry_id=inquiry_id,
+                        inquiry_item_id=single_item_id,
+                        supplier_id=sup.id,
+                        channel="email",
+                        direction="outbound",
+                        sender_name="Yinglima Procurement",
+                        recipient_contact=", ".join(all_emails),
+                        message_text=f"Consolidated RFQ email sent to {sup.company_name} ({len(product_summary_list)} items).",
+                    )
+                    db.add(email_log)
+                    dispatched_suppliers.append({
+                        "supplier_id": str(sup.id),
+                        "company_name": sup.company_name,
+                        "emails": all_emails,
+                        "channel": "email",
+                    })
+
+    # --- WECHAT DISPATCH ---
+    if "wechat" in channels:
+        wechat_recipients: list[str] = []
+        if payload.custom_recipient_wechat_numbers:
+            wechat_recipients = [w.strip() for w in payload.custom_recipient_wechat_numbers if w.strip()]
+        else:
+            for sup in suppliers_res:
+                wc_num = getattr(sup, "contact_wechat_number", None) or getattr(sup, "wechat_number", None)
+                if wc_num and wc_num.strip():
+                    wechat_recipients.append(wc_num.strip())
+
+        if wechat_recipients:
+            try:
+                single_item_id = payload.inquiry_item_ids[0] if (payload.inquiry_item_ids and len(payload.inquiry_item_ids) == 1) else (inquiry_items[0][0].id if len(inquiry_items) == 1 else None)
+                wecom_res = wecom.send_rfq_markdown_message(
+                    to_users=wechat_recipients,
+                    consignment_code=consignment_code_str,
+                    items=product_summary_list,
+                    general_notes=payload.notes,
+                )
+                invalid_users = wecom_res.get("invaliduser", "") if isinstance(wecom_res, dict) else ""
+                status_note = f"\n⚠️ Notice: Tencent reported unregistered WeCom user(s): {invalid_users}" if invalid_users else ""
+                prod_lines = "\n".join(f"• {p.get('product_name')} (Qty: {p.get('quantity')})" for p in product_summary_list)
+
+                wc_log = InquiryMessage(
+                    id=uuid.uuid4(),
+                    inquiry_id=inquiry_id,
+                    inquiry_item_id=single_item_id,
+                    channel="wechat",
+                    direction="outbound",
+                    sender_name="Yinglima ERP Bot",
+                    recipient_contact=", ".join(wechat_recipients),
+                    message_text=(
+                        f"WeChat RFQ card dispatched to {len(wechat_recipients)} recipient(s) [{', '.join(wechat_recipients)}] for consignment [#{consignment_code_str}].\n\n"
+                        f"📦 Products Included ({len(product_summary_list)}):\n{prod_lines}"
+                        f"{status_note}"
+                    ),
+                )
+                db.add(wc_log)
+                dispatched_suppliers.append({
+                    "supplier_id": "wechat_group",
+                    "company_name": "WeChat Suppliers",
+                    "wechat_recipients": wechat_recipients,
+                    "channel": "wechat",
+                    "wecom_res": wecom_res,
+                })
+            except Exception as we_err:
+                logger.warning("WeChat dispatch encountered note: %s", str(we_err))
+
+    await db.commit()
+
+    # Broadcast Live WebSocket update for Messages Tab
+    await dispatcher.publish(
+        module_channel("inquiries"),
+        Event(
+            entity="inquiry",
+            entity_id=str(inquiry_id),
+            event_type="inquiry.message.created",
+            changes={"inquiry_id": str(inquiry_id)},
+        ),
+    )
 
     return build_success_response(
         data={
@@ -1131,7 +1230,7 @@ async def create_bulk_rfqs(
             "items": product_summary_list,
         },
         request_id=request.state.request_id,
-        message=f"Consolidated RFQ email for {len(product_summary_list)} items successfully dispatched to {len(dispatched_suppliers)} suppliers.",
+        message=f"Consolidated RFQ for {len(product_summary_list)} items successfully dispatched across selected channels.",
     )
 
 
@@ -1223,7 +1322,34 @@ async def inbound_quotation_webhook(
             prod_name = p.product_name_tally or p.product_name
             prod_code = p.product_code
 
-    # Run AI Extractor
+    # 1. Always record Inbound Email/Message in InquiryMessage timeline
+    inbound_msg = InquiryMessage(
+        id=uuid.uuid4(),
+        inquiry_id=item.inquiry_id,
+        inquiry_item_id=item.id,
+        supplier_id=supplier.id if supplier else None,
+        channel=payload.channel or "email",
+        direction="inbound",
+        sender_name=supplier.company_name if supplier else payload.sender,
+        sender_contact=payload.sender,
+        recipient_contact="Yinglima Procurement",
+        message_text=payload.text,
+    )
+    session.add(inbound_msg)
+    await session.commit()
+
+    # Broadcast Live WebSocket update for Messages/Emails Tab
+    await event_dispatcher.publish(
+        module_channel("inquiries"),
+        Event(
+            entity="inquiry",
+            entity_id=str(item.inquiry_id),
+            event_type="inquiry.message.created",
+            changes={"inquiry_id": str(item.inquiry_id)},
+        ),
+    )
+
+    # 2. Run AI Extractor
     ai_result = await extract_supplier_quotation(
         text_content=payload.text,
         product_name=prod_name,
@@ -1235,17 +1361,54 @@ async def inbound_quotation_webhook(
         return build_success_response(
             data={"created": False, "is_quotation_detected": False},
             request_id=request.state.request_id,
-            message="Message received, but no quotation detected (casual greeting/inquiry).",
+            message="Message received and logged, but no commercial quotation price detected.",
         )
 
-    # Insert Quotation
-    quote_supplier_id = supplier.id if supplier else item.proposed_by
-    quote_count_res = await session.execute(select(Quotation).where(Quotation.inquiry_item_id == item.id))
-    existing_count = len(quote_count_res.scalars().all())
-    quote_number = f"QT-WEBHOOK-{existing_count + 1:02d}"
+    # 3. Resolve Supplier ID properly
+    quote_supplier_id = supplier.id if supplier else None
+    if not quote_supplier_id:
+        if item.proposed_by:
+            quote_supplier_id = item.proposed_by
+        else:
+            first_supp = (await session.execute(select(Supplier.id).where(Supplier.deleted_at.is_(None)).limit(1))).scalar_one_or_none()
+            quote_supplier_id = first_supp
+
+    # Check if a quote already exists for this (Item, Supplier)
+    existing_quote_res = await session.execute(
+        select(Quotation).where(
+            Quotation.inquiry_item_id == item.id,
+            Quotation.supplier_id == quote_supplier_id,
+            Quotation.deleted_at.is_(None),
+        )
+    )
+    existing_quote = existing_quote_res.scalars().first()
+
+    if existing_quote:
+        # Business Rule: 1 initial quotation per (Supplier, Item).
+        # Subsequent chats/emails are logged to the timeline above, but do NOT spawn duplicate quote rows.
+        logger.info(
+            "Item %s already has an initial quotation (%s) from supplier %s. Skipping new quote creation.",
+            item.id,
+            existing_quote.quote_number,
+            quote_supplier_id,
+        )
+        return build_success_response(
+            data={"created": False, "is_quotation_detected": True, "quote_number": existing_quote.quote_number},
+            request_id=request.state.request_id,
+            message=f"Inbound email logged to Emails timeline. Initial quote ({existing_quote.quote_number}) already exists.",
+        )
 
     quoted_qty = ai_result.quantity or float(item.quantity or 1.0)
     unit_p = float(ai_result.unit_price)
+
+    quote_count_res = await session.execute(
+        select(Quotation).where(
+            Quotation.inquiry_item_id == item.id,
+            Quotation.deleted_at.is_(None),
+        )
+    )
+    existing_count = len(quote_count_res.scalars().all())
+    quote_number = f"QT-AUTO-{existing_count + 1:02d}"
 
     new_quotation = Quotation(
         id=uuid.uuid4(),
@@ -1255,7 +1418,7 @@ async def inbound_quotation_webhook(
         quantity=quoted_qty,
         unit_price=unit_p,
         total_cost=round(quoted_qty * unit_p, 2),
-        currency=ai_result.currency or "CNY",
+        currency=ai_result.currency or "USD",
         expected_receiving_date=datetime.strptime(ai_result.earliest_available_date, "%Y-%m-%d").date()
         if ai_result.earliest_available_date
         else None,
@@ -1266,6 +1429,7 @@ async def inbound_quotation_webhook(
     )
     session.add(new_quotation)
     await session.commit()
+    quote_id_str = str(new_quotation.id)
 
     # Broadcast Live WebSocket update to ERP UI
     await event_dispatcher.publish(
@@ -1275,7 +1439,7 @@ async def inbound_quotation_webhook(
             entity_id=str(item.id),
             event_type="quotation.created",
             changes={
-                "id": str(new_quotation.id),
+                "id": quote_id_str,
                 "inquiry_item_id": str(item.id),
                 "quote_number": quote_number,
                 "unit_price": unit_p,
@@ -1296,3 +1460,340 @@ async def inbound_quotation_webhook(
         request_id=request.state.request_id,
         message=f"Quotation {quote_number} automatically created and broadcasted to ERP.",
     )
+
+
+# ---------------------------------------------------------------------------
+# Communication Timeline & Messages Tab Endpoints
+# ---------------------------------------------------------------------------
+
+@router.get("/{inquiry_id}/messages", summary="Fetch all communication messages for an inquiry consignment")
+async def get_inquiry_messages(
+    inquiry_id: uuid.UUID,
+    request: Request,
+    db: AsyncSession = Depends(get_db_session),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    """Returns chronological communication messages (WeChat, Email, System) for the Messages tab."""
+    stmt = (
+        select(InquiryMessage, Supplier.company_name)
+        .join(Supplier, InquiryMessage.supplier_id == Supplier.id, isouter=True)
+        .where(
+            InquiryMessage.inquiry_id == inquiry_id,
+            InquiryMessage.deleted_at.is_(None),
+        )
+        .order_by(InquiryMessage.created_at.asc())
+    )
+    res = await db.execute(stmt)
+    rows = res.all()
+
+    messages_data = []
+    for msg, sup_name in rows:
+        messages_data.append({
+            "id": str(msg.id),
+            "inquiry_id": str(msg.inquiry_id),
+            "inquiry_item_id": str(msg.inquiry_item_id) if msg.inquiry_item_id else None,
+            "supplier_id": str(msg.supplier_id) if msg.supplier_id else None,
+            "supplier_name": sup_name,
+            "channel": msg.channel,
+            "direction": msg.direction,
+            "sender_name": msg.sender_name,
+            "sender_contact": msg.sender_contact,
+            "recipient_contact": msg.recipient_contact,
+            "message_text": msg.message_text,
+            "attachment_url": msg.attachment_url,
+            "attachment_filename": msg.attachment_filename,
+            "created_at": msg.created_at.isoformat() if msg.created_at else None,
+        })
+
+    return build_success_response(
+        data=messages_data,
+        request_id=request.state.request_id,
+        message=f"Retrieved {len(messages_data)} communication messages.",
+    )
+
+
+# ---------------------------------------------------------------------------
+# WeCom (WeChat Work) Callback URL Handshake & Decryption (Doc 90556)
+# ---------------------------------------------------------------------------
+
+@router.get("/wechat/callback", summary="WeCom Callback URL verification handshake")
+async def wechat_callback_handshake(
+    msg_signature: str,
+    timestamp: str,
+    nonce: str,
+    echostr: str,
+):
+    """
+    Handles GET verification from Tencent WeCom servers per Doc 90556.
+    Decrypts echostr and returns plaintext to confirm callback validity.
+    """
+    from fastapi.responses import PlainTextResponse
+
+    wecom = get_wecom_service()
+    try:
+        decrypted_echo = wecom.decrypt_echostr(msg_signature, timestamp, nonce, echostr)
+        return PlainTextResponse(content=decrypted_echo, status_code=200)
+    except Exception as err:
+        logger.error("WeCom URL Handshake Verification Failed: %s", str(err))
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="WeCom Signature Verification Failed")
+
+
+@router.post("/wechat/callback", summary="WeCom Inbound Message Webhook")
+async def wechat_inbound_message_callback(
+    msg_signature: str,
+    timestamp: str,
+    nonce: str,
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+    event_dispatcher: EventDispatcher = Depends(get_event_dispatcher),
+):
+    """
+    Receives encrypted incoming WeChat replies from suppliers.
+    Decrypts XML -> records message in timeline -> runs conversational AI quotation extraction.
+    """
+    from fastapi.responses import PlainTextResponse
+    import re
+    from app.inquiries.models import Inquiry, InquiryItem, Quotation, QuotationStatus, ConsignmentCode
+    from app.suppliers.models import Supplier, SupplierContact
+
+    body_bytes = await request.body()
+    post_xml = body_bytes.decode("utf-8")
+
+    wecom = get_wecom_service()
+    try:
+        msg_dict = wecom.decrypt_message(msg_signature, timestamp, nonce, post_xml)
+    except Exception as err:
+        logger.error("Failed to decrypt incoming WeCom message: %s", str(err))
+        return PlainTextResponse(content="success", status_code=200)
+
+    from_user = msg_dict.get("FromUserName", "")  # WeCom UserID / External UserID
+    msg_type = msg_dict.get("MsgType", "")
+    content = msg_dict.get("Content", "")
+
+    if not content or msg_type != "text":
+        # Successfully acknowledge non-text or event packets
+        return PlainTextResponse(content="success", status_code=200)
+
+    # 1. Match Supplier via WeCom UserID or WeChat Number
+    supplier: Supplier | None = None
+    all_suppliers_res = await session.execute(select(Supplier).limit(100))
+    for s in all_suppliers_res.scalars().all():
+        wc_num = getattr(s, "contact_wechat_number", None) or getattr(s, "wechat_number", None)
+        if wc_num and (wc_num.lower() in from_user.lower() or from_user.lower() in wc_num.lower()):
+            supplier = s
+            break
+
+    if not supplier:
+        # Fallback to matching SupplierContact
+        contacts_res = await session.execute(select(SupplierContact).limit(100))
+        for c in contacts_res.scalars().all():
+            if c.wechat_number and (c.wechat_number.lower() in from_user.lower() or from_user.lower() in c.wechat_number.lower()):
+                supplier = await session.get(Supplier, c.supplier_id)
+                break
+
+    # 2. Match Consignment from Subject / Code (e.g. [#FB1]) or active recent inquiries
+    matched_inquiry: Inquiry | None = None
+    code_match = re.search(r"\[#?([a-zA-Z0-9_\-]+)\]", content) or re.search(r"#([a-zA-Z0-9_\-]+)", content)
+    if code_match:
+        found_code = code_match.group(1).strip()
+        cc_res = await session.execute(select(ConsignmentCode).where(ConsignmentCode.code.ilike(found_code)))
+        cc_obj = cc_res.scalars().first()
+        if cc_obj:
+            inq_res = await session.execute(select(Inquiry).where(Inquiry.consignment_code_id == cc_obj.id))
+            matched_inquiry = inq_res.scalars().first()
+
+    if not matched_inquiry:
+        recent_inq_res = await session.execute(select(Inquiry).order_by(Inquiry.created_at.desc()).limit(1))
+        matched_inquiry = recent_inq_res.scalars().first()
+
+    if not matched_inquiry:
+        return PlainTextResponse(content="success", status_code=200)
+
+    # 3. Record Inbound Message in Timeline
+    inbound_msg = InquiryMessage(
+        id=uuid.uuid4(),
+        inquiry_id=matched_inquiry.id,
+        supplier_id=supplier.id if supplier else None,
+        channel="wechat",
+        direction="inbound",
+        sender_name=supplier.company_name if supplier else f"WeChat ({from_user})",
+        sender_contact=from_user,
+        recipient_contact="Yinglima ERP Bot",
+        message_text=content,
+    )
+    session.add(inbound_msg)
+    await session.commit()
+
+    # Broadcast Live WebSocket update for Messages Tab
+    await event_dispatcher.publish(
+        module_channel("inquiries"),
+        Event(
+            entity="inquiry",
+            entity_id=str(matched_inquiry.id),
+            event_type="inquiry.message.created",
+            changes={"inquiry_id": str(matched_inquiry.id)},
+        ),
+    )
+
+    # 4. Conversational AI Extraction (Passing recent chat history for fragmented message support)
+    # Fetch candidate items in consignment
+    consignment_items_res = await session.execute(
+        select(InquiryItem, Product)
+        .join(Product, InquiryItem.product_id == Product.id)
+        .where(
+            InquiryItem.inquiry_id == matched_inquiry.id,
+            InquiryItem.deleted_at.is_(None),
+        )
+    )
+    consignment_items = consignment_items_res.all()
+    if not consignment_items:
+        return PlainTextResponse(content="success", status_code=200)
+
+    # Gather last 5 chat messages for context
+    history_res = await session.execute(
+        select(InquiryMessage)
+        .where(
+            InquiryMessage.inquiry_id == matched_inquiry.id,
+            InquiryMessage.deleted_at.is_(None),
+        )
+        .order_by(InquiryMessage.created_at.desc())
+        .limit(5)
+    )
+    recent_messages = list(reversed(history_res.scalars().all()))
+    combined_chat_context = "\n".join(f"[{m.sender_name or m.channel}]: {m.message_text}" for m in recent_messages)
+
+    candidate_items_list = [
+        {
+            "item_id": str(ci.id),
+            "product_code": cp.product_code or "N/A",
+            "product_name": cp.product_name or cp.product_name_tally or "Product",
+            "target_quantity": float(ci.quantity or 1.0),
+        }
+        for ci, cp in consignment_items
+    ]
+
+    ai_result = await extract_supplier_quotation(
+        text_content=f"{combined_chat_context}\n\nLatest message: {content}",
+        candidate_items=candidate_items_list,
+    )
+
+    if ai_result.is_quotation_detected:
+        quote_supplier_id = supplier.id if supplier else (await session.execute(select(Supplier.id).limit(1))).scalar_one()
+        quotes_to_process = ai_result.quotes if ai_result.quotes else []
+        if not quotes_to_process and ai_result.unit_price:
+            quotes_to_process = [{
+                "product_name": consignment_items[0][1].product_name,
+                "product_code": consignment_items[0][1].product_code,
+                "unit_price": ai_result.unit_price,
+                "currency": ai_result.currency,
+                "quantity": ai_result.quantity,
+                "earliest_available_date": ai_result.earliest_available_date,
+                "price_terms": ai_result.price_terms,
+                "payment_terms": ai_result.payment_terms,
+                "remarks": ai_result.remarks,
+            }]
+
+        for q_obj in quotes_to_process:
+            q_dict = q_obj if isinstance(q_obj, dict) else q_obj.model_dump()
+            unit_p = q_dict.get("unit_price")
+            if not unit_p or float(unit_p) <= 0:
+                continue
+
+            target_item = consignment_items[0][0]
+            ai_pcode = re.sub(r"[^a-z0-9]", "", (q_dict.get("product_code") or "").lower())
+            if ai_pcode:
+                for c_item, c_prod in consignment_items:
+                    cp_code = re.sub(r"[^a-z0-9]", "", (c_prod.product_code or "").lower())
+                    if cp_code and (ai_pcode == cp_code or ai_pcode in cp_code or cp_code in ai_pcode):
+                        target_item = c_item
+                        break
+
+            # 1-Quote rule per (Supplier, Item): Update existing quotation or create new initial quote
+            existing_supp_quote_res = await session.execute(
+                select(Quotation).where(
+                    Quotation.inquiry_item_id == target_item.id,
+                    Quotation.supplier_id == quote_supplier_id,
+                    Quotation.deleted_at.is_(None),
+                )
+            )
+            existing_quote = existing_supp_quote_res.scalars().first()
+
+            quoted_qty = q_dict.get("quantity") or float(target_item.quantity or 1.0)
+            quoted_unit_price = float(unit_p)
+            quote_currency = q_dict.get("currency") or ai_result.currency or "CNY"
+            total_cost = round(quoted_qty * quoted_unit_price, 2)
+
+            t_parts = []
+            if q_dict.get("price_terms"):
+                t_parts.append(q_dict["price_terms"])
+            if q_dict.get("payment_terms"):
+                t_parts.append(q_dict["payment_terms"])
+            terms_combined = " • ".join(t_parts) if t_parts else None
+
+            exp_date = None
+            date_val = q_dict.get("earliest_available_date") or ai_result.earliest_available_date
+            if date_val:
+                try:
+                    exp_date = datetime.strptime(date_val, "%Y-%m-%d").date()
+                except Exception:
+                    pass
+
+            if existing_quote:
+                # Update existing quote with negotiation updates
+                existing_quote.unit_price = quoted_unit_price
+                existing_quote.total_cost = total_cost
+                existing_quote.currency = quote_currency
+                if exp_date:
+                    existing_quote.expected_receiving_date = exp_date
+                if terms_combined:
+                    existing_quote.terms_and_conditions = terms_combined
+                existing_quote.remarks = f"Updated via WeChat chat from {from_user}"
+                await session.commit()
+                await event_dispatcher.publish(
+                    module_channel("inquiries"),
+                    Event(
+                        entity="inquiry",
+                        entity_id=str(target_item.id),
+                        event_type="quotation.updated",
+                        changes={"id": str(existing_quote.id), "unit_price": quoted_unit_price},
+                    ),
+                )
+            else:
+                # Create initial quote
+                quote_count_res = await session.execute(
+                    select(Quotation).where(
+                        Quotation.inquiry_item_id == target_item.id,
+                        Quotation.deleted_at.is_(None),
+                    )
+                )
+                existing_count = len(quote_count_res.scalars().all())
+                quote_number = f"QT-AUTO-{existing_count + 1:02d}"
+
+                new_quotation = Quotation(
+                    id=uuid.uuid4(),
+                    quote_number=quote_number,
+                    inquiry_item_id=target_item.id,
+                    supplier_id=quote_supplier_id,
+                    quantity=quoted_qty,
+                    unit_price=quoted_unit_price,
+                    total_cost=total_cost,
+                    currency=quote_currency,
+                    expected_receiving_date=exp_date,
+                    terms_and_conditions=terms_combined,
+                    remarks=f"Auto-extracted via WeChat from {from_user}",
+                    status=QuotationStatus.PENDING,
+                    created_by=target_item.proposed_by,
+                )
+                session.add(new_quotation)
+                await session.commit()
+                await event_dispatcher.publish(
+                    module_channel("inquiries"),
+                    Event(
+                        entity="inquiry",
+                        entity_id=str(target_item.id),
+                        event_type="quotation.created",
+                        changes={"id": str(new_quotation.id), "quote_number": quote_number},
+                    ),
+                )
+
+    return PlainTextResponse(content="success", status_code=200)

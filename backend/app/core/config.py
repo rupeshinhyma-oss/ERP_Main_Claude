@@ -247,6 +247,38 @@ class Settings(BaseSettings):
     SMTP_FROM_NAME: str = "Yinglima Procurement Team"
     SMTP_USE_TLS: bool = True
 
+    # -------------------------------------------------------------------
+    # Supabase Storage
+    # -------------------------------------------------------------------
+    SUPABASE_PROJECT_ID: str = Field(
+        default="mpvzjzunkiqchhhvxrza",
+        description="Supabase Project ID for storage and REST endpoints",
+    )
+    SUPABASE_SERVICE_KEY: str | None = Field(
+        default=None,
+        description="Supabase Service Role Secret Key (with admin storage permissions)",
+    )
+    SUPABASE_ANON_KEY: str | None = Field(
+        default=None,
+        description="Supabase Public Anon Key",
+    )
+    SUPABASE_URL: str | None = Field(
+        default=None,
+        description="Optional custom Supabase base URL (defaults to https://{SUPABASE_PROJECT_ID}.supabase.co)",
+    )
+
+    @property
+    def supabase_base_url(self) -> str:
+        """Return the effective Supabase base URL."""
+        if self.SUPABASE_URL:
+            return self.SUPABASE_URL.rstrip("/")
+        return f"https://{self.SUPABASE_PROJECT_ID}.supabase.co"
+
+    @property
+    def supabase_auth_key(self) -> str | None:
+        """Return the preferred key for Supabase API requests (service key preferred)."""
+        return self.SUPABASE_SERVICE_KEY or self.SUPABASE_ANON_KEY
+
     @property
     def cors_allowed_origins_list(self) -> list[str]:
         """Parse CORS_ALLOWED_ORIGINS into a list, splitting on commas."""

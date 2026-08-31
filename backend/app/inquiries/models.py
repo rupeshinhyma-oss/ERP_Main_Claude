@@ -313,3 +313,35 @@ class RFQ(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
     def __repr__(self) -> str:
         """Return a debug-friendly representation."""
         return f"<RFQ id={self.id} inquiry_item_id={self.inquiry_item_id}>"
+
+
+class InquiryMessage(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
+    """
+    Two-way communication log (WeChat, Email, System) attached to an Inquiry consignment.
+    """
+
+    __tablename__ = "inquiry_messages"
+
+    inquiry_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(), ForeignKey("inquiries.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    inquiry_item_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("inquiry_items.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    supplier_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("suppliers.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    channel: Mapped[str] = mapped_column(String(30), default="wechat", nullable=False, index=True)
+    direction: Mapped[str] = mapped_column(String(20), default="inbound", nullable=False, index=True)
+    sender_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    sender_contact: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    recipient_contact: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    message_text: Mapped[str] = mapped_column(Text, nullable=False)
+    attachment_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    attachment_filename: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    inquiry: Mapped["Inquiry"] = relationship(foreign_keys=[inquiry_id])
+
+    def __repr__(self) -> str:
+        """Return a debug-friendly representation."""
+        return f"<InquiryMessage id={self.id} inquiry_id={self.inquiry_id} channel={self.channel} dir={self.direction}>"

@@ -210,10 +210,12 @@ class BulkRFQCreate(BaseModel):
     expected_receiving_date: str | None = None
     supplier_type: str = Field(default="all", description="all or selected")
     supplier_ids: list[uuid.UUID] = Field(default_factory=list)
+    channels: list[str] = Field(default_factory=lambda: ["email", "wechat"], description="email, wechat, or both")
     notes: str | None = None
     custom_subject: str | None = None
     custom_body: str | None = None
     custom_recipient_emails: list[str] = Field(default_factory=list)
+    custom_recipient_wechat_numbers: list[str] = Field(default_factory=list)
 
 
 class RFQRead(BaseModel):
@@ -289,3 +291,22 @@ class CompanySummaryRead(BaseModel):
     consignment_status: InquiryConsignmentStatus = InquiryConsignmentStatus.PROPOSED
     consignment_codes: list[str] = Field(default_factory=list)
     updated_at: datetime | None = None
+
+
+class InquiryMessageRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    inquiry_id: uuid.UUID
+    inquiry_item_id: uuid.UUID | None = None
+    supplier_id: uuid.UUID | None = None
+    supplier_name: str | None = None
+    channel: str
+    direction: str
+    sender_name: str | None = None
+    sender_contact: str | None = None
+    recipient_contact: str | None = None
+    message_text: str
+    attachment_url: str | None = None
+    attachment_filename: str | None = None
+    created_at: datetime

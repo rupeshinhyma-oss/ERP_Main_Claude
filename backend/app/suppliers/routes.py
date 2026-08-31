@@ -26,6 +26,7 @@ from app.audit.service import AuditService
 from app.auth.service import CurrentUser
 from app.common.list_query import ListQueryParams, get_list_query_params
 from app.common.pagination import PageMeta
+from app.common.storage import save_uploaded_file
 from app.core.logging import get_logger
 from app.core.responses import build_success_response
 from app.database.session import get_db_session
@@ -309,85 +310,18 @@ async def upload_supplier_media(
     _current_user: CurrentUser = Depends(require_permission("supplier.create")),
 ) -> dict:
     """
-    Upload a supplier visit photo/video to Supabase Storage, falling back to
-    local disk.
-
-    Switched from a blocking ``urllib.request.urlopen`` call to
-    ``httpx.AsyncClient`` (matching ``app.masters.products.routes.upload_product_image``,
-    which already made this fix) -- the blocking version froze this FastAPI
-    worker's entire event loop, and every other concurrent request it was
-    serving, for the whole duration of the upload. Also replaced the silent
-    ``except Exception: pass`` with real logging: a failed Supabase upload
-    used to disappear with zero trace, silently falling back to local disk
-    (which is invisible from any other machine/deployment) with no way to
-    tell WHY it fell back -- missing/wrong API key, network failure, wrong
-    bucket permissions, etc. all looked identical from the outside.
+    Upload a supplier visit photo/video to Supabase Storage (bucket 'supplier-media'),
+    falling back to local disk (uploads/suppliers/) if Supabase is unavailable.
     """
-    import httpx
-    from pathlib import Path
-    import os
-
     content = await file.read()
-    filename = f"{uuid.uuid4().hex}_{file.filename}"
-    supabase_project_id = os.getenv("SUPABASE_PROJECT_ID", "mpvzjzunkiqchhhvxrza")
-    supabase_key = os.getenv("SUPABASE_SERVICE_KEY") or os.getenv("SUPABASE_ANON_KEY", "")
-
-    # Try direct upload to Supabase Storage Buckets
-    if not supabase_key:
-        logger.warning(
-            "SUPABASE_SERVICE_KEY / SUPABASE_ANON_KEY not set on this backend instance -- "
-            "falling back to local disk. This file will NOT be visible from any other machine "
-            "or deployment. Set one of these environment variables to upload to Supabase Storage "
-            "instead.",
-            extra={"filename": filename},
-        )
-    else:
-        for bucket in ("supplier-media", "product-images"):
-            try:
-                supabase_upload_url = f"https://{supabase_project_id}.supabase.co/storage/v1/object/{bucket}/{filename}"
-                async with httpx.AsyncClient(timeout=30.0) as client:
-                    resp = await client.post(
-                        supabase_upload_url,
-                        content=content,
-                        headers={
-                            "Authorization": f"Bearer {supabase_key}",
-                            "Content-Type": file.content_type or "application/octet-stream",
-                            "x-upsert": "true",
-                        },
-                    )
-                if resp.status_code in (200, 201):
-                    public_url = f"https://{supabase_project_id}.supabase.co/storage/v1/object/public/{bucket}/{filename}"
-                    return {"success": True, "data": {"url": public_url}}
-                logger.warning(
-                    "Supabase Storage rejected the upload for this bucket -- trying the next "
-                    "bucket (if any), then falling back to local disk if all fail.",
-                    extra={
-                        "filename": filename,
-                        "bucket": bucket,
-                        "status_code": resp.status_code,
-                        "response_body": resp.text[:500],
-                    },
-                )
-            except Exception as exc:
-                logger.warning(
-                    "Request to Supabase Storage failed (network error, timeout, or similar) "
-                    "for this bucket -- trying the next bucket (if any), then falling back to "
-                    "local disk if all fail.",
-                    extra={
-                        "filename": filename,
-                        "bucket": bucket,
-                        "error": str(exc),
-                        "error_type": type(exc).__name__,
-                    },
-                )
-
-    # Fallback to local server static storage
-    upload_dir = Path("uploads/suppliers")
-    upload_dir.mkdir(parents=True, exist_ok=True)
-    file_path = upload_dir / filename
-    file_path.write_bytes(content)
-    public_url = f"/static/uploads/suppliers/{filename}"
-    return {"success": True, "data": {"url": public_url}}
+    media_url, _ = await save_uploaded_file(
+        content=content,
+        original_filename=file.filename or "supplier_media.jpg",
+        bucket="supplier-media",
+        local_subfolder="suppliers",
+        content_type=file.content_type,
+    )
+    return {"success": True, "data": {"url": media_url}}
 
 
 @router.get("/{supplier_id}", summary="Get a supplier")

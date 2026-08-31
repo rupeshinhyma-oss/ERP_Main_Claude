@@ -23,12 +23,13 @@ from typing import Any
 from sqlalchemy import and_, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.common.storage import save_uploaded_file
 from app.database.engine import get_sessionmaker
 from app.events.channels import module_channel
 from app.events.dispatcher import EventDispatcher
 from app.events.models import Event
 from app.inquiries.ai_extractor import extract_supplier_quotation
-from app.inquiries.models import ConsignmentCode, Inquiry, InquiryItem, Quotation, QuotationStatus, RFQ
+from app.inquiries.models import ConsignmentCode, Inquiry, InquiryItem, InquiryMessage, Quotation, QuotationStatus, RFQ
 from app.inquiries.public_quotes import decode_rfq_token
 from app.masters.products.models import Product
 from app.suppliers.models import Supplier
@@ -143,21 +144,34 @@ class EmailInboundWorker:
             return
 
         def _fetch_unread_emails() -> list[tuple[bytes, bytes]]:
-            """Synchronous IMAP connection and recent reply email retrieval."""
+            """Synchronous IMAP connection and recent email retrieval (both INBOX and Sent Mail)."""
             results = []
             try:
                 mail = imaplib.IMAP4_SSL(imap_host, imap_port)
                 mail.login(smtp_user, smtp_pass)
-                mail.select("INBOX")
-                # Search ALL messages and inspect recent 15 messages so emails opened in Gmail web are never missed!
-                status, search_data = mail.search(None, 'ALL')
-                if status == "OK" and search_data and search_data[0]:
-                    email_ids = search_data[0].split()
-                    recent_ids = email_ids[-15:]
-                    for e_id in recent_ids:
-                        res_status, msg_data = mail.fetch(e_id, "(RFC822)")
-                        if res_status == "OK" and msg_data and msg_data[0]:
-                            results.append((e_id, msg_data[0][1]))
+
+                folders_to_poll = ["INBOX"]
+                if "gmail" in imap_host.lower():
+                    folders_to_poll.append('"[Gmail]/Sent Mail"')
+                else:
+                    folders_to_poll.append("Sent")
+
+                for folder in folders_to_poll:
+                    try:
+                        sel_status, _ = mail.select(folder)
+                        if sel_status != "OK":
+                            continue
+                        status, search_data = mail.search(None, 'ALL')
+                        if status == "OK" and search_data and search_data[0]:
+                            email_ids = search_data[0].split()
+                            recent_ids = email_ids[-10:]
+                            for e_id in recent_ids:
+                                res_status, msg_data = mail.fetch(e_id, "(RFC822)")
+                                if res_status == "OK" and msg_data and msg_data[0]:
+                                    results.append((e_id, msg_data[0][1]))
+                    except Exception as f_err:
+                        logger.debug("Error reading folder %s: %s", folder, str(f_err))
+
                 mail.close()
                 mail.logout()
             except Exception as ex:
@@ -167,26 +181,6 @@ class EmailInboundWorker:
         # Run blocking IMAP network call in executor thread
         unread_emails = await asyncio.to_thread(_fetch_unread_emails)
         if not unread_emails:
-            return
-
-        # On initial boot, mark all existing emails as seen so only new emails arriving after start are processed
-        if not self._initialized:
-            for email_id, raw_bytes in unread_emails:
-                try:
-                    m = email.message_from_bytes(raw_bytes)
-                    m_id = (m.get("Message-ID") or "").strip()
-                    if m_id:
-                        self._seen_message_ids.add(m_id)
-                except Exception:
-                    pass
-            self._initialized = True
-            try:
-                import json
-                with open(self._cache_file, "w") as f:
-                    json.dump(list(self._seen_message_ids), f, indent=2)
-            except Exception:
-                pass
-            logger.info("Initialized inbound email poller with %d existing mailbox messages.", len(self._seen_message_ids))
             return
 
         for email_id, raw_bytes in unread_emails:
@@ -215,7 +209,8 @@ class EmailInboundWorker:
             return
 
         # Extract text body and attachments
-        body_text_parts: list[str] = []
+        plain_text_parts: list[str] = []
+        html_text_parts: list[str] = []
         attachments: list[dict[str, Any]] = []
 
         if msg.is_multipart():
@@ -232,21 +227,59 @@ class EmailInboundWorker:
                             "content_type": content_type,
                             "bytes": payload_bytes,
                         })
-                elif content_type in ["text/plain", "text/html"] and "attachment" not in content_disp:
+                elif content_type == "text/plain" and "attachment" not in content_disp:
                     payload_bytes = part.get_payload(decode=True)
                     if payload_bytes:
                         try:
                             text = payload_bytes.decode(part.get_content_charset() or "utf-8", errors="replace")
-                            body_text_parts.append(text)
+                            plain_text_parts.append(text)
+                        except Exception:
+                            pass
+                elif content_type == "text/html" and "attachment" not in content_disp:
+                    payload_bytes = part.get_payload(decode=True)
+                    if payload_bytes:
+                        try:
+                            text = payload_bytes.decode(part.get_content_charset() or "utf-8", errors="replace")
+                            html_text_parts.append(text)
                         except Exception:
                             pass
         else:
             payload_bytes = msg.get_payload(decode=True)
             if payload_bytes:
                 text = payload_bytes.decode(msg.get_content_charset() or "utf-8", errors="replace")
-                body_text_parts.append(text)
+                if msg.get_content_type() == "text/html":
+                    html_text_parts.append(text)
+                else:
+                    plain_text_parts.append(text)
 
-        full_body_text = "\n".join(body_text_parts).strip()
+        # 1. Prefer pure plain text if present; otherwise strip HTML cleanly
+        raw_body_text = ""
+        if plain_text_parts:
+            raw_body_text = "\n".join(plain_text_parts).strip()
+        elif html_text_parts:
+            import html
+            raw_html = "\n".join(html_text_parts)
+            raw_html = re.sub(r"<(script|style).*?>.*?</\1>", "", raw_html, flags=re.DOTALL | re.IGNORECASE)
+            raw_html = re.sub(r"<blockquote.*?>.*?</blockquote>", "", raw_html, flags=re.DOTALL | re.IGNORECASE)
+            raw_html = re.sub(r"<br\s*/?>|</p>|</div>|</li>", "\n", raw_html, flags=re.IGNORECASE)
+            clean_t = re.sub(r"<[^>]+>", "", raw_html)
+            raw_body_text = html.unescape(clean_t).strip()
+
+        # 2. Cut off quoted previous email trail (e.g. "On Sat, Aug 29... wrote:")
+        reply_split_patterns = [
+            r"\n\s*On\s+.+?wrote:\s*\n",
+            r"\n\s*On\s+.+?at\s+.+?wrote:\s*\n",
+            r"\n\s*---\s*Original Message\s*---\s*\n",
+            r"\n\s*From:\s*.+?\nSent:\s*",
+            r"\n\s*_{10,}\s*\n",
+        ]
+        cleaned_body = raw_body_text
+        for pat in reply_split_patterns:
+            splits = re.split(pat, cleaned_body, maxsplit=1, flags=re.IGNORECASE)
+            if len(splits) > 1:
+                cleaned_body = splits[0].strip()
+
+        full_body_text = re.sub(r"\n{3,}", "\n\n", cleaned_body).strip()
         if not full_body_text and not attachments:
             return
 
@@ -262,37 +295,73 @@ class EmailInboundWorker:
                 pass
 
         full_search_text = f"{subject} {full_body_text} {pdf_extra_text}".lower()
-
         session_factory = get_sessionmaker()
         async with session_factory() as session:
             from app.suppliers.models import SupplierContact, SupplierEmail
 
-            # 1. Match Supplier in ERP: First by Company Name in PDF/Text, then fallback to Email
+            # 1. Determine Outbound (Company/Salesperson) vs Inbound (Supplier)
+            smtp_user = os.getenv("SMTP_USER", "").lower().strip()
+            is_outbound = bool(smtp_user and (sender_email == smtp_user or "om1inhyma" in sender_email or "yinglima" in sender_email))
+
+            # 2. Match Supplier in ERP
             supplier: Supplier | None = None
-            all_suppliers_res = await session.execute(select(Supplier).limit(100))
-            for s in all_suppliers_res.scalars().all():
-                s_name = (s.company_name or "").strip()
-                if s_name and len(s_name) > 3 and s_name.lower() in full_search_text:
-                    supplier = s
-                    break
+            if is_outbound:
+                # For outbound emails, extract all recipient emails from "To" and "Cc"
+                to_raw = clean_decode_header(msg.get("To", "")) + " " + clean_decode_header(msg.get("Cc", ""))
+                to_emails = re.findall(r"[\w.+-]+@[\w-]+\.[\w.-]+", to_raw)
+                for rec_email in to_emails:
+                    rec_clean = rec_email.strip().lower()
+                    if rec_clean and rec_clean != smtp_user and "om1inhyma" not in rec_clean:
+                        s_email_res = await session.execute(
+                            select(SupplierEmail).where(SupplierEmail.email.ilike(rec_clean))
+                        )
+                        s_email = s_email_res.scalars().first()
+                        if s_email:
+                            supplier = await session.get(Supplier, s_email.supplier_id)
+                            if supplier:
+                                break
+                        s_contact_res = await session.execute(
+                            select(SupplierContact).where(SupplierContact.email.ilike(rec_clean))
+                        )
+                        s_contact = s_contact_res.scalars().first()
+                        if s_contact:
+                            supplier = await session.get(Supplier, s_contact.supplier_id)
+                            if supplier:
+                                break
 
-            if not supplier:
-                s_email_res = await session.execute(
-                    select(SupplierEmail).where(SupplierEmail.email.ilike(sender_email))
-                )
-                s_email = s_email_res.scalars().first()
-                if s_email:
-                    supplier = await session.get(Supplier, s_email.supplier_id)
+                if not supplier:
+                    all_suppliers_res = await session.execute(select(Supplier).limit(100))
+                    for s in all_suppliers_res.scalars().all():
+                        s_name = (s.company_name or "").strip()
+                        if s_name and len(s_name) > 3 and s_name.lower() in (subject + " " + full_body_text).lower():
+                            supplier = s
+                            break
+            else:
+                # For inbound emails, match sender
+                all_suppliers_res = await session.execute(select(Supplier).limit(100))
+                for s in all_suppliers_res.scalars().all():
+                    s_name = (s.company_name or "").strip()
+                    if s_name and len(s_name) > 3 and s_name.lower() in (subject + " " + full_body_text).lower():
+                        supplier = s
+                        break
 
-            if not supplier:
-                s_contact_res = await session.execute(
-                    select(SupplierContact).where(SupplierContact.email.ilike(sender_email))
-                )
-                s_contact = s_contact_res.scalars().first()
-                if s_contact:
-                    supplier = await session.get(Supplier, s_contact.supplier_id)
+                if not supplier:
+                    s_email_res = await session.execute(
+                        select(SupplierEmail).where(SupplierEmail.email.ilike(sender_email))
+                    )
+                    s_email = s_email_res.scalars().first()
+                    if s_email:
+                        supplier = await session.get(Supplier, s_email.supplier_id)
 
-            # 2. Match Consignment / Inquiry
+                if not supplier:
+                    s_contact_res = await session.execute(
+                        select(SupplierContact).where(SupplierContact.email.ilike(sender_email))
+                    )
+                    s_contact = s_contact_res.scalars().first()
+                    if s_contact:
+                        supplier = await session.get(Supplier, s_contact.supplier_id)
+
+            # 3. Match Consignment / Inquiry Header
             matched_inquiry_id: uuid.UUID | None = None
             target_rfq: RFQ | None = None
 
@@ -309,7 +378,7 @@ class EmailInboundWorker:
                 except Exception:
                     pass
 
-            # B) Match Consignment Code from Subject / Body (e.g. [TES1] or #TES1)
+            # B) Match Consignment Code from Subject / Body (e.g. [FB2] or #FB2)
             if not matched_inquiry_id:
                 code_match = re.search(r"\[([a-zA-Z0-9_\-]+)\]", subject) or re.search(r"#([a-zA-Z0-9_\-]+)", subject)
                 if code_match:
@@ -326,7 +395,7 @@ class EmailInboundWorker:
                         if inq_obj:
                             matched_inquiry_id = inq_obj.id
 
-            # C) If active RFQ sent to this supplier
+            # C) Active RFQ match for this supplier
             if not matched_inquiry_id and supplier:
                 rfq_res = await session.execute(
                     select(RFQ, InquiryItem)
@@ -357,10 +426,10 @@ class EmailInboundWorker:
                         break
 
             if not matched_inquiry_id:
-                logger.info("Inbound email received from %s, but no matching consignment was found.", sender_email)
+                logger.info("Email received from %s, but no matching consignment was found.", sender_email)
                 return
 
-            # Fetch all candidate items in this consignment for multi-product extraction & mapping
+            # Fetch all items in this consignment
             consignment_items_res = await session.execute(
                 select(InquiryItem, Product)
                 .join(Product, InquiryItem.product_id == Product.id)
@@ -385,46 +454,162 @@ class EmailInboundWorker:
             ]
 
             first_item, first_prod = consignment_items[0]
-            prod_name = first_prod.product_name or first_prod.product_name_tally or "Product"
-            prod_code = first_prod.product_code
-            target_qty = float(first_item.quantity) if first_item.quantity else None
 
+            # 4. Resolve Target Product Item with Thread-Aware Inheritance
+            target_matched_item = None
+
+            # A) Check if email body/subject explicitly mentions a product code/name in this consignment
+            for c_item, c_prod in consignment_items:
+                cp_code = (c_prod.product_code or "").lower().strip()
+                cp_name = (c_prod.product_name or c_prod.product_name_tally or "").lower().strip()
+                if cp_code and len(cp_code) >= 3 and cp_code in (subject + " " + full_body_text).lower():
+                    target_matched_item = c_item
+                    break
+                if cp_name and len(cp_name) > 4 and cp_name in (subject + " " + full_body_text).lower():
+                    target_matched_item = c_item
+                    break
+
+            # B) Thread-Aware Item Inheritance (For short follow-up / negotiation emails)
+            if not target_matched_item and supplier:
+                # 1. Inherit from recent message in this consignment with this supplier
+                prev_msg_res = await session.execute(
+                    select(InquiryMessage)
+                    .where(
+                        InquiryMessage.inquiry_id == matched_inquiry_id,
+                        InquiryMessage.supplier_id == supplier.id,
+                        InquiryMessage.inquiry_item_id.isnot(None),
+                    )
+                    .order_by(InquiryMessage.created_at.desc())
+                    .limit(1)
+                )
+                prev_msg = prev_msg_res.scalars().first()
+                if prev_msg and prev_msg.inquiry_item_id:
+                    for c_item, _ in consignment_items:
+                        if c_item.id == prev_msg.inquiry_item_id:
+                            target_matched_item = c_item
+                            break
+
+                # 2. Inherit from active quotation for this supplier in this consignment
+                if not target_matched_item:
+                    prev_quote_res = await session.execute(
+                        select(Quotation)
+                        .where(
+                            Quotation.supplier_id == supplier.id,
+                            Quotation.deleted_at.is_(None),
+                        )
+                        .order_by(Quotation.created_at.desc())
+                        .limit(1)
+                    )
+                    prev_quote = prev_quote_res.scalars().first()
+                    if prev_quote:
+                        for c_item, _ in consignment_items:
+                            if c_item.id == prev_quote.inquiry_item_id:
+                                target_matched_item = c_item
+                                break
+
+            if not target_matched_item:
+                target_matched_item = consignment_items[0][0]
+
+            resolved_item_id = target_matched_item.id if target_matched_item else (first_item.id if first_item else None)
+
+            # 5. Always Record Email in InquiryMessage Timeline for Emails Tab
+            msg_direction = "outbound" if is_outbound else "inbound"
+            msg_sender_name = "Yinglima Procurement" if is_outbound else (supplier.company_name if supplier else from_raw or sender_email)
+            msg_recipient = (supplier.company_name if supplier else "Supplier Partner") if is_outbound else "Yinglima Procurement"
+
+            inbound_msg = InquiryMessage(
+                id=uuid.uuid4(),
+                inquiry_id=matched_inquiry_id,
+                inquiry_item_id=resolved_item_id,
+                supplier_id=supplier.id if supplier else None,
+                channel="email",
+                direction=msg_direction,
+                sender_name=msg_sender_name,
+                sender_contact=sender_email,
+                recipient_contact=msg_recipient,
+                message_text=full_body_text,
+            )
+            session.add(inbound_msg)
+            await session.commit()
+
+            # Broadcast WebSocket event for live update in Emails tab
+            await self._dispatcher.publish(
+                module_channel("inquiries"),
+                Event(
+                    entity="inquiry",
+                    entity_id=str(matched_inquiry_id),
+                    event_type="inquiry.message.created",
+                    changes={"inquiry_id": str(matched_inquiry_id), "item_id": str(resolved_item_id)},
+                ),
+            )
+
+            # 6. AI QUOTATION EXTRACTION GATE:
+            # - Outbound emails from us: 0 AI calls
+            # - Follow-up / negotiation replies (Quotation already exists): 0 AI calls
+            # - Unverified emails: 0 AI calls
+            if is_outbound:
+                logger.info("Outbound email from company saved to Emails tab timeline. Skipping AI extraction (0 OpenAI tokens).")
+                return
+
+            if not supplier:
+                logger.info("Inbound email received without verified supplier association. Skipping AI extraction.")
+                return
+
+            # Check if a quotation already exists for this (Item, Supplier) pair
+            existing_supp_quote = await session.execute(
+                select(Quotation).where(
+                    Quotation.inquiry_item_id == resolved_item_id,
+                    Quotation.supplier_id == supplier.id,
+                    Quotation.deleted_at.is_(None),
+                )
+            )
+            if existing_supp_quote.scalars().first():
+                logger.info(
+                    "Quotation already exists for supplier %s on item %s. Logged negotiation email to Emails tab without AI extraction (0 OpenAI tokens).",
+                    supplier.id,
+                    resolved_item_id,
+                )
+                return
+
+            # 7. FIRST VALID SUPPLIER QUOTATION REPLY: CALL OPENAI EXACTLY ONCE
+            logger.info("First valid quotation reply detected for supplier %s on item %s. Running AI extraction...", supplier.id, resolved_item_id)
+            target_prod_name = first_prod.product_name or first_prod.product_name_tally or "Product"
+            target_prod_code = first_prod.product_code
+            target_qty_val = float(first_item.quantity) if first_item.quantity else None
             target_date_str = str(target_rfq.expected_receiving_date) if target_rfq and target_rfq.expected_receiving_date else None
 
-            # 3. Extract Quotation with AI (OpenAI GPT-4o-mini with Candidate Disambiguation)
             primary_attachment = attachments[0] if attachments else None
             ai_result = await extract_supplier_quotation(
                 text_content=full_body_text,
                 file_bytes=primary_attachment["bytes"] if primary_attachment else None,
                 mime_type=primary_attachment["content_type"] if primary_attachment else None,
-                product_name=prod_name,
-                product_code=prod_code,
-                target_quantity=target_qty,
+                product_name=target_prod_name,
+                product_code=target_prod_code,
+                target_quantity=target_qty_val,
                 target_date=target_date_str,
                 candidate_items=candidate_items_list,
             )
 
-            # 4. Save quotation attachment file once to uploads/quotations if present
+            # Save quotation attachment file to Supabase Storage (fallback to uploads/quotations)
             saved_attachment_url = None
             saved_attachment_filename = None
             if attachments:
                 first_att = attachments[0]
                 raw_fname = first_att.get("filename") or "quote_document.pdf"
-                clean_fname = re.sub(r"[^\w\-.]", "_", raw_fname)
-                unique_fname = f"{uuid.uuid4().hex[:10]}_{clean_fname}"
-                quotation_dir = Path("uploads/quotations")
-                quotation_dir.mkdir(parents=True, exist_ok=True)
-                file_path = quotation_dir / unique_fname
                 try:
-                    with open(file_path, "wb") as f:
-                        f.write(first_att["bytes"])
-                    saved_attachment_url = f"/uploads/quotations/{unique_fname}"
+                    att_url, _ = await save_uploaded_file(
+                        content=first_att["bytes"],
+                        original_filename=raw_fname,
+                        bucket="quotations",
+                        local_subfolder="quotations",
+                    )
+                    saved_attachment_url = att_url
                     saved_attachment_filename = raw_fname
-                    logger.info("Saved supplier attachment to %s", saved_attachment_url)
+                    logger.info("Saved supplier quotation attachment to %s", saved_attachment_url)
                 except Exception as save_err:
                     logger.error("Failed to save quotation attachment: %s", str(save_err))
 
-            # Resolve creator user ID from parent Inquiry or default User
+            # Resolve creator user ID
             inquiry_res = await session.execute(select(Inquiry).where(Inquiry.id == matched_inquiry_id))
             parent_inquiry = inquiry_res.scalars().first()
             creator_user_id = parent_inquiry.created_by if parent_inquiry else None
@@ -432,17 +617,13 @@ class EmailInboundWorker:
                 user_res = await session.execute(select(User.id).limit(1))
                 creator_user_id = user_res.scalar_one()
 
-            # Resolve supplier ID
-            quote_supplier_id = supplier.id if supplier else None
-            if not quote_supplier_id:
-                first_supp = await session.execute(select(Supplier.id).limit(1))
-                quote_supplier_id = first_supp.scalar_one()
+            quote_supplier_id = supplier.id
 
             quotes_to_process = ai_result.quotes if ai_result.quotes else []
             if not quotes_to_process and ai_result.unit_price:
                 quotes_to_process = [{
-                    "product_name": prod_name,
-                    "product_code": prod_code,
+                    "product_name": target_prod_name,
+                    "product_code": target_prod_code,
                     "unit_price": ai_result.unit_price,
                     "currency": ai_result.currency,
                     "quantity": ai_result.quantity,
@@ -459,71 +640,25 @@ class EmailInboundWorker:
                 if not unit_p or float(unit_p) <= 0:
                     continue
 
-                # Direct & High-Precision Match against consignment items
-                target_item = None
-                ai_pcode = re.sub(r"[^a-z0-9]", "", (q_dict.get("product_code") or "").lower())
-                ai_pname = (q_dict.get("product_name") or "").lower().strip()
-
-                if consignment_items:
-                    # 1. Direct code lookup matching AI's resolved candidate code
-                    if ai_pcode:
-                        for c_item, c_prod in consignment_items:
-                            cp_code = re.sub(r"[^a-z0-9]", "", (c_prod.product_code or "").lower())
-                            if cp_code and (ai_pcode == cp_code or (len(ai_pcode) >= 5 and (ai_pcode in cp_code or cp_code in ai_pcode))):
-                                target_item = c_item
-                                break
-
-                    # 2. High-precision token overlap with model number sensitivity
-                    if not target_item and ai_pname:
-                        GENERIC_STOP_WORDS = {
-                            "product", "for", "the", "and", "with", "in", "of", "to", "at", "by", "a", "an", "is", "pcs", "unit", "units"
-                        }
-                        q_tokens = set(re.findall(r"[a-z0-9]+", ai_pname)) - GENERIC_STOP_WORDS
-                        best_score = 0
-                        for c_item, c_prod in consignment_items:
-                            cp_name = (c_prod.product_name or c_prod.product_name_tally or "").lower()
-                            cp_tokens = set(re.findall(r"[a-z0-9]+", cp_name)) - GENERIC_STOP_WORDS
-                            overlap = q_tokens & cp_tokens
-                            
-                            # Extra weight for exact model numbers (e.g. 1000an, 900, 900a, msv, msh)
-                            score = len(overlap)
-                            for tok in overlap:
-                                if any(ch.isdigit() for ch in tok) or tok in ["msv", "msh", "ssh", "fr", "dbf"]:
-                                    score += 3
-                            
-                            if score > best_score:
-                                best_score = score
-                                target_item = c_item
-
-                if not target_item:
-                    target_item = consignment_items[0][0]
-
-                # RULE: Only 1 initial quotation per (Supplier + Product Item) pair is auto-created.
-                # If a quote from this supplier already exists for this item, skip auto-creation
-                # so ongoing email negotiations do not flood the inquiry with duplicate quote rows.
-                existing_supp_quote = await session.execute(
+                # Final check before creating quotation row
+                existing_check = await session.execute(
                     select(Quotation).where(
-                        Quotation.inquiry_item_id == target_item.id,
+                        Quotation.inquiry_item_id == resolved_item_id,
                         Quotation.supplier_id == quote_supplier_id,
                         Quotation.deleted_at.is_(None),
                     )
                 )
-                if existing_supp_quote.scalars().first():
-                    logger.info(
-                        "Supplier %s already has an active quote for item %s. Skipping auto-creation so sales team can manage manual negotiation updates.",
-                        quote_supplier_id,
-                        target_item.id,
-                    )
+                if existing_check.scalars().first():
                     continue
 
-                quoted_qty = q_dict.get("quantity") or float(target_item.quantity or 1.0)
+                quoted_qty = q_dict.get("quantity") or float(target_matched_item.quantity or 1.0)
                 quoted_unit_price = float(unit_p)
                 quote_currency = q_dict.get("currency") or ai_result.currency or "CNY"
                 total_cost = round(quoted_qty * quoted_unit_price, 2)
 
                 quote_count_res = await session.execute(
                     select(Quotation).where(
-                        Quotation.inquiry_item_id == target_item.id,
+                        Quotation.inquiry_item_id == resolved_item_id,
                         Quotation.deleted_at.is_(None),
                     )
                 )
@@ -552,37 +687,43 @@ class EmailInboundWorker:
                     except Exception:
                         pass
 
-                new_quotation = Quotation(
+                quotation = Quotation(
                     id=uuid.uuid4(),
-                    quote_number=quote_number,
-                    inquiry_item_id=target_item.id,
+                    inquiry_item_id=resolved_item_id,
                     supplier_id=quote_supplier_id,
-                    quantity=quoted_qty,
+                    quote_number=quote_number,
                     unit_price=quoted_unit_price,
-                    total_cost=total_cost,
                     currency=quote_currency,
-                    expected_receiving_date=exp_date,
+                    total_cost=total_cost,
                     terms_and_conditions=terms_combined,
                     remarks=dedup_remark,
+                    expected_receiving_date=exp_date,
                     attachment_url=saved_attachment_url,
                     attachment_filename=saved_attachment_filename,
                     status=QuotationStatus.PENDING,
                     created_by=creator_user_id,
                 )
-                session.add(new_quotation)
+                session.add(quotation)
                 created_quotes_count += 1
 
-                # Broadcast real-time WebSocket event for each created quote
+            if created_quotes_count > 0:
+                await session.commit()
+                logger.info(
+                    "Auto-created %d quotation record(s) for supplier %s on consignment %s.",
+                    created_quotes_count,
+                    quote_supplier_id,
+                    matched_inquiry_id,
+                )
                 await self._dispatcher.publish(
                     module_channel("inquiries"),
                     Event(
-                        entity="inquiry",
-                        entity_id=str(target_item.inquiry_id),
+                        entity="quotation",
+                        entity_id=str(resolved_item_id),
                         event_type="quotation.created",
                         changes={
-                            "id": str(new_quotation.id),
-                            "inquiry_item_id": str(target_item.id),
-                            "inquiry_id": str(target_item.inquiry_id),
+                            "id": str(quotation.id),
+                            "inquiry_item_id": str(resolved_item_id),
+                            "inquiry_id": str(matched_inquiry_id),
                             "quote_number": quote_number,
                             "unit_price": quoted_unit_price,
                             "currency": quote_currency,
@@ -590,11 +731,7 @@ class EmailInboundWorker:
                         },
                     ),
                 )
-                logger.info("Created quotation %s (%s %s) for item %s", quote_number, quoted_unit_price, quote_currency, target_item.id)
-
-            if created_quotes_count > 0:
-                await session.commit()
-                logger.info("Successfully saved %d quotations from email %s.", created_quotes_count, msg_id)
+                logger.info("Created quotation %s (%s %s) for item %s", quote_number, quoted_unit_price, quote_currency, resolved_item_id)
 
 
 # Global worker instance

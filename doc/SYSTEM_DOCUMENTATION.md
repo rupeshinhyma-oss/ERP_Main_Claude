@@ -123,7 +123,7 @@ ERP_Main_Claude/
 │   │   ├── auth/              # JWT auth, Argon2id, session tracking, rate limiting
 │   │   ├── buyers/            # Buyer directory, contacts, addresses, credit limits
 │   │   ├── cache/             # Redis / in-memory cache manager, cleanup worker
-│   │   ├── common/            # BaseRepository, BaseService, Pagination, Importer, Email
+│   │   ├── common/            # BaseRepository, BaseService, Pagination, Storage, Importer, Email
 │   │   ├── core/              # Config, Responses, Exceptions, Exception Handlers, Logging
 │   │   ├── database/          # Async Engine, Session DI, Declarative Base Mixins
 │   │   ├── events/            # WebSocket connection manager and broadcast bus
@@ -138,6 +138,7 @@ ERP_Main_Claude/
 │   │   ├── users/             # User accounts, HR profiles, reporting managers
 │   │   └── main.py            # Composition root, lifespan lifecycle, middleware wiring
 │   ├── alembic/               # Database schema version migrations
+│   ├── scripts/               # Migration and maintenance tools (sync_uploads_to_supabase.py)
 │   └── requirements.txt       # Python dependencies
 └── frontend/
     ├── src/
@@ -402,7 +403,10 @@ $$\text{EffectivePermissions} = \left( \bigcup_{r \in \text{UserRoles}} \text{Ro
 | **Inquiries**| `PATCH` | `/api/v1/inquiries/{id}` | Update inquiry header & status | `inquiry.update` |
 | **Inquiries**| `POST` | `/api/v1/inquiries/{id}/items` | Add line item to inquiry | `inquiry.update` |
 | **Inquiries**| `POST` | `/api/v1/inquiries/{id}/items/bulk` | Bulk add items to inquiry | `inquiry.update` |
-| **Inquiries**| `POST` | `/api/v1/inquiries/{id}/bulk-rfqs` | Dispatch multi-item RFQ emails to suppliers | `inquiry.action` |
+| **Inquiries**| `POST` | `/api/v1/inquiries/{id}/bulk-rfqs` | Dispatch multi-item RFQ emails/WeChat to suppliers | `inquiry.action` |
+| **Inquiries**| `GET`  | `/api/v1/inquiries/{id}/messages` | Fetch chronological two-way communication feed | `inquiry.read` |
+| **Inquiries**| `GET`  | `/api/v1/inquiries/wechat/callback` | Tencent WeCom handshake verification | Public (Signature Verified) |
+| **Inquiries**| `POST` | `/api/v1/inquiries/wechat/callback` | WeCom webhook handler with AI quotation ingestion | Public (AES Decrypted) |
 | **Inquiries**| `POST` | `/api/v1/inquiries/items/{item_id}/rfqs` | Dispatch single-item RFQ email & portal link | `inquiry.action` |
 | **Inquiries**| `POST` | `/api/v1/inquiries/items/{item_id}/quotations` | Manually record supplier quotation | `inquiry.update` |
 | **Inquiries**| `PATCH` | `/api/v1/inquiries/quotations/{id}` | Edit quotation details (qty, price, currency, terms) | `inquiry.update` |
@@ -487,7 +491,11 @@ IMAP_SERVER=imap.gmail.com
 IMAP_PORT=993
 IMAP_USERNAME=quotes@yourdomain.com
 IMAP_PASSWORD=your-app-password
-IMAP_POLL_INTERVAL_SECONDS=60
+# Supabase Storage & Cloud Asset Persistence
+SUPABASE_PROJECT_ID=mpvzjzunkiqchhhvxrza
+SUPABASE_SERVICE_KEY=your-supabase-service-role-secret-key
+SUPABASE_ANON_KEY=your-supabase-anon-key
+SUPABASE_URL=https://mpvzjzunkiqchhhvxrza.supabase.co
 ```
 
 ### Frontend Environment Variables (`frontend/.env`)
@@ -496,5 +504,25 @@ VITE_API_BASE_URL=http://localhost:8000/api/v1
 VITE_WS_BASE_URL=ws://localhost:8000/api/v1/events/ws
 ```
 
+### Supabase Storage & Media Asset Persistence Architecture
+- **Central Storage Engine (`app.common.storage`)**: All file and media uploads (Product Photos, Supplier Visit Photos/Videos, and Inbound Supplier Quotation Sheets/PDFs) utilize a unified async storage engine.
+- **Dedicated Public Buckets**:
+  - `product-images`: Multi-photo product catalogs and cover images.
+  - `supplier-media`: Factory visit photos, videos, and supplier profile attachments.
+  - `quotations`: PDF quote sheets and specification attachments extracted from supplier reply emails.
+- **Automatic Bucket Provisioning**: The service role secret key automatically provisions public buckets (`public: true`, 50MB per-file ceiling) upon initial upload.
+- **Resilient Fallback**: If Supabase credentials are not supplied or the remote service is temporarily unreachable, files safely persist to the backend's local `uploads/` directory with detailed structured warning logs.
+- **Sync & Maintenance Utility (`scripts/sync_uploads_to_supabase.py`)**: One-command synchronization tool that scans local disk directories (`uploads/products`, `uploads/suppliers`, `uploads/quotations`), uploads them to Supabase Storage, and updates all existing PostgreSQL database references with global public URLs.
+
+### Inbound & Outbound Email Architecture (Zero Wasted API Costs)
+- **Bidirectional Mailbox Polling**: Poller inspects both `INBOX` and `[Gmail]/Sent Mail` to capture supplier replies and salesperson outbound negotiations sent directly via email clients (e.g. Gmail web, Outlook, mobile).
+- **Outbound Multi-Recipient Parsing**: Outbound emails parse all addresses from `To` and `Cc` to guarantee matching against all recipient suppliers.
+- **Outbound Company Emails**: Emails sent by Yinglima (`om1inhyma@gmail.com`) are strictly tagged as `direction="outbound"`. They are logged into the `Emails` tab timeline with **0 OpenAI API calls** and never create quotation rows.
+- **First Valid Supplier Reply**: The first valid reply from a supplier to our RFQ triggers OpenAI GPT extraction **exactly ONCE**, creating `QT-AUTO-01`, uploading any quote attachment directly to Supabase Storage, and logging the email in the `Emails` tab.
+- **Subsequent Follow-ups & Negotiations**: Once `QT-AUTO-01` exists for `(inquiry_item_id, supplier_id)`, all subsequent negotiation emails, price discussions, and delivery conversations bypass AI extraction (**0 OpenAI API calls**) and are appended directly to the `Emails` timeline.
+- **Thread-Aware Item Inheritance**: Short follow-up emails without explicit SKU numbers automatically inherit the product item (`inquiry_item_id`) from the active thread history with that supplier.
+- **Dynamic Live Polling**: Frontend automatically live-syncs quotes and email messages every 2.5 seconds, ensuring updates reflect instantly without manual browser refresh.
+- **Supplier Thread Filter**: The `Emails` tab features an intuitive supplier dropdown allowing users to isolate conversations with specific suppliers (e.g., `Wenzhou Brother Machinery` vs `Hualian Machinery Group`) or view all combined.
+
 ---
-*Maintained and verified for Inhyma Solutions Enterprise ERP.*
+*Maintained and verified for Inhyma Solutions Enterprise ERP. Last updated: August 31, 2026 (Supabase Storage Cloud Media Integration for Quotations, Products & Suppliers, Unified Storage Utility & Living Documentation).*

@@ -641,7 +641,7 @@ function CompaniesView({
               <th style={thStyle}>Total CBM</th>
               <th style={thStyle}>Total Weight</th>
               <th style={thStyle}>Updated Date</th>
-              <th style={thStyle}>Action</th>
+              <th style={{ ...thStyle, textAlign: "center" }}>Action</th>
             </tr>
           </thead>
           <tbody>
@@ -698,8 +698,8 @@ function CompaniesView({
                   <td style={tdStyle}>{s.total_cbm.toFixed(3)}</td>
                   <td style={tdStyle}>{s.total_weight.toFixed(2)}</td>
                   <td style={tdStyle}>{s.updated_at ? new Date(s.updated_at).toLocaleDateString() : "-"}</td>
-                  <td style={tdStyle}>
-                    <div style={{ display: "flex", gap: "6px" }}>
+                  <td style={{ ...tdStyle, textAlign: "center" }}>
+                    <div style={{ display: "flex", gap: "6px", justifyContent: "center", alignItems: "center" }}>
                       <button
                         type="button"
                         onClick={() => onOpenCompany(s.buyer_id)}
@@ -832,7 +832,7 @@ function ConsignmentsView({
               <th style={thStyle}>Total CBM</th>
               <th style={thStyle}>Total Weight</th>
               <th style={thStyle}>Updated</th>
-              <th style={thStyle}>Action</th>
+              <th style={{ ...thStyle, textAlign: "center" }}>Action</th>
             </tr>
           </thead>
           <tbody>
@@ -855,8 +855,8 @@ function ConsignmentsView({
                   <td style={tdStyle}>{r.total_cbm.toFixed(3)}</td>
                   <td style={tdStyle}>{r.total_weight.toFixed(2)}</td>
                   <td style={tdStyle}>{new Date(r.updated_at).toLocaleDateString()}</td>
-                  <td style={tdStyle}>
-                    <div style={{ display: "flex", gap: 6 }}>
+                  <td style={{ ...tdStyle, textAlign: "center" }}>
+                    <div style={{ display: "flex", gap: 6, justifyContent: "center", alignItems: "center" }}>
                       <button type="button" onClick={() => onOpenConsignment(r.id)} className="btn-link">View</button>
                       <Can permission="inquiry.delete">
                         <button
@@ -932,6 +932,13 @@ function ItemsView({
   const [quotations, setQuotations] = useState<Quotation[]>([]);
   const [loadingQuotes, setLoadingQuotes] = useState(false);
 
+  // Right Panel Tabs: 'quotation' vs 'messages' (WeChat) vs 'emails'
+  const [activeRightTab, setActiveRightTab] = useState<"quotation" | "messages" | "emails">("quotation");
+  const [inquiryMessages, setInquiryMessages] = useState<any[]>([]);
+  const [loadingMessages, setLoadingMessages] = useState(false);
+  const [showAllConsignmentMsgs, setShowAllConsignmentMsgs] = useState(false);
+  const [emailSupplierFilter, setEmailSupplierFilter] = useState<string>("all");
+
   // Modals & Drawers state
   const [addOpen, setAddOpen] = useState(false);
   const [shiftTarget, setShiftTarget] = useState<InquiryItem | null>(null);
@@ -964,13 +971,27 @@ function ItemsView({
     }
   }, [inquiryId, onError, onBack]);
 
+  const loadMessages = useCallback(async (silent = false) => {
+    if (!silent) setLoadingMessages(true);
+    try {
+      const res = await apiGet<any>(`/inquiries/${inquiryId}/messages`);
+      setInquiryMessages(Array.isArray(res.data) ? res.data : []);
+    } catch {
+      if (!silent) setInquiryMessages([]);
+    } finally {
+      if (!silent) setLoadingMessages(false);
+    }
+  }, [inquiryId]);
+
   useEffect(() => {
     void load();
-  }, [load]);
+    void loadMessages(true);
+  }, [load, loadMessages]);
 
-  // Live real-time WebSocket subscription: updates quietly when a supplier submits a quotation
+  // Live real-time WebSocket subscription: updates quietly when a supplier submits a quotation or message
   useLiveModule("inquiries", (_event) => {
     void load(true);
+    void loadMessages(true);
     const activeId = selectedItem?.id || selectedItemId;
     if (activeId) {
       void loadQuotations(activeId, true);
@@ -1001,20 +1022,22 @@ function ItemsView({
   useEffect(() => {
     if (selectedItem?.id) {
       void loadQuotations(selectedItem.id);
+      setEmailSupplierFilter("all");
     } else {
       setQuotations([]);
     }
   }, [selectedItem?.id, loadQuotations]);
 
-  // Seamless dynamic live sync every 2 seconds: ensures newly arriving quotes appear immediately without manual refresh
+  // Seamless dynamic live sync every 2.5 seconds: ensures newly arriving quotes and emails appear immediately without manual refresh
   useEffect(() => {
     const activeId = selectedItem?.id || selectedItemId;
     if (!activeId) return;
     const interval = setInterval(() => {
       void loadQuotations(activeId, true);
-    }, 2000);
+      void loadMessages(true);
+    }, 2500);
     return () => clearInterval(interval);
-  }, [selectedItem?.id, selectedItemId, loadQuotations]);
+  }, [selectedItem?.id, selectedItemId, loadQuotations, loadMessages]);
 
   // Filtered products on left
   const filteredProducts = useMemo(() => {
@@ -1721,34 +1744,520 @@ function ItemsView({
             overflow: "hidden",
           }}
         >
-          {/* Tabs row: Quotation / Messages */}
-          <div style={{ display: "flex", borderBottom: "1px solid #e2e8f0", gap: "24px" }}>
-            <div
-              style={{
-                fontSize: "14px",
-                fontWeight: 700,
-                color: "#2563eb",
-                paddingBottom: "10px",
-                borderBottom: "2px solid #2563eb",
-                cursor: "pointer",
-              }}
-            >
-              Quotation
-            </div>
-            <div
-              style={{
-                fontSize: "14px",
-                fontWeight: 500,
-                color: "#64748b",
-                paddingBottom: "10px",
-                cursor: "pointer",
-              }}
-            >
-              Messages (1)
-            </div>
-          </div>
+          {/* Tabs row: Quotation / WeChat Messages / Emails */}
+          {(() => {
+            const isRelevantMessage = (msg: any) => {
+              if (showAllConsignmentMsgs) return true;
+              if (!selectedItem) return true;
+              if (msg.inquiry_item_id === selectedItem.id) return true;
+              const pCode = (selectedItem.product_code || "").toLowerCase().trim();
+              const pName = (selectedItem.product_name || selectedItem.product_name_tally || "").toLowerCase().trim();
+              const text = (msg.message_text || "").toLowerCase();
+              if (pCode && pCode.length >= 3 && text.includes(pCode)) return true;
+              if (pName && pName.length >= 4 && text.includes(pName)) return true;
+              return false;
+            };
 
-          {selectedItem ? (
+            const wechatCount = inquiryMessages.filter((m: any) => m.channel === "wechat" && isRelevantMessage(m)).length;
+            const emailCount = inquiryMessages.filter((m: any) => (m.channel === "email" || !m.channel) && isRelevantMessage(m)).length;
+            return (
+              <div style={{ display: "flex", borderBottom: "1px solid #e2e8f0", gap: "24px" }}>
+                <button
+                  type="button"
+                  onClick={() => setActiveRightTab("quotation")}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    fontSize: "14px",
+                    fontWeight: 700,
+                    color: activeRightTab === "quotation" ? "#2563eb" : "#64748b",
+                    paddingBottom: "10px",
+                    borderBottom: activeRightTab === "quotation" ? "2.5px solid #2563eb" : "2.5px solid transparent",
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px",
+                  }}
+                >
+                  📋 Quotation
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveRightTab("messages");
+                    void loadMessages();
+                  }}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    fontSize: "14px",
+                    fontWeight: 700,
+                    color: activeRightTab === "messages" ? "#16a34a" : "#64748b",
+                    paddingBottom: "10px",
+                    borderBottom: activeRightTab === "messages" ? "2.5px solid #16a34a" : "2.5px solid transparent",
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px",
+                  }}
+                >
+                  💬 WeChat Messages ({wechatCount})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveRightTab("emails");
+                    void loadMessages();
+                  }}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    fontSize: "14px",
+                    fontWeight: 700,
+                    color: activeRightTab === "emails" ? "#2563eb" : "#64748b",
+                    paddingBottom: "10px",
+                    borderBottom: activeRightTab === "emails" ? "2.5px solid #2563eb" : "2.5px solid transparent",
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px",
+                  }}
+                >
+                  📧 Emails ({emailCount})
+                </button>
+              </div>
+            );
+          })()}
+
+          {activeRightTab === "messages" ? (
+            /* ================= WECHAT (企业微信) TIMELINE VIEW ================= */
+            (() => {
+              const currentItemName = selectedItem?.product_name || selectedItem?.product_name_tally || "Selected Product";
+              const isRelevantMessage = (msg: any) => {
+                if (showAllConsignmentMsgs) return true;
+                if (!selectedItem) return true;
+                if (msg.inquiry_item_id === selectedItem.id) return true;
+                const pCode = (selectedItem.product_code || "").toLowerCase().trim();
+                const pName = (selectedItem.product_name || selectedItem.product_name_tally || "").toLowerCase().trim();
+                const text = (msg.message_text || "").toLowerCase();
+                if (pCode && pCode.length >= 3 && text.includes(pCode)) return true;
+                if (pName && pName.length >= 4 && text.includes(pName)) return true;
+                return false;
+              };
+              const wechatList = inquiryMessages.filter((m: any) => m.channel === "wechat" && isRelevantMessage(m));
+              return (
+                <div style={{ display: "flex", flexDirection: "column", gap: "16px", flex: 1 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "12px", background: "#f0fdf4", padding: "12px 16px", borderRadius: "8px", border: "1px solid #bbf7d0" }}>
+                    <div>
+                      <div style={{ fontSize: "14px", fontWeight: 700, color: "#166534", display: "flex", alignItems: "center", gap: "8px" }}>
+                        <span>💬</span> WeChat (企业微信) Communication Timeline
+                      </div>
+                      <div style={{ fontSize: "12px", color: "#15803d", marginTop: "2px" }}>
+                        {showAllConsignmentMsgs
+                          ? `Live record of all WeChat RFQs & responses for Consignment #${inquiry?.consignment_code || "Inquiry"}`
+                          : `Live WeChat chat history for ${currentItemName}`}
+                      </div>
+                    </div>
+
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                      {/* Product vs Consignment Filter Toggle */}
+                      <div style={{ display: "flex", gap: "3px", background: "#ffffff", padding: "3px", borderRadius: "18px", border: "1px solid #86efac" }}>
+                        <button
+                          type="button"
+                          onClick={() => setShowAllConsignmentMsgs(false)}
+                          style={{
+                            padding: "3px 10px",
+                            borderRadius: "14px",
+                            fontSize: "11px",
+                            fontWeight: 700,
+                            cursor: "pointer",
+                            border: "none",
+                            background: !showAllConsignmentMsgs ? "#16a34a" : "transparent",
+                            color: !showAllConsignmentMsgs ? "#ffffff" : "#475569",
+                            transition: "all 0.15s ease",
+                          }}
+                        >
+                          📦 This Product Only
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setShowAllConsignmentMsgs(true)}
+                          style={{
+                            padding: "3px 10px",
+                            borderRadius: "14px",
+                            fontSize: "11px",
+                            fontWeight: 700,
+                            cursor: "pointer",
+                            border: "none",
+                            background: showAllConsignmentMsgs ? "#16a34a" : "transparent",
+                            color: showAllConsignmentMsgs ? "#ffffff" : "#475569",
+                            transition: "all 0.15s ease",
+                          }}
+                        >
+                          🌐 All Consignment
+                        </button>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => void loadMessages()}
+                        disabled={loadingMessages}
+                        style={{
+                          padding: "6px 12px",
+                          background: "#ffffff",
+                          border: "1px solid #86efac",
+                          borderRadius: "6px",
+                          fontSize: "12px",
+                          fontWeight: 600,
+                          color: "#166534",
+                          cursor: "pointer",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "5px",
+                          boxShadow: "0 1px 2px rgba(0,0,0,0.04)",
+                        }}
+                      >
+                        <span>{loadingMessages ? "⏳" : "↻"}</span>
+                        <span>{loadingMessages ? "Refreshing..." : "Refresh"}</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {wechatList.length === 0 ? (
+                    <div style={{ padding: "48px 20px", textAlign: "center", background: "#f8fafc", border: "1px dashed #cbd5e1", borderRadius: "10px", margin: "10px 0" }}>
+                      <div style={{ fontSize: "32px", marginBottom: "8px" }}>💬</div>
+                      <div style={{ fontSize: "15px", fontWeight: 700, color: "#334155" }}>
+                        No WeChat Messages Logged Yet {showAllConsignmentMsgs ? "" : `for ${currentItemName}`}
+                      </div>
+                      <div style={{ fontSize: "13px", color: "#64748b", maxWidth: "440px", margin: "6px auto 0" }}>
+                        {showAllConsignmentMsgs
+                          ? "When you dispatch an RFQ to WeChat or suppliers reply via WeChat, the chat will appear here."
+                          : `When you dispatch an RFQ for ${currentItemName} to WeChat or suppliers reply, the chat history will appear here in real time.`}
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ display: "flex", flexDirection: "column", gap: "12px", maxHeight: "calc(100vh - 340px)", overflowY: "auto", paddingRight: "4px" }}>
+                      {wechatList.map((msg: any) => {
+                        const isOutbound = msg.direction === "outbound";
+                        const formattedDate = msg.created_at ? new Date(msg.created_at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "Just now";
+
+                        return (
+                          <div
+                            key={msg.id}
+                            style={{
+                              background: isOutbound ? "#f8fafc" : "#ffffff",
+                              border: isOutbound ? "1px solid #e2e8f0" : "1.5px solid #86efac",
+                              borderRadius: "10px",
+                              padding: "14px 16px",
+                              boxShadow: "0 1px 3px rgba(0,0,0,0.03)",
+                              display: "flex",
+                              flexDirection: "column",
+                              gap: "8px",
+                            }}
+                          >
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px" }}>
+                              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                                <span style={{ fontSize: "16px" }}>💬</span>
+                                <span style={{ fontSize: "13px", fontWeight: 700, color: "#0f172a" }}>
+                                  {isOutbound ? (msg.sender_name || "Yinglima ERP Bot") : (msg.supplier_name || msg.sender_name || msg.sender_contact || "Supplier")}
+                                </span>
+                                {msg.sender_contact && (
+                                  <span style={{ fontSize: "11.5px", color: "#15803d", background: "#dcfce7", padding: "2px 6px", borderRadius: "4px" }}>
+                                    {msg.sender_contact}
+                                  </span>
+                                )}
+                              </div>
+
+                              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                                <span
+                                  style={{
+                                    fontSize: "11px",
+                                    fontWeight: 700,
+                                    padding: "2px 8px",
+                                    borderRadius: "12px",
+                                    background: isOutbound ? "#e0e7ff" : "#dcfce7",
+                                    color: isOutbound ? "#4338ca" : "#166534",
+                                  }}
+                                >
+                                  {isOutbound ? "Outbound WeChat ↗" : "WeChat Inbound ↙"}
+                                </span>
+                                <span style={{ fontSize: "11.5px", color: "#94a3b8" }}>{formattedDate}</span>
+                              </div>
+                            </div>
+
+                            <div style={{ fontSize: "13px", color: "#334155", lineHeight: 1.6, whiteSpace: "pre-wrap", background: "#ffffff", padding: "10px 12px", borderRadius: "6px", border: "1px solid #f1f5f9" }}>
+                              {(() => {
+                                let clean = (msg.message_text || "").trim();
+                                if (clean.includes("<") && clean.includes(">")) {
+                                  clean = clean.replace(/<blockquote[\s\S]*?<\/blockquote>/gi, "");
+                                  clean = clean.replace(/<br\s*\/?>|<\/p>|<\/div>|<\/li>/gi, "\n");
+                                  clean = clean.replace(/<[^>]+>/g, "");
+                                }
+                                return clean.replace(/\n{3,}/g, "\n\n").trim();
+                              })()}
+                            </div>
+
+                            {!isOutbound && (
+                              <div style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "11.5px", color: "#059669", fontWeight: 600 }}>
+                                <span>✨</span>
+                                <span>Auto-Extracted with Conversational AI &amp; Recorded in Quotation Matrix</span>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            })()
+          ) : activeRightTab === "emails" ? (
+            /* ================= EMAILS COMMUNICATION VIEW ================= */
+            (() => {
+              const currentItemName = selectedItem?.product_name || selectedItem?.product_name_tally || "Selected Product";
+              const isRelevantMessage = (msg: any) => {
+                if (showAllConsignmentMsgs) return true;
+                if (!selectedItem) return true;
+                if (msg.inquiry_item_id === selectedItem.id) return true;
+                const pCode = (selectedItem.product_code || "").toLowerCase().trim();
+                const pName = (selectedItem.product_name || selectedItem.product_name_tally || "").toLowerCase().trim();
+                const text = (msg.message_text || "").toLowerCase();
+                if (pCode && pCode.length >= 3 && text.includes(pCode)) return true;
+                if (pName && pName.length >= 4 && text.includes(pName)) return true;
+                return false;
+              };
+              const emailList = inquiryMessages.filter((m: any) => (m.channel === "email" || !m.channel) && isRelevantMessage(m));
+
+              // Extract unique suppliers present in this product's emails
+              const uniqueSuppliersInEmails: { id: string; name: string }[] = [];
+              const seenSuppMap = new Set<string>();
+              for (const m of emailList) {
+                const suppName = m.supplier_name || (m.direction === "inbound" ? (m.sender_name || m.sender_contact) : null);
+                const suppKey = m.supplier_id || suppName || m.sender_contact;
+                if (suppKey && suppName && !seenSuppMap.has(suppKey) && suppName !== "Yinglima Procurement") {
+                  seenSuppMap.add(suppKey);
+                  uniqueSuppliersInEmails.push({ id: suppKey, name: suppName });
+                }
+              }
+
+              const displayedEmailList = emailSupplierFilter === "all"
+                ? emailList
+                : emailList.filter((m: any) => {
+                    const suppKey = m.supplier_id || m.supplier_name || m.sender_name || m.sender_contact;
+                    const suppName = m.supplier_name || m.sender_name || m.sender_contact;
+                    return (
+                      suppKey === emailSupplierFilter ||
+                      suppName === emailSupplierFilter ||
+                      (m.direction === "outbound" && (m.message_text || "").toLowerCase().includes(emailSupplierFilter.toLowerCase()))
+                    );
+                  });
+
+              return (
+                <div style={{ display: "flex", flexDirection: "column", gap: "16px", flex: 1 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "12px", background: "#eff6ff", padding: "12px 16px", borderRadius: "8px", border: "1px solid #bfdbfe" }}>
+                    <div>
+                      <div style={{ fontSize: "14px", fontWeight: 700, color: "#1e40af", display: "flex", alignItems: "center", gap: "8px" }}>
+                        <span>📧</span> Email Communication History
+                      </div>
+                      <div style={{ fontSize: "12px", color: "#1d4ed8", marginTop: "2px" }}>
+                        {showAllConsignmentMsgs
+                          ? `Record of all RFQ emails & supplier replies for Consignment #${inquiry?.consignment_code || "Inquiry"}`
+                          : `Email thread specifically for ${currentItemName}`}
+                      </div>
+                    </div>
+
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                      {/* Supplier Filter Dropdown if multiple suppliers replied */}
+                      {uniqueSuppliersInEmails.length > 1 && (
+                        <select
+                          value={emailSupplierFilter}
+                          onChange={(e) => setEmailSupplierFilter(e.target.value)}
+                          style={{
+                            padding: "5px 10px",
+                            borderRadius: "6px",
+                            border: "1px solid #93c5fd",
+                            background: "#ffffff",
+                            fontSize: "12px",
+                            fontWeight: 600,
+                            color: "#1e40af",
+                            cursor: "pointer",
+                            boxShadow: "0 1px 2px rgba(0,0,0,0.04)",
+                          }}
+                        >
+                          <option value="all">👥 All Suppliers ({uniqueSuppliersInEmails.length})</option>
+                          {uniqueSuppliersInEmails.map((s) => (
+                            <option key={s.id} value={s.id}>
+                              🏢 {s.name}
+                            </option>
+                          ))}
+                        </select>
+                      )}
+
+                      {/* Product vs Consignment Filter Toggle */}
+                      <div style={{ display: "flex", gap: "3px", background: "#ffffff", padding: "3px", borderRadius: "18px", border: "1px solid #93c5fd" }}>
+                        <button
+                          type="button"
+                          onClick={() => setShowAllConsignmentMsgs(false)}
+                          style={{
+                            padding: "3px 10px",
+                            borderRadius: "14px",
+                            fontSize: "11px",
+                            fontWeight: 700,
+                            cursor: "pointer",
+                            border: "none",
+                            background: !showAllConsignmentMsgs ? "#2563eb" : "transparent",
+                            color: !showAllConsignmentMsgs ? "#ffffff" : "#475569",
+                            transition: "all 0.15s ease",
+                          }}
+                        >
+                          📦 This Product Only
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setShowAllConsignmentMsgs(true)}
+                          style={{
+                            padding: "3px 10px",
+                            borderRadius: "14px",
+                            fontSize: "11px",
+                            fontWeight: 700,
+                            cursor: "pointer",
+                            border: "none",
+                            background: showAllConsignmentMsgs ? "#2563eb" : "transparent",
+                            color: showAllConsignmentMsgs ? "#ffffff" : "#475569",
+                            transition: "all 0.15s ease",
+                          }}
+                        >
+                          🌐 All Consignment
+                        </button>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => void loadMessages()}
+                        disabled={loadingMessages}
+                        style={{
+                          padding: "6px 12px",
+                          background: "#ffffff",
+                          border: "1px solid #93c5fd",
+                          borderRadius: "6px",
+                          fontSize: "12px",
+                          fontWeight: 600,
+                          color: "#1e40af",
+                          cursor: "pointer",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "5px",
+                          boxShadow: "0 1px 2px rgba(0,0,0,0.04)",
+                        }}
+                      >
+                        <span>{loadingMessages ? "⏳" : "↻"}</span>
+                        <span>{loadingMessages ? "Refreshing..." : "Refresh"}</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {displayedEmailList.length === 0 ? (
+                    <div style={{ padding: "48px 20px", textAlign: "center", background: "#f8fafc", border: "1px dashed #cbd5e1", borderRadius: "10px", margin: "10px 0" }}>
+                      <div style={{ fontSize: "32px", marginBottom: "8px" }}>📧</div>
+                      <div style={{ fontSize: "15px", fontWeight: 700, color: "#334155" }}>
+                        No Emails Found {showAllConsignmentMsgs ? "" : `for ${currentItemName}`}
+                      </div>
+                      <div style={{ fontSize: "13px", color: "#64748b", maxWidth: "440px", margin: "6px auto 0" }}>
+                        {emailSupplierFilter !== "all"
+                          ? "No messages match the selected supplier filter."
+                          : showAllConsignmentMsgs
+                          ? "When you send RFQ emails to suppliers or suppliers reply with their quotes, the complete email chain will be displayed here."
+                          : `When you send an RFQ email for ${currentItemName} or the supplier replies with their quote, the complete email thread will appear here.`}
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ display: "flex", flexDirection: "column", gap: "12px", maxHeight: "calc(100vh - 340px)", overflowY: "auto", paddingRight: "4px" }}>
+                      {displayedEmailList.map((msg: any) => {
+                        const isOutbound = msg.direction === "outbound";
+                        const formattedDate = msg.created_at ? new Date(msg.created_at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "Just now";
+
+                        return (
+                          <div
+                            key={msg.id}
+                            style={{
+                              background: isOutbound ? "#f8fafc" : "#ffffff",
+                              border: isOutbound ? "1px solid #e2e8f0" : "1.5px solid #93c5fd",
+                              borderRadius: "10px",
+                              padding: "14px 16px",
+                              boxShadow: "0 1px 3px rgba(0,0,0,0.03)",
+                              display: "flex",
+                              flexDirection: "column",
+                              gap: "8px",
+                            }}
+                          >
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px" }}>
+                              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                                <span style={{ fontSize: "16px" }}>📧</span>
+                                <span style={{ fontSize: "13px", fontWeight: 700, color: "#0f172a" }}>
+                                  {isOutbound ? (msg.sender_name || "Yinglima Procurement") : (msg.supplier_name || msg.sender_name || msg.sender_contact || "Supplier")}
+                                </span>
+                                {msg.sender_contact && (
+                                  <span style={{ fontSize: "11.5px", color: "#1e40af", background: "#dbeafe", padding: "2px 6px", borderRadius: "4px" }}>
+                                    {msg.sender_contact}
+                                  </span>
+                                )}
+                              </div>
+
+                              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                                <span
+                                  style={{
+                                    fontSize: "11px",
+                                    fontWeight: 700,
+                                    padding: "2px 8px",
+                                    borderRadius: "12px",
+                                    background: isOutbound ? "#e0e7ff" : "#dbeafe",
+                                    color: isOutbound ? "#4338ca" : "#1e40af",
+                                  }}
+                                >
+                                  {isOutbound ? "Outbound Email ↗" : "Email Inbound ↙"}
+                                </span>
+                                <span style={{ fontSize: "11.5px", color: "#94a3b8" }}>{formattedDate}</span>
+                              </div>
+                            </div>
+
+                            <div style={{ fontSize: "13px", color: "#334155", lineHeight: 1.6, whiteSpace: "pre-wrap", background: "#ffffff", padding: "10px 12px", borderRadius: "6px", border: "1px solid #f1f5f9" }}>
+                              {(() => {
+                                let clean = (msg.message_text || "").trim();
+                                if (clean.includes("<") && clean.includes(">")) {
+                                  clean = clean.replace(/<blockquote[\s\S]*?<\/blockquote>/gi, "");
+                                  clean = clean.replace(/<br\s*\/?>|<\/p>|<\/div>|<\/li>/gi, "\n");
+                                  clean = clean.replace(/<[^>]+>/g, "");
+                                }
+                                const replyPatterns = [
+                                  /\n\s*On\s+.+?wrote:\s*\n/i,
+                                  /\n\s*On\s+.+?at\s+.+?wrote:\s*\n/i,
+                                  /\n\s*---\s*Original Message\s*---\s*\n/i,
+                                ];
+                                for (const pat of replyPatterns) {
+                                  const parts = clean.split(pat);
+                                  if (parts.length > 1) {
+                                    clean = parts[0];
+                                  }
+                                }
+                                return clean.replace(/\n{3,}/g, "\n\n").trim();
+                              })()}
+                            </div>
+
+                            {!isOutbound && (
+                              <div style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "11.5px", color: "#2563eb", fontWeight: 600 }}>
+                                <span>✨</span>
+                                <span>Auto-Parsed with AI &amp; Recorded in Quotation Matrix</span>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            })()
+          ) : selectedItem ? (
             <>
               {/* Product Header & Action Buttons */}
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "12px" }}>
@@ -2244,6 +2753,8 @@ function ItemsView({
       {/* 2. Request Quotation Drawer (Single Item) */}
       {rfqOpen && selectedItem && (
         <RequestQuotationDrawer
+          inquiryId={inquiryId}
+          consignmentCode={inquiry?.consignment_code || undefined}
           item={selectedItem}
           onClose={() => setRfqOpen(false)}
           onDispatched={() => {
@@ -2769,59 +3280,40 @@ function AddQuotationDrawer({
 }
 
 function RequestQuotationDrawer({
+  inquiryId,
+  consignmentCode,
   item,
   onClose,
   onDispatched,
   onError,
 }: {
+  inquiryId: string;
+  consignmentCode?: string;
   item: InquiryItem;
   onClose: () => void;
   onDispatched: () => void;
   onError: (err: unknown) => void;
 }) {
   const [expDate, setExpDate] = useState("");
-  const [supplierType, setSupplierType] = useState<"all" | "selected">("selected");
+  const [supplierType, setSupplierType] = useState<"all" | "selected">("all");
   const [selectedSupplierIds, setSelectedSupplierIds] = useState<string[]>([]);
-  const [note, setNote] = useState("");
+  const [note, setNote] = useState(item.product_specs_remarks || "");
   const [submitting, setSubmitting] = useState(false);
-  const [dispatchedData, setDispatchedData] = useState<any | null>(null);
-  const [copiedToken, setCopiedToken] = useState<string | null>(null);
-  const [copiedWechatToken, setCopiedWechatToken] = useState<string | null>(null);
-  const [sendingEmailToken, setSendingEmailToken] = useState<string | null>(null);
-  const [sentEmailSuccess, setSentEmailSuccess] = useState<Record<string, boolean>>({});
+  const [dispatchedResult, setDispatchedResult] = useState<any | null>(null);
 
-  const handleSendAutoEmail = async (sup: any, fullQuoteUrl: string, prodTitle: string) => {
-    const emailsList = (sup.emails && Array.isArray(sup.emails) && sup.emails.length > 0)
-      ? sup.emails
-      : sup.email
-        ? [sup.email]
-        : [];
+  // Dispatch Channel: 'all' (Email + WeChat) vs 'email' (Email Only) vs 'wechat' (WeChat Only)
+  const [channelMode, setChannelMode] = useState<"all" | "email" | "wechat">("all");
 
-    if (emailsList.length === 0) {
-      alert(`No email address registered for ${sup.company_name}. Please open Gmail or copy the link.`);
-      return;
-    }
-
-    setSendingEmailToken(sup.token);
-    try {
-      await apiPost("/inquiries/rfqs/send-email", {
-        to_emails: emailsList,
-        contact_name: sup.contact_name || "Valued Partner",
-        company_name: sup.company_name,
-        product_name: prodTitle,
-        product_code: item.product_code || null,
-        quantity: item.quantity,
-        quote_url: fullQuoteUrl,
-        expected_receiving_date: expDate || null,
-        notes: note.trim() || null,
-      });
-      setSentEmailSuccess((prev) => ({ ...prev, [sup.token]: true }));
-    } catch (err: any) {
-      alert("Failed to send automated email: " + (err?.message || "Please check connection."));
-    } finally {
-      setSendingEmailToken(null);
-    }
-  };
+  // Send Mode: 'auto' (Automatic Send) vs 'draft' (Draft & Preview)
+  const [sendMode, setSendMode] = useState<"auto" | "draft">("auto");
+  const [resolvedSuppliers, setResolvedSuppliers] = useState<{ id: string; name: string; emails: string[]; wechat: string }[]>([]);
+  const [showAllMatchedSuppliers, setShowAllMatchedSuppliers] = useState(false);
+  const [customRecipientEmails, setCustomRecipientEmails] = useState<string>("");
+  const [customRecipientWechat, setCustomRecipientWechat] = useState<string>("");
+  const [customSubject, setCustomSubject] = useState<string>("");
+  const [customBody, setCustomBody] = useState<string>("");
+  const [loadingEmails, setLoadingEmails] = useState(false);
+  const [loadingLastPurchase, setLoadingLastPurchase] = useState(false);
 
   const [productMeta, setProductMeta] = useState<{
     categoryId?: string;
@@ -2829,13 +3321,36 @@ function RequestQuotationDrawer({
     subCategoryId?: string;
     subCategoryName?: string;
   } | null>(null);
-  const [allMatchingSuppliers, setAllMatchingSuppliers] = useState<Array<{ id: string; name: string }>>([]);
-  const [supplierFilterScope, setSupplierFilterScope] = useState<"all_matching" | "sub_category" | "category" | "all">("all_matching");
 
+  const fetchSupplierOptions = useCallback(async (term: string) => {
+    try {
+      let url = `/suppliers?page_size=100&sort_by=company_name&sort_order=asc`;
+      if (term && term.trim()) {
+        url += `&search=${encodeURIComponent(term.trim())}`;
+      }
+      const res = await apiGet<any>(url);
+      const list = Array.isArray(res.data) ? res.data : res.data?.items || res.data?.data || [];
+      return list.map((s: any) => ({ value: s.id, label: s.company_name || s.name || "Supplier" }));
+    } catch {
+      return [];
+    }
+  }, []);
+
+  const fetchSupplierLabel = useCallback(async (id: string) => {
+    try {
+      const res = await apiGet<any>(`/suppliers/${id}`);
+      return res.data?.company_name || res.data?.name || id;
+    } catch {
+      return id;
+    }
+  }, []);
+
+  // Fetch product metadata & resolve matching suppliers
   useEffect(() => {
     if (!item.product_id) return;
     let isMounted = true;
     (async () => {
+      setLoadingEmails(true);
       try {
         const { data: prod } = await apiGet<any>(`/masters/products/${item.product_id}`);
         if (!prod || !isMounted) return;
@@ -2847,176 +3362,124 @@ function RequestQuotationDrawer({
           try {
             const { data: cat } = await apiGet<any>(`/masters/product-categories/${prod.category_id}`);
             catName = cat?.name || "";
-          } catch {
-            /* ignore */
-          }
+          } catch {}
         }
 
         if (prod.sub_category_id) {
           try {
             const { data: subCat } = await apiGet<any>(`/masters/product-sub-categories/${prod.sub_category_id}`);
             subCatName = subCat?.name || "";
-          } catch {
-            /* ignore */
-          }
+          } catch {}
         }
 
-        if (!isMounted) return;
-        setProductMeta({
-          categoryId: prod.category_id || undefined,
-          categoryName: catName,
-          subCategoryId: prod.sub_category_id || undefined,
-          subCategoryName: subCatName,
-        });
+        if (isMounted) {
+          setProductMeta({
+            categoryId: prod.category_id || undefined,
+            categoryName: catName,
+            subCategoryId: prod.sub_category_id || undefined,
+            subCategoryName: subCatName,
+          });
+        }
 
-        // Automatically fetch all matching suppliers for this product to keep in allMatchingSuppliers
-        const matchingList: Array<{ id: string; name: string }> = [];
-        const seenIds = new Set<string>();
-        try {
-          if (prod.sub_category_id) {
-            const { data: subSups } = await apiGet<any>(`/suppliers?sub_category_id=${prod.sub_category_id}&limit=100`);
-            const subList = Array.isArray(subSups) ? subSups : subSups?.data || [];
-            subList.forEach((s: any) => {
-              if (!seenIds.has(s.id)) {
-                seenIds.add(s.id);
-                matchingList.push({ id: s.id, name: s.company_name || s.name || "Supplier" });
-              }
-            });
+        if (supplierType === "selected") {
+          if (selectedSupplierIds.length === 0) {
+            if (isMounted) {
+              setResolvedSuppliers([]);
+              setCustomRecipientEmails("");
+              setCustomRecipientWechat("");
+            }
+            return;
           }
-          if (prod.category_id) {
-            const { data: catSups } = await apiGet<any>(`/suppliers?category_id=${prod.category_id}&limit=100`);
-            const catList = Array.isArray(catSups) ? catSups : catSups?.data || [];
-            catList.forEach((s: any) => {
-              if (!seenIds.has(s.id)) {
-                seenIds.add(s.id);
-                matchingList.push({ id: s.id, name: s.company_name || s.name || "Supplier" });
+          const list: { id: string; name: string; emails: string[]; wechat: string }[] = [];
+          for (const sid of selectedSupplierIds) {
+            try {
+              const { data: s } = await apiGet<any>(`/suppliers/${sid}`);
+              if (s) {
+                const rawEmails = Array.isArray(s.emails) ? s.emails : [];
+                const ems: string[] = rawEmails
+                  .map((e: any) => (typeof e === "string" ? e : e?.email || "").trim())
+                  .filter((e: string) => e && e.includes("@"));
+                const wechatNum = (s.contact_wechat_number || s.wechat_number || s.phone || "").trim();
+                list.push({ id: s.id, name: s.company_name || s.name || "Supplier", emails: ems, wechat: wechatNum });
               }
-            });
-          }
-          if (matchingList.length === 0) {
-            const { data: allSups } = await apiGet<any>(`/suppliers?limit=100`);
-            const allList = Array.isArray(allSups) ? allSups : allSups?.data || [];
-            allList.forEach((s: any) => {
-              if (!seenIds.has(s.id)) {
-                seenIds.add(s.id);
-                matchingList.push({ id: s.id, name: s.company_name || s.name || "Supplier" });
-              }
-            });
+            } catch {}
           }
           if (isMounted) {
-            setAllMatchingSuppliers(matchingList);
+            setResolvedSuppliers(list);
+            const allEms = Array.from(new Set(list.flatMap((x) => x.emails)));
+            setCustomRecipientEmails(allEms.join(", "));
+            const allWcs = Array.from(new Set(list.map((x) => x.wechat).filter(Boolean)));
+            setCustomRecipientWechat(allWcs.join(", "));
           }
-        } catch {
-          /* ignore */
+        } else {
+          // "all" matching suppliers
+          const { data: sups } = await apiGet<any>("/suppliers?limit=200");
+          const supList = Array.isArray(sups) ? sups : sups?.data || [];
+
+          const matchingSupStubs = supList.filter((s: any) => {
+            if (s.is_active === false) return false;
+            const supCatIds = (s.category_ids || []).map((id: any) => String(id));
+            const supSubCatIds = (s.sub_category_ids || []).map((id: any) => String(id));
+
+            if (!prod.category_id && !prod.sub_category_id) return true;
+
+            const catMatch = prod.category_id && supCatIds.includes(String(prod.category_id));
+            const subCatMatch = prod.sub_category_id && supSubCatIds.includes(String(prod.sub_category_id));
+            return catMatch || subCatMatch;
+          });
+
+          const list: { id: string; name: string; emails: string[]; wechat: string }[] = [];
+          for (const stub of matchingSupStubs) {
+            try {
+              const { data: s } = await apiGet<any>(`/suppliers/${stub.id}`);
+              if (s) {
+                const rawEmails = Array.isArray(s.emails) ? s.emails : [];
+                const ems: string[] = rawEmails
+                  .map((e: any) => (typeof e === "string" ? e : e?.email || "").trim())
+                  .filter((e: string) => e && e.includes("@"));
+                const wechatNum = (s.contact_wechat_number || s.wechat_number || s.phone || "").trim();
+                list.push({ id: s.id, name: s.company_name || s.name || "Supplier", emails: ems, wechat: wechatNum });
+              }
+            } catch {}
+          }
+
+          if (isMounted) {
+            setResolvedSuppliers(list);
+            const allEms = Array.from(new Set(list.flatMap((x) => x.emails)));
+            setCustomRecipientEmails(allEms.join(", "));
+            const allWcs = Array.from(new Set(list.map((x) => x.wechat).filter(Boolean)));
+            setCustomRecipientWechat(allWcs.join(", "));
+          }
         }
       } catch {
-        /* ignore */
+        if (isMounted) {
+          setResolvedSuppliers([]);
+          setCustomRecipientEmails("");
+          setCustomRecipientWechat("");
+        }
+      } finally {
+        if (isMounted) setLoadingEmails(false);
       }
     })();
     return () => {
       isMounted = false;
     };
-  }, [item.product_id]);
+  }, [item.product_id, supplierType, selectedSupplierIds]);
 
-  const fetchSupplierOptions = useCallback(
-    async (term: string) => {
-      try {
-        if (supplierFilterScope === "all_matching") {
-          const supplierMap = new Map<string, any>();
-          if (productMeta?.subCategoryId) {
-            const { data: subSups } = await apiGet<any>(`/suppliers?search=${encodeURIComponent(term)}&sub_category_id=${productMeta.subCategoryId}&limit=100`);
-            const list = Array.isArray(subSups) ? subSups : subSups?.data || [];
-            list.forEach((s: any) => supplierMap.set(s.id, s));
-          }
-          if (productMeta?.categoryId) {
-            const { data: catSups } = await apiGet<any>(`/suppliers?search=${encodeURIComponent(term)}&category_id=${productMeta.categoryId}&limit=100`);
-            const list = Array.isArray(catSups) ? catSups : catSups?.data || [];
-            list.forEach((s: any) => supplierMap.set(s.id, s));
-          }
-          if (supplierMap.size === 0) {
-            const { data: allSups } = await apiGet<any>(`/suppliers?search=${encodeURIComponent(term)}&limit=100`);
-            const list = Array.isArray(allSups) ? allSups : allSups?.data || [];
-            list.forEach((s: any) => supplierMap.set(s.id, s));
-          }
-          return Array.from(supplierMap.values()).map((s: any) => ({
-            value: s.id,
-            label: s.company_name || s.name || "Supplier",
-          }));
-        }
+  // Auto-generate template text for the draft
+  useEffect(() => {
+    const codeTag = consignmentCode ? `[#${consignmentCode}]` : "";
+    const pName = item.product_name || item.product_name_tally || "Product";
+    const pCode = item.product_code ? ` (#${item.product_code})` : "";
+    setCustomSubject(`${codeTag} Request for Quotation: ${pName}${pCode} - Yinglima Procurement Team`);
 
-        let url = `/suppliers?search=${encodeURIComponent(term)}&limit=100&sort_by=company_name&sort_order=asc`;
-        if (supplierFilterScope === "sub_category" && productMeta?.subCategoryId) {
-          url += `&sub_category_id=${productMeta.subCategoryId}`;
-        } else if (supplierFilterScope === "category" && productMeta?.categoryId) {
-          url += `&category_id=${productMeta.categoryId}`;
-        }
-        const res = await apiGet<any>(url);
-        const list = Array.isArray(res.data) ? res.data : res.data?.data || [];
-        return list.map((s: any) => ({
-          value: s.id,
-          label: s.company_name || s.name || "Supplier",
-        }));
-      } catch {
-        return [];
-      }
-    },
-    [supplierFilterScope, productMeta]
-  );
+    const pDate = expDate || "Earliest Possible";
+    const pNotes = note.trim() ? `\n• General Notes / Specifications: ${note.trim()}` : "";
 
-  const fetchSupplierLabel = useCallback(async (id: string) => {
-    try {
-      const res = await apiGet<any>(`/suppliers/${id}`);
-      return res.data?.company_name || res.data?.name || id;
-    } catch {
-      return id;
-    }
-  }, []);
+    const defaultBodyText = `Dear Valued Partner,\n\nWe are from Yinglima Procurement Team. We are requesting your best competitive quotation and delivery lead times for:\n\n• Product: ${pName}${pCode}\n• Target Quantity: ${item.quantity} units\n• Target Delivery Date: ${pDate}${pNotes}\n\nPlease reply directly to this email or WeChat message with:\n1. Unit Price (CNY / USD / INR / EUR)\n2. Earliest Production / Delivery Lead Time\n3. Payment Terms & Price Terms (Ex-Factory / FOB, Deposit %)\n\nYou can reply directly to this message or attach your official quotation PDF / sheet.\n\nBest regards,\nYinglima Procurement Team\nYinglima Packaging Machinery Co., Ltd.`;
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if (supplierType === "selected" && selectedSupplierIds.length === 0) {
-      alert("Please select at least one supplier.");
-      return;
-    }
-
-    const supplierIdsToSend = supplierType === "all" ? allMatchingSuppliers.map((s) => s.id) : selectedSupplierIds;
-
-    setSubmitting(true);
-    try {
-      const res = await apiPost<any>(`/inquiries/items/${item.id}/rfqs`, {
-        expected_receiving_date: expDate || null,
-        supplier_type: supplierType,
-        supplier_ids: supplierIdsToSend,
-        notes: note.trim() || null,
-      });
-
-      if (res.data && res.data.supplier_links && res.data.supplier_links.length > 0) {
-        // The backend now automatically dispatches emails in the background
-        // to every supplier link that has an email address (see
-        // app.inquiries.routes.create_item_rfq), so pre-mark those as
-        // already sent -- otherwise this dialog would show "⚡ Send Email"
-        // as still available/unsent for suppliers who were already
-        // emailed automatically, inviting a confusing duplicate send.
-        const initialSent: Record<string, boolean> = {};
-        res.data.supplier_links.forEach((l: any) => {
-          if ((l.emails && l.emails.length > 0) || l.email) {
-            initialSent[l.token] = true;
-          }
-        });
-        setSentEmailSuccess(initialSent);
-        setDispatchedData(res.data);
-      } else {
-        alert("Request for Quotation successfully sent to suppliers!");
-        onDispatched();
-      }
-    } catch (err) {
-      onError(err);
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  const [loadingLastPurchase, setLoadingLastPurchase] = useState(false);
+    setCustomBody(defaultBodyText);
+  }, [consignmentCode, item, expDate, note]);
 
   const handleViewLastPurchase = async () => {
     if (!item.product_id) {
@@ -3049,13 +3512,67 @@ function RequestQuotationDrawer({
     }
   };
 
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (supplierType === "selected" && selectedSupplierIds.length === 0) {
+      alert("Please select at least one supplier.");
+      return;
+    }
+
+    const recipientList = customRecipientEmails
+      .split(",")
+      .map((e) => e.trim())
+      .filter((e) => e && e.includes("@"));
+
+    const wechatList = customRecipientWechat
+      .split(",")
+      .map((w) => w.trim())
+      .filter(Boolean);
+
+    if (sendMode === "draft") {
+      if ((channelMode === "email" || channelMode === "all") && recipientList.length === 0 && wechatList.length === 0) {
+        alert("Please provide at least one valid recipient supplier email or WeChat number in the draft fields.");
+        return;
+      }
+    }
+
+    const channelsToDispatch = channelMode === "all" ? ["email", "wechat"] : [channelMode];
+
+    setSubmitting(true);
+    try {
+      const payload: any = {
+        inquiry_item_ids: [item.id],
+        expected_receiving_date: expDate || null,
+        supplier_type: supplierType,
+        supplier_ids: selectedSupplierIds,
+        notes: note.trim() || null,
+        channels: channelsToDispatch,
+      };
+
+      if (sendMode === "draft") {
+        payload.custom_subject = customSubject.trim() || null;
+        payload.custom_body = customBody.trim() || null;
+        payload.custom_recipient_emails = recipientList;
+        payload.custom_recipient_wechat_numbers = wechatList;
+      }
+
+      const res = await apiPost<any>(`/inquiries/${inquiryId}/bulk-rfqs`, payload);
+      const payloadData = res.data?.data || res.data || {};
+      setDispatchedResult(payloadData);
+    } catch (err) {
+      onError(err);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 100010, display: "flex", justifyContent: "flex-end" }}>
       <div style={{ position: "absolute", inset: 0, background: "rgba(15,23,42,0.45)", backdropFilter: "blur(2px)" }} onClick={onClose} />
       <div
         style={{
           position: "relative",
-          width: "520px",
+          width: "650px",
           maxWidth: "94vw",
           height: "100%",
           background: "#ffffff",
@@ -3066,223 +3583,55 @@ function RequestQuotationDrawer({
         }}
       >
         {/* Header */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "18px 24px", borderBottom: "1px solid #e2e8f0" }}>
-          <h3 style={{ margin: 0, fontSize: "17px", fontWeight: 700, color: "#0f172a" }}>
-            {dispatchedData ? "⚡ RFQ Share & Dispatch" : "Request For Quotation"}
-          </h3>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "18px 24px", borderBottom: "1px solid #e2e8f0", background: "#f8fafc" }}>
+          <div>
+            <h3 style={{ margin: 0, fontSize: "17px", fontWeight: 700, color: "#0f172a" }}>
+              Request Quotation
+            </h3>
+            <div style={{ fontSize: "12.5px", color: "#64748b", marginTop: "2px" }}>
+              Consignment #{consignmentCode || "Inquiry"} • {item.product_name || item.product_name_tally || "Product"}
+            </div>
+          </div>
           <button type="button" onClick={onClose} style={{ background: "none", border: "none", fontSize: "18px", cursor: "pointer", color: "#64748b" }}>✕</button>
         </div>
 
-        {/* If already dispatched, show interactive Share Links modal */}
-        {dispatchedData ? (
-          <div style={{ padding: "20px 24px", display: "flex", flexDirection: "column", gap: "16px", flex: 1 }}>
-            <div style={{ background: "#ecfdf5", border: "1px solid #a7f3d0", padding: "14px 16px", borderRadius: "10px" }}>
-              <div style={{ fontSize: "14px", fontWeight: 700, color: "#065f46", display: "flex", alignItems: "center", gap: "6px" }}>
-                <span>✓</span> RFQ Created Successfully!
+        {dispatchedResult ? (
+          /* Dispatched Confirmation Screen */
+          <div style={{ padding: "24px", display: "flex", flexDirection: "column", gap: "18px" }}>
+            <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: "10px", padding: "16px 20px" }}>
+              <div style={{ fontSize: "15px", fontWeight: 700, color: "#166534", display: "flex", alignItems: "center", gap: "8px" }}>
+                <span>✓</span> RFQ Dispatched Successfully!
               </div>
-              <div style={{ fontSize: "12.5px", color: "#047857", marginTop: "4px" }}>
-                Send the private quotation link to each supplier. When they submit their quote, it will automatically appear in your ERP Quotations Table.
-              </div>
+              <p style={{ margin: "8px 0 0 0", fontSize: "13px", color: "#15803d", lineHeight: 1.5 }}>
+                RFQ for <strong>{item.product_name || item.product_name_tally || "Product"}</strong> was dispatched via <strong>{dispatchedResult.channels?.join(" + ") || "Email & WeChat"}</strong> to <strong>{dispatchedResult.dispatched_count} supplier(s)</strong>.
+              </p>
             </div>
 
-            {/* Product Summary */}
-            <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "12px 14px" }}>
-              <div style={{ fontSize: "13.5px", fontWeight: 700, color: "#0f172a" }}>
-                {item.product_name || item.product_name_tally}
-              </div>
-              <div style={{ fontSize: "12px", color: "#64748b" }}>
-                Qty: <strong>{item.quantity} units</strong> {expDate && `• Expected By: ${expDate}`}
-              </div>
+            <div style={{ fontSize: "13px", fontWeight: 700, color: "#0f172a" }}>
+              Dispatched Suppliers ({dispatchedResult.dispatched_suppliers?.length || 0}):
             </div>
-
-            {/* List of Supplier Links */}
-            <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-              <label style={{ fontSize: "12.5px", fontWeight: 700, color: "#334155" }}>
-                Supplier Quotation Links ({dispatchedData.supplier_links?.length || 0})
-              </label>
-
-              {dispatchedData.supplier_links?.map((sup: any) => {
-                const host = window.location.hostname;
-                const isLocal = host === "localhost" || host === "127.0.0.1";
-                const baseOrigin = isLocal ? `${window.location.protocol}//192.168.1.23:${window.location.port}` : window.location.origin;
-                const fullQuoteUrl = `${baseOrigin}${sup.quote_path}`;
-                const prodTitle = item.product_name || item.product_name_tally || "Product";
-                const waText = `Hello ${sup.contact_name},\n\nWe have an RFQ for ${item.quantity} units of *${prodTitle}* (#${item.product_code || "PC"}).\n\nPlease submit your best quotation with price and lead time using this link:\n\n${fullQuoteUrl}\n\nThank you!\nfrom Yinglima`;
-                const waUrl = sup.clean_phone
-                  ? `https://api.whatsapp.com/send?phone=${sup.clean_phone}&text=${encodeURIComponent(waText)}`
-                  : `https://api.whatsapp.com/send?text=${encodeURIComponent(waText)}`;
-                const supEmail = (
-                  typeof sup.email === "string" && sup.email
-                    ? sup.email
-                    : Array.isArray(sup.emails)
-                      ? sup.emails.map((e: any) => (typeof e === "string" ? e : e?.email || "")).filter(Boolean).join(", ")
-                      : ""
-                );
-                const emailSubject = `Request for Quotation: ${prodTitle} (${item.quantity} units)`;
-                const emailBody = `Dear ${sup.contact_name},\n\nPlease review our inquiry for ${item.quantity} units of ${prodTitle}.\n\nYou can view specifications and submit your quotation using the link below:\n\n${fullQuoteUrl}\n\nBest regards,\nYinglima Procurement Team`;
-                const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(supEmail)}&su=${encodeURIComponent(emailSubject)}&body=${encodeURIComponent(emailBody)}`;
-
-                return (
-                  <div
-                    key={sup.supplier_id}
-                    style={{
-                      background: "#ffffff",
-                      border: "1.5px solid #e2e8f0",
-                      borderRadius: "10px",
-                      padding: "14px 16px",
-                      boxShadow: "0 1px 3px rgba(0,0,0,0.03)",
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: "10px",
-                    }}
-                  >
-                    <div>
-                      <div style={{ fontSize: "13.5px", fontWeight: 700, color: "#0f172a" }}>
-                        🏢 {sup.company_name}
-                      </div>
-                      <div style={{ fontSize: "12px", color: "#64748b", marginTop: "2px" }}>
-                        Contact: {sup.contact_name} {sup.phone ? `• 📞 ${sup.phone}` : ""} {supEmail ? `• ✉️ ${supEmail}` : ""}
-                      </div>
-                    </div>
-
-                    {/* Action Buttons Row */}
-                    <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-                      {/* 1-Click Instant Auto-Email Button */}
-                      <button
-                        type="button"
-                        disabled={sendingEmailToken === sup.token}
-                        onClick={() => void handleSendAutoEmail(sup, fullQuoteUrl, prodTitle)}
-                        style={{
-                          padding: "7px 14px",
-                          background: sentEmailSuccess[sup.token] ? "#059669" : "#0061f2",
-                          color: "#ffffff",
-                          border: "none",
-                          borderRadius: "6px",
-                          fontSize: "12px",
-                          fontWeight: 700,
-                          cursor: sendingEmailToken === sup.token ? "wait" : "pointer",
-                          display: "inline-flex",
-                          alignItems: "center",
-                          gap: "6px",
-                          boxShadow: "0 2px 5px rgba(0,97,242,0.25)",
-                        }}
-                      >
-                        {sendingEmailToken === sup.token ? (
-                          <><span>⏳</span> Sending Email...</>
-                        ) : sentEmailSuccess[sup.token] ? (
-                          <><span>✓</span> Email Sent!</>
-                        ) : (
-                          <><span>⚡</span> Auto-Send Email</>
-                        )}
-                      </button>
-
-                      {/* 1-Click Copy for WeChat Button (English) */}
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const wechatMsg = `Dear ${sup.contact_name || sup.company_name},\n\nYinglima Procurement Team invites you to submit your quotation for:\n\n• Product: ${prodTitle}${item.product_code ? ` (#${item.product_code})` : ''}\n• Quantity: ${item.quantity} units\n${expDate ? `• Required Date: ${expDate}\n` : ''}${note.trim() ? `• Notes: ${note.trim()}\n` : ''}\nPlease click the link below to view specifications and submit your quotation:\n👉 ${fullQuoteUrl}\n\nThank you!\n(Yinglima Procurement Team)`;
-                          navigator.clipboard.writeText(wechatMsg);
-                          setCopiedWechatToken(sup.token);
-                          setTimeout(() => setCopiedWechatToken(null), 3000);
-                        }}
-                        style={{
-                          padding: "7px 12px",
-                          background: copiedWechatToken === sup.token ? "#dcfce7" : "#07c160",
-                          color: copiedWechatToken === sup.token ? "#15803d" : "#ffffff",
-                          border: copiedWechatToken === sup.token ? "1px solid #86efac" : "none",
-                          borderRadius: "6px",
-                          fontSize: "12px",
-                          fontWeight: 700,
-                          cursor: "pointer",
-                          display: "inline-flex",
-                          alignItems: "center",
-                          gap: "6px",
-                          boxShadow: "0 2px 4px rgba(7,193,96,0.25)",
-                        }}
-                        title="Copy pre-formatted inquiry message with quote link to paste into WeChat"
-                      >
-                        <span>💬</span>
-                        {copiedWechatToken === sup.token ? "✓ Message Copied!" : "WeChat Message"}
-                      </button>
-
-                      {/* WhatsApp Button */}
-                      <a
-                        href={waUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        style={{
-                          padding: "7px 12px",
-                          background: "#25D366",
-                          color: "#ffffff",
-                          borderRadius: "6px",
-                          fontSize: "12px",
-                          fontWeight: 700,
-                          textDecoration: "none",
-                          display: "inline-flex",
-                          alignItems: "center",
-                          gap: "6px",
-                          boxShadow: "0 2px 4px rgba(37,211,102,0.2)",
-                        }}
-                      >
-                        <span>💬</span> Send on WhatsApp
-                      </a>
-
-                      {/* Gmail Button */}
-                      <a
-                        href={gmailUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        style={{
-                          padding: "7px 12px",
-                          background: "#fef2f2",
-                          color: "#dc2626",
-                          border: "1px solid #fecaca",
-                          borderRadius: "6px",
-                          fontSize: "12px",
-                          fontWeight: 600,
-                          textDecoration: "none",
-                          display: "inline-flex",
-                          alignItems: "center",
-                          gap: "6px",
-                        }}
-                        title="Open in Gmail Web to review or edit before sending"
-                      >
-                        <span>✉️</span> Gmail Web
-                      </a>
-
-                      {/* Copy Link Button */}
-                      <button
-                        type="button"
-                        onClick={() => {
-                          navigator.clipboard.writeText(fullQuoteUrl);
-                          setCopiedToken(sup.token);
-                          setTimeout(() => setCopiedToken(null), 2500);
-                        }}
-                        style={{
-                          padding: "7px 12px",
-                          background: copiedToken === sup.token ? "#dcfce7" : "#f8fafc",
-                          color: copiedToken === sup.token ? "#15803d" : "#334155",
-                          border: copiedToken === sup.token ? "1px solid #86efac" : "1px solid #cbd5e1",
-                          borderRadius: "6px",
-                          fontSize: "12px",
-                          fontWeight: 600,
-                          cursor: "pointer",
-                          display: "inline-flex",
-                          alignItems: "center",
-                          gap: "6px",
-                        }}
-                      >
-                        <span>{copiedToken === sup.token ? "✓" : "📋"}</span>
-                        {copiedToken === sup.token ? "✓ Link Copied!" : "Copy Link"}
-                      </button>
+            <div style={{ display: "flex", flexDirection: "column", gap: "8px", maxHeight: "260px", overflowY: "auto" }}>
+              {dispatchedResult.dispatched_suppliers?.map((sup: any, idx: number) => (
+                <div key={idx} style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "10px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: "13.5px", color: "#0f172a" }}>{sup.company_name}</div>
+                    <div style={{ fontSize: "12px", color: "#64748b" }}>
+                      {sup.emails && sup.emails.length > 0 && `📧 ${sup.emails.join(", ")}`}
+                      {sup.wechat && ` • 💬 WeChat: ${sup.wechat}`}
                     </div>
                   </div>
-                );
-              })}
+                  <span style={{ fontSize: "11px", fontWeight: 700, background: "#dcfce7", color: "#166534", padding: "3px 8px", borderRadius: "12px" }}>
+                    Dispatched 🚀
+                  </span>
+                </div>
+              ))}
             </div>
 
-            {/* Done & View Quotations Button */}
-            <div style={{ marginTop: "auto", paddingTop: "16px" }}>
+            <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: "8px", padding: "12px 16px", fontSize: "12.5px", color: "#1e40af" }}>
+              <strong>Two-Way Live Ingestion:</strong> When suppliers reply via WeChat or email with price offers, the AI extractor will parse their quotes and update your ERP table live!
+            </div>
+
+            <div style={{ marginTop: "auto", paddingTop: "12px" }}>
               <button
                 type="button"
                 onClick={() => {
@@ -3292,22 +3641,21 @@ function RequestQuotationDrawer({
                 style={{
                   width: "100%",
                   padding: "10px",
-                  background: "#0061f2",
+                  background: "#2563eb",
                   color: "#ffffff",
                   border: "none",
                   borderRadius: "8px",
                   fontSize: "14px",
                   fontWeight: 700,
                   cursor: "pointer",
-                  boxShadow: "0 2px 6px rgba(0,97,242,0.25)",
                 }}
               >
-                Done &amp; View Quotations Table
+                Done
               </button>
             </div>
           </div>
         ) : (
-          /* Initial RFQ Creation Form */
+          /* Initial RFQ Form */
           <form onSubmit={handleSubmit} style={{ padding: "20px 24px", display: "flex", flexDirection: "column", gap: "16px", flex: 1 }}>
             {/* Selected Product Card */}
             <div>
@@ -3315,16 +3663,16 @@ function RequestQuotationDrawer({
               <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "12px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <div>
                   <div style={{ fontSize: "13.5px", fontWeight: 700, color: "#0f172a" }}>
-                    {item.product_name || item.product_name_tally}
+                    {item.product_name || item.product_name_tally || "Product"}
                   </div>
-                  <div style={{ fontSize: "12px", color: "#64748b" }}>
+                  <div style={{ fontSize: "12px", color: "#64748b", marginTop: "2px" }}>
                     #{item.product_code || "PC10956df"}
                     {productMeta?.subCategoryName && ` • ${productMeta.subCategoryName}`}
                     {!productMeta?.subCategoryName && productMeta?.categoryName && ` • ${productMeta.categoryName}`}
                   </div>
                 </div>
-                <div style={{ fontSize: "13px", fontWeight: 600, color: "#334155" }}>
-                  Qty: {item.quantity}
+                <div style={{ fontSize: "13px", fontWeight: 700, color: "#2563eb", background: "#eff6ff", border: "1px solid #bfdbfe", padding: "4px 10px", borderRadius: "6px" }}>
+                  Qty: {item.quantity} units
                 </div>
               </div>
               <div style={{ textAlign: "right", marginTop: "4px" }}>
@@ -3341,7 +3689,7 @@ function RequestQuotationDrawer({
                     textDecoration: "underline",
                   }}
                 >
-                  {loadingLastPurchase ? "Fetching..." : "View Last Purchase"}
+                  {loadingLastPurchase ? "Fetching..." : "📜 View Last Purchase Record"}
                 </button>
               </div>
             </div>
@@ -3349,7 +3697,7 @@ function RequestQuotationDrawer({
             {/* Expected Receiving Date */}
             <div>
               <label style={{ display: "block", fontSize: "12.5px", fontWeight: 700, color: "#334155", marginBottom: "4px" }}>
-                *Expected Receiving
+                Expected Receiving Date
               </label>
               <input
                 type="date"
@@ -3359,7 +3707,7 @@ function RequestQuotationDrawer({
               />
             </div>
 
-            {/* Suppliers Type Radio */}
+            {/* Suppliers Selection */}
             <div>
               <label style={{ display: "block", fontSize: "12.5px", fontWeight: 700, color: "#334155", marginBottom: "6px" }}>
                 *Suppliers Type
@@ -3368,17 +3716,17 @@ function RequestQuotationDrawer({
                 <label style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "13px", cursor: "pointer", fontWeight: supplierType === "all" ? 600 : 400 }}>
                   <input
                     type="radio"
-                    name="supplierType"
+                    name="singleSupplierType"
                     value="all"
                     checked={supplierType === "all"}
                     onChange={() => setSupplierType("all")}
                   />
-                  All Suppliers (Category &amp; Sub-Category)
+                  All Matching Suppliers (Category / Sub-Category)
                 </label>
                 <label style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "13px", cursor: "pointer", fontWeight: supplierType === "selected" ? 600 : 400 }}>
                   <input
                     type="radio"
-                    name="supplierType"
+                    name="singleSupplierType"
                     value="selected"
                     checked={supplierType === "selected"}
                     onChange={() => setSupplierType("selected")}
@@ -3386,174 +3734,103 @@ function RequestQuotationDrawer({
                   Selected Suppliers
                 </label>
               </div>
-            </div>
 
-            {/* When "all" is selected: show preview of all matching suppliers */}
-            {supplierType === "all" && (
-              <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", padding: "12px 14px", borderRadius: "8px" }}>
-                <div style={{ fontSize: "13px", fontWeight: 700, color: "#166534", display: "flex", alignItems: "center", gap: "6px" }}>
-                  <span>🌟</span> All Matching Suppliers ({allMatchingSuppliers.length})
-                </div>
-                <div style={{ fontSize: "12px", color: "#15803d", marginTop: "3px" }}>
-                  Will automatically dispatch quotation request to all {allMatchingSuppliers.length} supplier(s) matching {productMeta?.subCategoryName ? `Sub-Category "${productMeta.subCategoryName}"` : productMeta?.categoryName ? `Category "${productMeta.categoryName}"` : "this product"}.
-                </div>
-                {allMatchingSuppliers.length > 0 && (
-                  <div style={{ marginTop: "8px", display: "flex", flexWrap: "wrap", gap: "5px" }}>
-                    {allMatchingSuppliers.map((s) => (
-                      <span key={s.id} style={{ background: "#dcfce7", color: "#166534", border: "1px solid #86efac", padding: "3px 8px", borderRadius: "4px", fontSize: "11.5px", fontWeight: 600 }}>
-                        🏢 {s.name}
+              {/* Compact Matched Suppliers Summary Box (Visible when supplierType === 'all') */}
+              {supplierType === "all" && (
+                <div
+                  style={{
+                    marginTop: "10px",
+                    background: resolvedSuppliers.length > 0 ? "#f0fdf4" : "#fffbeb",
+                    border: `1px solid ${resolvedSuppliers.length > 0 ? "#bbf7d0" : "#fef08a"}`,
+                    borderRadius: "8px",
+                    padding: "10px 12px",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "8px",
+                  }}
+                >
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <div style={{ fontSize: "12px", fontWeight: 700, color: resolvedSuppliers.length > 0 ? "#166534" : "#854d0e", display: "flex", alignItems: "center", gap: "6px" }}>
+                      <span>{loadingEmails ? "⏳" : resolvedSuppliers.length > 0 ? "🎯" : "⚠️"}</span>
+                      <span>
+                        {loadingEmails
+                          ? "Matching suppliers for this product..."
+                          : resolvedSuppliers.length > 0
+                            ? `${resolvedSuppliers.length} Supplier(s) Matched (${resolvedSuppliers.reduce((acc, s) => acc + s.emails.length, 0)} Emails, ${resolvedSuppliers.filter((s) => s.wechat).length} WeChat)`
+                            : "No registered suppliers match this product category"}
                       </span>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Multi-Select Suppliers (if selected) */}
-            {supplierType === "selected" && (
-              <div>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
-                  <label style={{ display: "block", fontSize: "12.5px", fontWeight: 700, color: "#334155" }}>
-                    *Select Suppliers ({selectedSupplierIds.length} Selected)
-                  </label>
-                  <div style={{ display: "flex", gap: "10px" }}>
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        const matching = await fetchSupplierOptions("");
-                        setSelectedSupplierIds((prev) => {
-                          const combined = new Set([...prev, ...matching.map((m: any) => m.value)]);
-                          return Array.from(combined);
-                        });
-                      }}
-                      style={{
-                        background: "none",
-                        border: "none",
-                        color: "#0061f2",
-                        fontSize: "11.5px",
-                        fontWeight: 700,
-                        cursor: "pointer",
-                        textDecoration: "underline",
-                      }}
-                    >
-                      + Select All in List
-                    </button>
-                    {selectedSupplierIds.length > 0 && (
+                    </div>
+                    {resolvedSuppliers.length > 3 && (
                       <button
                         type="button"
-                        onClick={() => setSelectedSupplierIds([])}
+                        onClick={() => setShowAllMatchedSuppliers(!showAllMatchedSuppliers)}
                         style={{
                           background: "none",
                           border: "none",
-                          color: "#ef4444",
+                          color: "#2563eb",
                           fontSize: "11.5px",
                           fontWeight: 600,
                           cursor: "pointer",
                           textDecoration: "underline",
                         }}
                       >
-                        Clear All
+                        {showAllMatchedSuppliers ? "Collapse" : `+${resolvedSuppliers.length - 3} more (View all)`}
                       </button>
                     )}
                   </div>
-                </div>
 
-                {/* Filter Pills: All Matching / Sub-Category / Category / All Suppliers */}
-                <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginBottom: "8px", alignItems: "center" }}>
-                  <button
-                    type="button"
-                    onClick={() => setSupplierFilterScope("all_matching")}
-                    style={{
-                      padding: "4px 10px",
-                      borderRadius: "16px",
-                      border: "none",
-                      fontSize: "11.5px",
-                      fontWeight: 600,
-                      cursor: "pointer",
-                      background: supplierFilterScope === "all_matching" ? "#0061f2" : "#f1f5f9",
-                      color: supplierFilterScope === "all_matching" ? "#ffffff" : "#475569",
-                      boxShadow: supplierFilterScope === "all_matching" ? "0 2px 4px rgba(0,97,242,0.25)" : "none",
-                      transition: "all 0.15s ease",
-                    }}
-                  >
-                    🌟 All Matching
-                  </button>
-
-                  {productMeta?.subCategoryId && (
-                    <button
-                      type="button"
-                      onClick={() => setSupplierFilterScope("sub_category")}
+                  {resolvedSuppliers.length > 0 && (
+                    <div
                       style={{
-                        padding: "4px 10px",
-                        borderRadius: "16px",
-                        border: "none",
-                        fontSize: "11.5px",
-                        fontWeight: 600,
-                        cursor: "pointer",
-                        background: supplierFilterScope === "sub_category" ? "#0061f2" : "#f1f5f9",
-                        color: supplierFilterScope === "sub_category" ? "#ffffff" : "#475569",
-                        boxShadow: supplierFilterScope === "sub_category" ? "0 2px 4px rgba(0,97,242,0.25)" : "none",
-                        transition: "all 0.15s ease",
+                        display: "flex",
+                        flexWrap: "wrap",
+                        gap: "6px",
+                        maxHeight: showAllMatchedSuppliers ? "120px" : "auto",
+                        overflowY: showAllMatchedSuppliers ? "auto" : "visible",
                       }}
                     >
-                      🎯 Sub-Category: {productMeta.subCategoryName || "Sub-Category"}
-                    </button>
+                      {(showAllMatchedSuppliers ? resolvedSuppliers : resolvedSuppliers.slice(0, 3)).map((s) => (
+                        <span
+                          key={s.id}
+                          style={{
+                            fontSize: "11px",
+                            background: "#ffffff",
+                            color: "#166534",
+                            padding: "4px 8px",
+                            borderRadius: "6px",
+                            border: "1px solid #bbf7d0",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "6px",
+                            boxShadow: "0 1px 2px rgba(0,0,0,0.03)",
+                          }}
+                        >
+                          <strong>🏢 {s.name}</strong>
+                          {s.emails.length > 0 && (
+                            <span style={{ color: "#15803d", fontSize: "10.5px" }}>📧 {s.emails.join(", ")}</span>
+                          )}
+                          {s.wechat && (
+                            <span style={{ color: "#047857", fontSize: "10.5px", background: "#dcfce7", padding: "1px 4px", borderRadius: "4px" }}>
+                              💬 {s.wechat}
+                            </span>
+                          )}
+                        </span>
+                      ))}
+                    </div>
                   )}
-
-                  {productMeta?.categoryId && (
-                    <button
-                      type="button"
-                      onClick={() => setSupplierFilterScope("category")}
-                      style={{
-                        padding: "4px 10px",
-                        borderRadius: "16px",
-                        border: "none",
-                        fontSize: "11.5px",
-                        fontWeight: 600,
-                        cursor: "pointer",
-                        background: supplierFilterScope === "category" ? "#0061f2" : "#f1f5f9",
-                        color: supplierFilterScope === "category" ? "#ffffff" : "#475569",
-                        boxShadow: supplierFilterScope === "category" ? "0 2px 4px rgba(0,97,242,0.25)" : "none",
-                        transition: "all 0.15s ease",
-                      }}
-                    >
-                      📁 Category: {productMeta.categoryName || "Category"}
-                    </button>
-                  )}
-
-                  <button
-                    type="button"
-                    onClick={() => setSupplierFilterScope("all")}
-                    style={{
-                      padding: "4px 10px",
-                      borderRadius: "16px",
-                      border: "none",
-                      fontSize: "11.5px",
-                      fontWeight: 600,
-                      cursor: "pointer",
-                      background: supplierFilterScope === "all" ? "#0061f2" : "#f1f5f9",
-                      color: supplierFilterScope === "all" ? "#ffffff" : "#475569",
-                      boxShadow: supplierFilterScope === "all" ? "0 2px 4px rgba(0,97,242,0.25)" : "none",
-                      transition: "all 0.15s ease",
-                    }}
-                  >
-                    🌐 All Suppliers
-                  </button>
                 </div>
+              )}
+            </div>
 
+            {supplierType === "selected" && (
+              <div>
+                <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#64748b", marginBottom: "4px" }}>
+                  Select Suppliers *
+                </label>
                 <SearchableDropdownMultiPanel
-                  key={`rfq-sup-${supplierFilterScope}-${productMeta?.subCategoryId || ""}-${productMeta?.categoryId || ""}`}
                   values={selectedSupplierIds}
                   onChange={setSelectedSupplierIds}
-                  placeholder={
-                    supplierFilterScope === "all_matching"
-                      ? "-- Select or search matching suppliers --"
-                      : supplierFilterScope === "sub_category" && productMeta?.subCategoryName
-                        ? `-- Select ${productMeta.subCategoryName} Suppliers --`
-                        : supplierFilterScope === "category" && productMeta?.categoryName
-                          ? `-- Select ${productMeta.categoryName} Suppliers --`
-                          : "-- Select Suppliers --"
-                  }
+                  placeholder="-- Select or search suppliers --"
                   chipsPlacement="below"
                   fetchOptions={fetchSupplierOptions}
                   fetchLabelForValue={fetchSupplierLabel}
@@ -3563,15 +3840,267 @@ function RequestQuotationDrawer({
 
             {/* Note */}
             <div>
-              <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#64748b", marginBottom: "4px" }}>Note</label>
+              <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#64748b", marginBottom: "4px" }}>
+                General Notes / Requirements
+              </label>
               <textarea
-                rows={3}
-                placeholder="Add notes for suppliers..."
+                rows={2}
+                placeholder="Specifications, payment terms, or delivery notes..."
                 value={note}
                 onChange={(e) => setNote(e.target.value)}
                 style={{ width: "100%", padding: "8px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px", resize: "vertical" }}
               />
             </div>
+
+            {/* ------------------------------------------------------------- */}
+            {/* Multi-Channel Selector (🌐 Both vs 📧 Email vs 💬 WeChat) */}
+            {/* ------------------------------------------------------------- */}
+            <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "12px 14px" }}>
+              <label style={{ display: "block", fontSize: "12.5px", fontWeight: 700, color: "#1e293b", marginBottom: "8px" }}>
+                📡 Dispatch Channels
+              </label>
+              <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+                <button
+                  type="button"
+                  onClick={() => setChannelMode("all")}
+                  style={{
+                    padding: "6px 12px",
+                    borderRadius: "6px",
+                    border: `1.5px solid ${channelMode === "all" ? "#2563eb" : "#cbd5e1"}`,
+                    background: channelMode === "all" ? "#eff6ff" : "#ffffff",
+                    color: channelMode === "all" ? "#1d4ed8" : "#334155",
+                    fontSize: "12.5px",
+                    fontWeight: channelMode === "all" ? 700 : 500,
+                    cursor: "pointer",
+                  }}
+                >
+                  🌐 Email + WeChat
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setChannelMode("email")}
+                  style={{
+                    padding: "6px 12px",
+                    borderRadius: "6px",
+                    border: `1.5px solid ${channelMode === "email" ? "#2563eb" : "#cbd5e1"}`,
+                    background: channelMode === "email" ? "#eff6ff" : "#ffffff",
+                    color: channelMode === "email" ? "#1d4ed8" : "#334155",
+                    fontSize: "12.5px",
+                    fontWeight: channelMode === "email" ? 700 : 500,
+                    cursor: "pointer",
+                  }}
+                >
+                  📧 Email Only
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setChannelMode("wechat")}
+                  style={{
+                    padding: "6px 12px",
+                    borderRadius: "6px",
+                    border: `1.5px solid ${channelMode === "wechat" ? "#16a34a" : "#cbd5e1"}`,
+                    background: channelMode === "wechat" ? "#f0fdf4" : "#ffffff",
+                    color: channelMode === "wechat" ? "#15803d" : "#334155",
+                    fontSize: "12.5px",
+                    fontWeight: channelMode === "wechat" ? 700 : 500,
+                    cursor: "pointer",
+                  }}
+                >
+                  💬 WeChat Only (企业微信)
+                </button>
+              </div>
+            </div>
+
+            {/* ------------------------------------------------------------- */}
+            {/* Sending Mode Selector (🔴 Send Automatically vs 🟡 Draft & Preview) */}
+            {/* ------------------------------------------------------------- */}
+            <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "12px 14px" }}>
+              <label style={{ display: "block", fontSize: "12.5px", fontWeight: 700, color: "#1e293b", marginBottom: "8px" }}>
+                Dispatch Option
+              </label>
+              <div style={{ display: "flex", gap: "16px", flexWrap: "wrap" }}>
+                <label
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
+                    fontSize: "13px",
+                    cursor: "pointer",
+                    padding: "6px 12px",
+                    borderRadius: "6px",
+                    background: sendMode === "auto" ? "#eff6ff" : "#ffffff",
+                    border: `1px solid ${sendMode === "auto" ? "#93c5fd" : "#cbd5e1"}`,
+                    fontWeight: sendMode === "auto" ? 600 : 400,
+                    color: sendMode === "auto" ? "#1d4ed8" : "#334155",
+                  }}
+                >
+                  <input
+                    type="radio"
+                    name="singleSendMode"
+                    value="auto"
+                    checked={sendMode === "auto"}
+                    onChange={() => setSendMode("auto")}
+                  />
+                  <span>⚡ Send Automatically</span>
+                </label>
+
+                <label
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
+                    fontSize: "13px",
+                    cursor: "pointer",
+                    padding: "6px 12px",
+                    borderRadius: "6px",
+                    background: sendMode === "draft" ? "#fefce8" : "#ffffff",
+                    border: `1px solid ${sendMode === "draft" ? "#fde047" : "#cbd5e1"}`,
+                    fontWeight: sendMode === "draft" ? 600 : 400,
+                    color: sendMode === "draft" ? "#854d0e" : "#334155",
+                  }}
+                >
+                  <input
+                    type="radio"
+                    name="singleSendMode"
+                    value="draft"
+                    checked={sendMode === "draft"}
+                    onChange={() => setSendMode("draft")}
+                  />
+                  <span>✏️ Draft &amp; Preview</span>
+                </label>
+              </div>
+            </div>
+
+            {/* ------------------------------------------------------------- */}
+            {/* 🟠 Orange Area: Editable Draft View (Active when sendMode === 'draft') */}
+            {/* ------------------------------------------------------------- */}
+            {sendMode === "draft" && (
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "14px",
+                  background: "#fffbeb",
+                  border: "2px solid #f59e0b",
+                  borderRadius: "10px",
+                  padding: "16px",
+                  boxShadow: "0 4px 12px rgba(245, 158, 11, 0.12)",
+                }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div style={{ fontSize: "13.5px", fontWeight: 700, color: "#92400e", display: "flex", alignItems: "center", gap: "6px" }}>
+                    <span>📝</span> Editable RFQ Draft Preview
+                  </div>
+                  {loadingEmails && (
+                    <span style={{ fontSize: "12px", color: "#b45309" }}>Resolving supplier contacts...</span>
+                  )}
+                </div>
+
+                {/* Recipient Emails (To Field) - if email enabled */}
+                {(channelMode === "all" || channelMode === "email") && (
+                  <div>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
+                      <label style={{ fontSize: "12px", fontWeight: 700, color: "#78350f" }}>
+                        📧 To (Recipient Supplier Emails)
+                      </label>
+                      <span style={{ fontSize: "11px", color: "#92400e" }}>
+                        {customRecipientEmails ? customRecipientEmails.split(",").filter((x) => x.trim()).length : 0} Email(s)
+                      </span>
+                    </div>
+                    <input
+                      type="text"
+                      placeholder="e.g. supplier1@example.com, supplier2@example.com"
+                      value={customRecipientEmails}
+                      onChange={(e) => setCustomRecipientEmails(e.target.value)}
+                      style={{
+                        width: "100%",
+                        padding: "8px 10px",
+                        borderRadius: "6px",
+                        border: "1px solid #fcd34d",
+                        fontSize: "12.5px",
+                        background: "#ffffff",
+                        color: "#0f172a",
+                      }}
+                    />
+                  </div>
+                )}
+
+                {/* Recipient WeChat Numbers (To Field) - if wechat enabled */}
+                {(channelMode === "all" || channelMode === "wechat") && (
+                  <div>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
+                      <label style={{ fontSize: "12px", fontWeight: 700, color: "#78350f" }}>
+                        💬 To (Recipient Supplier WeChat Numbers / User IDs)
+                      </label>
+                      <span style={{ fontSize: "11px", color: "#92400e" }}>
+                        {customRecipientWechat ? customRecipientWechat.split(",").filter((x) => x.trim()).length : 0} WeChat Contact(s)
+                      </span>
+                    </div>
+                    <input
+                      type="text"
+                      placeholder="e.g. +91 8108294930, Pawan-022, sup_wechat_id"
+                      value={customRecipientWechat}
+                      onChange={(e) => setCustomRecipientWechat(e.target.value)}
+                      style={{
+                        width: "100%",
+                        padding: "8px 10px",
+                        borderRadius: "6px",
+                        border: "1px solid #fcd34d",
+                        fontSize: "12.5px",
+                        background: "#ffffff",
+                        color: "#0f172a",
+                      }}
+                    />
+                  </div>
+                )}
+
+                {/* Subject Line */}
+                <div>
+                  <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "#78350f", marginBottom: "4px" }}>
+                    Subject Line *
+                  </label>
+                  <input
+                    type="text"
+                    value={customSubject}
+                    onChange={(e) => setCustomSubject(e.target.value)}
+                    style={{
+                      width: "100%",
+                      padding: "8px 10px",
+                      borderRadius: "6px",
+                      border: "1px solid #fcd34d",
+                      fontSize: "13px",
+                      fontWeight: 600,
+                      background: "#ffffff",
+                      color: "#0f172a",
+                    }}
+                  />
+                </div>
+
+                {/* Message Body */}
+                <div>
+                  <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "#78350f", marginBottom: "4px" }}>
+                    RFQ Message Body * (Bilingual Editable Text)
+                  </label>
+                  <textarea
+                    rows={8}
+                    value={customBody}
+                    onChange={(e) => setCustomBody(e.target.value)}
+                    style={{
+                      width: "100%",
+                      padding: "10px",
+                      borderRadius: "6px",
+                      border: "1px solid #fcd34d",
+                      fontSize: "12.5px",
+                      fontFamily: "monospace, sans-serif",
+                      background: "#ffffff",
+                      color: "#0f172a",
+                      lineHeight: "1.5",
+                      resize: "vertical",
+                    }}
+                  />
+                </div>
+              </div>
+            )}
 
             {/* Submit Button */}
             <div style={{ marginTop: "auto", paddingTop: "16px" }}>
@@ -3580,18 +4109,22 @@ function RequestQuotationDrawer({
                 disabled={submitting}
                 style={{
                   width: "100%",
-                  padding: "10px",
-                  background: "#2563eb",
+                  padding: "12px",
+                  background: sendMode === "draft" ? "#d97706" : "#2563eb",
                   color: "#ffffff",
                   border: "none",
                   borderRadius: "8px",
                   fontSize: "14px",
                   fontWeight: 700,
                   cursor: submitting ? "not-allowed" : "pointer",
-                  boxShadow: "0 2px 6px rgba(37,99,235,0.25)",
+                  boxShadow: sendMode === "draft" ? "0 2px 6px rgba(217,119,6,0.3)" : "0 2px 6px rgba(37,99,235,0.25)",
                 }}
               >
-                {submitting ? "Dispatching RFQ..." : "Submit & Generate Links"}
+                {submitting
+                  ? "Dispatching RFQ..."
+                  : sendMode === "draft"
+                    ? "🚀 Send Custom Draft RFQ"
+                    : `Send RFQ to Suppliers (${channelMode === "all" ? "Email + WeChat" : channelMode === "wechat" ? "WeChat" : "Email"})`}
               </button>
             </div>
           </form>
@@ -3624,11 +4157,15 @@ function BulkRequestQuotationDrawer({
   const [submitting, setSubmitting] = useState(false);
   const [dispatchedResult, setDispatchedResult] = useState<any | null>(null);
 
-  // Send Mode: 'auto' (Automatic Send) vs 'draft' (Draft & Preview Email)
+  // Dispatch Channel: 'all' (Email + WeChat) vs 'email' (Email Only) vs 'wechat' (WeChat Only)
+  const [channelMode, setChannelMode] = useState<"all" | "email" | "wechat">("all");
+
+  // Send Mode: 'auto' (Automatic Send) vs 'draft' (Draft & Preview)
   const [sendMode, setSendMode] = useState<"auto" | "draft">("auto");
-  const [resolvedSuppliers, setResolvedSuppliers] = useState<{ id: string; name: string; emails: string[] }[]>([]);
+  const [resolvedSuppliers, setResolvedSuppliers] = useState<{ id: string; name: string; emails: string[]; wechat: string }[]>([]);
   const [showAllMatchedSuppliers, setShowAllMatchedSuppliers] = useState(false);
   const [customRecipientEmails, setCustomRecipientEmails] = useState<string>("");
+  const [customRecipientWechat, setCustomRecipientWechat] = useState<string>("");
   const [customSubject, setCustomSubject] = useState<string>("");
   const [customBody, setCustomBody] = useState<string>("");
   const [loadingEmails, setLoadingEmails] = useState(false);
@@ -3649,8 +4186,12 @@ function BulkRequestQuotationDrawer({
 
   const fetchSupplierOptions = useCallback(async (term: string) => {
     try {
-      const res = await apiGet<any>(`/suppliers?search=${encodeURIComponent(term)}&limit=100&sort_by=company_name&sort_order=asc`);
-      const list = Array.isArray(res.data) ? res.data : res.data?.data || [];
+      let url = `/suppliers?page_size=100&sort_by=company_name&sort_order=asc`;
+      if (term && term.trim()) {
+        url += `&search=${encodeURIComponent(term.trim())}`;
+      }
+      const res = await apiGet<any>(url);
+      const list = Array.isArray(res.data) ? res.data : res.data?.items || res.data?.data || [];
       return list.map((s: any) => ({ value: s.id, label: s.company_name || s.name || "Supplier" }));
     } catch {
       return [];
@@ -3666,7 +4207,7 @@ function BulkRequestQuotationDrawer({
     }
   }, []);
 
-  // Resolve Supplier Emails whenever Supplier Type, Selected Suppliers, or Selected Products change
+  // Resolve Supplier Emails & WeChat Numbers whenever Supplier Type, Selected Suppliers, or Selected Products change
   useEffect(() => {
     let isMounted = true;
     (async () => {
@@ -3677,10 +4218,11 @@ function BulkRequestQuotationDrawer({
             if (isMounted) {
               setResolvedSuppliers([]);
               setCustomRecipientEmails("");
+              setCustomRecipientWechat("");
             }
             return;
           }
-          const list: { id: string; name: string; emails: string[] }[] = [];
+          const list: { id: string; name: string; emails: string[]; wechat: string }[] = [];
           for (const sid of selectedSupplierIds) {
             try {
               const { data: s } = await apiGet<any>(`/suppliers/${sid}`);
@@ -3689,7 +4231,8 @@ function BulkRequestQuotationDrawer({
                 const ems: string[] = rawEmails
                   .map((e: any) => (typeof e === "string" ? e : e?.email || "").trim())
                   .filter((e: string) => e && e.includes("@"));
-                list.push({ id: s.id, name: s.company_name || s.name || "Supplier", emails: ems });
+                const wechatNum = (s.contact_wechat_number || s.wechat_number || s.phone || "").trim();
+                list.push({ id: s.id, name: s.company_name || s.name || "Supplier", emails: ems, wechat: wechatNum });
               }
             } catch {}
           }
@@ -3697,6 +4240,8 @@ function BulkRequestQuotationDrawer({
             setResolvedSuppliers(list);
             const allEms = Array.from(new Set(list.flatMap((x) => x.emails)));
             setCustomRecipientEmails(allEms.join(", "));
+            const allWcs = Array.from(new Set(list.map((x) => x.wechat).filter(Boolean)));
+            setCustomRecipientWechat(allWcs.join(", "));
           }
         } else {
           // "all" matching suppliers: filter by selected products' category & sub-category
@@ -3735,8 +4280,8 @@ function BulkRequestQuotationDrawer({
             return catMatch || subCatMatch;
           });
 
-          // Fetch full profile for matching suppliers to get their verified email list
-          const list: { id: string; name: string; emails: string[] }[] = [];
+          // Fetch full profile for matching suppliers to get their verified email & wechat list
+          const list: { id: string; name: string; emails: string[]; wechat: string }[] = [];
           for (const stub of matchingSupStubs) {
             try {
               const { data: s } = await apiGet<any>(`/suppliers/${stub.id}`);
@@ -3745,7 +4290,8 @@ function BulkRequestQuotationDrawer({
                 const ems: string[] = rawEmails
                   .map((e: any) => (typeof e === "string" ? e : e?.email || "").trim())
                   .filter((e: string) => e && e.includes("@"));
-                list.push({ id: s.id, name: s.company_name || s.name || "Supplier", emails: ems });
+                const wechatNum = (s.contact_wechat_number || s.wechat_number || s.phone || "").trim();
+                list.push({ id: s.id, name: s.company_name || s.name || "Supplier", emails: ems, wechat: wechatNum });
               }
             } catch {}
           }
@@ -3754,12 +4300,15 @@ function BulkRequestQuotationDrawer({
             setResolvedSuppliers(list);
             const allEms = Array.from(new Set(list.flatMap((x) => x.emails)));
             setCustomRecipientEmails(allEms.join(", "));
+            const allWcs = Array.from(new Set(list.map((x) => x.wechat).filter(Boolean)));
+            setCustomRecipientWechat(allWcs.join(", "));
           }
         }
       } catch {
         if (isMounted) {
           setResolvedSuppliers([]);
           setCustomRecipientEmails("");
+          setCustomRecipientWechat("");
         }
       } finally {
         if (isMounted) setLoadingEmails(false);
@@ -3785,7 +4334,7 @@ function BulkRequestQuotationDrawer({
       return `${idx + 1}. ${pName}${pCode} - Qty: ${pQty} units | Target Delivery: ${pDate}${pNotes}`;
     }).join("\n");
 
-    const defaultBodyText = `Dear Valued Partner,\n\nWe are from Yinglima Procurement Team. We are requesting your best competitive quotation and delivery lead times for the following ${selectedItems.length} items:\n\n${itemsLines}\n\n${note.trim() ? `General Notes / Requirements:\n${note.trim()}\n\n` : ""}Please reply directly to this email with:\n1. Unit Price for each product (CNY / USD / INR / EUR)\n2. Earliest Production / Delivery Lead Time\n3. Payment Terms & Price Terms (Ex-Factory / FOB, Deposit %)\n\nYou can reply directly to this email or attach your official quotation PDF / sheet.\n\nBest regards,\nYinglima Procurement Team\nYinglima Packaging Machinery Co., Ltd.`;
+    const defaultBodyText = `Dear Valued Partner,\n\nWe are from Yinglima Procurement Team. We are requesting your best competitive quotation and delivery lead times for the following ${selectedItems.length} items:\n\n${itemsLines}\n\n${note.trim() ? `General Notes / Requirements:\n${note.trim()}\n\n` : ""}Please reply directly to this email or WeChat with:\n1. Unit Price for each product (CNY / USD / INR / EUR)\n2. Earliest Production / Delivery Lead Time\n3. Payment Terms & Price Terms (Ex-Factory / FOB, Deposit %)\n\nYou can reply directly to this message or attach your official quotation PDF / sheet.\n\nBest regards,\nYinglima Procurement Team\nYinglima Packaging Machinery Co., Ltd.`;
 
     setCustomBody(defaultBodyText);
   }, [consignmentCode, selectedItemIds, items, expDate, note]);
@@ -3806,10 +4355,19 @@ function BulkRequestQuotationDrawer({
       .map((e) => e.trim())
       .filter((e) => e && e.includes("@"));
 
-    if (sendMode === "draft" && recipientList.length === 0) {
-      alert("Please provide at least one valid recipient supplier email in the draft To field.");
-      return;
+    const wechatList = customRecipientWechat
+      .split(",")
+      .map((w) => w.trim())
+      .filter(Boolean);
+
+    if (sendMode === "draft") {
+      if ((channelMode === "email" || channelMode === "all") && recipientList.length === 0 && wechatList.length === 0) {
+        alert("Please provide at least one valid recipient supplier email or WeChat number in the draft fields.");
+        return;
+      }
     }
+
+    const channelsToDispatch = channelMode === "all" ? ["email", "wechat"] : [channelMode];
 
     setSubmitting(true);
     try {
@@ -3819,12 +4377,14 @@ function BulkRequestQuotationDrawer({
         supplier_type: supplierType,
         supplier_ids: selectedSupplierIds,
         notes: note.trim() || null,
+        channels: channelsToDispatch,
       };
 
       if (sendMode === "draft") {
         payload.custom_subject = customSubject.trim() || null;
         payload.custom_body = customBody.trim() || null;
         payload.custom_recipient_emails = recipientList;
+        payload.custom_recipient_wechat_numbers = wechatList;
       }
 
       const res = await apiPost<any>(`/inquiries/${inquiryId}/bulk-rfqs`, payload);
@@ -3843,7 +4403,7 @@ function BulkRequestQuotationDrawer({
       <div
         style={{
           position: "relative",
-          width: "620px",
+          width: "650px",
           maxWidth: "94vw",
           height: "100%",
           background: "#ffffff",
@@ -3871,10 +4431,10 @@ function BulkRequestQuotationDrawer({
           <div style={{ padding: "24px", display: "flex", flexDirection: "column", gap: "18px" }}>
             <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: "10px", padding: "16px 20px" }}>
               <div style={{ fontSize: "15px", fontWeight: 700, color: "#166534", display: "flex", alignItems: "center", gap: "8px" }}>
-                <span>✓</span> Consolidated RFQ Email Dispatched!
+                <span>✓</span> Consolidated RFQ Dispatched!
               </div>
               <p style={{ margin: "8px 0 0 0", fontSize: "13px", color: "#15803d", lineHeight: 1.5 }}>
-                A consolidated RFQ email listing all <strong>{dispatchedResult.item_count} requested products</strong> was sent to <strong>{dispatchedResult.dispatched_count} suppliers</strong>.
+                A consolidated RFQ listing all <strong>{dispatchedResult.item_count} requested products</strong> was dispatched via <strong>{dispatchedResult.channels?.join(" + ") || "Email & WeChat"}</strong> to <strong>{dispatchedResult.dispatched_count} suppliers</strong>.
               </p>
             </div>
 
@@ -3886,17 +4446,20 @@ function BulkRequestQuotationDrawer({
                 <div key={idx} style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "10px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                   <div>
                     <div style={{ fontWeight: 600, fontSize: "13.5px", color: "#0f172a" }}>{sup.company_name}</div>
-                    <div style={{ fontSize: "12px", color: "#64748b" }}>{sup.emails?.join(", ")}</div>
+                    <div style={{ fontSize: "12px", color: "#64748b" }}>
+                      {sup.emails && sup.emails.length > 0 && `📧 ${sup.emails.join(", ")}`}
+                      {sup.wechat && ` • 💬 WeChat: ${sup.wechat}`}
+                    </div>
                   </div>
                   <span style={{ fontSize: "11px", fontWeight: 700, background: "#dcfce7", color: "#166534", padding: "3px 8px", borderRadius: "12px" }}>
-                    Sent ✉️
+                    Dispatched 🚀
                   </span>
                 </div>
               ))}
             </div>
 
             <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: "8px", padding: "12px 16px", fontSize: "12.5px", color: "#1e40af" }}>
-              <strong>Pure Email Ingestion:</strong> When suppliers reply to the email or attach their quotation sheets, the AI will automatically extract prices for all products and update your ERP table live!
+              <strong>Two-Way Live Ingestion:</strong> When suppliers reply via WeChat or email, or send their price messages, the AI conversational extractor will parse their quotes and update your ERP table live!
             </div>
 
             <div style={{ marginTop: "auto", paddingTop: "12px" }}>
@@ -4036,7 +4599,7 @@ function BulkRequestQuotationDrawer({
                         {loadingEmails
                           ? "Matching suppliers for selected products..."
                           : resolvedSuppliers.length > 0
-                            ? `${resolvedSuppliers.length} Supplier(s) Matched (${resolvedSuppliers.reduce((acc, s) => acc + s.emails.length, 0)} Email addresses)`
+                            ? `${resolvedSuppliers.length} Supplier(s) Matched (${resolvedSuppliers.reduce((acc, s) => acc + s.emails.length, 0)} Emails, ${resolvedSuppliers.filter((s) => s.wechat).length} WeChat)`
                             : "No registered suppliers match these product categories"}
                       </span>
                     </div>
@@ -4076,19 +4639,24 @@ function BulkRequestQuotationDrawer({
                             fontSize: "11px",
                             background: "#ffffff",
                             color: "#166534",
-                            padding: "3px 8px",
+                            padding: "4px 8px",
                             borderRadius: "6px",
                             border: "1px solid #bbf7d0",
                             display: "inline-flex",
                             alignItems: "center",
-                            gap: "4px",
+                            gap: "6px",
                             boxShadow: "0 1px 2px rgba(0,0,0,0.03)",
                           }}
                         >
                           <strong>🏢 {s.name}</strong>
-                          <span style={{ color: s.emails.length > 0 ? "#15803d" : "#94a3b8", fontSize: "10.5px" }}>
-                            ({s.emails.length > 0 ? s.emails.join(", ") : "No email"})
-                          </span>
+                          {s.emails.length > 0 && (
+                            <span style={{ color: "#15803d", fontSize: "10.5px" }}>📧 {s.emails.join(", ")}</span>
+                          )}
+                          {s.wechat && (
+                            <span style={{ color: "#047857", fontSize: "10.5px", background: "#dcfce7", padding: "1px 4px", borderRadius: "4px" }}>
+                              💬 {s.wechat}
+                            </span>
+                          )}
                         </span>
                       ))}
                     </div>
@@ -4128,7 +4696,66 @@ function BulkRequestQuotationDrawer({
             </div>
 
             {/* ------------------------------------------------------------- */}
-            {/* Sending Mode Selector (🔴 Send Automatically vs 🟡 Draft Email) */}
+            {/* Multi-Channel Selector (🌐 Both vs 📧 Email vs 💬 WeChat) */}
+            {/* ------------------------------------------------------------- */}
+            <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "12px 14px" }}>
+              <label style={{ display: "block", fontSize: "12.5px", fontWeight: 700, color: "#1e293b", marginBottom: "8px" }}>
+                📡 Dispatch Channels
+              </label>
+              <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+                <button
+                  type="button"
+                  onClick={() => setChannelMode("all")}
+                  style={{
+                    padding: "6px 12px",
+                    borderRadius: "6px",
+                    border: `1.5px solid ${channelMode === "all" ? "#2563eb" : "#cbd5e1"}`,
+                    background: channelMode === "all" ? "#eff6ff" : "#ffffff",
+                    color: channelMode === "all" ? "#1d4ed8" : "#334155",
+                    fontSize: "12.5px",
+                    fontWeight: channelMode === "all" ? 700 : 500,
+                    cursor: "pointer",
+                  }}
+                >
+                  🌐 Email + WeChat
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setChannelMode("email")}
+                  style={{
+                    padding: "6px 12px",
+                    borderRadius: "6px",
+                    border: `1.5px solid ${channelMode === "email" ? "#2563eb" : "#cbd5e1"}`,
+                    background: channelMode === "email" ? "#eff6ff" : "#ffffff",
+                    color: channelMode === "email" ? "#1d4ed8" : "#334155",
+                    fontSize: "12.5px",
+                    fontWeight: channelMode === "email" ? 700 : 500,
+                    cursor: "pointer",
+                  }}
+                >
+                  📧 Email Only
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setChannelMode("wechat")}
+                  style={{
+                    padding: "6px 12px",
+                    borderRadius: "6px",
+                    border: `1.5px solid ${channelMode === "wechat" ? "#16a34a" : "#cbd5e1"}`,
+                    background: channelMode === "wechat" ? "#f0fdf4" : "#ffffff",
+                    color: channelMode === "wechat" ? "#15803d" : "#334155",
+                    fontSize: "12.5px",
+                    fontWeight: channelMode === "wechat" ? 700 : 500,
+                    cursor: "pointer",
+                  }}
+                >
+                  💬 WeChat Only (企业微信)
+                </button>
+              </div>
+            </div>
+
+            {/* ------------------------------------------------------------- */}
+            {/* Sending Mode Selector (🔴 Send Automatically vs 🟡 Draft & Preview) */}
             {/* ------------------------------------------------------------- */}
             <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "12px 14px" }}>
               <label style={{ display: "block", fontSize: "12.5px", fontWeight: 700, color: "#1e293b", marginBottom: "8px" }}>
@@ -4157,7 +4784,7 @@ function BulkRequestQuotationDrawer({
                     checked={sendMode === "auto"}
                     onChange={() => setSendMode("auto")}
                   />
-                  <span>⚡ Send Email Automatically</span>
+                  <span>⚡ Send Automatically</span>
                 </label>
 
                 <label
@@ -4182,7 +4809,7 @@ function BulkRequestQuotationDrawer({
                     checked={sendMode === "draft"}
                     onChange={() => setSendMode("draft")}
                   />
-                  <span>✏️ Draft & Preview Email</span>
+                  <span>✏️ Draft &amp; Preview</span>
                 </label>
               </div>
             </div>
@@ -4195,7 +4822,7 @@ function BulkRequestQuotationDrawer({
                 style={{
                   display: "flex",
                   flexDirection: "column",
-                  gap: "12px",
+                  gap: "14px",
                   background: "#fffbeb",
                   border: "2px solid #f59e0b",
                   borderRadius: "10px",
@@ -4208,36 +4835,67 @@ function BulkRequestQuotationDrawer({
                     <span>📝</span> Editable RFQ Draft Preview
                   </div>
                   {loadingEmails && (
-                    <span style={{ fontSize: "12px", color: "#b45309" }}>Resolving supplier emails...</span>
+                    <span style={{ fontSize: "12px", color: "#b45309" }}>Resolving supplier contacts...</span>
                   )}
                 </div>
 
-                {/* Recipient Emails (To Field) */}
-                <div>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
-                    <label style={{ fontSize: "12px", fontWeight: 700, color: "#78350f" }}>
-                      To (Recipient Supplier Emails) *
-                    </label>
-                    <span style={{ fontSize: "11px", color: "#92400e" }}>
-                      {customRecipientEmails ? customRecipientEmails.split(",").filter((x) => x.trim()).length : 0} Email(s)
-                    </span>
+                {/* Recipient Emails (To Field) - if email enabled */}
+                {(channelMode === "all" || channelMode === "email") && (
+                  <div>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
+                      <label style={{ fontSize: "12px", fontWeight: 700, color: "#78350f" }}>
+                        📧 To (Recipient Supplier Emails)
+                      </label>
+                      <span style={{ fontSize: "11px", color: "#92400e" }}>
+                        {customRecipientEmails ? customRecipientEmails.split(",").filter((x) => x.trim()).length : 0} Email(s)
+                      </span>
+                    </div>
+                    <input
+                      type="text"
+                      placeholder="e.g. supplier1@example.com, supplier2@example.com"
+                      value={customRecipientEmails}
+                      onChange={(e) => setCustomRecipientEmails(e.target.value)}
+                      style={{
+                        width: "100%",
+                        padding: "8px 10px",
+                        borderRadius: "6px",
+                        border: "1px solid #fcd34d",
+                        fontSize: "12.5px",
+                        background: "#ffffff",
+                        color: "#0f172a",
+                      }}
+                    />
                   </div>
-                  <input
-                    type="text"
-                    placeholder="e.g. supplier1@example.com, supplier2@example.com"
-                    value={customRecipientEmails}
-                    onChange={(e) => setCustomRecipientEmails(e.target.value)}
-                    style={{
-                      width: "100%",
-                      padding: "8px 10px",
-                      borderRadius: "6px",
-                      border: "1px solid #fcd34d",
-                      fontSize: "12.5px",
-                      background: "#ffffff",
-                      color: "#0f172a",
-                    }}
-                  />
-                </div>
+                )}
+
+                {/* Recipient WeChat Numbers (To Field) - if wechat enabled */}
+                {(channelMode === "all" || channelMode === "wechat") && (
+                  <div>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
+                      <label style={{ fontSize: "12px", fontWeight: 700, color: "#78350f" }}>
+                        💬 To (Recipient Supplier WeChat Numbers / User IDs)
+                      </label>
+                      <span style={{ fontSize: "11px", color: "#92400e" }}>
+                        {customRecipientWechat ? customRecipientWechat.split(",").filter((x) => x.trim()).length : 0} WeChat Contact(s)
+                      </span>
+                    </div>
+                    <input
+                      type="text"
+                      placeholder="e.g. +91 8108294930, Pawan-022, sup_wechat_id"
+                      value={customRecipientWechat}
+                      onChange={(e) => setCustomRecipientWechat(e.target.value)}
+                      style={{
+                        width: "100%",
+                        padding: "8px 10px",
+                        borderRadius: "6px",
+                        border: "1px solid #fcd34d",
+                        fontSize: "12.5px",
+                        background: "#ffffff",
+                        color: "#0f172a",
+                      }}
+                    />
+                  </div>
+                )}
 
                 {/* Subject Line */}
                 <div>
@@ -4261,10 +4919,10 @@ function BulkRequestQuotationDrawer({
                   />
                 </div>
 
-                {/* Email Body */}
+                {/* Message Body */}
                 <div>
                   <label style={{ display: "block", fontSize: "12px", fontWeight: 700, color: "#78350f", marginBottom: "4px" }}>
-                    Email Body Text * (Editable)
+                    RFQ Message Body * (Bilingual Editable Text)
                   </label>
                   <textarea
                     rows={8}
@@ -4308,8 +4966,8 @@ function BulkRequestQuotationDrawer({
                 {submitting
                   ? "Dispatching Consolidated RFQs..."
                   : sendMode === "draft"
-                    ? `✉️ Send Custom Draft RFQ for ${selectedItemIds.length} Items`
-                    : `Send RFQ for ${selectedItemIds.length} Items to Suppliers`}
+                    ? `🚀 Send Custom Draft RFQ for ${selectedItemIds.length} Items`
+                    : `Send RFQ for ${selectedItemIds.length} Items (${channelMode === "all" ? "Email + WeChat" : channelMode === "wechat" ? "WeChat" : "Email"})`}
               </button>
             </div>
           </form>

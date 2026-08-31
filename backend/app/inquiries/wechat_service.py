@@ -15,12 +15,15 @@ import hashlib
 import json
 import logging
 import os
+import re
 import struct
 import time
 import urllib.request
 import urllib.error
 import xml.etree.ElementTree as ET
 from typing import Any
+
+import httpx
 
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.backends import default_backend
@@ -47,29 +50,54 @@ class WeComService:
 
     def get_access_token(self, force_refresh: bool = False) -> str:
         """Fetch WeCom API access token with automatic in-memory TTL caching."""
+        import httpx
+
         now = time.time()
         if not force_refresh and self._cached_token and now < (self._token_expires_at - 300):
             return self._cached_token
 
         url = f"https://qyapi.weixin.qq.com/cgi-bin/gettoken?corpid={self.corp_id}&corpsecret={self.secret}"
-        req = urllib.request.Request(
-            url,
-            headers={"User-Agent": "Yinglima-ERP/1.0"}
-        )
         try:
-            with urllib.request.urlopen(req, timeout=12) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
+            with httpx.Client(timeout=15.0) as client:
+                resp = client.get(url, headers={"User-Agent": "Yinglima-ERP/1.0"})
+                data = resp.json()
                 if data.get("errcode") != 0:
                     err_msg = data.get("errmsg", "Unknown WeCom error")
                     logger.error("WeCom gettoken error: %s (code: %s)", err_msg, data.get("errcode"))
                     raise RuntimeError(f"WeCom token error: {err_msg} (errcode: {data.get('errcode')})")
-                
+
                 self._cached_token = data["access_token"]
                 self._token_expires_at = now + float(data.get("expires_in", 7200))
                 return self._cached_token
         except Exception as exc:
             logger.error("Failed to retrieve WeCom access token: %s", str(exc))
             raise
+
+    def get_userid_by_mobile(self, mobile: str) -> str | None:
+        """Resolve a Chinese 11-digit mobile number to WeCom UserID."""
+        import httpx
+
+        # Clean mobile number (+86, spaces, hyphens)
+        clean_mobile = re.sub(r"\D", "", mobile)
+        if clean_mobile.startswith("86") and len(clean_mobile) == 13:
+            clean_mobile = clean_mobile[2:]
+
+        if len(clean_mobile) != 11:
+            return None
+
+        try:
+            token = self.get_access_token()
+            url = f"https://qyapi.weixin.qq.com/cgi-bin/user/getuserid?access_token={token}"
+            with httpx.Client(timeout=15.0) as client:
+                resp = client.post(url, json={"mobile": clean_mobile}, headers={"User-Agent": "Yinglima-ERP/1.0"})
+                data = resp.json()
+                if data.get("errcode") == 0 and data.get("userid"):
+                    logger.info("Resolved mobile %s to WeCom UserID: %s", clean_mobile, data["userid"])
+                    return data["userid"]
+                logger.warning("WeCom getuserid failed for mobile %s: %s", clean_mobile, data)
+        except Exception as exc:
+            logger.error("Error resolving mobile %s to WeCom UserID: %s", clean_mobile, exc)
+        return None
 
     def send_rfq_markdown_message(
         self,
@@ -81,6 +109,8 @@ class WeComService:
         """
         Send a professional, bilingual RFQ Markdown card to supplier WeChat accounts.
         """
+        import httpx
+
         token = self.get_access_token()
         url = f"https://qyapi.weixin.qq.com/cgi-bin/message/send?access_token={token}"
 
@@ -91,7 +121,7 @@ class WeComService:
             p_code = itm.get("product_code") or "N/A"
             qty = itm.get("quantity") or 1
             t_date = itm.get("target_date") or "Earliest / 尽快"
-            
+
             item_lines.append(
                 f"> **{idx}. {p_name}** (`#{p_code}`)\n"
                 f"> • 需求数量 (Qty): **{qty} 台/Units**\n"
@@ -114,7 +144,23 @@ class WeComService:
             f"*盈骊玛进出口 (温州) 有限公司*"
         )
 
-        touser_str = "|".join(to_users) if to_users else "@all"
+        resolved_users: list[str] = []
+        for u in to_users:
+            u_clean = u.strip()
+            # If it looks like a phone number, try to resolve to WeCom UserID
+            digits = re.sub(r"\D", "", u_clean)
+            if digits.startswith("86") and len(digits) == 13:
+                digits = digits[2:]
+            if len(digits) == 11 and digits.startswith("1"):
+                uid = self.get_userid_by_mobile(digits)
+                if uid:
+                    resolved_users.append(uid)
+                else:
+                    resolved_users.append(u_clean)
+            else:
+                resolved_users.append(u_clean)
+
+        touser_str = "|".join(resolved_users) if resolved_users else "@all"
         payload = {
             "touser": touser_str,
             "msgtype": "markdown",
@@ -126,18 +172,17 @@ class WeComService:
             "enable_duplicate_check": 0
         }
 
-        req = urllib.request.Request(
-            url,
-            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-            headers={
-                "Content-Type": "application/json; charset=utf-8",
-                "User-Agent": "Yinglima-ERP/1.0"
-            }
-        )
-
         try:
-            with urllib.request.urlopen(req, timeout=15) as resp:
-                res = json.loads(resp.read().decode("utf-8"))
+            with httpx.Client(timeout=15.0) as client:
+                resp = client.post(
+                    url,
+                    json=payload,
+                    headers={
+                        "Content-Type": "application/json; charset=utf-8",
+                        "User-Agent": "Yinglima-ERP/1.0",
+                    },
+                )
+                res = resp.json()
                 logger.info("Dispatched WeCom RFQ message to %s: %s", touser_str, res)
                 return res
         except Exception as exc:

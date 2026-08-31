@@ -3222,6 +3222,7 @@ function AddQuotationDrawer({
             </label>
             <input
               type="date"
+              min={new Date().toISOString().split("T")[0]}
               value={expDate}
               onChange={(e) => setExpDate(e.target.value)}
               style={{ width: "100%", padding: "8px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px" }}
@@ -3701,6 +3702,7 @@ function RequestQuotationDrawer({
               </label>
               <input
                 type="date"
+                min={new Date().toISOString().split("T")[0]}
                 value={expDate}
                 onChange={(e) => setExpDate(e.target.value)}
                 style={{ width: "100%", padding: "8px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px" }}
@@ -4544,6 +4546,7 @@ function BulkRequestQuotationDrawer({
               </label>
               <input
                 type="date"
+                min={new Date().toISOString().split("T")[0]}
                 value={expDate}
                 onChange={(e) => setExpDate(e.target.value)}
                 style={{ width: "100%", padding: "8px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px" }}
@@ -5289,6 +5292,7 @@ function EditQuotationModal({
             </label>
             <input
               type="date"
+              min={new Date().toISOString().split("T")[0]}
               value={expDate}
               onChange={(e) => setExpDate(e.target.value)}
               style={{ width: "100%", padding: "7px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px" }}

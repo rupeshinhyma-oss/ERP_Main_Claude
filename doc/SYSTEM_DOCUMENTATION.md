@@ -295,10 +295,13 @@ $$\text{EffectivePermissions} = \left( \bigcup_{r \in \text{UserRoles}} \text{Ro
 - **Features:** Background daemon running every 60 seconds. Connects via secure IMAP, checks for inquiry reference tokens in email subjects/headers, downloads quote attachments, triggers AI extraction, and logs quotation bids automatically. Avoids duplicate processing via `processed_email_ids.json`.
 
 ### 8.10. Master Shipment Planning Grid & Container Calculations
-- **Endpoints:** `GET /planning/sheets`, `POST /planning/sheets`, `GET /planning/sheets/{id}/grid`, `POST /planning/rows`, `POST /planning/columns`, `PATCH /planning/cells`, `POST /planning/container-calc`.
+- **Endpoints:** `GET /planning/sheets`, `POST /planning/sheets`, `GET /planning/sheets/{id}/grid`, `GET /planning/sheets/{id}/filter-values`, `GET /planning/organization-search`, `POST /planning/rows`, `POST /planning/columns`, `PATCH /planning/cells`, `POST /planning/container-calc`.
 - **Features:**
   - Dynamic grid model (`planning_sheets` $\rightarrow$ `planning_rows` $\rightarrow$ `planning_columns` $\rightarrow$ `planning_cells`).
   - Column data types (`TEXT`, `NUMBER`, `DATE`, `BOOLEAN_YN`) and source types (`MANUAL`, `LINKED_LOOKUP`, `AGGREGATE`, `FORMULA_CALCULATION`).
+  - **Organization-Wide Cross-Branch Search Bar**: Top-level search bar dynamically scans across all branches of the currently viewed organization (e.g. Inhyma Mumbai, Inhyma Ahmedabad, Inhyma Indore) via `/planning/organization-search`. Provides instant branch-wise result counts, previews matching items, filters the active grid live, and allows one-click switching to any branch tab.
+  - **Full-Dataset Column Filtering & Live Search**: Filter popover dynamically queries distinct values and occurrence counts across all records on the sheet (1384+ items) via `/planning/sheets/{id}/filter-values` with debounced text search, ensuring unrendered and newly created Product Master records are fully searchable.
+  - **Automated Product Master Auto-Population**: Automatically syncs and materializes unlinked products for the sheet's organization and branch upon sheet load or filter search.
   - Cell status color tagging (e.g. `status-ordered`, `status-purchased`).
   - Container calculation engine computing total volume in CBM and payload weight across 20FT, 40FT, 40FT HC, and LCL container configurations.
   - Group-wise subcategory & product sorting.
@@ -427,6 +430,8 @@ $$\text{EffectivePermissions} = \left( \bigcup_{r \in \text{UserRoles}} \text{Ro
 | **Planning**| `GET` | `/api/v1/planning/sheets` | List planning sheets / branches | `planning.read` |
 | **Planning**| `POST` | `/api/v1/planning/sheets` | Create planning sheet | `planning.sheet.manage` |
 | **Planning**| `GET` | `/api/v1/planning/sheets/{id}/grid` | Fetch dynamic planning matrix | `planning.read` |
+| **Planning**| `GET` | `/api/v1/planning/sheets/{id}/filter-values` | Query distinct column filter values & counts | `planning.read` |
+| **Planning**| `GET` | `/api/v1/planning/organization-search` | Search items across all branch sheets of an organization | `planning.read` |
 | **Planning**| `POST` | `/api/v1/planning/rows` | Add item row to planning sheet | `planning.row.manage` |
 | **Planning**| `POST` | `/api/v1/planning/columns` | Add dynamic column to sheet | `planning.column.manage` |
 | **Planning**| `PATCH` | `/api/v1/planning/cells` | Update cell value & status color | `planning.cell.edit` |

@@ -603,31 +603,45 @@ Manage complete vendor team directory:
      - Group-numbered series (e.g. `Mum 1`, `Mum 1 Remarks`, `NO. OF PKG MUM1`, `TOTAL WEIGHT MUM1`, `TOTAL CBM MUM1`).
      - Deleting or hiding a group column cascades cleanly to all related package, weight, and remark group columns.
    - **Special `Approval Date` Column:**
-     - Interactive eye icon (`👁️`) on each cell displaying full chronological history of who approved the date and when.
-   - **Inline Cell Editing & CRM Status Swatch:**
-     - Single-click or double-click to edit cell values inline.
-     - Hover over any cell to display the **Status Swatch Picker**:
-       - 🔴 **Red Swatch:** Requirement Raised
-       - 🔵 **Blue Swatch:** Ordered to Manufacturer
-       - 🟢 **Green Swatch:** Purchased / In Transit
-       - 🎨 **Custom Color Swatches:** Admin-defined operational status tags.
-     - Real-time WebSocket broadcasting sends cell updates to all connected users, preventing concurrent edit overwrites.
+      - Interactive eye icon (`👁️`) on each cell displaying full chronological history of who approved the date and when.
+    - **Excel-Style Column Header Filtering & Live Server Search:**
+      - Filter funnel icon (`Y`) on every column header (including `ITEM`, `TEST(Y/N)`, `APPROVAL DATE`, and dynamic columns).
+      - **Live Filter Popover**: Queries `/api/v1/planning/sheets/{id}/filter-values` across the entire sheet dataset (1384+ items) rather than only the currently loaded browser page.
+      - **Instant Search Box**: Real-time debounced text search inside the popover dynamically matches and returns items from the whole database, even for unrendered or newly added Product Master items.
+      - **Checkbox Selection**: Multi-select checkboxes with `(Select All)` and `Clear` controls, exact item frequency counts `(N)`, and full name tooltips.
+      - **Server-Side Application**: Applying filters queries the database with server-side ILIKE and IN matching, updating the grid pagination and footer count (`Showing 1-N of Total`).
+    - **Inline Cell Editing & CRM Status Swatch:**
+      - Single-click or double-click to edit cell values inline.
+      - Hover over any cell to display the **Status Swatch Picker**:
+        - 🔴 **Red Swatch:** Requirement Raised
+        - 🔵 **Blue Swatch:** Ordered to Manufacturer
+        - 🟢 **Green Swatch:** Purchased / In Transit
+        - 🎨 **Custom Color Swatches:** Admin-defined operational status tags.
+      - Real-time WebSocket broadcasting sends cell updates to all connected users, preventing concurrent edit overwrites.
 
 4. **Container CBM Optimization Engine:**
-   - Computes total loaded volume in cubic meters ($m^3$) and gross weight ($kg$) live across all planned item rows:
-     $$\text{Total CBM} = \sum (\text{Row Quantity} \times \text{Product Packaging Unit CBM})$$
-     $$\text{Total Weight} = \sum (\text{Row Quantity} \times \text{Product Packaging Gross Weight})$$
-   - **Container Preset Specifications:**
-     - **20FT Standard Container:** Max $28.00 \text{ CBM} / 21,500 \text{ kg}$
-     - **40FT Standard Container:** Max $58.00 \text{ CBM} / 26,000 \text{ kg}$
-     - **40FT High Cube (HC) Container:** Max $68.00 \text{ CBM} / 26,000 \text{ kg}$
-     - **LCL (Less than Container Load)**
-   - **Visual Load Meter:**
-     - Percentage filled gauge: 🟢 Optimal ($< 95\%$), 🟡 Near Capacity ($95–100\%$), 🔴 Overloaded ($> 100\%$).
-     - Multi-container distribution recommendations (e.g. `Requires 2 x 40FT HC + 1 x 20FT Container`).
+    - Computes total loaded volume in cubic meters ($m^3$) and gross weight ($kg$) live across all planned item rows:
+      $$\text{Total CBM} = \sum (\text{Row Quantity} \times \text{Product Packaging Unit CBM})$$
+      $$\text{Total Weight} = \sum (\text{Row Quantity} \times \text{Product Packaging Gross Weight})$$
+    - **Container Preset Specifications:**
+      - **20FT Standard Container:** Max $28.00 \text{ CBM} / 21,500 \text{ kg}$
+      - **40FT Standard Container:** Max $58.00 \text{ CBM} / 26,000 \text{ kg}$
+      - **40FT High Cube (HC) Container:** Max $68.00 \text{ CBM} / 26,000 \text{ kg}$
+      - **LCL (Less than Container Load)**
+    - **Visual Load Meter:**
+      - Percentage filled gauge: 🟢 Optimal ($< 95\%$), 🟡 Near Capacity ($95–100\%$), 🔴 Overloaded ($> 100\%$).
+      - Multi-container distribution recommendations (e.g. `Requires 2 x 40FT HC + 1 x 20FT Container`).
 
 ### Test Cases for Shipment Planning Module
-- [ ] Open `/planning`, switch between branch sheet tabs, verify active sheet grid renders.
+- [ ] Open `/planning`, switch between branch sheet tabs, verify active sheet grid renders with default Inhyma organization.
+- [ ] Type an item query (e.g. `FR900` or `DKX4540`) into the top **Organization-Wide Search Bar**. Verify it live-filters the active branch sheet (`Inhyma Mumbai`) and opens the cross-branch results dropdown.
+- [ ] In the search dropdown, verify it displays match counts across all branches of the active organization (e.g. `Inhyma Mumbai`, `Inhyma Ahmedabad`, `Inhyma Indore`).
+- [ ] Click `Switch to Branch →` or click an item under another branch (e.g. `Inhyma Ahmedabad`). Verify active tab switches to `Inhyma Ahmedabad` with the filter applied immediately.
+- [ ] Click the clear icon (`✕`) in the top search bar. Verify active sheet filter clears and the full sheet is restored.
+- [ ] Click filter funnel on `ITEM` column, verify filter popover opens with distinct items across all rows in the workbook.
+- [ ] Paste a product name (e.g. `GF1000FD Granular Filler` or unrendered item) into `Search items...` in filter popover. Verify matching item appears in the list with count.
+- [ ] Select matching item, click `Apply`. Verify the grid updates and displays only the matching product with accurate footer count.
+- [ ] Click filter funnel again, click `Reset` or `Clear All Filters`. Verify all 1384+ items render again.
 - [ ] Click `+ Add Column`, create column `Test Number` with type `NUMBER` and source `MANUAL`. Verify column appears in grid.
 - [ ] Edit a cell in the grid, change value, click off, verify cell value persists on reload.
 - [ ] Hover over a cell, click the status swatch, select Green (`Purchased`). Verify cell displays green status tag.

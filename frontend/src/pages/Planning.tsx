@@ -415,75 +415,162 @@ function DescriptionPopover({
  */
 function ColumnFilterPopover({
   anchor,
+  sheetId,
+  columnId,
   columnName,
-  uniqueValues,
+  organizationId,
+  fallbackUniqueValues,
   currentFilter,
   onApply,
   onClear,
   onClose,
 }: {
   anchor: HTMLElement;
+  sheetId: string;
+  columnId: string;
   columnName: string;
-  uniqueValues: [string, number][];
+  organizationId?: string | null;
+  fallbackUniqueValues: [string, number][];
   currentFilter?: { selectedValues?: Set<string>; textQuery?: string };
   onApply: (filter: { selectedValues?: Set<string>; textQuery?: string }) => void;
   onClear: () => void;
   onClose: () => void;
 }) {
   const rect = anchor.getBoundingClientRect();
-  const left = Math.min(Math.max(10, rect.left), window.innerWidth - 270);
-  const top = Math.min(rect.bottom + 6, window.innerHeight - 360);
+  const left = Math.min(Math.max(10, rect.left), window.innerWidth - 280);
+  const top = Math.min(rect.bottom + 6, window.innerHeight - 380);
 
   const [searchValue, setSearchValue] = useState(currentFilter?.textQuery || "");
+  const [serverValues, setServerValues] = useState<[string, number][]>(fallbackUniqueValues);
+  const [loadingValues, setLoadingValues] = useState(false);
+
+  // Track if user explicitly clicked checkboxes to customize value selection
+  const [hasModifiedSelection, setHasModifiedSelection] = useState(
+    Boolean(currentFilter?.selectedValues && currentFilter.selectedValues.size > 0)
+  );
+
   const [checkedValues, setCheckedValues] = useState<Set<string>>(() => {
     if (currentFilter?.selectedValues && currentFilter.selectedValues.size > 0) {
       return new Set(currentFilter.selectedValues);
     }
-    return new Set(uniqueValues.map(([v]) => v));
+    return new Set();
   });
 
+  // Fetch unique values from server across the entire dataset (all 1384+ items)
+  useEffect(() => {
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      setLoadingValues(true);
+      try {
+        const colParam = columnId === "item-header-col" ? "" : columnId;
+        const qs = toQueryString({
+          column_id: colParam || undefined,
+          search: searchValue.trim() ? searchValue.trim() : undefined,
+          ...(organizationId ? { organization_id: organizationId } : {}),
+          limit: 1000,
+        });
+        const { data } = await apiGet<{ value: string; count: number }[]>(`/planning/sheets/${sheetId}/filter-values${qs}`);
+        if (!cancelled && Array.isArray(data)) {
+          const list: [string, number][] = data.map((item) => [item.value, item.count]);
+          setServerValues(list);
+        }
+      } catch {
+        // Fallback to local unique values gracefully
+      } finally {
+        if (!cancelled) setLoadingValues(false);
+      }
+    }, 150);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [sheetId, columnId, organizationId, searchValue]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const filteredUniqueValues = useMemo(() => {
-    if (!searchValue.trim()) return uniqueValues;
+    if (!searchValue.trim()) return serverValues;
     const q = searchValue.trim().toLowerCase();
-    return uniqueValues.filter(([val]) => val.toLowerCase().includes(q));
-  }, [uniqueValues, searchValue]);
+    return serverValues.filter(([val]) => val.toLowerCase().includes(q));
+  }, [serverValues, searchValue]);
+
+  const isValueChecked = useCallback(
+    (val: string) => {
+      if (!hasModifiedSelection) {
+        // By default (no custom checkbox changes), all items are considered selected
+        return true;
+      }
+      return checkedValues.has(val);
+    },
+    [hasModifiedSelection, checkedValues]
+  );
 
   const allFilteredChecked = useMemo(() => {
-    return filteredUniqueValues.length > 0 && filteredUniqueValues.every(([v]) => checkedValues.has(v));
-  }, [filteredUniqueValues, checkedValues]);
+    if (filteredUniqueValues.length === 0) return false;
+    if (!hasModifiedSelection) return true;
+    return filteredUniqueValues.every(([v]) => checkedValues.has(v));
+  }, [filteredUniqueValues, hasModifiedSelection, checkedValues]);
 
   const handleToggleAll = () => {
+    setHasModifiedSelection(true);
     if (allFilteredChecked) {
-      const next = new Set(checkedValues);
-      filteredUniqueValues.forEach(([v]) => next.delete(v));
-      setCheckedValues(next);
+      setCheckedValues((prev) => {
+        const next = hasModifiedSelection ? new Set(prev) : new Set(filteredUniqueValues.map(([v]) => v));
+        filteredUniqueValues.forEach(([v]) => next.delete(v));
+        return next;
+      });
     } else {
-      const next = new Set(checkedValues);
-      filteredUniqueValues.forEach(([v]) => next.add(v));
-      setCheckedValues(next);
+      setCheckedValues((prev) => {
+        const next = new Set(prev);
+        filteredUniqueValues.forEach(([v]) => next.add(v));
+        return next;
+      });
     }
   };
 
   const handleToggleValue = (val: string) => {
-    const next = new Set(checkedValues);
-    if (next.has(val)) {
-      next.delete(val);
-    } else {
-      next.add(val);
-    }
-    setCheckedValues(next);
+    setCheckedValues((prev) => {
+      let next: Set<string>;
+      if (!hasModifiedSelection) {
+        // First explicit click: start from all currently filtered values except the toggled one
+        next = new Set(filteredUniqueValues.map(([v]) => v));
+        next.delete(val);
+      } else {
+        next = new Set(prev);
+        if (next.has(val)) {
+          next.delete(val);
+        } else {
+          next.add(val);
+        }
+      }
+      return next;
+    });
+    setHasModifiedSelection(true);
   };
 
   const handleApply = () => {
-    const isAllSelected = uniqueValues.length > 0 && checkedValues.size === uniqueValues.length;
     const hasText = searchValue.trim().length > 0;
-    if (isAllSelected && !hasText) {
+    const textQuery = hasText ? searchValue.trim() : undefined;
+
+    if (!hasModifiedSelection) {
+      // User only searched by text or left default select-all
+      if (!textQuery) {
+        onClear();
+      } else {
+        onApply({ textQuery, selectedValues: undefined });
+      }
+      onClose();
+      return;
+    }
+
+    // User customized checkbox selections
+    if (checkedValues.size === 0) {
+      // Nothing selected
+      onApply({ textQuery, selectedValues: new Set(["__NO_MATCH__"]) });
+    } else if (!hasText && serverValues.length > 0 && checkedValues.size >= serverValues.length) {
+      // All checked and no text search -> no filter needed
       onClear();
     } else {
-      onApply({
-        selectedValues: isAllSelected ? undefined : new Set(checkedValues),
-        textQuery: hasText ? searchValue.trim() : undefined,
-      });
+      onApply({ textQuery, selectedValues: new Set(checkedValues) });
     }
     onClose();
   };
@@ -502,7 +589,7 @@ function ColumnFilterPopover({
           borderRadius: 8,
           boxShadow: "0 10px 25px -5px rgba(0,0,0,0.2), 0 8px 10px -6px rgba(0,0,0,0.1)",
           padding: 12,
-          width: 250,
+          width: 260,
           display: "flex",
           flexDirection: "column",
           gap: 10,
@@ -510,7 +597,7 @@ function ColumnFilterPopover({
         }}
       >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #E2E8F0", paddingBottom: 6 }}>
-          <span style={{ fontWeight: 600, color: "#0F172A", fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 180 }} title={columnName}>
+          <span style={{ fontWeight: 600, color: "#0F172A", fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 190 }} title={columnName}>
             Filter: {columnName}
           </span>
           <button type="button" onClick={onClose} style={{ border: "none", background: "transparent", cursor: "pointer", color: "#64748B", fontSize: 14 }}>
@@ -518,21 +605,28 @@ function ColumnFilterPopover({
           </button>
         </div>
 
-        <input
-          type="text"
-          placeholder="Search items..."
-          value={searchValue}
-          onChange={(e) => setSearchValue(e.target.value)}
-          style={{
-            width: "100%",
-            boxSizing: "border-box",
-            padding: "5px 8px",
-            fontSize: 12,
-            borderRadius: 5,
-            border: "1px solid #CBD5E1",
-            outline: "none",
-          }}
-        />
+        <div style={{ position: "relative", width: "100%" }}>
+          <input
+            type="text"
+            placeholder="Search items..."
+            value={searchValue}
+            onChange={(e) => setSearchValue(e.target.value)}
+            style={{
+              width: "100%",
+              boxSizing: "border-box",
+              padding: "5px 8px",
+              fontSize: 12,
+              borderRadius: 5,
+              border: "1px solid #CBD5E1",
+              outline: "none",
+            }}
+          />
+          {loadingValues && (
+            <span style={{ position: "absolute", right: 8, top: 6, fontSize: 10, color: "#94A3B8" }}>
+              Loading…
+            </span>
+          )}
+        </div>
 
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 11 }}>
           <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontWeight: 600, color: "#334155" }}>
@@ -545,7 +639,10 @@ function ColumnFilterPopover({
           </label>
           <button
             type="button"
-            onClick={() => setCheckedValues(new Set())}
+            onClick={() => {
+              setHasModifiedSelection(true);
+              setCheckedValues(new Set());
+            }}
             style={{ border: "none", background: "transparent", color: "#2563EB", cursor: "pointer", fontSize: 11, padding: 0 }}
           >
             Clear
@@ -554,7 +651,9 @@ function ColumnFilterPopover({
 
         <div style={{ maxHeight: 180, overflowY: "auto", border: "1px solid #F1F5F9", borderRadius: 6, padding: "4px 6px", display: "flex", flexDirection: "column", gap: 3 }}>
           {filteredUniqueValues.length === 0 ? (
-            <div style={{ color: "#94A3B8", fontSize: 12, padding: "8px 0", textAlign: "center" }}>No matching items</div>
+            <div style={{ color: "#94A3B8", fontSize: 12, padding: "8px 0", textAlign: "center" }}>
+              {loadingValues ? "Searching all records…" : "No matching items"}
+            </div>
           ) : (
             filteredUniqueValues.map(([val, count]) => (
               <label
@@ -574,7 +673,7 @@ function ColumnFilterPopover({
                 <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0, flex: 1 }}>
                   <input
                     type="checkbox"
-                    checked={checkedValues.has(val)}
+                    checked={isValueChecked(val)}
                     onChange={() => handleToggleValue(val)}
                   />
                   <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={val}>
@@ -1428,10 +1527,11 @@ export function PlanningPage() {
       })
       .map(([key, state]) => {
         const colId = key.slice(prefix.length);
+        const vals = state.selectedValues && state.selectedValues.size > 0 ? Array.from(state.selectedValues) : undefined;
         return {
           column_id: colId === "item-header-col" ? null : colId,
           text_query: state.textQuery && state.textQuery.trim() ? state.textQuery.trim() : undefined,
-          selected_values: state.selectedValues && state.selectedValues.size > 0 ? Array.from(state.selectedValues) : undefined,
+          selected_values: vals && vals.length > 0 && vals.length <= 100 ? vals : undefined,
         };
       });
     if (entries.length === 0) return undefined;
@@ -1439,6 +1539,156 @@ export function PlanningPage() {
   }, [activeSheetId, activeColumnFilters]);
 
   const [filterPopover, setFilterPopover] = useState<{ anchor: HTMLElement; columnId: string; columnName: string } | null>(null);
+
+  // --- Organization-Wide Cross-Branch Search Bar State ---
+  const [orgSearchTerm, setOrgSearchTerm] = useState("");
+  const [orgSearchResults, setOrgSearchResults] = useState<{
+    total_matches: number;
+    branches: {
+      sheet_id: string;
+      sheet_name: string;
+      organization_id: string | null;
+      branch_id: string | null;
+      match_count: number;
+      items: { row_id: string; label: string }[];
+    }[];
+  } | null>(null);
+  const [orgSearchLoading, setOrgSearchLoading] = useState(false);
+  const [orgSearchDropdownOpen, setOrgSearchDropdownOpen] = useState(false);
+  const [isSearchFocused, setIsSearchFocused] = useState(false);
+  const orgSearchContainerRef = useRef<HTMLDivElement | null>(null);
+
+  const currentOrgName = useMemo(() => {
+    if (!tabOrganizationFilterId) return "All";
+    return organizations.items.find((o) => o.id === tabOrganizationFilterId)?.name || "Current Organization";
+  }, [tabOrganizationFilterId, organizations.items]);
+
+  // Close org search dropdown on click outside
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (orgSearchContainerRef.current && !orgSearchContainerRef.current.contains(e.target as Node)) {
+        setOrgSearchDropdownOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  // Debounced multi-branch scan across the active organization
+  useEffect(() => {
+    const term = orgSearchTerm.trim();
+    if (!term) {
+      setOrgSearchResults(null);
+      setOrgSearchLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      setOrgSearchLoading(true);
+      try {
+        const qs = toQueryString({
+          query: term,
+          ...(tabOrganizationFilterId ? { organization_id: tabOrganizationFilterId } : {}),
+          limit_per_branch: 5,
+        });
+        const { data } = await apiGet<{
+          total_matches: number;
+          branches: {
+            sheet_id: string;
+            sheet_name: string;
+            organization_id: string | null;
+            branch_id: string | null;
+            match_count: number;
+            items: { row_id: string; label: string }[];
+          }[];
+        }>(`/planning/organization-search${qs}`);
+        if (!cancelled && data) {
+          setOrgSearchResults(data);
+          setOrgSearchDropdownOpen(true);
+        }
+      } catch {
+        // Graceful fallback
+      } finally {
+        if (!cancelled) setOrgSearchLoading(false);
+      }
+    }, 180);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [orgSearchTerm, tabOrganizationFilterId]);
+
+  // Live filter active sheet grid while typing
+  const handleOrgSearchChange = (term: string) => {
+    setOrgSearchTerm(term);
+    if (!term.trim()) {
+      setOrgSearchDropdownOpen(false);
+      if (activeSheetId) {
+        setActiveColumnFilters((prev) => {
+          const next = { ...prev };
+          delete next[`${activeSheetId}:item-header-col`];
+          return next;
+        });
+      }
+    } else {
+      setOrgSearchDropdownOpen(true);
+      if (activeSheetId) {
+        setActiveColumnFilters((prev) => ({
+          ...prev,
+          [`${activeSheetId}:item-header-col`]: { textQuery: term.trim() },
+        }));
+      }
+    }
+  };
+
+  const handleSelectBranchFromSearch = (sheetId: string, sheetName: string) => {
+    setActiveSheetId(sheetId);
+    setGrid(null);
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set("sheet", sheetName);
+      return next;
+    });
+    if (orgSearchTerm.trim()) {
+      setActiveColumnFilters((prev) => ({
+        ...prev,
+        [`${sheetId}:item-header-col`]: { textQuery: orgSearchTerm.trim() },
+      }));
+    }
+    setOrgSearchDropdownOpen(false);
+  };
+
+  const handleSelectItemFromSearch = (sheetId: string, sheetName: string, itemLabel: string) => {
+    setActiveSheetId(sheetId);
+    setGrid(null);
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set("sheet", sheetName);
+      return next;
+    });
+    setOrgSearchTerm(itemLabel);
+    setActiveColumnFilters((prev) => ({
+      ...prev,
+      [`${sheetId}:item-header-col`]: { textQuery: itemLabel },
+    }));
+    setOrgSearchDropdownOpen(false);
+  };
+
+  const handleClearOrgSearch = () => {
+    setOrgSearchTerm("");
+    setOrgSearchResults(null);
+    setOrgSearchDropdownOpen(false);
+    if (activeSheetId) {
+      setActiveColumnFilters((prev) => {
+        const next = { ...prev };
+        delete next[`${activeSheetId}:item-header-col`];
+        return next;
+      });
+    }
+  };
+
   /** Draft text for the "Group Label" fix-in-place field inside the Configuration panel. Reset to the sheet's current label whenever the panel opens. */
   const [groupLabelDraft, setGroupLabelDraft] = useState("");
   const [savingGroupLabel, setSavingGroupLabel] = useState(false);
@@ -1535,18 +1785,28 @@ export function PlanningPage() {
    * `?sheet=<name>` to a sheet ID. Only runs the match while
    * `activeOrganizationId` is still unset, so it doesn't fight with the
    * dropdown once the person has changed the filter themselves.
+   * If no org param is provided, default tabOrganizationFilterId to Inhyma.
    */
   useEffect(() => {
-    if (activeOrganizationId !== null) return;
     if (!organizations.loaded || organizations.items.length === 0) return;
     const urlOrgParam = searchParams.get("org");
-    if (!urlOrgParam) return;
-    const matched = organizations.items.find(
-      (o) => o.name.toLowerCase() === urlOrgParam.toLowerCase() || o.id === urlOrgParam
-    );
-    if (matched) setActiveOrganizationId(matched.id);
+    if (urlOrgParam) {
+      const matched = organizations.items.find(
+        (o) => o.name.toLowerCase() === urlOrgParam.toLowerCase() || o.id === urlOrgParam
+      );
+      if (matched) {
+        if (activeOrganizationId === null) setActiveOrganizationId(matched.id);
+        setTabOrganizationFilterId((prev) => (prev !== null ? prev : matched.id));
+        return;
+      }
+    }
+    // Default organization filter to Inhyma when not explicitly set
+    const inhymaOrg = organizations.items.find((o) => o.name.toLowerCase().includes("inhyma"));
+    if (inhymaOrg) {
+      setTabOrganizationFilterId((prev) => (prev === null ? inhymaOrg.id : prev));
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [organizations.loaded, organizations.items]);
+  }, [organizations.loaded, organizations.items, searchParams]);
 
   const loadSheets = useCallback(async () => {
     try {
@@ -1559,24 +1819,26 @@ export function PlanningPage() {
             (s) => s.name.toLowerCase() === urlSheetParam.toLowerCase() || s.id === urlSheetParam
           )
           : null;
-        const target = matched || (activeSheetId ? data.find((s) => s.id === activeSheetId) || data[0] : data[0]);
+
+        // Find Inhyma organization and its primary sheet as the default
+        const inhymaOrg = organizations.items.find((o) => o.name.toLowerCase().includes("inhyma"));
+        const inhymaSheet = inhymaOrg
+          ? data.find((s) => s.organization_id === inhymaOrg.id)
+          : data.find((s) => s.name.toLowerCase().includes("inhyma"));
+
+        const target = matched || (activeSheetId ? data.find((s) => s.id === activeSheetId) : null) || inhymaSheet || data[0];
         setActiveSheetId(target.id);
         setSheetUrlParam(target.name);
-        // Default the tab-visibility filter to the initially-resolved
-        // sheet's own organization, exactly once (never overrides a
-        // filter the user already picked) -- otherwise every
-        // organization's branches would show mixed together in the tab
-        // bar on first load, which is what this whole feature exists to
-        // avoid. A legacy, never-linked sheet (organization_id is null)
-        // leaves the filter unset (null = "no filter", every sheet
-        // still shown), since there's no organization to default to.
-        setTabOrganizationFilterId((prev) => (prev !== null ? prev : target.organization_id ?? null));
+        
+        // Default the tab-visibility filter to Inhyma if available, otherwise target's organization
+        const defaultOrgId = inhymaOrg ? inhymaOrg.id : (target.organization_id ?? null);
+        setTabOrganizationFilterId((prev) => (prev !== null ? prev : defaultOrgId));
       }
     } catch (err) {
       setError(err);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams, setSearchParams]);
+  }, [searchParams, setSearchParams, organizations.items, activeSheetId]);
 
   /**
    * Sheets currently shown as tabs, restricted to whichever organization
@@ -3027,8 +3289,8 @@ export function PlanningPage() {
               : ["Shipment Planning"]
           }
         />
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, flexWrap: "wrap", gap: 8 }}>
-          <h1 style={{ fontSize: 20, fontWeight: 600, color: "#0F172A", margin: 0 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, flexWrap: "wrap", gap: 12 }}>
+          <h1 style={{ fontSize: 20, fontWeight: 600, color: "#0F172A", margin: 0, flexShrink: 0 }}>
             Shipment Planning{activeSheet ? ` / ${activeSheet.name}` : ""}
             {activeOrganizationId && (
               <span style={{ fontSize: 13, fontWeight: 500, color: "#2563EB" }}>
@@ -3036,7 +3298,389 @@ export function PlanningPage() {
               </span>
             )}
           </h1>
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+
+          {/* Org-Wide Cross-Branch Search Bar */}
+          <div ref={orgSearchContainerRef} style={{ position: "relative", flex: "1 1 340px", maxWidth: 460, minWidth: 260 }}>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                background: "#FFFFFF",
+                border: isSearchFocused ? "1.5px solid #2563EB" : "1.5px solid #E2E8F0",
+                borderRadius: 8,
+                padding: "0 10px",
+                height: 38,
+                gap: 8,
+                boxShadow: isSearchFocused
+                  ? "0 0 0 3px rgba(37, 99, 235, 0.12), 0 1px 2px rgba(0,0,0,0.04)"
+                  : "0 1px 2px rgba(0,0,0,0.04)",
+                transition: "all 0.15s ease-in-out",
+                boxSizing: "border-box",
+              }}
+            >
+              {/* Modern SVG Search Icon */}
+              <span
+                style={{
+                  color: isSearchFocused ? "#2563EB" : "#94A3B8",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
+                  transition: "color 0.15s",
+                }}
+              >
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="11" cy="11" r="8" />
+                  <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                </svg>
+              </span>
+
+              <input
+                type="text"
+                value={orgSearchTerm}
+                onChange={(e) => handleOrgSearchChange(e.target.value)}
+                onFocus={() => {
+                  setIsSearchFocused(true);
+                  if (orgSearchTerm.trim() && orgSearchResults) {
+                    setOrgSearchDropdownOpen(true);
+                  }
+                }}
+                onBlur={() => setIsSearchFocused(false)}
+                placeholder={
+                  tabOrganizationFilterId
+                    ? `Search across ${currentOrgName} branches...`
+                    : "Search items across all branches..."
+                }
+                style={{
+                  border: "none",
+                  outline: "none",
+                  width: "100%",
+                  fontSize: 13,
+                  fontWeight: 450,
+                  color: "#0F172A",
+                  background: "transparent",
+                  padding: 0,
+                }}
+              />
+
+              {/* Organization Pill badge */}
+              {tabOrganizationFilterId && !orgSearchTerm && (
+                <span
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 600,
+                    color: "#2563EB",
+                    background: "#EFF6FF",
+                    padding: "2px 7px",
+                    borderRadius: 4,
+                    border: "1px solid #DBEAFE",
+                    flexShrink: 0,
+                    userSelect: "none",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {currentOrgName}
+                </span>
+              )}
+
+              {/* Modern Spinner while scanning */}
+              {orgSearchLoading && (
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 4,
+                    color: "#64748B",
+                    fontSize: 11,
+                    fontWeight: 500,
+                    flexShrink: 0,
+                  }}
+                >
+                  <svg
+                    style={{ animation: "spinOrgSearch 0.8s linear infinite" }}
+                    width="13"
+                    height="13"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="#2563EB"
+                    strokeWidth="2.5"
+                  >
+                    <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                  </svg>
+                  <style>{`
+                    @keyframes spinOrgSearch {
+                      from { transform: rotate(0deg); }
+                      to { transform: rotate(360deg); }
+                    }
+                  `}</style>
+                </div>
+              )}
+
+              {/* Clear button */}
+              {orgSearchTerm && (
+                <button
+                  type="button"
+                  onClick={handleClearOrgSearch}
+                  title="Clear search"
+                  style={{
+                    border: "none",
+                    background: "#F1F5F9",
+                    color: "#64748B",
+                    cursor: "pointer",
+                    width: 18,
+                    height: 18,
+                    borderRadius: "50%",
+                    fontSize: 11,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    padding: 0,
+                    flexShrink: 0,
+                    transition: "background 0.15s, color 0.15s",
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = "#E2E8F0";
+                    e.currentTarget.style.color = "#0F172A";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = "#F1F5F9";
+                    e.currentTarget.style.color = "#64748B";
+                  }}
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+
+            {/* Cross-Branch Search Results Dropdown */}
+            {orgSearchDropdownOpen && orgSearchTerm.trim() && (
+              <div
+                style={{
+                  position: "absolute",
+                  top: "calc(100% + 8px)",
+                  left: 0,
+                  right: 0,
+                  zIndex: 999,
+                  background: "#FFFFFF",
+                  border: "1px solid #E2E8F0",
+                  borderRadius: 10,
+                  boxShadow: "0 15px 30px -5px rgba(15, 23, 42, 0.12), 0 6px 12px -4px rgba(15, 23, 42, 0.06)",
+                  maxHeight: 400,
+                  overflowY: "auto",
+                  display: "flex",
+                  flexDirection: "column",
+                  fontSize: 12,
+                }}
+              >
+                {/* Header Summary */}
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    padding: "9px 12px",
+                    background: "#F8FAFC",
+                    borderBottom: "1px solid #E2E8F0",
+                    color: "#475569",
+                    fontSize: 11.5,
+                    fontWeight: 600,
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <span>🏢</span>
+                    <span>
+                      {tabOrganizationFilterId ? `${currentOrgName} Organization Branches` : "All Branches"}
+                    </span>
+                  </div>
+                  <span
+                    style={{
+                      background: orgSearchLoading ? "#F1F5F9" : (orgSearchResults && orgSearchResults.total_matches > 0 ? "#EEF2FF" : "#F1F5F9"),
+                      color: orgSearchLoading ? "#64748B" : (orgSearchResults && orgSearchResults.total_matches > 0 ? "#4338CA" : "#64748B"),
+                      padding: "2px 8px",
+                      borderRadius: 12,
+                      fontWeight: 600,
+                      fontSize: 11,
+                      border: orgSearchResults && orgSearchResults.total_matches > 0 ? "1px solid #C7D2FE" : "1px solid #E2E8F0",
+                    }}
+                  >
+                    {orgSearchLoading
+                      ? "Scanning branches..."
+                      : orgSearchResults
+                      ? `${orgSearchResults.total_matches} match${orgSearchResults.total_matches === 1 ? "" : "es"}`
+                      : "Ready"}
+                  </span>
+                </div>
+
+                <div style={{ padding: 8, display: "flex", flexDirection: "column", gap: 8 }}>
+                  {orgSearchLoading && !orgSearchResults && (
+                    <div style={{ padding: "24px 12px", textAlign: "center", color: "#64748B", display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
+                      <svg style={{ animation: "spinOrgSearch 0.8s linear infinite" }} width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#2563EB" strokeWidth="2.5">
+                        <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                      </svg>
+                      <span style={{ fontSize: 12 }}>Scanning across branches for "{orgSearchTerm}"...</span>
+                    </div>
+                  )}
+
+                  {!orgSearchLoading && orgSearchResults && orgSearchResults.branches.length === 0 && (
+                    <div style={{ padding: "20px 12px", textAlign: "center", color: "#94A3B8" }}>
+                      No branches found linked to this organization.
+                    </div>
+                  )}
+
+                  {!orgSearchLoading && orgSearchResults && orgSearchResults.total_matches === 0 && (
+                    <div style={{ padding: "20px 12px", textAlign: "center", color: "#64748B", display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+                      <span style={{ fontSize: 18 }}>🔍</span>
+                      <span style={{ fontWeight: 600, color: "#1E293B", fontSize: 13 }}>No matching items found</span>
+                      <span style={{ fontSize: 11.5, color: "#94A3B8" }}>
+                        "{orgSearchTerm}" is not planned in any {currentOrgName} branch.
+                      </span>
+                    </div>
+                  )}
+
+                  {orgSearchResults &&
+                    orgSearchResults.branches.map((branch) => {
+                      const isActive = branch.sheet_id === activeSheetId;
+                      const hasMatches = branch.match_count > 0;
+                      return (
+                        <div
+                          key={branch.sheet_id}
+                          style={{
+                            background: isActive ? "#F0F7FF" : "#FFFFFF",
+                            border: isActive ? "1px solid #BFDBFE" : "1px solid #E2E8F0",
+                            borderRadius: 8,
+                            padding: "8px 10px",
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: 6,
+                            transition: "border-color 0.15s",
+                          }}
+                        >
+                          <div
+                            style={{
+                              display: "flex",
+                              justifyContent: "space-between",
+                              alignItems: "center",
+                            }}
+                          >
+                            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                              <span style={{ fontWeight: 600, color: "#1E293B", fontSize: 12.5 }}>
+                                {branch.sheet_name}
+                              </span>
+                              {isActive ? (
+                                <span
+                                  style={{
+                                    background: "#ECFDF5",
+                                    color: "#059669",
+                                    fontSize: 10,
+                                    fontWeight: 700,
+                                    padding: "1.5px 6px",
+                                    borderRadius: 4,
+                                    border: "1px solid #A7F3D0",
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: 3,
+                                  }}
+                                >
+                                  <span style={{ width: 5, height: 5, borderRadius: "50%", background: "#10B981" }} />
+                                  Active Sheet
+                                </span>
+                              ) : (
+                                <span style={{ fontSize: 10, color: "#94A3B8", background: "#F1F5F9", padding: "1px 5px", borderRadius: 4 }}>
+                                  Branch
+                                </span>
+                              )}
+                            </div>
+                            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                              <span
+                                style={{
+                                  fontSize: 11,
+                                  fontWeight: 600,
+                                  color: hasMatches ? "#16A34A" : "#94A3B8",
+                                }}
+                              >
+                                {branch.match_count} item{branch.match_count === 1 ? "" : "s"}
+                              </span>
+                              {!isActive && hasMatches && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleSelectBranchFromSearch(branch.sheet_id, branch.sheet_name)}
+                                  style={{
+                                    border: "1px solid #2563EB",
+                                    background: "#EFF6FF",
+                                    color: "#2563EB",
+                                    cursor: "pointer",
+                                    fontSize: 11,
+                                    padding: "2.5px 9px",
+                                    borderRadius: 5,
+                                    fontWeight: 600,
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: 3,
+                                    transition: "all 0.15s",
+                                  }}
+                                  onMouseEnter={(e) => {
+                                    e.currentTarget.style.background = "#2563EB";
+                                    e.currentTarget.style.color = "#FFFFFF";
+                                  }}
+                                  onMouseLeave={(e) => {
+                                    e.currentTarget.style.background = "#EFF6FF";
+                                    e.currentTarget.style.color = "#2563EB";
+                                  }}
+                                >
+                                  Open Branch →
+                                </button>
+                              )}
+                            </div>
+                          </div>
+
+                          {branch.items.length > 0 && (
+                            <div style={{ display: "flex", flexDirection: "column", gap: 2, marginTop: 2, paddingTop: 4, borderTop: isActive ? "1px solid #DBEAFE" : "1px solid #F1F5F9" }}>
+                              {branch.items.map((item) => (
+                                <div
+                                  key={item.row_id}
+                                  onClick={() => handleSelectItemFromSearch(branch.sheet_id, branch.sheet_name, item.label)}
+                                  title={`Open ${branch.sheet_name} and view ${item.label}`}
+                                  style={{
+                                    padding: "4px 8px",
+                                    borderRadius: 5,
+                                    cursor: "pointer",
+                                    color: "#334155",
+                                    fontSize: 11.5,
+                                    display: "flex",
+                                    justifyContent: "space-between",
+                                    alignItems: "center",
+                                    background: "transparent",
+                                    transition: "background 0.1s, color 0.1s",
+                                  }}
+                                  onMouseEnter={(e) => {
+                                    e.currentTarget.style.background = isActive ? "#DBEAFE" : "#F1F5F9";
+                                    e.currentTarget.style.color = "#0F172A";
+                                  }}
+                                  onMouseLeave={(e) => {
+                                    e.currentTarget.style.background = "transparent";
+                                    e.currentTarget.style.color = "#334155";
+                                  }}
+                                >
+                                  <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+                                    <span style={{ color: "#94A3B8", fontSize: 11, flexShrink: 0 }}>📦</span>
+                                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                      {item.label}
+                                    </span>
+                                  </div>
+                                  <span style={{ color: "#2563EB", fontSize: 10.5, fontWeight: 500, flexShrink: 0 }}>Select ↵</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexShrink: 0 }}>
             <button type="button" className="btn btn-secondary" onClick={handleOpenHistory} disabled={!activeSheetId}>
               History
             </button>
@@ -3046,7 +3690,8 @@ export function PlanningPage() {
                 className="btn btn-secondary"
                 onClick={() => {
                   setNewSheetGroupLabel("Mum");
-                  setNewSheetOrganizationId("");
+                  const inhymaOrg = organizations.items.find((o) => o.name.toLowerCase().includes("inhyma"));
+                  setNewSheetOrganizationId(tabOrganizationFilterId || inhymaOrg?.id || "");
                   setNewSheetBranchId("");
                   setAddSheetOpen(true);
                 }}
@@ -3664,8 +4309,11 @@ export function PlanningPage() {
         {filterPopover && activeSheetId && (
           <ColumnFilterPopover
             anchor={filterPopover.anchor}
+            sheetId={activeSheetId}
+            columnId={filterPopover.columnId}
             columnName={filterPopover.columnName}
-            uniqueValues={getUniqueValuesForColumn(filterPopover.columnId)}
+            organizationId={activeOrganizationId}
+            fallbackUniqueValues={getUniqueValuesForColumn(filterPopover.columnId)}
             currentFilter={activeColumnFilters[`${activeSheetId}:${filterPopover.columnId}`]}
             onApply={(filter) => {
               setActiveColumnFilters((prev) => ({

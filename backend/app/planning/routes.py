@@ -649,6 +649,44 @@ async def get_grid(
     return build_success_response(data=data, request_id=request.state.request_id)
 
 
+@router.get("/sheets/{sheet_id}/filter-values", summary="Get distinct values and counts for a column filter popover")
+async def get_filter_values(
+    sheet_id: uuid.UUID,
+    request: Request,
+    column_id: uuid.UUID | None = Query(None, description="Column ID or null for ITEM column"),
+    search: str | None = Query(None, description="Optional search term to filter unique values"),
+    organization_id: uuid.UUID | None = Query(None, description="Optional organization ID override"),
+    limit: int = Query(500, ge=1, le=2000, description="Max unique values to return"),
+    service: PlanningService = Depends(get_planning_service),
+    _current_user: CurrentUser = Depends(require_permission("planning.view")),
+) -> dict:
+    data = await service.get_filter_values(
+        sheet_id,
+        column_id,
+        search=search,
+        organization_id=organization_id,
+        limit=limit,
+    )
+    return build_success_response(data=data, request_id=request.state.request_id)
+
+
+@router.get("/organization-search", summary="Search items across all branch sheets of an organization")
+async def organization_search(
+    request: Request,
+    query: str = Query(..., min_length=1, description="Search query string"),
+    organization_id: uuid.UUID | None = Query(None, description="Optional organization ID to scope branch search"),
+    limit_per_branch: int = Query(5, ge=1, le=50, description="Max matching items to return per branch"),
+    service: PlanningService = Depends(get_planning_service),
+    _current_user: CurrentUser = Depends(require_permission("planning.view")),
+) -> dict:
+    data = await service.search_organization_branches(
+        query,
+        organization_id=organization_id,
+        limit_per_branch=limit_per_branch,
+    )
+    return build_success_response(data=data, request_id=request.state.request_id)
+
+
 # ---------------------------------------------------------------------------
 # Columns (admin-defined, unlimited, insertable at any position)
 # ---------------------------------------------------------------------------

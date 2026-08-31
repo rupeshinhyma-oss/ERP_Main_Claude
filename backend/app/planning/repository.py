@@ -444,6 +444,94 @@ class PlanningRowRepository(BaseRepository[PlanningRow]):
         )
         await self.session.execute(stmt)
 
+    async def get_distinct_values_for_column(
+        self,
+        sheet_id: uuid.UUID,
+        column_id: uuid.UUID | None,
+        *,
+        search: str | None = None,
+        organization_id: uuid.UUID | None = None,
+        branch_id: str | None = None,
+        limit: int = 500,
+    ) -> list[tuple[str, int]]:
+        """
+        Return unique values and their row frequencies for a column on a sheet across all rows.
+        If column_id is None, queries the ITEM column (PlanningRow.label).
+        Otherwise queries PlanningCell.value joined with PlanningRow.
+        """
+        matching_ids = None
+        if organization_id is not None:
+            matching_ids = await self._linked_record_ids_for_organization(organization_id, branch_id=branch_id)
+            if not matching_ids:
+                return []
+
+        search_term = (search or "").strip()
+
+        if column_id is None:
+            # ITEM column (PlanningRow.label)
+            val_expr = func.coalesce(func.nullif(func.trim(PlanningRow.label), ""), "(Blanks)")
+            stmt = (
+                select(val_expr.label("val"), func.count(PlanningRow.id).label("cnt"))
+                .where(PlanningRow.sheet_id == sheet_id, PlanningRow.deleted_at.is_(None))
+            )
+            if matching_ids is not None:
+                stmt = stmt.where(PlanningRow.linked_record_id.in_(matching_ids))
+            if search_term:
+                stmt = stmt.where(PlanningRow.label.ilike(f"%{search_term}%"))
+            stmt = stmt.group_by(val_expr).order_by(val_expr.asc()).limit(limit)
+            result = await self.session.execute(stmt)
+            return [(str(row[0]), int(row[1])) for row in result.all()]
+        else:
+            # Regular column (PlanningCell.value)
+            val_expr = func.coalesce(func.nullif(func.trim(PlanningCell.value), ""), "(Blanks)")
+            stmt = (
+                select(val_expr.label("val"), func.count(PlanningCell.id).label("cnt"))
+                .join(PlanningRow, PlanningCell.row_id == PlanningRow.id)
+                .where(
+                    PlanningRow.sheet_id == sheet_id,
+                    PlanningRow.deleted_at.is_(None),
+                    PlanningCell.column_id == column_id,
+                )
+            )
+            if matching_ids is not None:
+                stmt = stmt.where(PlanningRow.linked_record_id.in_(matching_ids))
+            if search_term:
+                stmt = stmt.where(PlanningCell.value.ilike(f"%{search_term}%"))
+            stmt = stmt.group_by(val_expr).order_by(val_expr.asc()).limit(limit)
+            result = await self.session.execute(stmt)
+            return [(str(row[0]), int(row[1])) for row in result.all()]
+
+    async def search_items_for_sheet(
+        self,
+        sheet_id: uuid.UUID,
+        query: str,
+        *,
+        limit: int = 5,
+    ) -> tuple[int, list[PlanningRow]]:
+        """
+        Return the total count of rows matching `query` in `sheet_id` and the top `limit` matching PlanningRow objects.
+        """
+        clean_query = query.strip()
+        if not clean_query:
+            return 0, []
+
+        base_where = (
+            PlanningRow.sheet_id == sheet_id,
+            PlanningRow.deleted_at.is_(None),
+            PlanningRow.label.ilike(f"%{clean_query}%"),
+        )
+        count_stmt = select(func.count(PlanningRow.id)).where(*base_where)
+        count_res = await self.session.execute(count_stmt)
+        count = int(count_res.scalar_one())
+
+        if count == 0:
+            return 0, []
+
+        items_stmt = select(PlanningRow).where(*base_where).order_by(PlanningRow.position.asc()).limit(limit)
+        items_res = await self.session.execute(items_stmt)
+        items = list(items_res.scalars().all())
+        return count, items
+
 
 class PlanningColumnRepository(BaseRepository[PlanningColumn]):
     """Repository for ``planning_columns`` (admin-defined, unlimited, positioned)."""

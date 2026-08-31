@@ -1260,8 +1260,7 @@ class PlanningService:
 
         source_total: int | None = None
         if (
-            not has_active_search
-            and sheet.item_source_type == PlanningColumnSourceType.LINKED_LOOKUP
+            sheet.item_source_type == PlanningColumnSourceType.LINKED_LOOKUP
             and sheet.item_source_module == "product"
         ):
             all_matching_ids = await self.row_repository._all_product_ids_for_organization(
@@ -1269,24 +1268,20 @@ class PlanningService:
             )
             source_total = len(all_matching_ids)
 
-            if limit is not None and source_total > 0:
-                needed = min(offset + limit, source_total)
-                currently_linked = await self.row_repository.count_for_sheet(
-                    sheet_id, organization_id=effective_organization_id, branch_id=effective_branch_id
+            currently_linked = await self.row_repository.count_for_sheet(
+                sheet_id, organization_id=effective_organization_id, branch_id=effective_branch_id
+            )
+            if currently_linked < source_total:
+                # Ensure all products for this organization/branch are auto-populated
+                # so search filters and pagination have the full dataset available immediately
+                await self.auto_populate_rows_from_item_source(
+                    sheet_id,
+                    limit=None,
+                    user_id=sheet.created_by,
+                    username="system",
+                    organization_id=effective_organization_id,
+                    branch_id=effective_branch_id,
                 )
-                if currently_linked < needed:
-                    # Pull enough of THIS organization's (and, if linked,
-                    # this exact branch's) records to cover the requested
-                    # page -- e.g. asking for offset=50, limit=50 with 31
-                    # currently linked needs 69 more created.
-                    await self.auto_populate_rows_from_item_source(
-                        sheet_id,
-                        limit=needed,
-                        user_id=sheet.created_by,  # system-driven creation; attributed to the sheet's owner, mirrors seed-time auto-populate
-                        username="system",
-                        organization_id=effective_organization_id,
-                        branch_id=effective_branch_id,
-                    )
 
         columns = await self.column_repository.list_for_sheet(sheet_id)
         rows = await self.row_repository.list_page_for_sheet(
@@ -1298,16 +1293,132 @@ class PlanningService:
             search_column_filters=search_column_filters,
         )
         total_rows = (
-            source_total
-            if source_total is not None
-            else await self.row_repository.count_for_sheet(
+            await self.row_repository.count_for_sheet(
                 sheet_id,
                 organization_id=effective_organization_id,
                 branch_id=effective_branch_id,
                 search_column_filters=search_column_filters,
             )
+            if has_active_search
+            else (
+                source_total
+                if source_total is not None
+                else await self.row_repository.count_for_sheet(
+                    sheet_id,
+                    organization_id=effective_organization_id,
+                    branch_id=effective_branch_id,
+                )
+            )
         )
         return {"sheet": sheet, "columns": columns, "rows": rows, "total_rows": total_rows}
+
+    async def get_filter_values(
+        self,
+        sheet_id: uuid.UUID,
+        column_id: uuid.UUID | None,
+        *,
+        search: str | None = None,
+        organization_id: uuid.UUID | None = None,
+        limit: int = 500,
+    ) -> list[dict[str, Any]]:
+        """
+        Fetch distinct values with counts for a column filter popover across the whole sheet dataset.
+        Automatically syncs/populates any new products from Product Master so all data is available.
+        """
+        sheet = await self.get_sheet_or_raise(sheet_id)
+        effective_organization_id = sheet.organization_id if sheet.organization_id is not None else organization_id
+        effective_branch_id = sheet.branch_id if sheet.organization_id is not None else None
+
+        if sheet.item_source_type == PlanningColumnSourceType.LINKED_LOOKUP and sheet.item_source_module == "product":
+            await self.row_repository.cleanup_orphaned_product_rows(sheet_id)
+            all_matching_ids = await self.row_repository._all_product_ids_for_organization(
+                effective_organization_id, branch_id=effective_branch_id
+            )
+            source_total = len(all_matching_ids)
+            currently_linked = await self.row_repository.count_for_sheet(
+                sheet_id, organization_id=effective_organization_id, branch_id=effective_branch_id
+            )
+            if currently_linked < source_total:
+                await self.auto_populate_rows_from_item_source(
+                    sheet_id,
+                    limit=None,
+                    user_id=sheet.created_by,
+                    username="system",
+                    organization_id=effective_organization_id,
+                    branch_id=effective_branch_id,
+                )
+
+        values = await self.row_repository.get_distinct_values_for_column(
+            sheet_id,
+            column_id,
+            search=search,
+            organization_id=effective_organization_id,
+            branch_id=effective_branch_id,
+            limit=limit,
+        )
+        return [{"value": val, "count": count} for val, count in values]
+
+    async def search_organization_branches(
+        self,
+        query: str,
+        *,
+        organization_id: uuid.UUID | None = None,
+        limit_per_branch: int = 5,
+    ) -> dict[str, Any]:
+        """
+        Search for items matching ``query`` across all branch sheets belonging to ``organization_id``
+        (or across all sheets if organization_id is None).
+        Returns a breakdown per branch sheet with match counts and top matching items.
+        """
+        clean_query = query.strip()
+        sheets = await self.sheet_repository.list_active()
+        if organization_id is not None:
+            sheets = [s for s in sheets if s.organization_id == organization_id]
+
+        branch_results = []
+        total_matches = 0
+
+        for sheet in sheets:
+            # Ensure products are auto-populated if needed
+            if sheet.item_source_type == PlanningColumnSourceType.LINKED_LOOKUP and sheet.item_source_module == "product":
+                effective_org = sheet.organization_id
+                effective_branch = sheet.branch_id
+                all_matching_ids = await self.row_repository._all_product_ids_for_organization(
+                    effective_org, branch_id=effective_branch
+                )
+                source_total = len(all_matching_ids)
+                currently_linked = await self.row_repository.count_for_sheet(
+                    sheet.id, organization_id=effective_org, branch_id=effective_branch
+                )
+                if currently_linked < source_total:
+                    await self.auto_populate_rows_from_item_source(
+                        sheet.id,
+                        limit=None,
+                        user_id=sheet.created_by,
+                        username="system",
+                        organization_id=effective_org,
+                        branch_id=effective_branch,
+                    )
+
+            count, items = await self.row_repository.search_items_for_sheet(
+                sheet.id, clean_query, limit=limit_per_branch
+            )
+            total_matches += count
+            branch_results.append({
+                "sheet_id": str(sheet.id),
+                "sheet_name": sheet.name,
+                "organization_id": str(sheet.organization_id) if sheet.organization_id else None,
+                "branch_id": sheet.branch_id,
+                "match_count": count,
+                "items": [{"row_id": str(r.id), "label": r.label} for r in items],
+            })
+
+        return {
+            "query": clean_query,
+            "organization_id": str(organization_id) if organization_id else None,
+            "total_matches": total_matches,
+            "branches": branch_results,
+        }
 
     # --- Columns (admin-defined, unlimited, insertable at any position) ----------
 

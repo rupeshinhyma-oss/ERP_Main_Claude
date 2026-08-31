@@ -392,6 +392,10 @@ $$\text{EffectivePermissions} = \left( \bigcup_{r \in \text{UserRoles}} \text{Ro
 | **Masters** | `GET/POST`| `/api/v1/masters/currencies` | Manage currencies & conversion rates | `currency.*` |
 | **Masters** | `GET/POST`| `/api/v1/masters/uom` | Manage units of measurement | `uom.*` |
 | **Masters** | `GET/POST`| `/api/v1/masters/hsn` | Manage HSN/SAC customs codes | `hsn.*` |
+| **Masters** | `GET/POST`| `/api/v1/masters/company-list` | Manage enterprise company/branch entities | `organizationlist.*` |
+| **Masters** | `GET/POST`| `/api/v1/masters/supplier-types` | Manage supplier classification types | `suppliertype.*` |
+| **Masters** | `GET/POST`| `/api/v1/masters/buyer-types` | Manage buyer client classification types | `buyertype.*` |
+| **Search**  | `GET` | `/api/v1/search` | Universal global topbar search across all modules | Authenticated |
 | **Products**| `GET` | `/api/v1/products` | Paginated product catalog | `product.read` |
 | **Products**| `POST` | `/api/v1/products` | Create product record | `product.create` |
 | **Products**| `PATCH` | `/api/v1/products/{id}` | Update product & technical specs | `product.update` |
@@ -442,6 +446,8 @@ $$\text{EffectivePermissions} = \left( \bigcup_{r \in \text{UserRoles}} \text{Ro
 | **Trash** | `DELETE`| `/api/v1/trash/{entity}/{id}/purge` | Permanently purge record | `trash.purge` (Super Admin) |
 | **Cache** | `GET` | `/api/v1/cache/stats` | Inspect cache metrics & hit rate | `settings.manage` |
 | **Cache** | `DELETE`| `/api/v1/cache/flush` | Flush entire cache | `settings.manage` |
+| **Organizations** | `GET/PATCH` | `/api/v1/organizations/profile` | Manage enterprise company profile & logo | `organization.view/manage` |
+| **Events** | `WS` | `/api/v1/events/ws` | Real-time WebSocket connection bus | Authenticated |
 
 ---
 

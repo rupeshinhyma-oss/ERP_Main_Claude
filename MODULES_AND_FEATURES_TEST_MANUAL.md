@@ -571,6 +571,7 @@ Manage complete vendor team directory:
    - **Sheet Actions Menu:** `Rename Sheet`, `Duplicate Sheet`, `Delete Sheet`.
 
 2. **Top Grid Toolbar Actions:**
+   - 🔍 **Organization-Wide Cross-Branch Search Bar:** Dynamic top search bar with animated SVG search icon, live branch scan across all sheets of the active organization (e.g. `Inhyma Mumbai`, `Inhyma Ahmedabad`, `Inhyma Indore`), match count pills, item previews, and instant one-click branch switching.
    - 🔍 **Grid Search Input:** Live cell search highlighting matching cells across all rows and columns.
    - 🎚️ **Density Toggle:** `Compact` (high-density ERP spreadsheet) vs `Comfortable`.
    - ➕ **`+ Add Row` Button & Modal:**

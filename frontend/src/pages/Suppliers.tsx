@@ -654,6 +654,26 @@ export function SuppliersPage() {
     return "+86";
   }
 
+  function replacePhonePrefix(fullNumber: string | undefined | null, newPrefix: string): string {
+    if (!fullNumber) return "";
+    const trimmed = fullNumber.trim();
+    if (!trimmed) return "";
+    if (trimmed.startsWith("+")) {
+      const spaceIdx = trimmed.indexOf(" ");
+      if (spaceIdx !== -1) {
+        const subscriber = trimmed.slice(spaceIdx + 1).trim();
+        return subscriber ? `${newPrefix} ${subscriber}` : newPrefix;
+      }
+      const match = trimmed.match(/^\+\d{1,4}(.*)$/);
+      if (match && match[1]) {
+        const subscriber = match[1].trim();
+        return subscriber ? `${newPrefix} ${subscriber}` : newPrefix;
+      }
+      return newPrefix;
+    }
+    return `${newPrefix} ${trimmed}`;
+  }
+
   function focusAndScrollToField(fieldId: string) {
     setTimeout(() => {
       const el = document.getElementById(fieldId);
@@ -2385,6 +2405,12 @@ export function SuppliersPage() {
                           setValidationErrors((prev) => ({ ...prev, "field-country": "", "field-province": "", "field-city": "" }));
                           const newCode = await resolveCountryPhoneCode(v);
                           setFormCountryPhoneCode(newCode);
+                          setForm((prev) => ({
+                            ...prev,
+                            contact_calling_number: replacePhonePrefix(prev.contact_calling_number, newCode),
+                            contact_whatsapp_number: replacePhonePrefix(prev.contact_whatsapp_number, newCode),
+                            contact_wechat_number: replacePhonePrefix(prev.contact_wechat_number, newCode),
+                          }));
                         }}
                         placeholder="Search country..."
                         fetchOptions={searchFetcher("/masters/countries")}

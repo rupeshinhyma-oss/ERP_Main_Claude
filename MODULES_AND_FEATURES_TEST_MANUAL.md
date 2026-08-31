@@ -235,6 +235,7 @@ Manage complete vendor team directory:
 - [ ] Open `/suppliers` and confirm active list loads.
 - [ ] Click `+ QUICK ADD`, fill Company Name, Country, State, City and save. Verify record appears in table.
 - [ ] Click `+ ADD NEW`, navigate all 3 tabs, upload factory visit photo, add contact person, and save.
+- [ ] Test Country Dial Code Auto-Update: Change Country (e.g. China -> India) and verify Calling Number, WhatsApp Number, and WeChat Number dialing codes automatically update (e.g. `+86` -> `+91`) while resetting Province/City dropdowns.
 - [ ] Test 1-Way Status Lock: Change status to `Existing`, save, edit again and verify `New` cannot be chosen.
 - [ ] Verify soft-delete moves vendor to `/trash`.
 

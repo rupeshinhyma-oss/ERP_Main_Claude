@@ -6,6 +6,7 @@
  */
 
 import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { Banner } from "@/components/ui";
 import { apiGet, apiPost } from "@/lib/api";
@@ -60,6 +61,9 @@ function TrashTableSkeletonRows({ count = 6 }: { count?: number }) {
 }
 
 export function TrashPage() {
+  const [searchParams] = useSearchParams();
+  const deepLinkQ = searchParams.get("q");
+
   const [items, setItems] = useState<TrashItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<unknown>(null);
@@ -67,7 +71,13 @@ export function TrashPage() {
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [filterModule, setFilterModule] = useState<string>("ALL");
-  const [searchQuery, setSearchQuery] = useState<string>("");
+  const [searchQuery, setSearchQuery] = useState<string>(deepLinkQ || "");
+
+  useEffect(() => {
+    if (deepLinkQ) {
+      setSearchQuery(deepLinkQ);
+    }
+  }, [deepLinkQ]);
 
   // Phase 7: double-submit guards. Per-row restore/delete are keyed by
   // "entityType:id" so clicking one row's button never disables another

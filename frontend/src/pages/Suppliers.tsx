@@ -15,6 +15,7 @@
  */
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { Banner, ModalAlert, TableMessageRow } from "@/components/ui";
@@ -612,11 +613,55 @@ export function SuppliersPage() {
   /* Modal state */
   const [modalOpen, setModalOpen] = useState(false);
 
+  const [searchParams, setSearchParams] = useSearchParams();
+  const deepLinkSupplierId = searchParams.get("id");
+  const activeFetchSupplierIdRef = useRef<string | null>(null);
+
+  const handleCloseDrawer = useCallback(() => {
+    setDrawerSupplier(null);
+    activeFetchSupplierIdRef.current = null;
+    setSearchParams((prev) => {
+      if (!prev.has("id")) return prev;
+      const next = new URLSearchParams(prev);
+      next.delete("id");
+      return next;
+    }, { replace: true });
+  }, [setSearchParams]);
+
   // Sync browser back arrow with modal & drawer so it closes them instead of
   // navigating back to Dashboard.
   useModalHistorySync(modalOpen, () => setModalOpen(false));
-  useModalHistorySync(Boolean(drawerSupplier), () => setDrawerSupplier(null));
+  useModalHistorySync(Boolean(drawerSupplier), handleCloseDrawer);
   useModalHistorySync(isImportPageOpen, () => setIsImportPageOpen(false));
+
+  // Universal search deep-link: `?id=` opens that supplier's detail drawer
+  // directly, so clicking a Suppliers result in the topbar search lands on
+  // the actual record instead of just the bare list.
+  useEffect(() => {
+    if (!deepLinkSupplierId) return;
+    if (activeFetchSupplierIdRef.current === deepLinkSupplierId) return;
+    const targetId = deepLinkSupplierId;
+    activeFetchSupplierIdRef.current = targetId;
+
+    // Immediately replace URL in history so history.back() never returns to ?id=
+    setSearchParams((prev) => {
+      if (!prev.has("id")) return prev;
+      const next = new URLSearchParams(prev);
+      next.delete("id");
+      return next;
+    }, { replace: true });
+
+    (async () => {
+      try {
+        const { data } = await apiGet<Supplier>(`/suppliers/${targetId}`);
+        if (activeFetchSupplierIdRef.current === targetId) {
+          setDrawerSupplier(data);
+        }
+      } catch (err) {
+        console.error("Failed to load supplier detail for deep-link:", err);
+      }
+    })();
+  }, [deepLinkSupplierId, setSearchParams]);
   const [modalMode, setModalMode] = useState<"quick" | "full">("full");
   const [modalTab, setModalTab] = useState<ModalTab>("first");
   const [currentSupplierId, setCurrentSupplierId] = useState<string | null>(null);
@@ -4291,12 +4336,12 @@ export function SuppliersPage() {
           open={Boolean(drawerSupplier)}
           title={`Supplier Detail #${drawerSupplier.company_name}`}
           subtitle={`Supplier Type: ${drawerSupplier.supplier_type || "—"} | Status: ${drawerSupplier.is_active ? "Active" : "Inactive"}`}
-          onClose={() => setDrawerSupplier(null)}
+          onClose={handleCloseDrawer}
           onEdit={
             canUpdate
               ? () => {
                 const id = drawerSupplier.id;
-                setDrawerSupplier(null);
+                handleCloseDrawer();
                 void handleRowEdit(id);
               }
               : undefined

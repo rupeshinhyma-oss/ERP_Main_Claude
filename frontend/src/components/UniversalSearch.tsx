@@ -70,10 +70,11 @@ export function UniversalSearch() {
   }, [open]);
 
   function handleInput(value: string) {
-    setQuery(value);
+    const cleanValue = value.trimStart();
+    setQuery(cleanValue);
     setHighlightedIndex(-1);
 
-    const trimmed = value.trim();
+    const trimmed = cleanValue.trim();
     if (!trimmed) {
       search.cancel();
       setOpen(false);
@@ -104,7 +105,14 @@ export function UniversalSearch() {
     setOpen(false);
     setQuery("");
     setResults([]);
-    navigate(resolveLegacyUrl(item.target_url));
+    const path = resolveLegacyUrl(item.target_url);
+    // Carry the matched record's id along as a query param so the
+    // destination page can open that exact record's detail view/drawer on
+    // arrival, instead of just landing on the bare list (see each page's
+    // `id` search-param handling, e.g. Suppliers.tsx, Buyers.tsx,
+    // Users.tsx, MasterPage.tsx, masters/Products.tsx).
+    const separator = path.includes("?") ? "&" : "?";
+    navigate(`${path}${separator}id=${encodeURIComponent(item.id)}`);
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {

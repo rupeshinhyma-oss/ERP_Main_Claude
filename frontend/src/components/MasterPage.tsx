@@ -21,6 +21,7 @@
  */
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useSearchParams } from "react-router-dom";
 import { AppShell } from "./AppShell";
 import { Banner, Can, ModalAlert, StatusBadge, TableMessageRow } from "./ui";
 import { Pagination } from "./Pagination";
@@ -579,10 +580,57 @@ export function MasterPage<T extends MasterRecord>({
 
   const [drawerItem, setDrawerItem] = useState<T | null>(null);
 
+  const [searchParams, setSearchParams] = useSearchParams();
+  const deepLinkItemId = searchParams.get("id");
+  const activeFetchMasterIdRef = useRef<string | null>(null);
+
+  const handleCloseDrawer = useCallback(() => {
+    setDrawerItem(null);
+    activeFetchMasterIdRef.current = null;
+    setSearchParams((prev) => {
+      if (!prev.has("id")) return prev;
+      const next = new URLSearchParams(prev);
+      next.delete("id");
+      return next;
+    }, { replace: true });
+  }, [setSearchParams]);
+
   // Sync browser back arrow with modal & drawer: close them instead of
   // navigating back to Dashboard.
   useModalHistorySync(modalOpen, () => setModalOpen(false));
-  useModalHistorySync(Boolean(drawerItem), () => setDrawerItem(null));
+  useModalHistorySync(Boolean(drawerItem), handleCloseDrawer);
+
+  // Universal search deep-link: `?id=` opens that record's detail drawer
+  // directly, so clicking a result in the topbar search (for any master data
+  // page that uses this shared drawer -- Categories, Sub-Categories, Brands,
+  // Countries, States, Cities, Currencies, UOM, HSN) lands on the actual
+  // record instead of just the bare list. Pages with a bespoke drawer
+  // (Products) opt out via `detailFields` and handle this themselves.
+  useEffect(() => {
+    if (!detailFields || !deepLinkItemId) return;
+    if (activeFetchMasterIdRef.current === deepLinkItemId) return;
+    const targetId = deepLinkItemId;
+    activeFetchMasterIdRef.current = targetId;
+
+    // Immediately replace URL in history so history.back() never returns to ?id=
+    setSearchParams((prev) => {
+      if (!prev.has("id")) return prev;
+      const next = new URLSearchParams(prev);
+      next.delete("id");
+      return next;
+    }, { replace: true });
+
+    (async () => {
+      try {
+        const { data } = await apiGet<T>(`${apiBase}/${targetId}`);
+        if (activeFetchMasterIdRef.current === targetId) {
+          setDrawerItem(data);
+        }
+      } catch (err) {
+        console.error("Failed to load master item detail for deep-link:", err);
+      }
+    })();
+  }, [deepLinkItemId, apiBase, detailFields, setSearchParams]);
 
   const [importSummary, setImportSummary] = useState<ImportSummary | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
@@ -2315,12 +2363,12 @@ export function MasterPage<T extends MasterRecord>({
                 : fallbackDrawerSubtitle(drawerItem)
               : ""
           }
-          onClose={() => setDrawerItem(null)}
+          onClose={handleCloseDrawer}
           onEdit={
             canUpdate
               ? () => {
                 const item = drawerItem;
-                setDrawerItem(null);
+                handleCloseDrawer();
                 if (item) handleEdit(item.id);
               }
               : undefined

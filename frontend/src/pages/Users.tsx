@@ -7,7 +7,8 @@
  * server-generated temporary password exactly once, in a dedicated modal.
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { ActionDropdown, type ActionDropdownEntry } from "@/components/ActionDropdown";
@@ -15,7 +16,7 @@ import { Banner, Can, Modal, TableMessageRow } from "@/components/ui";
 import { Pagination } from "@/components/Pagination";
 import { SelectField, TextField } from "@/components/fields";
 import { apiDelete, apiGet, apiPatch, apiPost, apiPut, toQueryString } from "@/lib/api";
-import { useAuth, useDebouncedValue, usePendingGuard } from "@/lib/hooks";
+import { useAuth, useDebouncedValue, useModalHistorySync, usePendingGuard } from "@/lib/hooks";
 import { useToast } from "@/lib/toast";
 import { friendlyPermissionLabel, groupPermissionsByModule, MODULE_NAMES } from "@/lib/permissionLabels";
 import type {
@@ -288,6 +289,46 @@ export function UsersPage() {
   const [viewUser, setViewUser] = useState<User | null>(null);
   const [viewSessions, setViewSessions] = useState<UserSession[] | null>(null);
   const [viewLoading, setViewLoading] = useState(false);
+
+  const [searchParams, setSearchParams] = useSearchParams();
+  const deepLinkUserId = searchParams.get("id");
+  const activeFetchUserIdRef = useRef<string | null>(null);
+
+  const handleCloseViewUser = useCallback(() => {
+    setViewUser(null);
+    setViewSessions(null);
+    setViewLoading(false);
+    activeFetchUserIdRef.current = null;
+    setSearchParams((prev) => {
+      if (!prev.has("id")) return prev;
+      const next = new URLSearchParams(prev);
+      next.delete("id");
+      return next;
+    }, { replace: true });
+  }, [setSearchParams]);
+
+  useModalHistorySync(Boolean(viewUser), handleCloseViewUser);
+
+  // Universal search deep-link: `?id=` opens that user's detail view
+  // directly, so clicking a Users result in the topbar search lands on the
+  // actual record instead of just the bare list.
+  useEffect(() => {
+    if (!deepLinkUserId) return;
+    if (activeFetchUserIdRef.current === deepLinkUserId) return;
+    const targetId = deepLinkUserId;
+    activeFetchUserIdRef.current = targetId;
+
+    // Immediately replace URL in history so history.back() never returns to ?id=
+    setSearchParams((prev) => {
+      if (!prev.has("id")) return prev;
+      const next = new URLSearchParams(prev);
+      next.delete("id");
+      return next;
+    }, { replace: true });
+
+    void openViewUser(targetId);
+  }, [deepLinkUserId, setSearchParams]);
+
   const [roleModalUserId, setRoleModalUserId] = useState<string | null>(null);
   const [assignRoleId, setAssignRoleId] = useState("");
   const [tempPassword, setTempPassword] = useState<string | null>(null);
@@ -1243,10 +1284,7 @@ export function UsersPage() {
             <span>User Account & Profile Details</span>
           </div>
         }
-        onClose={() => {
-          setViewUser(null);
-          setViewSessions(null);
-        }}
+        onClose={handleCloseViewUser}
         cardStyle={{ width: "100%", maxWidth: "700px", padding: 0 }}
       >
         {!viewUser ? (
@@ -1553,9 +1591,8 @@ export function UsersPage() {
                   className="btn btn-primary"
                   onClick={() => {
                     const u = viewUser;
-                    setViewUser(null);
-                    setViewSessions(null);
-                    openEditUser(u);
+                    handleCloseViewUser();
+                    if (u) openEditUser(u);
                   }}
                 >
                   ✏️ Edit Profile
@@ -1564,10 +1601,7 @@ export function UsersPage() {
               <button
                 type="button"
                 className="btn"
-                onClick={() => {
-                  setViewUser(null);
-                  setViewSessions(null);
-                }}
+                onClick={handleCloseViewUser}
               >
                 Close
               </button>

@@ -35,7 +35,8 @@
 24. [USER ACCOUNT: Profile, Security & Active Sessions](#24-user-account-profile-security--active-sessions)
 25. [AUTHENTICATION: Login & Session Recovery](#25-authentication-login--session-recovery)
 26. [EXTERNAL PORTAL: Public Supplier Quotation Submission Portal](#26-external-portal-public-supplier-quotation-submission-portal)
-27. [AI Subagent Autonomous Testing Prompt Template](#27-ai-subagent-autonomous-testing-prompt-template)
+27. [TOPBAR: Universal Search & Record Deep-Linking](#27-topbar-universal-search--record-deep-linking)
+28. [AI Subagent Autonomous Testing Prompt Template](#28-ai-subagent-autonomous-testing-prompt-template)
 
 ---
 
@@ -826,7 +827,22 @@ Manage complete vendor team directory:
 
 ---
 
-## 27. AI Subagent Autonomous Testing Prompt Template
+## 27. TOPBAR: Universal Search & Record Deep-Linking
+
+- **Component:** `UniversalSearch.tsx` (Top Navigation Bar)
+- **Keyboard Shortcuts:** `ArrowUp`, `ArrowDown`, `Enter` (Navigate results), `Escape` (Close dropdown).
+- **Backend Search Service:** `GET /search?q=<term>` (`app.search.service`) querying Organizations, Users, Suppliers, Buyers, Products, Product Categories, Sub-Categories, Brands, HSN Codes, Countries, States, Cities, Currencies, and UOM.
+- **Deep-Linking Test Cases:**
+  1. **Supplier Deep-Link:** Search for a supplier (e.g. `Darsh Impex`), click result $\rightarrow$ Lands on `/suppliers?id=<uuid>`, automatically loads supplier profile and opens `SideDrawer` displaying all details, contacts, categories, and remarks.
+  2. **Buyer Deep-Link:** Search for a buyer, click result $\rightarrow$ Lands on `/buyers?id=<uuid>`, automatically loads buyer details and opens `SideDrawer`.
+  3. **Product Deep-Link:** Search for a product, click result $\rightarrow$ Lands on `/masters/products?id=<uuid>`, automatically loads product details and opens `SideDrawer`.
+  4. **User Deep-Link:** Search for a user member, click result $\rightarrow$ Lands on `/users?id=<uuid>`, automatically loads profile and opens View User Modal.
+  5. **Master Data Deep-Link:** Search for Categories, Brands, HSN, Countries, Currencies, etc., click result $\rightarrow$ Opens corresponding master record drawer via `MasterPage.tsx`.
+  6. **Drawer Close / URL Cleanup:** Closing the drawer or modal cleanly removes `?id=` from the URL and supports back-button navigation.
+
+---
+
+## 28. AI Subagent Autonomous Testing Prompt Template
 
 When instructing an autonomous AI agent to verify the ERP after code modifications, copy and run the following prompt:
 
@@ -844,3 +860,4 @@ Checklist to execute:
 
 ---
 *End of Master Features & Testing Specification Manual. Maintained for Inhyma Solutions Enterprise ERP.*
+

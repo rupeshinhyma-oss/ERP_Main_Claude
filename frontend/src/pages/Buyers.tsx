@@ -19,6 +19,7 @@
  */
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumb } from "@/components/Breadcrumb";
 import { Banner } from "@/components/ui";
@@ -423,10 +424,54 @@ export function BuyersPage() {
   /* Form & Tabs State */
   const [modalMode, setModalMode] = useState<ModalMode>(null);
 
+  const [searchParams, setSearchParams] = useSearchParams();
+  const deepLinkBuyerId = searchParams.get("id");
+  const activeFetchBuyerIdRef = useRef<string | null>(null);
+
+  const handleCloseDetailBuyer = useCallback(() => {
+    setDetailBuyer(null);
+    activeFetchBuyerIdRef.current = null;
+    setSearchParams((prev) => {
+      if (!prev.has("id")) return prev;
+      const next = new URLSearchParams(prev);
+      next.delete("id");
+      return next;
+    }, { replace: true });
+  }, [setSearchParams]);
+
   // Sync browser back arrow with modal & drawer: close them instead of
   // navigating back to Dashboard.
   useModalHistorySync(Boolean(modalMode), () => setModalMode(null));
-  useModalHistorySync(Boolean(detailBuyer), () => setDetailBuyer(null));
+  useModalHistorySync(Boolean(detailBuyer), handleCloseDetailBuyer);
+
+  // Universal search deep-link: `?id=` opens that buyer's detail drawer
+  // directly, so clicking a Buyers result in the topbar search lands on the
+  // actual record instead of just the bare list.
+  useEffect(() => {
+    if (!deepLinkBuyerId) return;
+    if (activeFetchBuyerIdRef.current === deepLinkBuyerId) return;
+    const targetId = deepLinkBuyerId;
+    activeFetchBuyerIdRef.current = targetId;
+
+    // Immediately replace URL in history so history.back() never returns to ?id=
+    setSearchParams((prev) => {
+      if (!prev.has("id")) return prev;
+      const next = new URLSearchParams(prev);
+      next.delete("id");
+      return next;
+    }, { replace: true });
+
+    (async () => {
+      try {
+        const { data } = await apiGet<Buyer>(`/buyers/${targetId}`);
+        if (activeFetchBuyerIdRef.current === targetId) {
+          setDetailBuyer(data);
+        }
+      } catch (err) {
+        console.error("Failed to load buyer detail for deep-link:", err);
+      }
+    })();
+  }, [deepLinkBuyerId, setSearchParams]);
   const [editTab, setEditTab] = useState<"profile" | "contacts">("profile");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState(EMPTY_BUYER_FORM);
@@ -3143,12 +3188,12 @@ export function BuyersPage() {
             open={Boolean(detailBuyer)}
             title={`Buyer Detail #${detailBuyer.company_name}`}
             subtitle={`Buyer Type: ${detailBuyer.buyer_type ? detailBuyer.buyer_type.toUpperCase() : "—"} | Status: ${detailBuyer.current_status ? detailBuyer.current_status.toUpperCase() : "NEW"}`}
-            onClose={() => setDetailBuyer(null)}
+            onClose={handleCloseDetailBuyer}
             onEdit={
               canUpdate
                 ? () => {
                   const b = detailBuyer;
-                  setDetailBuyer(null);
+                  handleCloseDetailBuyer();
                   openEdit(b);
                 }
                 : undefined

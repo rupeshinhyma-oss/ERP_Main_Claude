@@ -177,6 +177,7 @@ export const LEGACY_REDIRECTS: Record<string, string> = {
   "/masters-categories.html": "/masters/categories",
   "/masters-subcategories.html": "/masters/subcategories",
   "/masters-products.html": "/masters/products",
+  "/trash.html": "/trash",
   // Both of these were already redirect-only stubs in the original.
   "/employee-detail.html": "/users",
   "/employee-form.html": "/users",

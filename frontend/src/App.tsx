@@ -45,9 +45,15 @@ import { LiveConnectionLifecycle } from "@/lib/live/liveConnectionLifecycle";
 import { ProductGalleryPage } from "@/pages/ProductGallery";
 import { TrashPage } from "@/pages/Trash";
 import PublicSupplierQuotePage from "@/pages/PublicSupplierQuotePage";
+import { initGlobalPasteSanitizer } from "@/lib/pasteSanitizer";
 
 export function App() {
   const navigate = useNavigate();
+
+  // Initialize global paste auto-clean across all inputs and forms
+  useEffect(() => {
+    return initGlobalPasteSanitizer();
+  }, []);
 
   // Let the API client bounce expired sessions through the router rather than
   // a full page load.

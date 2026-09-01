@@ -13,8 +13,10 @@
  *    `product_name`, exactly as before.
  */
 
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useLiveModule } from "@/lib/live/useLive";
+import { useModalHistorySync } from "@/lib/hooks";
 import { MasterPage, type FormState, type MasterPageHandle } from "@/components/MasterPage";
 import { SideDrawer, DetailFieldGrid } from "@/components/SideDrawer";
 import { StatusBadge } from "@/components/ui";
@@ -190,6 +192,60 @@ export function ProductsPage() {
       setDrawerLoading(false);
     }
   }
+
+  const [searchParams, setSearchParams] = useSearchParams();
+  const deepLinkProductId = searchParams.get("id");
+  const activeFetchProductIdRef = useRef<string | null>(null);
+
+  const handleCloseDrawer = useCallback(() => {
+    setDrawerProduct(null);
+    setDrawerLoading(false);
+    activeFetchProductIdRef.current = null;
+    setSearchParams((prev) => {
+      if (!prev.has("id")) return prev;
+      const next = new URLSearchParams(prev);
+      next.delete("id");
+      return next;
+    }, { replace: true });
+  }, [setSearchParams]);
+
+  useModalHistorySync(Boolean(drawerProduct), handleCloseDrawer);
+
+  // Universal search deep-link: `?id=` opens that product's detail drawer
+  // directly, so clicking a Products result in the topbar search lands on
+  // the actual record instead of just the bare list.
+  useEffect(() => {
+    if (!deepLinkProductId) return;
+    if (activeFetchProductIdRef.current === deepLinkProductId) return;
+    const targetId = deepLinkProductId;
+    activeFetchProductIdRef.current = targetId;
+
+    // Immediately replace URL in history so history.back() never returns to ?id=
+    setSearchParams((prev) => {
+      if (!prev.has("id")) return prev;
+      const next = new URLSearchParams(prev);
+      next.delete("id");
+      return next;
+    }, { replace: true });
+
+    setDrawerLoading(true);
+    setDrawerProduct(null);
+
+    (async () => {
+      try {
+        const { data } = await apiGet<Product>(`/masters/products/${targetId}`);
+        if (activeFetchProductIdRef.current === targetId) {
+          setDrawerProduct(data);
+        }
+      } catch (err) {
+        console.error("Failed to load product detail:", err);
+      } finally {
+        if (activeFetchProductIdRef.current === targetId) {
+          setDrawerLoading(false);
+        }
+      }
+    })();
+  }, [deepLinkProductId, setSearchParams]);
 
   const masterPage = (
     <MasterPage<Product>
@@ -1301,10 +1357,10 @@ export function ProductsPage() {
         }
         subtitle={p ? p.product_name_tally || p.product_name || "" : ""}
         editLabel="✏️ Edit Product"
-        onClose={() => setDrawerProduct(null)}
+        onClose={handleCloseDrawer}
         onEdit={() => {
           const id = p?.id;
-          setDrawerProduct(null);
+          handleCloseDrawer();
           if (id) masterHandleRef.current?.openEdit(id);
         }}
       >

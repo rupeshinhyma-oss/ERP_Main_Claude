@@ -74,8 +74,11 @@ from app.masters.products.models import Product
 from app.masters.states.models import State
 from app.masters.uom.models import UnitOfMeasurement
 from app.organizations.models import Organization
+from app.inquiries.models import ConsignmentCode, Inquiry, InquiryItem
 from app.search.schemas import SearchResultItem, UniversalSearchResponse
+from app.buyers.models import Buyer
 from app.suppliers.models import Supplier
+from app.trash.service import MODEL_MAP
 from app.users.models import User
 
 logger = logging.getLogger(__name__)
@@ -175,6 +178,10 @@ async def search_universal(db: AsyncSession, query_str: str) -> UniversalSearchR
             or_(
                 Supplier.company_name.ilike(pattern),
                 Supplier.brand_description.ilike(pattern),
+                Supplier.contact_full_name.ilike(pattern),
+                Supplier.town.ilike(pattern),
+                Supplier.address.ilike(pattern),
+                Supplier.tax_id_number.ilike(pattern),
             ),
         ).limit(LIMIT_PER_ENTITY)
         suppliers = (await db.execute(stmt)).scalars().all()
@@ -191,6 +198,41 @@ async def search_universal(db: AsyncSession, query_str: str) -> UniversalSearchR
             )
     except Exception as e:
         logger.warning("Error searching Suppliers: %s", e)
+
+    # 3b. Buyers (Clients)
+    try:
+        stmt = select(Buyer).where(
+            _not_deleted(Buyer),
+            or_(
+                Buyer.company_name.ilike(pattern),
+                Buyer.contact_full_name.ilike(pattern),
+                Buyer.city.ilike(pattern),
+                Buyer.product_range.ilike(pattern),
+                Buyer.currently_buying_from.ilike(pattern),
+                Buyer.overall_remarks.ilike(pattern),
+                Buyer.tax_id_number.ilike(pattern),
+            ),
+        ).limit(LIMIT_PER_ENTITY)
+        buyers = (await db.execute(stmt)).scalars().all()
+        for b in buyers:
+            grade_or_type = (
+                f"Grade {b.buyer_grade.value}"
+                if b.buyer_grade
+                else (b.buyer_type.upper() if b.buyer_type else "Buyer Profile")
+            )
+            subtitle = b.product_range or (f"City: {b.city} | {grade_or_type}" if b.city else grade_or_type)
+            results.append(
+                SearchResultItem(
+                    category="Buyers",
+                    id=str(b.id),
+                    title=b.company_name,
+                    subtitle=subtitle,
+                    target_url="./buyers.html",
+                    icon="shoppingBag",
+                )
+            )
+    except Exception as e:
+        logger.warning("Error searching Buyers: %s", e)
 
     # 4. Products
     try:
@@ -412,6 +454,123 @@ async def search_universal(db: AsyncSession, query_str: str) -> UniversalSearchR
             )
     except Exception as e:
         logger.warning("Error searching Currencies/UOM: %s", e)
+
+    # 10. Inquiries & Consignments
+    try:
+        stmt_cc = (
+            select(ConsignmentCode, Buyer)
+            .join(Buyer, ConsignmentCode.buyer_id == Buyer.id)
+            .where(
+                _not_deleted(ConsignmentCode),
+                _not_deleted(Buyer),
+                or_(
+                    ConsignmentCode.code.ilike(pattern),
+                    ConsignmentCode.label.ilike(pattern),
+                ),
+            )
+            .limit(LIMIT_PER_ENTITY)
+        )
+        cc_rows = (await db.execute(stmt_cc)).all()
+        for cc, buyer in cc_rows:
+            label_suffix = f" - {cc.label}" if cc.label else ""
+            results.append(
+                SearchResultItem(
+                    category="Inquiries",
+                    id=str(cc.id),
+                    title=f"Consignment: {cc.code}{label_suffix}",
+                    subtitle=f"Buyer: {buyer.company_name}",
+                    target_url=f"./inquiries.html?buyerId={cc.buyer_id}",
+                    icon="fileText",
+                )
+            )
+
+        stmt_items = (
+            select(InquiryItem, Inquiry, Buyer, Product)
+            .join(Inquiry, InquiryItem.inquiry_id == Inquiry.id)
+            .join(Buyer, Inquiry.buyer_id == Buyer.id)
+            .join(Product, InquiryItem.product_id == Product.id)
+            .where(
+                _not_deleted(InquiryItem),
+                _not_deleted(Inquiry),
+                _not_deleted(Buyer),
+                _not_deleted(Product),
+                or_(
+                    InquiryItem.brand_preference.ilike(pattern),
+                    InquiryItem.product_specs_remarks.ilike(pattern),
+                ),
+            )
+            .limit(LIMIT_PER_ENTITY)
+        )
+        item_rows = (await db.execute(stmt_items)).all()
+        for item, inq, buyer, prod in item_rows:
+            status_text = (
+                item.status.value.replace("_", " ").title()
+                if item.status
+                else "Proposed"
+            )
+            results.append(
+                SearchResultItem(
+                    category="Inquiries",
+                    id=str(item.id),
+                    title=f"Inquiry: {prod.product_name}",
+                    subtitle=f"Buyer: {buyer.company_name} | Qty: {item.quantity} | {status_text}",
+                    target_url=f"./inquiries.html?buyerId={inq.buyer_id}&inquiryId={inq.id}",
+                    icon="fileText",
+                )
+            )
+    except Exception as e:
+        logger.warning("Error searching Inquiries: %s", e)
+
+    # 11. Trash (Soft-deleted records across all models)
+    try:
+        trash_limit_remaining = LIMIT_PER_ENTITY
+        for entity_name, (model_cls, name_col, code_col) in MODEL_MAP.items():
+            if trash_limit_remaining <= 0:
+                break
+            if not issubclass(model_cls, SoftDeleteMixin):
+                continue
+            name_attr = getattr(model_cls, name_col, None)
+            if name_attr is None:
+                continue
+            from sqlalchemy import cast, String
+            conditions = [cast(name_attr, String).ilike(pattern) if name_col == "id" else name_attr.ilike(pattern)]
+            if code_col:
+                code_attr = getattr(model_cls, code_col, None)
+                if code_attr is not None:
+                    conditions.append(cast(code_attr, String).ilike(pattern) if code_col == "id" else code_attr.ilike(pattern))
+
+            stmt = (
+                select(model_cls)
+                .where(model_cls.deleted_at.is_not(None), or_(*conditions))
+                .order_by(model_cls.deleted_at.desc())
+                .limit(trash_limit_remaining)
+            )
+
+            deleted_rows = (await db.execute(stmt)).scalars().all()
+            for row in deleted_rows:
+                title = str(getattr(row, name_col, f"{entity_name} {row.id}"))
+                code_val = getattr(row, code_col, None) if code_col else None
+                code_suffix = f" ({code_val})" if code_val else ""
+                del_time = (
+                    row.deleted_at.strftime("%b %d, %Y")
+                    if getattr(row, "deleted_at", None)
+                    else "Deleted"
+                )
+                results.append(
+                    SearchResultItem(
+                        category="Trash",
+                        id=str(row.id),
+                        title=f"{title}{code_suffix} [Deleted]",
+                        subtitle=f"Type: {entity_name} | Deleted on {del_time}",
+                        target_url=f"./trash.html?q={title}",
+                        icon="trash",
+                    )
+                )
+                trash_limit_remaining -= 1
+                if trash_limit_remaining <= 0:
+                    break
+    except Exception as e:
+        logger.warning("Error searching Trash: %s", e)
 
     return UniversalSearchResponse(
         query=clean_q,

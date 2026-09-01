@@ -538,7 +538,16 @@ VITE_WS_BASE_URL=ws://localhost:8000/api/v1/events/ws
 - **Subsequent Follow-ups & Negotiations**: Once `QT-AUTO-01` exists for `(inquiry_item_id, supplier_id)`, all subsequent negotiation emails, price discussions, and delivery conversations bypass AI extraction (**0 OpenAI API calls**) and are appended directly to the `Emails` timeline.
 - **Thread-Aware Item Inheritance**: Short follow-up emails without explicit SKU numbers automatically inherit the product item (`inquiry_item_id`) from the active thread history with that supplier.
 - **Dynamic Live Polling**: Frontend automatically live-syncs quotes and email messages every 2.5 seconds, ensuring updates reflect instantly without manual browser refresh.
-- **Supplier Thread Filter**: The `Emails` tab features an intuitive supplier dropdown allowing users to isolate conversations with specific suppliers (e.g., `Wenzhou Brother Machinery` vs `Hualian Machinery Group`) or view all combined.
+### Universal Search & Deep-Linking Architecture (`GET /search?q=`)
+- **Global Search Endpoint (`app.search.service`)**: Searches asynchronously across Organization, Users, Suppliers, Buyers, Products, Product Categories & Sub-Categories, Brands, HSN Codes, Geography Masters (Countries, States, Cities), Currencies & UOM, **Inquiries & Consignments** (`ConsignmentCode`, `InquiryItem`), and **Trash** (soft-deleted records across all models via `MODEL_MAP`).
+- **Client-Side Deep-Linking (`UniversalSearch.tsx`)**: Clicking a search result carries the matched record's UUID via query parameter (e.g. `/suppliers?id=8973e972-...`, `/buyers?id=...`, `/masters/products?id=...`, `/users?id=...`, `/inquiries?buyerId=...&inquiryId=...`, `/trash?q=...`).
+- **Automatic Drawer & Modal Invocation**: Destination pages (`Suppliers.tsx`, `Buyers.tsx`, `Users.tsx`, `masters/Products.tsx`, `Inquiries.tsx`, `Trash.tsx`, and `MasterPage.tsx` for shared masters) detect parameters on mount or route transition and open corresponding views/drawers automatically.
+
+### Global Paste Auto-Clean Sanitizer (`lib/pasteSanitizer.ts`)
+- **System-Wide Clipboard Interceptor**: Listens globally to all paste events on HTML `<input>` and `<textarea>` elements across all forms, tables, search bars, and modals.
+- **Artifact Stripping**: Automatically strips leading and trailing spaces, tab characters (`\t`), newlines (`\n`), and non-breaking space characters (`\u00A0`) captured when copying cells from Excel, PDFs, or web tables.
+- **Native React State Dispatch**: Seamlessly triggers React's synthetic `onChange` and `input` events so form state updates immediately without manual backspacing. Excludes password and file upload inputs.
 
 ---
-*Maintained and verified for Inhyma Solutions Enterprise ERP. Last updated: August 31, 2026 (Supabase Storage Cloud Media Integration for Quotations, Products & Suppliers, Unified Storage Utility & Living Documentation).*
+*Maintained and verified for Inhyma Solutions Enterprise ERP. Last updated: September 1, 2026 (Universal Search Inquiries & Trash Extraction, Paste Auto-Clean & Deep-Link Synchronization).*
+

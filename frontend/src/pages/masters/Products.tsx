@@ -13,7 +13,7 @@
  *    `product_name`, exactly as before.
  */
 
-import { useState, useMemo } from "react";
+import { useState } from "react";
 import { useLiveModule } from "@/lib/live/useLive";
 import { MasterPage, type FormState, type MasterPageHandle } from "@/components/MasterPage";
 import { SideDrawer, DetailFieldGrid } from "@/components/SideDrawer";
@@ -134,192 +134,6 @@ function OrgPopoverCell({ orgNames }: { orgNames: string[] }) {
   );
 }
 
-function ProductKpiPanel({
-  catalogProducts,
-  categories,
-}: {
-  catalogProducts: Product[];
-  categories: ProductCategory[];
-}) {
-  const kpis = useMemo(() => {
-    const total = catalogProducts.length;
-    const activeCount = catalogProducts.filter((p) => p.status === "active").length;
-    const inactiveCount = catalogProducts.filter((p) => p.status === "inactive").length;
-
-    const purchasableCount = catalogProducts.filter((p) => p.is_purchasable).length;
-    const sellableCount = catalogProducts.filter((p) => p.is_sellable).length;
-
-    // License / Certificate Required count
-    const licenseCount = catalogProducts.filter((p) => Boolean(p.license_certificate_required)).length;
-
-    // Packaging Specs configured
-    const withPackaging = catalogProducts.filter(
-      (p) => (p.packaging_gross_weight || 0) > 0 || (p.packaging_unit_cbm || 0) > 0
-    ).length;
-
-    // Missing Photos
-    const missingPhotos = catalogProducts.filter(
-      (p) => !p.image_url && (!p.images || p.images.length === 0)
-    ).length;
-
-    // Top Categories breakdown
-    const catCounts: Record<string, number> = {};
-    for (const p of catalogProducts) {
-      if (p.category_id) {
-        catCounts[p.category_id] = (catCounts[p.category_id] || 0) + 1;
-      }
-    }
-    const topCategories = Object.entries(catCounts)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 3)
-      .map(([catId, count]) => {
-        const catObj = categories.find((c) => c.id === catId);
-        return { name: catObj ? catObj.name : "Unassigned", count };
-      });
-
-    return {
-      total,
-      activeCount,
-      inactiveCount,
-      purchasableCount,
-      sellableCount,
-      licenseCount,
-      withPackaging,
-      missingPhotos,
-      topCategories,
-    };
-  }, [catalogProducts, categories]);
-
-  return (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))",
-        gap: "14px",
-        marginBottom: "14px",
-      }}
-    >
-      {/* 1. Total Catalog */}
-      <div
-        style={{
-          background: "#ffffff",
-          borderRadius: "8px",
-          padding: "14px 16px",
-          border: "1px solid #e2e8f0",
-          boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
-          borderLeft: "4px solid #0061f2",
-        }}
-      >
-        <div style={{ fontSize: "11.5px", fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.5px" }}>
-          📦 Total Products
-        </div>
-        <div style={{ fontSize: "22px", fontWeight: 800, color: "#1e293b", marginTop: "4px" }}>
-          {kpis.total}
-        </div>
-        <div style={{ fontSize: "12px", color: "#64748b", marginTop: "4px" }}>
-          <span style={{ color: "#16a34a", fontWeight: 600 }}>{kpis.activeCount} Active</span> • <span>{kpis.inactiveCount} Inactive</span>
-        </div>
-      </div>
-
-      {/* 2. Trade Availability */}
-      <div
-        style={{
-          background: "#ffffff",
-          borderRadius: "8px",
-          padding: "14px 16px",
-          border: "1px solid #e2e8f0",
-          boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
-          borderLeft: "4px solid #10b981",
-        }}
-      >
-        <div style={{ fontSize: "11.5px", fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.5px" }}>
-          🛒 Trade Status
-        </div>
-        <div style={{ fontSize: "22px", fontWeight: 800, color: "#1e293b", marginTop: "4px" }}>
-          {kpis.sellableCount}{" "}
-          <span style={{ fontSize: "13px", fontWeight: 500, color: "#64748b" }}>Sellable</span>
-        </div>
-        <div style={{ fontSize: "12px", color: "#64748b", marginTop: "4px" }}>
-          <span style={{ color: "#0061f2", fontWeight: 600 }}>{kpis.purchasableCount}</span> Purchasable items
-        </div>
-      </div>
-
-      {/* 3. Compliance & License Alerts */}
-      <div
-        style={{
-          background: kpis.licenseCount > 0 ? "#fffaf0" : "#ffffff",
-          borderRadius: "8px",
-          padding: "14px 16px",
-          border: kpis.licenseCount > 0 ? "1px solid #fed7aa" : "1px solid #e2e8f0",
-          boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
-          borderLeft: kpis.licenseCount > 0 ? "4px solid #f97316" : "4px solid #94a3b8",
-        }}
-      >
-        <div style={{ fontSize: "11.5px", fontWeight: 700, color: kpis.licenseCount > 0 ? "#c2410c" : "#64748b", textTransform: "uppercase", letterSpacing: "0.5px" }}>
-          🚨 Compliance
-        </div>
-        <div style={{ fontSize: "22px", fontWeight: 800, color: kpis.licenseCount > 0 ? "#ea580c" : "#1e293b", marginTop: "4px" }}>
-          {kpis.licenseCount}
-        </div>
-        <div style={{ fontSize: "12px", color: kpis.licenseCount > 0 ? "#9a3412" : "#64748b", marginTop: "4px" }}>
-          Require License / Certificate
-        </div>
-      </div>
-
-      {/* 4. Packaging & Media Completeness */}
-      <div
-        style={{
-          background: "#ffffff",
-          borderRadius: "8px",
-          padding: "14px 16px",
-          border: "1px solid #e2e8f0",
-          boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
-          borderLeft: "4px solid #8b5cf6",
-        }}
-      >
-        <div style={{ fontSize: "11.5px", fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.5px" }}>
-          ⚖️ Specs &amp; Media
-        </div>
-        <div style={{ fontSize: "22px", fontWeight: 800, color: "#1e293b", marginTop: "4px" }}>
-          {kpis.withPackaging}{" "}
-          <span style={{ fontSize: "13px", fontWeight: 500, color: "#64748b" }}>w/ CBM / Wt</span>
-        </div>
-        <div style={{ fontSize: "12px", color: "#64748b", marginTop: "4px" }}>
-          <span style={{ color: kpis.missingPhotos > 0 ? "#e11d48" : "#16a34a", fontWeight: 600 }}>{kpis.missingPhotos}</span> items without image
-        </div>
-      </div>
-
-      {/* 5. Top Categories */}
-      <div
-        style={{
-          background: "#ffffff",
-          borderRadius: "8px",
-          padding: "14px 16px",
-          border: "1px solid #e2e8f0",
-          boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
-          borderLeft: "4px solid #3b82f6",
-        }}
-      >
-        <div style={{ fontSize: "11.5px", fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.5px" }}>
-          🏷️ Top Categories
-        </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: "3px", marginTop: "6px" }}>
-          {kpis.topCategories.length === 0 ? (
-            <span style={{ color: "#94a3b8", fontSize: "12px" }}>None yet</span>
-          ) : (
-            kpis.topCategories.map((c) => (
-              <div key={c.name} style={{ display: "flex", justifyContent: "space-between", fontSize: "12px" }}>
-                <span style={{ color: "#334155", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "130px" }}>{c.name}</span>
-                <span style={{ fontWeight: 700, color: "#0061f2" }}>{c.count}</span>
-              </div>
-            ))
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
 export function ProductsPage() {
   const categories = useLookup<ProductCategory>("/masters/product-categories", 250, true);
   const subCategories = useLookup<ProductSubCategory>("/masters/product-sub-categories", 500, true);
@@ -328,7 +142,6 @@ export function ProductsPage() {
   const uoms = useLookup<Uom>("/masters/uom", 250, true);
   const organizations = useLookup<{ id: string; name: string }>("/masters/company-list", 250, true);
   const [catalogProducts, setCatalogProducts] = useState<Product[]>([]);
-  const [showKpis, setShowKpis] = useState(false);
   const [liveReloadToken, setLiveReloadToken] = useState(0);
 
   /* Live Real-time cross-tab synchronization for Products */
@@ -443,39 +256,6 @@ export function ProductsPage() {
       onItemsLoaded={setCatalogProducts}
       useFullPageForm={true}
       hideQuickAdd={true}
-      headerExtras={
-        <button
-          type="button"
-          style={{
-            background: showKpis ? "#0f172a" : "#ffffff",
-            color: showKpis ? "#ffffff" : "#334155",
-            border: "1px solid #cbd5e1",
-            borderRadius: "6px",
-            fontWeight: 600,
-            fontSize: "12.5px",
-            padding: "6px 12px",
-            display: "inline-flex",
-            alignItems: "center",
-            gap: "6px",
-            cursor: "pointer",
-            boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
-            transition: "all 0.15s ease-in-out",
-          }}
-          onClick={() => setShowKpis((v) => !v)}
-          title="Toggle Product KPIs"
-        >
-          <span>📊</span>
-          <span>{showKpis ? "Hide KPIs" : "KPI Summary"}</span>
-        </button>
-      }
-      bannerExtras={
-        showKpis ? (
-          <ProductKpiPanel
-            catalogProducts={catalogProducts}
-            categories={categories.items}
-          />
-        ) : null
-      }
       extraFilters={Object.keys(extraFilters).length ? extraFilters : undefined}
       toolbarExtras={
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "20px", width: "100%" }}>

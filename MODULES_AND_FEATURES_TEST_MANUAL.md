@@ -315,14 +315,7 @@ Manage complete vendor team directory:
 - **Route:** `/masters/products`
 - **Purpose:** Centralized product catalog, dynamic specifications builder, CBM packaging calculations, photo gallery uploader, and ReportLab PDF datasheet generation.
 
-### 6.1. Product KPI Summary Banner
-- Displays real-time catalog analytics:
-  - **Total Products**, **Active Products**, **Inactive Products**
-  - **Purchasable Items**, **Sellable Items**, **License Required Items**
-  - **Configured Packaging Specs Count**, **Missing Photos Count**
-  - **Top 3 Product Categories Distribution**
-
-### 6.2. Product Master Table Columns
+### 6.1. Product Master Table Columns
 1. **Checkbox:** Row selector.
 2. **SR. NO.:** Sequential number.
 3. **IMAGE:** Thumbnail preview with click-to-expand lightbox.

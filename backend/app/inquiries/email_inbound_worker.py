@@ -512,10 +512,23 @@ class EmailInboundWorker:
 
             resolved_item_id = target_matched_item.id if target_matched_item else (first_item.id if first_item else None)
 
-            # 5. Always Record Email in InquiryMessage Timeline for Emails Tab
+            # 5. Always Record Email in InquiryMessage Timeline for Emails Tab (with deduplication guard)
             msg_direction = "outbound" if is_outbound else "inbound"
             msg_sender_name = "Yinglima Procurement" if is_outbound else (supplier.company_name if supplier else from_raw or sender_email)
             msg_recipient = (supplier.company_name if supplier else "Supplier Partner") if is_outbound else "Yinglima Procurement"
+
+            # Check if this exact email content was already recorded for this inquiry (prevents double-poll duplicates)
+            existing_msg_dup = await session.execute(
+                select(InquiryMessage.id).where(
+                    InquiryMessage.inquiry_id == matched_inquiry_id,
+                    InquiryMessage.sender_contact == sender_email,
+                    InquiryMessage.message_text == full_body_text,
+                    InquiryMessage.deleted_at.is_(None),
+                ).limit(1)
+            )
+            if existing_msg_dup.scalar_one_or_none():
+                logger.info("Email message from %s with identical text already recorded in inquiry %s. Skipping duplicate.", sender_email, matched_inquiry_id)
+                return
 
             inbound_msg = InquiryMessage(
                 id=uuid.uuid4(),

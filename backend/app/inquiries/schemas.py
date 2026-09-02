@@ -309,4 +309,15 @@ class InquiryMessageRead(BaseModel):
     message_text: str
     attachment_url: str | None = None
     attachment_filename: str | None = None
-    created_at: datetime
+    created_at: datetime
+
+
+class SendInquiryEmailPayload(BaseModel):
+    to_emails: list[str] = Field(..., min_length=1, description="List of recipient email addresses")
+    subject: str = Field(..., min_length=1, max_length=500, description="Email subject line")
+    body: str = Field(..., min_length=1, description="Email body content")
+    inquiry_item_id: uuid.UUID | None = None
+    supplier_id: uuid.UUID | None = None
+    attachment_url: str | None = None
+    attachment_filename: str | None = None
+

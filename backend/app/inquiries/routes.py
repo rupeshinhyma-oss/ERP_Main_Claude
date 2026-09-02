@@ -36,8 +36,9 @@ from app.audit.dependencies import get_audit_service
 from app.audit.service import AuditService
 from app.auth.dependencies import get_current_user
 from app.auth.service import CurrentUser
+from app.core.config import settings
 from app.core.responses import build_success_response
-from app.common.email import send_bulk_rfq_email, send_rfq_email
+from app.common.email import send_bulk_rfq_email, send_rfq_email, send_email_async
 from app.database.session import get_db_session
 from app.events.channels import module_channel
 from app.events.dependencies import get_event_dispatcher
@@ -69,8 +70,9 @@ from app.inquiries.schemas import (
     QuotationUpdate,
     RFQCreate,
     RFQRead,
+    SendInquiryEmailPayload,
 )
-from app.inquiries.models import InquiryMessage
+from app.inquiries.models import Inquiry, InquiryItem, InquiryMessage, Quotation, RFQ
 from app.inquiries.wechat_service import get_wecom_service
 from app.inquiries.service import InquiryService
 
@@ -1510,6 +1512,154 @@ async def get_inquiry_messages(
         request_id=request.state.request_id,
         message=f"Retrieved {len(messages_data)} communication messages.",
     )
+
+
+@router.post("/{inquiry_id}/send-email-message", summary="Send an email to supplier from within the Inquiries Emails tab")
+async def send_inquiry_email_message(
+    inquiry_id: uuid.UUID,
+    payload: SendInquiryEmailPayload,
+    request: Request,
+    db: AsyncSession = Depends(get_db_session),
+    event_dispatcher: EventDispatcher = Depends(get_event_dispatcher),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    """Dispatches a direct email to recipient suppliers via SMTP and records it in the communication timeline."""
+    clean_recipients = [e.strip() for e in payload.to_emails if e and "@" in e]
+    if not clean_recipients:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="At least one valid recipient email address is required.",
+        )
+
+    # Verify inquiry exists
+    inquiry = await db.get(Inquiry, inquiry_id)
+    if not inquiry or inquiry.deleted_at is not None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Inquiry not found.",
+        )
+
+    # Find most recent previous email to quote in outbound thread (0 AI cost, standard email client formatting)
+    prev_msg_res = await db.execute(
+        select(InquiryMessage)
+        .where(
+            InquiryMessage.inquiry_id == inquiry_id,
+            InquiryMessage.channel == "email",
+            InquiryMessage.deleted_at.is_(None),
+        )
+        .order_by(InquiryMessage.created_at.desc())
+        .limit(1)
+    )
+    prev_msg = prev_msg_res.scalar_one_or_none()
+    quoted_html = ""
+    if prev_msg and prev_msg.message_text:
+        quoted_lines = prev_msg.message_text.strip().replace("\n", "<br/>")
+        sender_disp = prev_msg.sender_name or prev_msg.sender_contact or "Supplier"
+        date_disp = prev_msg.created_at.strftime("%b %d, %Y, at %H:%M") if prev_msg.created_at else "earlier"
+        quoted_html = f"""
+        <br/><br/>
+        <div style="border-left: 2px solid #cbd5e1; padding-left: 12px; color: #64748b; font-size: 13px; margin-top: 16px;">
+            <p style="margin: 0 0 6px 0; font-size: 12px; color: #94a3b8;">On {date_disp}, {sender_disp} wrote:</p>
+            <div style="color: #475569;">{quoted_lines}</div>
+        </div>
+        """
+
+    # Format email content
+    html_body = f"""
+    <div style="font-family: Arial, sans-serif; font-size: 14px; color: #1e293b; line-height: 1.6;">
+        <div style="white-space: pre-wrap;">{payload.body}</div>
+        {f'<div style="margin-top: 16px; padding: 10px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px;"><a href="{payload.attachment_url}" target="_blank" style="color: #2563eb; font-weight: bold; text-decoration: underline;">📎 Download Attachment: {payload.attachment_filename or "Document"}</a></div>' if payload.attachment_url else ''}
+        {quoted_html}
+        <br/><hr style="border: none; border-top: 1px solid #e2e8f0; margin: 20px 0;" />
+        <div style="font-size: 12px; color: #64748b;">
+            Sent by <strong>{current_user.full_name or 'Yinglima Procurement Team'}</strong> via Yinglima ERP.<br/>
+            You can reply directly to this email.
+        </div>
+    </div>
+    """
+
+    # Dispatch email asynchronously
+    import asyncio
+    asyncio.create_task(
+        send_email_async(
+            to_emails=clean_recipients,
+            subject=payload.subject,
+            html_content=html_body,
+            text_content=payload.body,
+        )
+    )
+
+    # Validate item ID if provided
+    valid_item_id = payload.inquiry_item_id
+    if valid_item_id:
+        item_check = await db.get(InquiryItem, valid_item_id)
+        if not item_check or item_check.inquiry_id != inquiry_id or item_check.deleted_at is not None:
+            valid_item_id = None
+
+    # Resolve supplier if passed or by email
+    supplier_id = payload.supplier_id
+    if supplier_id:
+        supp_check = await db.get(Supplier, supplier_id)
+        if not supp_check or supp_check.deleted_at is not None:
+            supplier_id = None
+    if not supplier_id:
+        from app.suppliers.models import SupplierEmail
+        email_match = await db.execute(
+            select(SupplierEmail.supplier_id)
+            .where(SupplierEmail.email.in_(clean_recipients))
+            .limit(1)
+        )
+        supplier_id = email_match.scalar_one_or_none()
+
+    # Log outbound message in InquiryMessage table
+    new_msg = InquiryMessage(
+        id=uuid.uuid4(),
+        inquiry_id=inquiry_id,
+        inquiry_item_id=valid_item_id,
+        supplier_id=supplier_id,
+        channel="email",
+        direction="outbound",
+        sender_name=current_user.full_name or "Yinglima Procurement",
+        sender_contact=settings.SMTP_FROM_EMAIL,
+        recipient_contact=", ".join(clean_recipients),
+        message_text=f"Subject: {payload.subject}\n\n{payload.body}",
+        attachment_url=payload.attachment_url,
+        attachment_filename=payload.attachment_filename,
+    )
+    db.add(new_msg)
+    await db.commit()
+
+    # Broadcast Live WebSocket update
+    await event_dispatcher.publish(
+        module_channel("inquiries"),
+        Event(
+            entity="inquiry",
+            entity_id=str(inquiry_id),
+            event_type="inquiry.message.created",
+            changes={"inquiry_id": str(inquiry_id), "item_id": str(valid_item_id) if valid_item_id else None},
+        ),
+    )
+
+    return build_success_response(
+        data={
+            "id": str(new_msg.id),
+            "inquiry_id": str(new_msg.inquiry_id),
+            "inquiry_item_id": str(new_msg.inquiry_item_id) if new_msg.inquiry_item_id else None,
+            "supplier_id": str(new_msg.supplier_id) if new_msg.supplier_id else None,
+            "channel": "email",
+            "direction": "outbound",
+            "sender_name": new_msg.sender_name,
+            "sender_contact": new_msg.sender_contact,
+            "recipient_contact": new_msg.recipient_contact,
+            "message_text": new_msg.message_text,
+            "attachment_url": new_msg.attachment_url,
+            "attachment_filename": new_msg.attachment_filename,
+            "created_at": new_msg.created_at.isoformat() if new_msg.created_at else None,
+        },
+        request_id=request.state.request_id,
+        message=f"Email successfully sent to {', '.join(clean_recipients)}.",
+    )
+
 
 
 # ---------------------------------------------------------------------------

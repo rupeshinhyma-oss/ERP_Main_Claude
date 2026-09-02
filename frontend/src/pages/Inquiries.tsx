@@ -939,6 +939,16 @@ function ItemsView({
   const [showAllConsignmentMsgs, setShowAllConsignmentMsgs] = useState(false);
   const [emailSupplierFilter, setEmailSupplierFilter] = useState<string>("all");
 
+  // Inline Email Composer state
+  const [composerTo, setComposerTo] = useState("");
+  const [composerSubject, setComposerSubject] = useState("");
+  const [composerBody, setComposerBody] = useState("");
+  const [composerAttachmentUrl, setComposerAttachmentUrl] = useState("");
+  const [composerAttachmentName, setComposerAttachmentName] = useState("");
+  const [sendingEmail, setSendingEmail] = useState(false);
+  const [composerStatus, setComposerStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
+  const [composerOpen, setComposerOpen] = useState(true);
+
   // Modals & Drawers state
   const [addOpen, setAddOpen] = useState(false);
   const [shiftTarget, setShiftTarget] = useState<InquiryItem | null>(null);
@@ -1162,6 +1172,95 @@ function ItemsView({
       void load();
     } catch (err: any) {
       onError(err);
+    }
+  }
+
+  // Pre-fill subject line based on selected item / consignment
+  useEffect(() => {
+    if (selectedItem) {
+      const codeTag = inquiry?.consignment_code ? `[#${inquiry.consignment_code}] ` : "";
+      const pName = selectedItem.product_name || selectedItem.product_name_tally || "Product";
+      const pCode = selectedItem.product_code ? ` (#${selectedItem.product_code})` : "";
+      setComposerSubject(`Re: ${codeTag}${pName}${pCode} - Inquiry Follow-up`);
+    }
+  }, [selectedItem, inquiry?.consignment_code]);
+
+  // If filtered by a specific supplier email, auto-fill the "To:" recipient
+  useEffect(() => {
+    if (emailSupplierFilter && emailSupplierFilter !== "all" && emailSupplierFilter.includes("@")) {
+      setComposerTo(emailSupplierFilter);
+    }
+  }, [emailSupplierFilter]);
+
+  // Auto-fill recipient ("To:") with the actual supplier email from message history
+  useEffect(() => {
+    if (!selectedItem || (composerTo && composerTo.includes("@"))) return;
+    const relevantEmails = inquiryMessages.filter((m: any) =>
+      (m.channel === "email" || !m.channel) &&
+      (!m.inquiry_item_id || m.inquiry_item_id === selectedItem.id)
+    );
+    for (const m of relevantEmails) {
+      const isOutbound = m.direction === "outbound";
+      const rawContact = isOutbound ? m.recipient_contact : (m.sender_contact || "");
+      const emailMatch = (rawContact || "").match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
+      const cleanEmail = emailMatch ? emailMatch[0] : (rawContact && rawContact.includes("@") ? rawContact.trim() : "");
+      if (cleanEmail && !cleanEmail.includes("noreply") && !cleanEmail.toLowerCase().includes("procurement")) {
+        setComposerTo(cleanEmail);
+        break;
+      }
+    }
+  }, [selectedItem, inquiryMessages, composerTo]);
+
+  async function handleSendEmail(e: React.FormEvent) {
+    e.preventDefault();
+    const cleanRecipients = composerTo
+      .split(",")
+      .map((x) => x.trim())
+      .filter((x) => x && x.includes("@"));
+
+    if (cleanRecipients.length === 0) {
+      setComposerStatus({ type: "error", message: "Please provide at least one valid recipient email address." });
+      return;
+    }
+    if (!composerSubject.trim()) {
+      setComposerStatus({ type: "error", message: "Please provide an email subject line." });
+      return;
+    }
+    if (!composerBody.trim()) {
+      setComposerStatus({ type: "error", message: "Please type your message body." });
+      return;
+    }
+
+    setSendingEmail(true);
+    setComposerStatus(null);
+    try {
+      const payload: any = {
+        to_emails: cleanRecipients,
+        subject: composerSubject.trim(),
+        body: composerBody.trim(),
+        inquiry_item_id: selectedItem?.id || null,
+        attachment_url: composerAttachmentUrl || null,
+        attachment_filename: composerAttachmentName || null,
+      };
+
+      const targetInquiryId = inquiry?.id || inquiryId;
+      const res = await apiPost<any>(`/inquiries/${targetInquiryId}/send-email-message`, payload);
+      const newMsgData = res.data?.data || res.data;
+
+      if (newMsgData) {
+        setInquiryMessages((prev) => [...prev, newMsgData]);
+      }
+
+      setComposerBody("");
+      setComposerAttachmentUrl("");
+      setComposerAttachmentName("");
+      setComposerStatus({ type: "success", message: `Email successfully sent to ${cleanRecipients.join(", ")}.` });
+      void loadMessages(true);
+    } catch (err: any) {
+      const errMsg = err?.response?.data?.message || err?.response?.data?.detail || err?.message || "Failed to send email. Please check the recipient address.";
+      setComposerStatus({ type: "error", message: errMsg });
+    } finally {
+      setSendingEmail(false);
     }
   }
 
@@ -2029,14 +2128,22 @@ function ItemsView({
               const emailList = inquiryMessages.filter((m: any) => (m.channel === "email" || !m.channel) && isRelevantMessage(m));
 
               // Extract unique suppliers present in this product's emails
-              const uniqueSuppliersInEmails: { id: string; name: string }[] = [];
+              const uniqueSuppliersInEmails: { id: string; name: string; email: string }[] = [];
               const seenSuppMap = new Set<string>();
               for (const m of emailList) {
-                const suppName = m.supplier_name || (m.direction === "inbound" ? (m.sender_name || m.sender_contact) : null);
-                const suppKey = m.supplier_id || suppName || m.sender_contact;
-                if (suppKey && suppName && !seenSuppMap.has(suppKey) && suppName !== "Yinglima Procurement") {
+                const isOutbound = m.direction === "outbound";
+                const rawContact = isOutbound ? m.recipient_contact : (m.sender_contact || "");
+                const emailMatch = (rawContact || "").match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
+                const cleanEmail = emailMatch ? emailMatch[0] : (rawContact && rawContact.includes("@") ? rawContact.trim() : "");
+                const suppName = m.supplier_name || (!isOutbound ? (m.sender_name || cleanEmail) : cleanEmail) || "Supplier";
+                const suppKey = cleanEmail || m.supplier_id || suppName;
+                if (suppKey && !seenSuppMap.has(suppKey) && suppName !== "Yinglima Procurement") {
                   seenSuppMap.add(suppKey);
-                  uniqueSuppliersInEmails.push({ id: suppKey, name: suppName });
+                  uniqueSuppliersInEmails.push({
+                    id: String(suppKey),
+                    name: suppName,
+                    email: cleanEmail,
+                  });
                 }
               }
 
@@ -2254,6 +2361,247 @@ function ItemsView({
                       })}
                     </div>
                   )}
+
+                  {/* Interactive Gmail / Figma-style Inline Email Composer */}
+                  <div
+                    style={{
+                      background: "#ffffff",
+                      border: "1.5px solid #cbd5e1",
+                      borderRadius: "12px",
+                      boxShadow: "0 4px 12px rgba(0,0,0,0.05)",
+                      overflow: "hidden",
+                      marginTop: "14px",
+                    }}
+                  >
+                    {/* Composer Header Bar */}
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        padding: "10px 16px",
+                        background: "#f1f5f9",
+                        borderBottom: "1px solid #e2e8f0",
+                        cursor: "pointer",
+                      }}
+                      onClick={() => setComposerOpen((v) => !v)}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", fontWeight: 700, color: "#1e293b" }}>
+                        <span>✉️</span>
+                        <span>Send Direct Email / Reply to Supplier</span>
+                      </div>
+                      <div style={{ fontSize: "12px", color: "#64748b", fontWeight: 600 }}>
+                        {composerOpen ? "▲ Minimize" : "▼ Open Composer"}
+                      </div>
+                    </div>
+
+                    {composerOpen && (
+                      <form onSubmit={handleSendEmail} style={{ padding: "14px 16px", display: "flex", flexDirection: "column", gap: "10px" }}>
+                        {composerStatus && (
+                          <div
+                            style={{
+                              padding: "8px 12px",
+                              borderRadius: "6px",
+                              fontSize: "12.5px",
+                              fontWeight: 600,
+                              background: composerStatus.type === "success" ? "#dcfce7" : "#fee2e2",
+                              color: composerStatus.type === "success" ? "#166534" : "#991b1b",
+                              border: `1px solid ${composerStatus.type === "success" ? "#bbf7d0" : "#fecaca"}`,
+                              display: "flex",
+                              justifyContent: "space-between",
+                              alignItems: "center",
+                            }}
+                          >
+                            <span>{composerStatus.type === "success" ? "✓ " : "⚠️ "}{composerStatus.message}</span>
+                            <button type="button" onClick={() => setComposerStatus(null)} style={{ background: "none", border: "none", cursor: "pointer", color: "inherit", fontWeight: 700 }}>✕</button>
+                          </div>
+                        )}
+
+                        {/* Recipient Field (To:) */}
+                        <div style={{ display: "flex", alignItems: "center", gap: "10px", borderBottom: "1px solid #f1f5f9", paddingBottom: "8px" }}>
+                          <span style={{ fontSize: "12.5px", fontWeight: 700, color: "#64748b", width: "40px" }}>To:</span>
+                          <div style={{ flex: 1, display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
+                            <input
+                              type="text"
+                              placeholder="supplier@example.com (or comma-separated emails)"
+                              value={composerTo}
+                              onChange={(e) => setComposerTo(e.target.value)}
+                              required
+                              style={{
+                                flex: 1,
+                                minWidth: "220px",
+                                padding: "6px 10px",
+                                border: "1px solid #cbd5e1",
+                                borderRadius: "6px",
+                                fontSize: "13px",
+                              }}
+                            />
+                            {/* Quick Supplier Picker */}
+                            {uniqueSuppliersInEmails.length > 0 && (
+                              <select
+                                onChange={(e) => {
+                                  if (e.target.value) {
+                                    setComposerTo(e.target.value);
+                                  }
+                                }}
+                                style={{
+                                  padding: "6px 10px",
+                                  border: "1px solid #cbd5e1",
+                                  borderRadius: "6px",
+                                  fontSize: "12px",
+                                  color: "#334155",
+                                  background: "#f8fafc",
+                                  cursor: "pointer",
+                                }}
+                                defaultValue=""
+                              >
+                                <option value="" disabled>-- Quick Select Supplier --</option>
+                                {uniqueSuppliersInEmails.map((s) => (
+                                  <option key={s.id} value={s.email || s.name}>
+                                    {s.name} {s.email ? `(${s.email})` : ""}
+                                  </option>
+                                ))}
+                              </select>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Subject Line */}
+                        <div style={{ display: "flex", alignItems: "center", gap: "10px", borderBottom: "1px solid #f1f5f9", paddingBottom: "8px" }}>
+                          <span style={{ fontSize: "12.5px", fontWeight: 700, color: "#64748b", width: "40px" }}>Subject:</span>
+                          <input
+                            type="text"
+                            placeholder="Email Subject"
+                            value={composerSubject}
+                            onChange={(e) => setComposerSubject(e.target.value)}
+                            required
+                            style={{
+                              flex: 1,
+                              padding: "6px 10px",
+                              border: "1px solid #cbd5e1",
+                              borderRadius: "6px",
+                              fontSize: "13px",
+                              fontWeight: 600,
+                            }}
+                          />
+                        </div>
+
+                        {/* Message Body */}
+                        <div>
+                          <textarea
+                            rows={4}
+                            placeholder="Write your email message or reply to the supplier here..."
+                            value={composerBody}
+                            onChange={(e) => setComposerBody(e.target.value)}
+                            required
+                            style={{
+                              width: "100%",
+                              padding: "10px 12px",
+                              borderRadius: "8px",
+                              border: "1px solid #cbd5e1",
+                              fontSize: "13px",
+                              lineHeight: 1.5,
+                              resize: "vertical",
+                              fontFamily: "inherit",
+                            }}
+                          />
+                        </div>
+
+                        {/* Attachment Display */}
+                        {composerAttachmentName && (
+                          <div style={{ display: "inline-flex", alignItems: "center", gap: "8px", background: "#f1f5f9", padding: "4px 10px", borderRadius: "6px", fontSize: "12px", border: "1px solid #cbd5e1" }}>
+                            <span>📎 {composerAttachmentName}</span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setComposerAttachmentUrl("");
+                                setComposerAttachmentName("");
+                              }}
+                              style={{ background: "none", border: "none", color: "#ef4444", cursor: "pointer", fontWeight: 700 }}
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        )}
+
+                        {/* Bottom Action Bar (Gmail Style) */}
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: "4px" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                            <button
+                              type="submit"
+                              disabled={sendingEmail || !composerBody.trim() || !composerTo.trim()}
+                              style={{
+                                padding: "8px 20px",
+                                background: "#2563eb",
+                                color: "#ffffff",
+                                border: "none",
+                                borderRadius: "8px",
+                                fontSize: "13px",
+                                fontWeight: 700,
+                                cursor: sendingEmail ? "not-allowed" : "pointer",
+                                display: "flex",
+                                alignItems: "center",
+                                gap: "6px",
+                                boxShadow: "0 2px 4px rgba(37,99,235,0.2)",
+                                opacity: sendingEmail || !composerBody.trim() || !composerTo.trim() ? 0.7 : 1,
+                              }}
+                            >
+                              <span>{sendingEmail ? "⏳" : "✈️"}</span>
+                              <span>{sendingEmail ? "Sending Email..." : "Send Email"}</span>
+                            </button>
+
+                            <label
+                              style={{
+                                padding: "6px 12px",
+                                borderRadius: "6px",
+                                border: "1px solid #cbd5e1",
+                                background: "#ffffff",
+                                color: "#475569",
+                                fontSize: "12px",
+                                fontWeight: 600,
+                                cursor: "pointer",
+                                display: "flex",
+                                alignItems: "center",
+                                gap: "4px",
+                              }}
+                            >
+                              <span>📎</span>
+                              <span>Attach File</span>
+                              <input
+                                type="file"
+                                style={{ display: "none" }}
+                                onChange={(e) => {
+                                  const file = e.target.files?.[0];
+                                  if (!file) return;
+                                  setComposerAttachmentName(file.name);
+                                }}
+                              />
+                            </label>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setComposerBody("");
+                              setComposerAttachmentUrl("");
+                              setComposerAttachmentName("");
+                              setComposerStatus(null);
+                            }}
+                            style={{
+                              background: "none",
+                              border: "none",
+                              color: "#64748b",
+                              fontSize: "12px",
+                              cursor: "pointer",
+                              textDecoration: "underline",
+                            }}
+                          >
+                            Discard
+                          </button>
+                        </div>
+                      </form>
+                    )}
+                  </div>
                 </div>
               );
             })()

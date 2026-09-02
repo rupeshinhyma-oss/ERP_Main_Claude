@@ -279,9 +279,11 @@ $$\text{EffectivePermissions} = \left( \bigcup_{r \in \text{UserRoles}} \text{Ro
 - **Features:** Client directory with credit limits, client grades (A, B, C, Premium), multi-address delivery matrix (Billing, Shipping, Warehouse), and bulk import/export.
 
 ### 8.8. Inquiries, RFQs & AI Quotation Extractor
-- **Endpoints:** `GET /inquiries`, `POST /inquiries`, `POST /inquiries/{id}/rfq/dispatch`, `POST /inquiries/{id}/quotes/manual`, `POST /inquiries/{id}/quotes/extract-pdf`, `POST /inquiries/{id}/convert-to-proforma`, `GET /inquiries/{id}/compare-matrix`.
+- **Endpoints:** `GET /inquiries`, `POST /inquiries`, `POST /inquiries/{id}/rfq/dispatch`, `POST /inquiries/{id}/send-email-message`, `GET /inquiries/{id}/messages`, `POST /inquiries/{id}/quotes/manual`, `POST /inquiries/{id}/quotes/extract-pdf`, `POST /inquiries/{id}/convert-to-proforma`, `GET /inquiries/{id}/compare-matrix`.
 - **Features:**
   - 3-layer RFQ and Quotation management lifecycle: `Buyer Directory` $\rightarrow$ `Consignments` $\rightarrow$ `Line Items & Quotation Matrix`.
+  - **Interactive Inline Email Composer (Gmail/Figma-Style)**: Located in the Inquiries -> Emails tab. Allows users to write custom follow-up emails or replies directly to suppliers, auto-selects recipient emails from known suppliers, pre-fills context-aware subject lines, attaches files, and immediately dispatches outbound SMTP emails. Dispatched emails are instantly recorded into the communication timeline.
+  - **Strict 1-Quote AI Extraction Policy**: The inbound AI parsing worker only extracts quotation terms from initial inbound supplier replies. Subsequent follow-up correspondence and chats between sales personnel and suppliers are logged directly to the email timeline without AI duplication or spurious quotation matrix modifications.
   - All Expected Receiving Date date-pickers enforce `min={today}` to disable selecting past dates.
   - Outbound WeChat RFQ engine automatically resolves supplier 11-digit mobile numbers to WeCom User IDs via Tencent API using `httpx`.
   - Supabase Cloud Storage integration handles all quotation PDF attachments.

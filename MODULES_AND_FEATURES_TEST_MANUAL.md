@@ -522,11 +522,18 @@ Manage complete vendor team directory:
   - 🖼️ **`Quote Documents Gallery` Side Drawer:**
     - Displays all vendor PDF quotation sheets, Excel specs, and technical drawings.
     - In-drawer preview, zoom, and direct download links.
-  - 💬 **`Two-Way Communication Timeline` Drawer / Tab:**
-    - Chronological feed of all inbound/outbound emails and WeChat messages for this consignment.
+  - 💬 **`Two-Way Communication Timeline & Interactive Email Composer` (Emails Tab):**
+    - Chronological feed of all inbound/outbound emails and WeChat messages for this consignment / product.
     - **Supplier Thread Filter**: Dropdown allowing users to isolate conversations with specific suppliers (e.g. `Wenzhou Brother Machinery`) or view all combined.
     - **AI Auto-Extraction Indicator**: Displays `QT-AUTO-01` badge when OpenAI GPT-4o automatically parsed an incoming quotation. Subsequent negotiation emails bypass AI (**0 API cost**).
-    - **Live Dynamic Polling**: Automatically refreshes feed every 2.5 seconds.
+    - **Interactive Inline Email Composer (Gmail/Figma-Style)**:
+      - Embedded directly at the bottom of the Email timeline.
+      - **"To:" Recipient Field**: Quick dropdown of suppliers or free-text comma-separated email entry.
+      - **"Subject:" Field**: Auto-prefilled with context tag `Re: [#ConsignmentCode] ProductName (#SKU) - Inquiry Follow-up`.
+      - **"Message Body" Textarea**: Clean, spacious multiline composer for typing replies/messages.
+      - **"📎 Attach File"**: Supabase Storage file/PDF uploader.
+      - **Action Toolbar**: Primary blue **`✈️ Send Email`** button with async SMTP dispatch + Discard button.
+    - **Live Dynamic Polling & WebSocket Sync**: Automatically refreshes feed every 2.5 seconds.
   - 📋 **`Bulk Tally Entry Post` Button:** Select multiple line items and mark them as `Tally Entry Posted` in one batch operation.
 - **Line Items Table Columns:**
   1. **Checkbox:** Select row for bulk RFQ dispatch or bulk Tally posting.
@@ -543,6 +550,8 @@ Manage complete vendor team directory:
 ### Test Cases for Inquiries Module
 - [ ] In Layer 1, click `+ Quick Add Inquiry`, select Buyer, enter Consignment `FB1`, pick Product, enter Quantity `100`, save. Verify item is created.
 - [ ] Drill down to Layer 2 and Layer 3, click `Dispatch Bulk RFQs`, select 2 suppliers, dispatch. Verify RFQ records are generated with public tokens.
+- [ ] Switch to the **Emails** tab in Layer 3, verify the timeline displays historical RFQs and replies.
+- [ ] In the **Inline Email Composer** at the bottom of the Emails tab, select a supplier from the dropdown, type a message body, and click `✈️ Send Email`. Verify the email is dispatched via SMTP and instantly appears in the conversation thread with the `Outbound Email ↗` badge.
 - [ ] Open Public Quote Portal (`/quote/:token`) for a supplier, submit unit price `¥4500` with PDF quote sheet upload.
 - [ ] Return to Layer 3 Items view, verify Received Quotes badge updates to `1 Quote`.
 - [ ] Open Quotation Matrix Comparison modal, verify Lowest Price is highlighted in green, click `Approve Quote`, verify status turns to `Approved`.

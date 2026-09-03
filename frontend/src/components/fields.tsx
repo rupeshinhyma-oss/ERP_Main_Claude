@@ -58,6 +58,7 @@ export function TextField({
   hasError = false,
   errorMessage,
   error,
+  showPasswordToggle = true,
 }: BaseFieldProps & {
   value: string;
   onChange: (value: string) => void;
@@ -74,9 +75,13 @@ export function TextField({
   className?: string;
   autoComplete?: string;
   disableAutoCapitalize?: boolean;
+  showPasswordToggle?: boolean;
 }) {
+  const [showPassword, setShowPassword] = useState(false);
   const isErr = Boolean(hasError || errorMessage || error);
   const errText = errorMessage || error;
+  const isPassword = type === "password";
+  const effectiveType = isPassword ? (showPassword ? "text" : "password") : type;
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const raw = e.target.value;
@@ -84,31 +89,75 @@ export function TextField({
     onChange(formatted);
   };
 
+  const inputElement = (
+    <input
+      id={id}
+      type={effectiveType}
+      value={value}
+      onChange={handleChange}
+      required={required}
+      maxLength={maxLength}
+      minLength={minLength}
+      placeholder={placeholder}
+      readOnly={readOnly}
+      style={{
+        ...inputStyle,
+        paddingRight: isPassword && showPasswordToggle ? "40px" : inputStyle?.paddingRight,
+        border: isErr ? "1.5px solid #ef4444" : inputStyle?.border,
+        boxShadow: isErr ? "0 0 0 3px rgba(239, 68, 68, 0.15)" : inputStyle?.boxShadow,
+        backgroundColor: isErr ? "#fff5f5" : inputStyle?.backgroundColor,
+      }}
+      step={step}
+      min={min}
+      max={max}
+      className={className}
+      autoComplete={autoComplete}
+    />
+  );
+
   return (
     <div className="field" style={style}>
       <label htmlFor={id}>{renderLabel(label)}</label>
-      <input
-        id={id}
-        type={type}
-        value={value}
-        onChange={handleChange}
-        required={required}
-        maxLength={maxLength}
-        minLength={minLength}
-        placeholder={placeholder}
-        readOnly={readOnly}
-        style={{
-          ...inputStyle,
-          border: isErr ? "1.5px solid #ef4444" : inputStyle?.border,
-          boxShadow: isErr ? "0 0 0 3px rgba(239, 68, 68, 0.15)" : inputStyle?.boxShadow,
-          backgroundColor: isErr ? "#fff5f5" : inputStyle?.backgroundColor,
-        }}
-        step={step}
-        min={min}
-        max={max}
-        className={className}
-        autoComplete={autoComplete}
-      />
+      {isPassword && showPasswordToggle ? (
+        <div style={{ position: "relative", display: "flex", alignItems: "center", width: "100%" }}>
+          {inputElement}
+          <button
+            type="button"
+            tabIndex={-1}
+            onClick={() => setShowPassword((v) => !v)}
+            title={showPassword ? "Hide password" : "Show password"}
+            aria-label={showPassword ? "Hide password" : "Show password"}
+            style={{
+              position: "absolute",
+              right: "10px",
+              background: "transparent",
+              border: "none",
+              padding: "4px",
+              color: "#64748b",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              borderRadius: "4px",
+              lineHeight: 1,
+            }}
+          >
+            {showPassword ? (
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" width={17} height={17}>
+                <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
+                <line x1="1" y1="1" x2="23" y2="23" />
+              </svg>
+            ) : (
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" width={17} height={17}>
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                <circle cx="12" cy="12" r="3" />
+              </svg>
+            )}
+          </button>
+        </div>
+      ) : (
+        inputElement
+      )}
       {errText && (
         <div style={{ color: "#dc2626", fontSize: "11.5px", fontWeight: 600, marginTop: "4px", display: "flex", alignItems: "center", gap: "4px" }}>
           <span>⚠️</span> {errText}
@@ -1176,9 +1225,26 @@ export function SelectField({
         <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {displayLabel}
         </span>
-        <span style={{ fontSize: "10px", color: "var(--color-muted)", marginLeft: "8px" }}>
-          {open ? "▲" : "▼"}
-        </span>
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          width="12"
+          height="12"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="#64748b"
+          strokeWidth="2.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          style={{
+            marginLeft: "8px",
+            marginRight: "4px",
+            transition: "transform 0.15s ease",
+            transform: open ? "rotate(180deg)" : "rotate(0deg)",
+            flexShrink: 0,
+          }}
+        >
+          <polyline points="6 9 12 15 18 9" />
+        </svg>
       </div>
 
       {open && (

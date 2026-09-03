@@ -262,8 +262,9 @@ export type OrganizationFieldId =
 export interface User {
   id: string;
   version?: number;
-  username: string;
-  email: string;
+  has_login?: boolean;
+  username?: string | null;
+  email?: string | null;
   phone?: string | null;
   status?: string;
   is_active?: boolean;
@@ -277,6 +278,8 @@ export interface User {
   employee_code?: string | null;
   manager_id?: string | null;
   manager_name?: string | null;
+  position_id?: string | null;
+  position_name?: string | null;
   date_of_birth?: string | null;
   gender?: string | null;
   date_of_joining?: string | null;
@@ -324,6 +327,14 @@ export interface Role {
   description?: string | null;
   is_system?: boolean;
   permissions?: string[];
+  /** Organizational-department fields (Department/Role merge). Optional -- a Role can be a pure permission bundle with no organizational placement. */
+  code?: string | null;
+  parent_department_id?: string | null;
+}
+
+export interface DepartmentHierarchy {
+  parents: Role[];
+  children: Role[];
 }
 
 export interface RoleDeletionAffectedUser {
@@ -344,6 +355,60 @@ export interface UserPermissionOverride {
   id: string;
   code: string;
   is_granted: boolean;
+}
+
+/* ------------------------------------------------------------------ */
+/* Organization Structure: Employees, Departments, Positions,         */
+/* Reporting (new -- Organization/Employee/IAM upgrade)               */
+/* ------------------------------------------------------------------ */
+
+export interface Position extends MasterRecord {
+  name: string;
+  code?: string | null;
+  description?: string | null;
+  employee_count?: number;
+}
+
+export interface PositionAssignment {
+  id: string;
+  employee_id: string;
+  position_id: string;
+  department_id?: string | null;
+  assignment_type: string;
+  is_primary: boolean;
+  effective_from?: string | null;
+  effective_to?: string | null;
+  status: string;
+}
+
+export interface LeadershipAssignment {
+  id: string;
+  department_id: string;
+  employee_id: string;
+  leadership_type: string;
+  is_primary: boolean;
+  effective_from?: string | null;
+  effective_to?: string | null;
+  status: string;
+}
+
+export interface ReportingRelationship {
+  id: string;
+  employee_id: string;
+  manager_employee_id: string;
+  relationship_type: string;
+  department_id?: string | null;
+  is_primary: boolean;
+  effective_from?: string | null;
+  effective_to?: string | null;
+  status: string;
+}
+
+export interface OrgChartNode {
+  employee_id: string;
+  employee_name: string;
+  manager_employee_id?: string | null;
+  manager_name?: string | null;
 }
 
 export interface PermissionSource {

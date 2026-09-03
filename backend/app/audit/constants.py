@@ -46,6 +46,27 @@ class AuditAction(str, Enum):
     EXPORT = "EXPORT"
     FILE_UPLOAD = "FILE_UPLOAD"
     FILE_DELETE = "FILE_DELETE"
+    # --- Organization / Employee / Identity & Access upgrade (additive) -----
+    # New, purely additive action codes for the Employee/Department/Position/
+    # Reporting/Leadership modules. Existing action codes above are
+    # untouched, so every previously-recorded audit row keeps its exact
+    # meaning; this just extends the closed vocabulary going forward. Since
+    # this column uses ``native_enum=False`` (see the model docstring in
+    # app.audit.models), adding members here requires no database migration.
+    EMPLOYEE_CREATED = "EMPLOYEE_CREATED"
+    EMPLOYEE_UPDATED = "EMPLOYEE_UPDATED"
+    EMPLOYEE_DEACTIVATED = "EMPLOYEE_DEACTIVATED"
+    EMPLOYEE_LINKED_USER = "EMPLOYEE_LINKED_USER"
+    EMPLOYEE_UNLINKED_USER = "EMPLOYEE_UNLINKED_USER"
+    DEPARTMENT_ASSIGNMENT_ADDED = "DEPARTMENT_ASSIGNMENT_ADDED"
+    DEPARTMENT_ASSIGNMENT_REMOVED = "DEPARTMENT_ASSIGNMENT_REMOVED"
+    POSITION_ASSIGNMENT_ADDED = "POSITION_ASSIGNMENT_ADDED"
+    POSITION_ASSIGNMENT_REMOVED = "POSITION_ASSIGNMENT_REMOVED"
+    LEADERSHIP_ASSIGNMENT_ADDED = "LEADERSHIP_ASSIGNMENT_ADDED"
+    LEADERSHIP_ASSIGNMENT_REMOVED = "LEADERSHIP_ASSIGNMENT_REMOVED"
+    REPORTING_RELATIONSHIP_ADDED = "REPORTING_RELATIONSHIP_ADDED"
+    REPORTING_RELATIONSHIP_REMOVED = "REPORTING_RELATIONSHIP_REMOVED"
+    REPORTING_RELATIONSHIP_CHANGED = "REPORTING_RELATIONSHIP_CHANGED"
     OTHER = "OTHER"
 
 

@@ -73,6 +73,7 @@ export const NAV_SECTIONS: NavSection[] = [
     label: "USER MANAGEMENT",
     items: [
       { key: "users", label: "Users", path: "/users", icon: "user", permission: "user.view" },
+      { key: "positions", label: "Positions", path: "/positions", icon: "briefcase", permission: "position.view" },
       { key: "rbac", label: "Departments & Permissions", path: "/rbac", icon: "shield", permission: "roles_permissions.view" },
     ],
   },
@@ -109,6 +110,9 @@ export const PAGE_TITLES: Record<string, string> = {
   hrms: "Human Resource Management",
   organization: "Organization Settings",
   users: "Users",
+  employees: "Employees",
+  positions: "Positions & Designations",
+  "org-chart": "Organization Chart",
   "masters-company-list": "Organization List",
   "masters-countries": "Countries (National Level)",
   "masters-states": "Provinces (First Level Divisions)",
@@ -181,6 +185,8 @@ export const LEGACY_REDIRECTS: Record<string, string> = {
   // Both of these were already redirect-only stubs in the original.
   "/employee-detail.html": "/users",
   "/employee-form.html": "/users",
+  "/org-chart": "/users",
+  "/org-chart.html": "/users",
 };
 
 /**

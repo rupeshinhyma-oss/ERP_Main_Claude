@@ -311,6 +311,23 @@ export function IconTrash(props: IconProps) {
   );
 }
 
+/** 25. Organization Chart (Hierarchical organizational tree with manager and direct reports) */
+export function IconOrgChart(props: IconProps) {
+  return (
+    <NavSvg {...props}>
+      <rect x="9" y="3" width="6" height="5" rx="1" />
+      <rect x="2" y="16" width="5" height="5" rx="1" />
+      <rect x="9.5" y="16" width="5" height="5" rx="1" />
+      <rect x="17" y="16" width="5" height="5" rx="1" />
+      <path d="M12 8v4" />
+      <path d="M4.5 12h15" />
+      <path d="M4.5 12v4" />
+      <path d="M12 12v4" />
+      <path d="M19.5 12v4" />
+    </NavSvg>
+  );
+}
+
 /* -------------------------------------------------------------------------- */
 /* Auxiliary / Legacy / Toolbar Icons                                         */
 /* -------------------------------------------------------------------------- */
@@ -476,6 +493,9 @@ export const ICONS = {
   // legacy aliases for backward compatibility
   tag: IconTag,
   briefcase: IconBriefcase,
+  orgChart: IconOrgChart,
+  "org-chart": IconOrgChart,
+  sitemap: IconOrgChart,
   task: IconTask,
   grid: IconImage,
   folder: IconLayers,

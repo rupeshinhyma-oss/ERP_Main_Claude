@@ -1,7 +1,7 @@
 # Enterprise ERP System — Unified Architecture, Feature & Technical Manual
 
 > **System Version:** 1.0.0 (Production)  
-> **Last Updated:** August 2026  
+> **Last Updated:** September 2026  
 > **Architectural Pattern:** Modular Async Monolith (FastAPI) + React 18 SPA (Vite) + Real-Time WebSocket Event Bus  
 > **Target Audience:** Systems Architects, Software Engineers, DevOps, and Autonomous AI Coding Assistants.  
 > **Scope:** Complete end-to-end technical reference containing all system features, data models, API endpoints, background workers, frontend architecture, and developer integration guidelines.
@@ -31,6 +31,8 @@
    - 8.11. [Audit Trails & JSON Delta Change Diffing](#811-audit-trails--json-delta-change-diffing)
    - 8.12. [Recycle Bin (Universal Soft-Delete & Recovery)](#812-recycle-bin-universal-soft-delete--recovery)
    - 8.13. [Organization & System Profile](#813-organization--system-profile)
+   - 8.14. [Employee Directory & Organization Structure](#814-employee-directory--organization-structure-identity--access-management-upgrade)
+
 9. [Real-Time WebSocket & Event Synchronization](#9-real-time-websocket--event-synchronization)
 10. [Multi-Tier Caching Engine](#10-multi-tier-caching-engine)
 11. [Universal Bulk Import & Export Wizard](#11-universal-bulk-import--export-wizard)
@@ -121,16 +123,18 @@ ERP_Main_Claude/
 │   │   ├── api/v1/router.py   # Versioned API route registration
 │   │   ├── audit/             # Immutable audit log models, service, and routes
 │   │   ├── auth/              # JWT auth, Argon2id, session tracking, rate limiting
-│   │   ├── buyers/            # Buyer directory, contacts, addresses, credit limits
-│   │   ├── cache/             # Redis / in-memory cache manager, cleanup worker
-│   │   ├── common/            # BaseRepository, BaseService, Pagination, Storage, Importer, Email
-│   │   ├── core/              # Config, Responses, Exceptions, Exception Handlers, Logging
-│   │   ├── database/          # Async Engine, Session DI, Declarative Base Mixins
-│   │   ├── events/            # WebSocket connection manager and broadcast bus
-│   │   ├── inquiries/         # RFQ lifecycle, AI Quote Extractor, IMAP email poller
+│   │   ├── buyers/             # Buyer directory, contacts, addresses, credit limits
+│   │   ├── cache/              # Redis / in-memory cache manager, cleanup worker
+│   │   ├── common/             # BaseRepository, BaseService, Pagination, Storage, Importer, Email
+│   │   ├── core/                # Config, Responses, Exceptions, Exception Handlers, Logging
+│   │   ├── database/           # Async Engine, Session DI, Declarative Base Mixins
+│   │   ├── employees/          # Employee (workforce/person) records, optional User Account link
+│   │   ├── events/              # WebSocket connection manager and broadcast bus
+│   │   ├── inquiries/          # RFQ lifecycle, AI Quote Extractor, IMAP email poller
 │   │   ├── masters/           # Brands, Categories, Subcategories, Geography, Currencies
 │   │   ├── middleware/        # Correlation ID, Logging, Security, Rate Limiter
 │   │   ├── organizations/     # Enterprise profile settings
+│   │   ├── org_structure/     # Departments, Positions, Leadership, Reporting Structure (IAM upgrade)
 │   │   ├── planning/          # Dynamic spreadsheet planning grid, container CBM calculator
 │   │   ├── rbac/              # Roles, Permissions, User Overrides, Effective Permissions
 │   │   ├── suppliers/         # Supplier directory, tokenized public quote portal
@@ -142,10 +146,11 @@ ERP_Main_Claude/
 │   └── requirements.txt       # Python dependencies
 └── frontend/
     ├── src/
-    │   ├── components/        # AppShell, MasterPage, SearchableDropdown, ImportWizard, UI
-    │   ├── lib/               # API client, Auth Context, Navigation registry, WebSockets
+    │   ├── components/        # AppShell, MasterPage, SearchableDropdown, ImportWizard, UI, icons
+    │   ├── lib/               # API client, Auth Context, Navigation registry (nav.ts), WebSockets
     │   ├── pages/             # Inquiries, Planning, Suppliers, Buyers, Users, Rbac, Profile
-    │   │   └── masters/       # Products, Brands, Categories, Currencies, Cities, Countries
+    │   │   ├── masters/       # Products, Brands, Categories, Currencies, Cities, Countries
+    │   │   └── org/           # Positions, Organization Chart (dynamic org hierarchy)
     │   ├── styles/            # IHM Design System stylesheet (style.css, pages.css)
     │   └── types/             # Strict TypeScript domain interfaces
     └── package.json           # Frontend dependencies and build scripts
@@ -190,7 +195,17 @@ erDiagram
     USERS ||--o{ USER_PERMISSIONS : overrides
     PERMISSIONS ||--o{ USER_PERMISSIONS : target
     USERS ||--o{ SESSIONS : registers
-    
+
+    ROLES ||--o{ ROLES : "parent_department (nested)"
+    ROLES ||--o{ DEPARTMENT_HIERARCHY : "parent_department (multi)"
+    ROLES ||--o{ DEPARTMENT_HIERARCHY : "child_department (multi)"
+    USERS ||--o{ EMPLOYEE_POSITION_ASSIGNMENTS : holds
+    POSITIONS ||--o{ EMPLOYEE_POSITION_ASSIGNMENTS : filled_by
+    ROLES ||--o{ DEPARTMENT_LEADERSHIP_ASSIGNMENTS : led_by
+    USERS ||--o{ DEPARTMENT_LEADERSHIP_ASSIGNMENTS : leads
+    USERS ||--o{ EMPLOYEE_REPORTING_RELATIONSHIPS : "reports (as person)"
+    USERS ||--o{ EMPLOYEE_REPORTING_RELATIONSHIPS : "manages (as manager)"
+
     BUYERS ||--o{ INQUIRIES : initiates
     INQUIRIES ||--o{ INQUIRY_ITEMS : contains
     INQUIRIES ||--o{ INQUIRY_SUPPLIER_QUOTES : receives
@@ -230,20 +245,32 @@ Every authentication creates a record in the `sessions` table capturing IP addre
 
 ## 7. RBAC Engine, Departments & Effective Permissions
 
-The platform treats **Departments** as functional role bundles (`roles` table) with dynamic user-level permission overrides.
+## 7. RBAC Engine, Departments & Effective Permissions
+
+The platform unifies **Roles** and organizational **Departments** onto the same underlying entity (`roles` table). A Role carries software permission bundles (`role_permissions`) AND real organizational placement (`code` and `parent_department_id` for departmental hierarchy with server-side cycle detection). Assigning a user to a department grants that department's permissions and places the person in the organizational unit. Individual per-user overrides (`user_permissions` ALLOW/DENY) remain available for any user who needs to deviate from department defaults.
 
 ### 7.1. Effective Permission Calculation
 User capabilities are calculated dynamically at request time:
 
 $$\text{EffectivePermissions} = \left( \bigcup_{r \in \text{UserRoles}} \text{RolePermissions}(r) \cup \text{DirectGrants} \right) \setminus \text{DirectDenies}$$
 
+A user may be assigned any number of Roles simultaneously (`POST /users/{id}/roles` is additive, carrying assignment metadata `assignment_type` [PRIMARY, SECONDARY, TEMPORARY, PROJECT, ACTING], `is_primary`, and effective dates).
+
 *Super Admin Rule:* Users with the `super_admin` role bypass checks and possess all permissions unconditionally.
 
-### 7.2. Department Managers
-- Department members can be designated as **Department Managers**.
+### 7.2. Department Managers & Leadership
+- Department members can be designated as **Department Managers** or leadership assignees (`department_leadership_assignments`).
 - Managers display a `MANAGER` badge on the department roster.
-- Administrators can configure direct per-user permission overrides (`🔑 Edit permissions`) to give managers elevated operational privileges (e.g. deletion, approval, bulk exports) without polluting the base department role.
+- Administrators can configure direct per-user permission overrides (`🔑 Edit permissions`) to give managers elevated operational privileges (e.g. deletion, approval, bulk exports) without altering the base department role.
 - Setting a manager automatically updates the `manager_id` reporting hierarchy for department members.
+
+### 7.3. Multi-Parent & Multi-Child Department Hierarchy
+- **Entity Model (`department_hierarchy`)**: Supports many-to-many relationships between organizational departments (`parent_department_id` $\leftrightarrow$ `child_department_id`).
+- **Bidirectional Relationship**:
+  - A parent department can possess **multiple child departments** (sub-departments).
+  - A child department can report to or be nested under **multiple parent departments**.
+- **DAG Cycle Prevention**: Traversing both `department_hierarchy` and legacy `roles.parent_department_id` via breadth-first search prevents direct or indirect recursive loops across the departmental graph. Attempted cycles fail fast with HTTP `409 Conflict` ("This would create a circular department hierarchy.").
+- **Backward Compatibility**: Automatically mirrors and backfills the primary parent to `roles.parent_department_id` for legacy single-parent queries.
 
 ---
 
@@ -251,15 +278,26 @@ $$\text{EffectivePermissions} = \left( \bigcup_{r \in \text{UserRoles}} \text{Ro
 
 ### 8.1. Authentication & Active Sessions
 - **Endpoints:** `POST /auth/login`, `POST /auth/refresh`, `POST /auth/logout`, `GET /auth/me`, `GET /auth/sessions`, `DELETE /auth/sessions/{id}`.
-- **Features:** Self-service password change, active session listing, device revocation, and forced password reset on first login.
+- **Features:** Self-service password change, active session listing, device revocation, and forced password reset on first login. Users with `has_login=False` cannot authenticate and are rejected before password hashing.
 
-### 8.2. Users & HR Profile Management
-- **Endpoints:** `GET /users`, `POST /users`, `GET /users/{id}`, `PATCH /users/{id}`, `POST /users/{id}/reset-password`.
-- **Features:** Complete employee directory with multi-field search, status filtering, and sorting. HR attributes include Employee Code, Contact Numbers, Gender, Date of Birth, Date of Joining, Employment Type, Status, Address, and Emergency Contact. **Last Name is optional**.
+### 8.2. Users & HR Profile Management (Unified Person & Workforce Directory)
+- **Endpoints:** `GET /users`, `GET /users/all`, `GET /users/department-manager/{role_id}`, `POST /users`, `GET /users/{id}`, `PATCH /users/{id}`, `POST /users/{id}/reset-password`, `POST /users/{id}/roles`, `DELETE /users/{id}/roles/{role_id}`.
+- **Features:** Unified person directory supporting both ERP login users and workforce members with no system credentials (`has_login=False` -- factory workers, drivers, temporary labor, consultants).
+  - **Account Fields:** `username`, `email`, `phone`, `password` (required when `has_login=True`; optional/null when `has_login=False`), and optional initial `position_id`.
+  - **HR Attributes:** Employee Code, Contact Numbers, Gender, Date of Birth, Date of Joining, Employment Type, Status, Address, Emergency Contact, and Notes. **Last Name is optional**.
+  - **Default "User" Role Assignment:** If an individual is not explicitly assigned any department/role upon creation (or if unassigned), the system automatically assigns the default system **"User"** role. When all roles are removed from a person, the system automatically falls back to assigning the "User" role.
+  - **Position Assignment & Editing:** When creating an account, an optional **Position** dropdown (extracted from the active Positions catalog) can be selected to establish an immediate primary position assignment. In the **Edit User Profile & HR Details** drawer, administrators can also view, update, reassign, or unset the user's primary position directly alongside the Reporting Manager selector, with changes synchronized atomically to `employee_position_assignments`.
+  - **Department & Manager Auto-Wiring:** When selecting an initial department in the Create User modal, the system calls `/users/department-manager/{role_id}` to automatically detect and pre-fill the department's active manager, with manual override capability.
+  - **Positions & Reporting:** Profile Drawer displays held positions (`GET /positions/holders-for-user/{id}`), reporting managers (`GET /reporting/managers/{id}`), and direct reports (`GET /reporting/direct-reports/{id}`).
+  - **Multi-Role Assignment:** Assign any number of roles/departments with `assignment_type` (PRIMARY, SECONDARY, TEMPORARY, PROJECT, ACTING), `is_primary`, and effective date ranges.
 
-### 8.3. Departments & Department Managers
-- **Endpoints:** `GET /rbac/roles`, `POST /rbac/roles`, `PATCH /rbac/roles/{id}`, `DELETE /rbac/roles/{id}`, `POST /rbac/roles/{id}/delete-with-reassignment`, `PUT /rbac/users/{id}/permissions/bulk`.
-- **Features:** Department permission assignment matrix, department manager assignment, safe deletion with user reassignment modal, and permission cloning.
+### 8.3. Departments & Permissions (RBAC & Org Structure)
+- **Endpoints:** `GET /rbac/roles`, `POST /rbac/roles`, `PATCH /rbac/roles/{id}`, `DELETE /rbac/roles/{id}`, `POST /rbac/roles/{id}/delete-with-reassignment`, `PUT /rbac/users/{id}/permissions/bulk`, `GET /rbac/roles/{id}/hierarchy`, `POST /rbac/roles/{id}/parents`, `DELETE /rbac/roles/{id}/parents/{parent_id}`, `POST /rbac/roles/{id}/children`, `DELETE /rbac/roles/{id}/children/{child_id}`.
+- **Features:** Department role definitions with optional short department `code` (e.g. `SALES`), multi-parent department nesting, safe deletion with user reassignment modal, and permission cloning.
+  - **Child Departments Card:** Dedicated card directly beneath "Users in this Department" in the left column of `/rbac`, displaying connected sub-departments, member counts, quick view navigation, and inline add/remove child controls.
+  - **Multi-Parent Department Management:** Department Details allows assigning multiple parent departments with removable tag badges and immediate unlinking without resaving the entire role.
+  - **Real-Time Bidirectional Sync:** Adding a child department in Operations instantly updates the child's parent roster, and vice versa.
+  - **Cycle Prevention:** Strict validation prevents assigning an ancestor as a child or vice-versa.
 
 ### 8.4. Master Data & Generic Catalogs
 - **Modules:** Brands, Categories, Sub-Categories, Countries, States, Cities, Currencies, Units of Measurement (UOM), HSN/SAC Codes, and Operating Companies.
@@ -320,6 +358,18 @@ $$\text{EffectivePermissions} = \left( \bigcup_{r \in \text{UserRoles}} \text{Ro
 - **Endpoints:** `GET /organizations/profile`, `PATCH /organizations/profile`.
 - **Features:** Enterprise legal identity, tax/VAT/TIN registration, official address, and base operational currency.
 
+### 8.14. Organization Structure, Positions & Reporting Hierarchy
+- **Files:** `backend/app/org_structure/`.
+- **Architecture:** Unifies workforce identity into `User` (`has_login` boolean) and department management into `Role` (`code`, `parent_department_id`). Complemented by dedicated organizational modules:
+- **Positions (`/positions`):** Designations/titles (e.g. "Sales Manager", "Marketing Advisor"). Managed via `Position` and assigned to users via `employee_position_assignments` (supporting PRIMARY, SECONDARY, ACTING, TEMPORARY roles). Holds no permission or reporting logic. Creation and updates support case-insensitive lifecycle status (`ACTIVE`, `INACTIVE`, `ARCHIVED`).
+  - **Employee Assignment Count & Deletion Lock:** `GET /positions` and `GET /positions/all` dynamically aggregate active assignment counts (`employee_count`). If any employees currently hold a position (`employee_count > 0`), the position's delete button is completely frozen and locked on the UI with a lock icon, `cursor: not-allowed`, tooltip warning, and an explanatory modal alert preventing deletion. Server-side deletion enforcement (`PositionService.delete`) strictly rejects deletions with HTTP 409 Conflict if active assignments exist.
+- **Department Leadership:** `department_leadership_assignments` records who manages/heads a department (`department_id` references `roles.id`, `employee_id` references `users.id`). The same user may lead multiple departments; a department may have multiple leadership assignees.
+- **Reporting Structure (`/reporting`):** Person-to-person reporting lines in `employee_reporting_relationships` (`employee_id` and `manager_employee_id` referencing `users.id`). Supports relationship types (`PRIMARY_REPORTING`, `FUNCTIONAL_REPORTING`, `PROJECT_REPORTING`, `DOTTED_LINE`, `TEMPORARY_REPORTING`) and optional department scoping.
+  - **Mandatory Server-Side Cycle Prevention:** `ReportingService.would_create_cycle` verifies the reporting graph before any row is saved, immediately rejecting self-reporting (`A -> A`) and circular chains (`A -> B -> C -> A`) with a 409 Conflict.
+  - **Direct Reports Reassignment:** `POST /reporting/reassign-direct-reports/{manager_id}` allows reassigning all direct reports before deactivating a manager.
+  - **Set / Move Primary Manager (Org Chart):** `POST /reporting/set-manager/{employee_id}` updates an employee's primary reporting manager in a single atomic transaction, validating cycle prevention and returning the updated relationship.
+- **Dynamic Org Chart (`GET /reporting/org-chart`):** Renders the multi-level reporting tree in `/org-chart` using active `PRIMARY_REPORTING` relationships resolved dynamically against `UserRepository.list_all()`, including node `relationship_id`.
+
 ---
 
 ## 9. Real-Time WebSocket & Event Synchronization
@@ -355,7 +405,8 @@ $$\text{EffectivePermissions} = \left( \bigcup_{r \in \text{UserRoles}} \text{Ro
 **Files:** `frontend/src/lib/api.ts`, `frontend/src/lib/authContext.tsx`, `frontend/src/components/AppShell.tsx`
 
 - **Routing:** React Router v6 with `ProtectedRoute` guards and deep-link redirect preservation.
-- **Component Design System:** Predefined accessible UI tokens in `frontend/src/components/ui.tsx` and `fields.tsx`.
+- **Error Boundaries:** Multi-layer error boundary protection with an application-level root boundary in `main.tsx` and a route-keyed boundary (`ErrorBoundary key={location.pathname}`) in `App.tsx` ensuring crashed page states do not leak across navigation transitions.
+- **Component Design System:** Predefined accessible UI tokens in `frontend/src/components/ui.tsx` and `fields.tsx` (including interactive `TextField` with automatic password visibility eye toggle `showPasswordToggle`).
 - **Hooks Architecture:** Custom hooks for asynchronous state management: `useAuth`, `usePendingGuard`, `useToast`, `usePagination`.
 
 ---
@@ -371,20 +422,37 @@ $$\text{EffectivePermissions} = \left( \bigcup_{r \in \text{UserRoles}} \text{Ro
 | **Auth** | `GET` | `/api/v1/auth/sessions` | List active user device sessions | Authenticated |
 | **Auth** | `DELETE`| `/api/v1/auth/sessions/{id}` | Revoke specific device session | Authenticated |
 | **Users** | `GET` | `/api/v1/users` | List paginated users with search/sort | `user.read` |
-| **Users** | `POST` | `/api/v1/users` | Create user account + HR profile | `user.create` |
+| **Users** | `GET` | `/api/v1/users/all` | List all users (unpaginated for manager lookups) | `user.read` |
+| **Users** | `GET` | `/api/v1/users/department-manager/{role_id}` | Get active manager for a department/role | `user.read` |
+| **Users** | `POST` | `/api/v1/users` | Create person record (login user or workforce member via `has_login`) | `user.create` |
 | **Users** | `GET` | `/api/v1/users/{id}` | Inspect user details & roles | `user.read` |
 | **Users** | `PATCH` | `/api/v1/users/{id}` | Update user profile / reporting manager | `user.update` |
 | **Users** | `POST` | `/api/v1/users/{id}/reset-password` | Generate temporary login password | `user.reset_password` |
-| **Users** | `POST` | `/api/v1/users/{id}/roles` | Assign department role to user | `user.manage_roles` |
-| **Users** | `DELETE`| `/api/v1/users/{id}/roles/{role_id}` | Remove department role from user | `user.manage_roles` |
-| **RBAC** | `GET` | `/api/v1/rbac/roles` | List all departments | `roles_permissions.view` |
-| **RBAC** | `POST` | `/api/v1/rbac/roles` | Create new department | `roles_permissions.create` |
-| **RBAC** | `PATCH` | `/api/v1/rbac/roles/{id}` | Rename/update department | `roles_permissions.action` |
-| **RBAC** | `DELETE`| `/api/v1/rbac/roles/{id}` | Delete department (with impact check) | `roles_permissions.delete` |
-| **RBAC** | `POST` | `/api/v1/rbac/roles/{id}/delete-with-reassignment` | Safe delete with user reassignment | `roles_permissions.delete` |
+| **Users** | `POST` | `/api/v1/users/{id}/roles` | Assign Role/Department (with assignment_type, is_primary, effective dates) | `user.action` |
+| **Users** | `DELETE`| `/api/v1/users/{id}/roles/{role_id}` | Remove one Role from a user | `user.action` |
+| **RBAC** | `GET` | `/api/v1/rbac/roles` | List all Roles / Departments | `roles_permissions.view` |
+| **RBAC** | `POST` | `/api/v1/rbac/roles` | Create new Role / Department (with optional `code` and `parent_department_id`) | `roles_permissions.create` |
+| **RBAC** | `PATCH` | `/api/v1/rbac/roles/{id}` | Update Role name/description/code/parent (with cycle detection) | `roles_permissions.action` |
+| **RBAC** | `DELETE`| `/api/v1/rbac/roles/{id}` | Delete Role (with impact check) | `roles_permissions.action` |
+| **RBAC** | `POST` | `/api/v1/rbac/roles/{id}/delete-with-reassignment` | Safe delete with user reassignment | `roles_permissions.action` |
+| **RBAC** | `GET` | `/api/v1/rbac/roles/{id}/hierarchy` | Fetch connected parent and child departments | `roles_permissions.view` |
+| **RBAC** | `POST` | `/api/v1/rbac/roles/{id}/parents` | Link an additional parent department (with cycle check) | `roles_permissions.action` |
+| **RBAC** | `DELETE`| `/api/v1/rbac/roles/{id}/parents/{parent_id}` | Unlink a parent department | `roles_permissions.action` |
+| **RBAC** | `POST` | `/api/v1/rbac/roles/{id}/children` | Link an additional child department (with cycle check) | `roles_permissions.action` |
+| **RBAC** | `DELETE`| `/api/v1/rbac/roles/{id}/children/{child_id}` | Unlink a child department | `roles_permissions.action` |
 | **RBAC** | `GET` | `/api/v1/rbac/permissions` | List all system permission codes | `roles_permissions.view` |
 | **RBAC** | `PUT` | `/api/v1/rbac/users/{id}/permissions/bulk` | Save per-user direct permission overrides | `roles_permissions.action` |
 | **RBAC** | `GET` | `/api/v1/rbac/users/{id}/effective-permissions` | Compute effective user permissions | `roles_permissions.view` |
+| **Positions** | `GET/POST`| `/api/v1/positions` | Manage positions/designations | `position.*` |
+| **Positions** | `GET` | `/api/v1/positions/holders-for-user/{user_id}` | List position assignments held by a user | `position.view` |
+| **Positions** | `POST/DELETE`| `/api/v1/positions/assignments[/{id}]` | Assign/remove an employee's position assignment | `position.update` |
+| **Reporting** | `POST` | `/api/v1/reporting` | Create a reporting relationship (rejects self/circular reporting, 409) | `reporting.manage` |
+| **Reporting** | `GET` | `/api/v1/reporting/managers/{user_id}` | List managers for a user | `reporting.view` |
+| **Reporting** | `GET` | `/api/v1/reporting/direct-reports/{user_id}` | List direct reports for a user | `reporting.view` |
+| **Reporting** | `DELETE`| `/api/v1/reporting/{id}` | Remove a reporting relationship | `reporting.manage` |
+| **Reporting** | `POST` | `/api/v1/reporting/reassign-direct-reports/{manager_id}` | Move a manager's active direct reports to someone else | `reporting.manage` |
+| **Reporting** | `POST` | `/api/v1/reporting/set-manager/{employee_id}` | Set or move an employee's primary manager (drag-and-drop org chart) | `reporting.manage` |
+| **Reporting** | `GET` | `/api/v1/reporting/org-chart` | Dynamic organization chart data (active PRIMARY_REPORTING edges) | `reporting.view` |
 | **Masters** | `GET/POST`| `/api/v1/masters/brands` | Manage product brands | `brand.*` |
 | **Masters** | `GET/POST`| `/api/v1/masters/categories` | Manage product categories | `category.*` |
 | **Masters** | `GET/POST`| `/api/v1/masters/subcategories` | Manage product sub-categories | `subcategory.*` |
@@ -551,5 +619,4 @@ VITE_WS_BASE_URL=ws://localhost:8000/api/v1/events/ws
 - **Native React State Dispatch**: Seamlessly triggers React's synthetic `onChange` and `input` events so form state updates immediately without manual backspacing. Excludes password and file upload inputs.
 
 ---
-*Maintained and verified for Inhyma Solutions Enterprise ERP. Last updated: September 1, 2026 (Universal Search Inquiries & Trash Extraction, Paste Auto-Clean & Deep-Link Synchronization).*
-
+*Maintained and verified for Inhyma Solutions Enterprise ERP. Last updated: September 2, 2026 (Organization, Employee & Identity/Access Management upgrade: multi-role assignment, Employee directory, Departments/Positions/Leadership/Reporting Structure, dynamic Organization Chart -- see section 8.14).*

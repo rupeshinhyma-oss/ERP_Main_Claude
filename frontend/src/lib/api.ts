@@ -20,6 +20,31 @@
  * The fix is a single-flight refresh lock: no matter how many requests hit a
  * 401 at once, only ONE actually calls /auth/refresh; every other concurrent
  * request awaits that same in-flight promise instead of starting its own.
+ *
+ * CROSS-TAB SESSION HANDLING (important):
+ * The in-memory lock above only protects requests within ONE tab/JS
+ * context. With the ERP open in two tabs (or a tab left idle for a long
+ * time while another tab, or a background timer, refreshed the session),
+ * each tab has its OWN in-memory `refreshInFlight` -- so two tabs can each
+ * independently decide "I got a 401, let me refresh" using the SAME
+ * refresh token from localStorage at nearly the same moment. The backend
+ * only allows the first one through; the second gets back a 401 (its
+ * token was just revoked by the first tab's successful rotation) with no
+ * further token to retry -- exactly the "leave it idle, come back, it's
+ * broken" symptom, and the user has to manually log out and back in to
+ * recover even though the session was, from the backend's point of view,
+ * never actually invalid.
+ *
+ * The fix is a localStorage-based cross-tab lock (acquireCrossTabRefreshLock /
+ * releaseCrossTabRefreshLock below): before calling /auth/refresh, a tab
+ * writes a short-lived lock key. Another tab that sees an active lock does
+ * NOT start its own refresh -- it waits briefly and then re-reads whatever
+ * token pair is now in localStorage (written by the tab that won the
+ * race), and retries its failed request with that instead. localStorage
+ * writes are synchronous and visible across tabs (via the native `storage`
+ * event and simple polling as a fallback for engines that fire it
+ * unreliably), which is what makes this a real cross-tab mutex rather than
+ * just another in-memory flag.
  */
 
 import { Auth } from "./auth";
@@ -208,6 +233,45 @@ async function rawFetch(path: string, options: RequestInit): Promise<RawResponse
   return { response, body };
 }
 
+// --- Cross-tab refresh coordination ---------------------------------------
+// A short-lived localStorage flag other tabs can see. Not a perfect
+// distributed lock (localStorage writes across tabs aren't atomic the way
+// a server-side mutex would be), but the window for a genuine double-write
+// is a single synchronous `setItem` call -- far narrower than the
+// multi-hundred-millisecond round trip to /auth/refresh this is guarding,
+// which is what actually matters here.
+const CROSS_TAB_REFRESH_LOCK_KEY = "erp_refresh_lock";
+// Long enough to cover a slow /auth/refresh round trip (including retry
+// backoff on a flaky connection), short enough that a tab which crashed
+// mid-refresh doesn't wedge every other tab's session recovery for long.
+const CROSS_TAB_LOCK_TTL_MS = 8000;
+const CROSS_TAB_LOCK_POLL_INTERVAL_MS = 150;
+
+function getActiveCrossTabLock(): number | null {
+  const raw = localStorage.getItem(CROSS_TAB_REFRESH_LOCK_KEY);
+  if (!raw) return null;
+  const lockedAt = Number(raw);
+  if (!Number.isFinite(lockedAt)) return null;
+  if (Date.now() - lockedAt > CROSS_TAB_LOCK_TTL_MS) return null; // stale -- treat as not locked
+  return lockedAt;
+}
+
+function acquireCrossTabRefreshLock(): void {
+  localStorage.setItem(CROSS_TAB_REFRESH_LOCK_KEY, String(Date.now()));
+}
+
+function releaseCrossTabRefreshLock(): void {
+  localStorage.removeItem(CROSS_TAB_REFRESH_LOCK_KEY);
+}
+
+/** Poll until the other tab's lock clears (or goes stale), then return. Bounded by CROSS_TAB_LOCK_TTL_MS. */
+async function waitForCrossTabRefreshLock(): Promise<void> {
+  const deadline = Date.now() + CROSS_TAB_LOCK_TTL_MS;
+  while (getActiveCrossTabLock() !== null && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, CROSS_TAB_LOCK_POLL_INTERVAL_MS));
+  }
+}
+
 // --- Single-flight refresh lock -------------------------------------------
 // Holds the in-progress refresh promise, if any. Every concurrent caller that
 // hits a 401 awaits this SAME promise instead of calling /auth/refresh again
@@ -219,9 +283,40 @@ async function tryRefresh(): Promise<boolean> {
     return refreshInFlight;
   }
 
+  // Another tab is already refreshing -- don't race it with our own call
+  // using the same (about-to-be-revoked) refresh token. Wait for it to
+  // finish, then retry with whatever token pair it leaves behind.
+  if (getActiveCrossTabLock() !== null) {
+    refreshInFlight = (async () => {
+      await waitForCrossTabRefreshLock();
+      // If the lock is STILL held after our poll deadline, the other tab's
+      // refresh is taking unusually long (or it crashed without releasing
+      // it) -- don't claim success on its behalf. Returning false here
+      // means the caller's retry is skipped and the normal "session
+      // expired" path takes over rather than silently reusing a token
+      // that may still be mid-rotation.
+      if (getActiveCrossTabLock() !== null) return false;
+      // The winning tab's successful refresh already updated localStorage
+      // (Auth.setSession) by the time its lock clears -- nothing further
+      // to do here; the caller's retry will pick up the new access token
+      // via Auth.getAccessToken(). If the other tab's refresh FAILED, its
+      // lock still clears (see the finally block below), and this tab's
+      // caller will retry with the same stale token and correctly get a
+      // fresh 401 -- at which point the normal "session expired, please
+      // log in again" path takes over instead of looping forever.
+      return true;
+    })();
+    try {
+      return await refreshInFlight;
+    } finally {
+      refreshInFlight = null;
+    }
+  }
+
   const refreshToken = Auth.getRefreshToken();
   if (!refreshToken) return false;
 
+  acquireCrossTabRefreshLock();
   refreshInFlight = (async () => {
     try {
       const res = await fetch(`${API_BASE}/auth/refresh`, {
@@ -248,6 +343,7 @@ async function tryRefresh(): Promise<boolean> {
     // naturally expires, minutes later -- can trigger a fresh refresh rather
     // than being stuck replaying a stale result forever.
     refreshInFlight = null;
+    releaseCrossTabRefreshLock();
   }
 }
 

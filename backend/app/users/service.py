@@ -143,12 +143,13 @@ class UserService:
     async def create_user(
         self,
         *,
-        email: str,
-        phone: str,
-        password: str,
         first_name: str,
         display_name: str,
         created_by: uuid.UUID,
+        has_login: bool = True,
+        email: str | None = None,
+        phone: str | None = None,
+        password: str | None = None,
         last_name: str | None = None,
         username: str | None = None,
         middle_name: str | None = None,
@@ -168,25 +169,112 @@ class UserService:
         notes: str | None = None,
         role_ids: list[uuid.UUID] | None = None,
         individual_permission_ids: list[uuid.UUID] | None = None,
-    ) -> tuple[User, str]:
+        position_id: uuid.UUID | None = None,
+    ) -> tuple[User, str | None]:
         """
-        Create a new user account.
+        Create a new person record, with login credentials OPTIONAL (Employee/User merge:
+        ``has_login=False`` records a workforce member with no ERP access -- factory
+        worker, driver, temporary labor, consultant -- as a single person record rather
+        than a separate Employee entity; see ``User`` model docstring for the full
+        rationale).
 
-        ``email``, ``phone``, ``password``, ``first_name``, and
-        ``display_name`` are required. ``last_name`` and ``username`` are optional: if the
-        admin doesn't supply a username, the system generates a unique username
-        automatically (derived from the email, falling back to the phone
-        number). Any of username / email / phone can later be used to log in.
-        ``display_name`` is what's shown throughout the rest of the system
-        (task lists, dropdowns, audit views) in place of the raw username.
+        ``first_name`` and ``display_name`` are always required. When
+        ``has_login=True`` (the default), ``email``, ``phone``, and
+        ``password`` are also required, exactly as before this merge --
+        this method's default behavior for a normal login-having user is
+        unchanged. When ``has_login=False``, none of those three are
+        required (and are ignored/stored as NULL even if passed).
 
-        Returns ``(user, password_set)`` -- the plaintext password is returned
-        once so the caller can relay it to the admin; only its hash is persisted.
+        ``last_name`` and ``username`` are optional: if the admin doesn't
+        supply a username (and ``has_login`` is True), the system generates
+        a unique username automatically (derived from the email, falling
+        back to the phone number). Any of username / email / phone can
+        later be used to log in. ``display_name`` is what's shown
+        throughout the rest of the system (task lists, dropdowns, audit
+        views) in place of the raw username.
+
+        Returns ``(user, password_set)`` -- the plaintext password is
+        returned once so the caller can relay it to the admin (``None`` for
+        a ``has_login=False`` record, since there is no password to relay);
+        only its hash is persisted.
         """
         if not first_name or not first_name.strip():
             raise ConflictException("First name is required.")
         if not display_name or not display_name.strip():
             raise ConflictException("Display name is required.")
+
+        if employee_code and await self.user_repository.employee_code_exists(employee_code):
+            raise ConflictException("An account is already linked to that employee code.")
+
+        if not has_login:
+            # A workforce member with no ERP access: credentials are
+            # deliberately left NULL, not defaulted to something synthetic
+            # -- there is no login to secure, so there is nothing to hash.
+            user = await self.user_repository.create(
+                first_name=first_name.strip(),
+                middle_name=middle_name,
+                last_name=last_name.strip() if last_name and last_name.strip() else None,
+                display_name=display_name.strip(),
+                employee_code=employee_code,
+                has_login=False,
+                username=None,
+                email=None,
+                phone=None,
+                password_hash=None,
+                manager_id=manager_id,
+                date_of_birth=date_of_birth,
+                gender=gender,
+                date_of_joining=date_of_joining,
+                employment_type=employment_type,
+                employment_status=employment_status,
+                address=address,
+                city=city,
+                state=state,
+                country=country,
+                postal_code=postal_code,
+                emergency_contact=emergency_contact,
+                notes=notes,
+                status=UserStatus.INACTIVE,  # no login is possible regardless, but keep status honest
+                is_active=True,
+                must_change_password=False,
+                failed_login_count=0,
+                created_by=created_by,
+                updated_by=created_by,
+            )
+            resolved_role_ids = list(role_ids or [])
+            if not resolved_role_ids:
+                default_role = await self.rbac_service.role_repository.get_by_name(DEFAULT_USER_ROLE_NAME)
+                if default_role is not None:
+                    resolved_role_ids = [default_role.id]
+
+            for role_id in resolved_role_ids:
+                try:
+                    await self.assign_role(user.id, role_id, assigned_by=created_by)
+                except ConflictException:
+                    pass
+            for permission_id in individual_permission_ids or []:
+                await self.rbac_service.assign_user_permission(
+                    user.id, permission_id, is_granted=True, granted_by=created_by
+                )
+            if position_id:
+                from app.org_structure.assignments_repository import EmployeePositionAssignmentRepository
+                from app.org_structure.models import OrgRecordStatus, PositionAssignmentType
+                assignment_repo = EmployeePositionAssignmentRepository(self.user_repository.session)
+                await assignment_repo.create(
+                    employee_id=user.id,
+                    position_id=position_id,
+                    assignment_type=PositionAssignmentType.PRIMARY,
+                    is_primary=True,
+                    status=OrgRecordStatus.ACTIVE,
+                )
+            return user, None
+
+        if not email:
+            raise ConflictException("Email is required for a user with login access.")
+        if not phone:
+            raise ConflictException("Phone number is required for a user with login access.")
+        if not password or not password.strip():
+            raise ConflictException("A password is required for a user with login access.")
 
         if username and await self.user_repository.username_exists(username):
             raise ConflictException("A user with that username already exists.")
@@ -194,11 +282,7 @@ class UserService:
             raise ConflictException("A user with that email already exists.")
         if await self.user_repository.phone_exists(phone):
             raise ConflictException("A user with that phone number already exists.")
-        if employee_code and await self.user_repository.employee_code_exists(employee_code):
-            raise ConflictException("An account is already linked to that employee code.")
 
-        if not password or not password.strip():
-            raise ConflictException("A password is required to create a user.")
         password_to_set = password.strip()
 
         resolved_username = username.strip() if username and username.strip() else (
@@ -211,6 +295,7 @@ class UserService:
             last_name=last_name.strip() if last_name and last_name.strip() else None,
             display_name=display_name.strip(),
             employee_code=employee_code,
+            has_login=True,
             username=resolved_username,
             email=email,
             phone=phone,
@@ -257,6 +342,18 @@ class UserService:
 
         for perm_id in (individual_permission_ids or []):
             await self.rbac_service.assign_user_permission(user.id, perm_id, is_granted=True, granted_by=created_by)
+
+        if position_id:
+            from app.org_structure.assignments_repository import EmployeePositionAssignmentRepository
+            from app.org_structure.models import OrgRecordStatus, PositionAssignmentType
+            assignment_repo = EmployeePositionAssignmentRepository(self.user_repository.session)
+            await assignment_repo.create(
+                employee_id=user.id,
+                position_id=position_id,
+                assignment_type=PositionAssignmentType.PRIMARY,
+                is_primary=True,
+                status=OrgRecordStatus.ACTIVE,
+            )
 
         return user, password_to_set
 
@@ -355,8 +452,37 @@ class UserService:
         return user
 
     # --- Admin: Role assignment ------------------------------------------------------
-    async def assign_role(self, user_id: uuid.UUID, role_id: uuid.UUID, *, assigned_by: uuid.UUID) -> None:
-        """Assign a role to a user, replacing any existing role so each user holds at most one role."""
+    async def assign_role(
+        self,
+        user_id: uuid.UUID,
+        role_id: uuid.UUID,
+        *,
+        assigned_by: uuid.UUID,
+        assignment_type: str = "PRIMARY",
+        is_primary: bool = False,
+        effective_from=None,
+        effective_to=None,
+    ) -> None:
+        """
+        Assign a role to a user, ADDING it to whatever roles the user already holds.
+
+        A user may hold any number of roles simultaneously (e.g. "Sales
+        Manager" + "Task Approver" + "Marketing Viewer" all at once) --
+        effective permissions are the union of every held role's grants,
+        adjusted by individual overrides (see
+        ``RBACRepository.get_permission_codes_for_user``). This method used
+        to replace any existing role so a user could only ever hold one at
+        a time; that restriction has been removed so multi-role assignment
+        actually works end-to-end, not just at the (always multi-role-
+        capable) ``user_roles`` table level.
+
+        ``assignment_type``/``is_primary``/``effective_from``/``effective_to``
+        are the organizational-department assignment fields carried over
+        from the Department/Role merge (see ``UserRole`` docstring in
+        ``app.rbac.models``) -- default to a plain, always-active PRIMARY
+        assignment so existing callers that don't pass them keep working
+        exactly as before.
+        """
         user = await self.get_by_id_or_raise(user_id)  # 404s cleanly if the user doesn't exist
         role = await self.rbac_service.get_role_or_raise(role_id)  # 404s cleanly if the role doesn't exist
 
@@ -371,16 +497,7 @@ class UserService:
                 )
 
         existing_links = await self.user_role_repository.list_for_user(user_id)
-        already_has_this_role = False
-        for link in existing_links:
-            if link.role_id == role_id:
-                already_has_this_role = True
-            else:
-                if link.role and link.role.name == SUPER_ADMIN_ROLE_NAME:
-                    await self._ensure_not_last_super_admin(user_id, link.role_id)
-                await self.user_role_repository.delete(link)
-
-        if already_has_this_role:
+        if any(link.role_id == role_id for link in existing_links):
             raise ConflictException("The user already has that role.")
 
         await self.user_role_repository.create(
@@ -388,11 +505,25 @@ class UserService:
             role_id=role_id,
             assigned_at=datetime.now(timezone.utc),
             assigned_by=assigned_by,
+            assignment_type=assignment_type,
+            is_primary=is_primary,
+            effective_from=effective_from,
+            effective_to=effective_to,
         )
         await self.rbac_service.invalidate_user_permissions_cache(user_id)
 
     async def remove_role(self, user_id: uuid.UUID, role_id: uuid.UUID, *, removed_by: uuid.UUID | None = None) -> None:
-        """Remove a role assignment from a user, defaulting back to the 'user' role so they always have one role."""
+        """
+        Remove a single role assignment from a user.
+
+        A user may hold several roles at once; removing one just drops that
+        one grant. Only if this removal empties the user's role set entirely
+        does the system fall back to assigning the default 'user' role, so
+        no account is ever left with zero roles (and therefore zero
+        permissions / unable to do anything, including being re-granted a
+        role by another admin who can no longer find them via any
+        role-scoped view).
+        """
         link = await self.user_role_repository.get(user_id, role_id)
         if link is None:
             raise NotFoundException("The user does not have that role.")

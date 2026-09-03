@@ -37,6 +37,7 @@ from app.database.base import Base
 import app.users.models  # noqa: F401,E402
 import app.rbac.models  # noqa: F401,E402
 import app.auth.models  # noqa: F401,E402
+import app.org_structure.models  # noqa: F401,E402 - Organization/Employee/IAM upgrade
 import app.queue.models  # noqa: F401,E402 - was missing; autogenerate couldn't see queue_jobs
 import app.audit.models  # noqa: F401,E402
 import app.organizations.models  # noqa: F401,E402 - Phase 6

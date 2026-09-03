@@ -27,10 +27,12 @@ from app.auth.service import CurrentUser
 from app.core.responses import build_success_response
 from app.rbac.dependencies import get_rbac_service, require_any_permission, require_permission
 from app.rbac.schemas import (
+    AddHierarchyLinkRequest,
     AssignUserPermissionRequest,
     BulkUserPermissionsRequest,
     ClonePermissionSetRequest,
     DeleteRoleRequest,
+    DepartmentHierarchyRead,
     EffectivePermissionsBreakdown,
     GrantPermissionRequest,
     PermissionRead,
@@ -72,9 +74,10 @@ async def create_role(
     current_user: CurrentUser = Depends(require_permission("roles_permissions.create")),
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
-    """Create a new role, optionally granting it an initial set of permission codes."""
+    """Create a new role/department, optionally granting it an initial set of permission codes."""
     role = await rbac_service.create_role(
-        name=payload.name, description=payload.description, permission_codes=payload.permission_codes
+        name=payload.name, description=payload.description, permission_codes=payload.permission_codes,
+        code=payload.code, parent_department_id=payload.parent_department_id,
     )
     data = (await _role_with_permissions(role, rbac_service)).model_dump(mode="json")
     await audit_service.record(
@@ -132,7 +135,12 @@ async def update_role(
     audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
     """Update a role's name/description. System roles cannot be renamed."""
-    role = await rbac_service.update_role(role_id, name=payload.name, description=payload.description)
+    unset_parent = "parent_department_id" in payload.model_fields_set and payload.parent_department_id is None
+    role = await rbac_service.update_role(
+        role_id, name=payload.name, description=payload.description,
+        code=payload.code, parent_department_id=payload.parent_department_id,
+        unset_parent=unset_parent,
+    )
     data = (await _role_with_permissions(role, rbac_service)).model_dump(mode="json")
     await audit_service.record(
         action=AuditAction.UPDATE,
@@ -149,6 +157,157 @@ async def update_role(
         endpoint=request.url.path,
         response_status=status.HTTP_200_OK,
         description=f"Updated role {role.name!r}.",
+    )
+    request.state.audit_logged = True
+    return build_success_response(data=data, request_id=request.state.request_id)
+
+
+@router.get("/roles/{role_id}/hierarchy", summary="Get connected parent and child departments")
+async def get_role_hierarchy(
+    role_id: uuid.UUID,
+    request: Request,
+    rbac_service: RBACService = Depends(get_rbac_service),
+    current_user: CurrentUser = Depends(require_permission("roles_permissions.view")),
+) -> dict:
+    hierarchy = await rbac_service.get_hierarchy(role_id)
+    data = {
+        "parents": [RoleRead.model_validate(p).model_dump(mode="json") for p in hierarchy["parents"]],
+        "children": [RoleRead.model_validate(c).model_dump(mode="json") for c in hierarchy["children"]],
+    }
+    return build_success_response(data=data, request_id=request.state.request_id)
+
+
+@router.post("/roles/{role_id}/parents", summary="Add a parent department")
+async def add_parent_department(
+    role_id: uuid.UUID,
+    payload: AddHierarchyLinkRequest,
+    request: Request,
+    rbac_service: RBACService = Depends(get_rbac_service),
+    current_user: CurrentUser = Depends(require_permission("roles_permissions.action")),
+    audit_service: AuditService = Depends(get_audit_service),
+) -> dict:
+    hierarchy = await rbac_service.add_parent_department(child_id=role_id, parent_id=payload.department_id)
+    data = {
+        "parents": [RoleRead.model_validate(p).model_dump(mode="json") for p in hierarchy["parents"]],
+        "children": [RoleRead.model_validate(c).model_dump(mode="json") for c in hierarchy["children"]],
+    }
+    await audit_service.record(
+        action=AuditAction.UPDATE,
+        module="rbac",
+        user_id=current_user.id,
+        username_snapshot=current_user.username,
+        entity_type="DepartmentHierarchy",
+        entity_id=str(role_id),
+        new_values={"added_parent_id": str(payload.department_id)},
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+        request_id=request.state.request_id,
+        http_method=request.method,
+        endpoint=request.url.path,
+        response_status=status.HTTP_200_OK,
+        description=f"Added parent department {payload.department_id} to {role_id}.",
+    )
+    request.state.audit_logged = True
+    return build_success_response(data=data, request_id=request.state.request_id)
+
+
+@router.delete("/roles/{role_id}/parents/{parent_id}", summary="Remove a parent department")
+async def remove_parent_department(
+    role_id: uuid.UUID,
+    parent_id: uuid.UUID,
+    request: Request,
+    rbac_service: RBACService = Depends(get_rbac_service),
+    current_user: CurrentUser = Depends(require_permission("roles_permissions.action")),
+    audit_service: AuditService = Depends(get_audit_service),
+) -> dict:
+    hierarchy = await rbac_service.remove_parent_department(child_id=role_id, parent_id=parent_id)
+    data = {
+        "parents": [RoleRead.model_validate(p).model_dump(mode="json") for p in hierarchy["parents"]],
+        "children": [RoleRead.model_validate(c).model_dump(mode="json") for c in hierarchy["children"]],
+    }
+    await audit_service.record(
+        action=AuditAction.UPDATE,
+        module="rbac",
+        user_id=current_user.id,
+        username_snapshot=current_user.username,
+        entity_type="DepartmentHierarchy",
+        entity_id=str(role_id),
+        new_values={"removed_parent_id": str(parent_id)},
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+        request_id=request.state.request_id,
+        http_method=request.method,
+        endpoint=request.url.path,
+        response_status=status.HTTP_200_OK,
+        description=f"Removed parent department {parent_id} from {role_id}.",
+    )
+    request.state.audit_logged = True
+    return build_success_response(data=data, request_id=request.state.request_id)
+
+
+@router.post("/roles/{role_id}/children", summary="Add a child department")
+async def add_child_department(
+    role_id: uuid.UUID,
+    payload: AddHierarchyLinkRequest,
+    request: Request,
+    rbac_service: RBACService = Depends(get_rbac_service),
+    current_user: CurrentUser = Depends(require_permission("roles_permissions.action")),
+    audit_service: AuditService = Depends(get_audit_service),
+) -> dict:
+    hierarchy = await rbac_service.add_child_department(parent_id=role_id, child_id=payload.department_id)
+    data = {
+        "parents": [RoleRead.model_validate(p).model_dump(mode="json") for p in hierarchy["parents"]],
+        "children": [RoleRead.model_validate(c).model_dump(mode="json") for c in hierarchy["children"]],
+    }
+    await audit_service.record(
+        action=AuditAction.UPDATE,
+        module="rbac",
+        user_id=current_user.id,
+        username_snapshot=current_user.username,
+        entity_type="DepartmentHierarchy",
+        entity_id=str(role_id),
+        new_values={"added_child_id": str(payload.department_id)},
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+        request_id=request.state.request_id,
+        http_method=request.method,
+        endpoint=request.url.path,
+        response_status=status.HTTP_200_OK,
+        description=f"Added child department {payload.department_id} to {role_id}.",
+    )
+    request.state.audit_logged = True
+    return build_success_response(data=data, request_id=request.state.request_id)
+
+
+@router.delete("/roles/{role_id}/children/{child_id}", summary="Remove a child department")
+async def remove_child_department(
+    role_id: uuid.UUID,
+    child_id: uuid.UUID,
+    request: Request,
+    rbac_service: RBACService = Depends(get_rbac_service),
+    current_user: CurrentUser = Depends(require_permission("roles_permissions.action")),
+    audit_service: AuditService = Depends(get_audit_service),
+) -> dict:
+    hierarchy = await rbac_service.remove_child_department(parent_id=role_id, child_id=child_id)
+    data = {
+        "parents": [RoleRead.model_validate(p).model_dump(mode="json") for p in hierarchy["parents"]],
+        "children": [RoleRead.model_validate(c).model_dump(mode="json") for c in hierarchy["children"]],
+    }
+    await audit_service.record(
+        action=AuditAction.UPDATE,
+        module="rbac",
+        user_id=current_user.id,
+        username_snapshot=current_user.username,
+        entity_type="DepartmentHierarchy",
+        entity_id=str(role_id),
+        new_values={"removed_child_id": str(child_id)},
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+        request_id=request.state.request_id,
+        http_method=request.method,
+        endpoint=request.url.path,
+        response_status=status.HTTP_200_OK,
+        description=f"Removed child department {child_id} from {role_id}.",
     )
     request.state.audit_logged = True
     return build_success_response(data=data, request_id=request.state.request_id)

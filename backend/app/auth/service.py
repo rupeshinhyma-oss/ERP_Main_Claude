@@ -137,6 +137,16 @@ class AuthService:
                 "Please try again later or contact an administrator."
             )
 
+        if not user.has_login or user.password_hash is None:
+            # A no-login user (Employee/User merge -- workforce member with
+            # no ERP access) can never authenticate. Checked before
+            # verify_password() specifically because password_hash is NULL
+            # for these accounts, and passing None into the Argon2 verifier
+            # raises TypeError rather than a clean mismatch -- this must be
+            # rejected here, not fall through to that call.
+            await self._record_rate_limit_attempt(identifier)
+            raise UnauthorizedException("Invalid username/email/phone number or password.")
+
         if not verify_password(password, user.password_hash):
             await self._record_rate_limit_attempt(identifier)
             await self._register_failed_attempt(user)
@@ -253,6 +263,8 @@ class AuthService:
     # --- Password management --------------------------------------------------------
     async def change_password(self, user: User, *, current_password: str, new_password: str) -> None:
         """Change a user's own password, verifying current password and strength policy."""
+        if not user.has_login or user.password_hash is None:
+            raise UnauthorizedException("This account does not have login access.")
         if not verify_password(current_password, user.password_hash):
             raise UnauthorizedException("Current password is incorrect.")
         await self._set_password(user, new_password, require_change_on_next_login=False)
@@ -283,7 +295,7 @@ class AuthService:
             raise ValidationException(
                 f"You cannot reuse any of your last {settings.PASSWORD_HISTORY_SIZE} passwords."
             )
-        if verify_password(new_password, user.password_hash):
+        if user.password_hash is not None and verify_password(new_password, user.password_hash):
             raise ValidationException("The new password must be different from your current password.")
 
         new_hash = hash_password(new_password)

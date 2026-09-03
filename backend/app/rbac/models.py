@@ -1,28 +1,62 @@
 """
 RBAC ORM Models.
 
-Owns the four tables that implement role-based access control:
+Owns the tables that implement role-based access control AND real
+organizational placement -- both live on the same ``Role``/``UserRole``
+tables by design (Department/Organization/Employee/IAM upgrade, merge
+phase):
 
     - ``permissions``       : the fixed vocabulary of fine-grained actions
                                 (e.g. ``"user.create"``), always seeded from
                                 code (``scripts/seed.py``) -- never entered
                                 free-form through the API.
-    - ``roles``              : named bundles of permissions (e.g. ``super_admin``).
+    - ``roles``              : named bundles of permissions (e.g. ``super_admin``)
+                                AND/OR real organizational departments (e.g.
+                                ``Sales``). A Role can be both at once: assigning
+                                someone to "Sales" grants them Sales' permissions
+                                (if any are configured) and places them in the Sales
+                                org unit for reporting/org-chart purposes.
     - ``role_permissions``   : many-to-many link between roles and permissions.
-    - ``user_roles``         : many-to-many link between users and roles.
+    - ``user_roles``         : many-to-many link between users and roles, now
+                                carrying assignment metadata (assignment type,
+                                primary flag, effective dates, status) so one
+                                user can hold several roles/departments at once
+                                with different characters (PRIMARY/SECONDARY/
+                                TEMPORARY/PROJECT/ACTING).
 
 Permissions are never hardcoded into route/dependency logic -- they are
 looked up from these tables at login/refresh time and embedded in the
 access token (see ``app.auth.security.create_access_token``).
+
+Merge history (why Role now carries org-structure fields)
+-----------------------------------------------------------------------
+This app previously had a SEPARATE ``app.org_structure.models.Department``
+table, deliberately kept apart from ``Role`` so that organizational
+placement and software permissions were independent concerns. In
+practice this produced two different sidebar screens both called
+"Departments", which was confusing to actually use day to day, and the
+common real-world case -- "put this person in Sales, and that determines
+what they can do" -- required two separate steps across two separate
+screens. The business decided the simpler, single-screen model is worth
+the (accepted, understood) trade-off of an employee's department
+directly granting its permissions; individual ``UserPermission``
+ALLOW/DENY overrides (see ``app.rbac.repository``) remain fully
+available on top for any one person who needs to differ from their
+department's default. ``Department``/``EmployeeDepartmentAssignment``
+were merged into ``Role``/``UserRole`` rather than the other way around
+because ``Role`` already carries the permission-bundle machinery
+(``RolePermission``) this merge needed to keep.
 """
 
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
+from enum import Enum
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, UniqueConstraint
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, String, UniqueConstraint
+from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database.base import GUID, Base, SoftDeleteMixin, TimestampMixin, UUIDPrimaryKeyMixin
@@ -34,6 +68,29 @@ if TYPE_CHECKING:
 def _utcnow() -> datetime:
     """Return the current time as a timezone-aware UTC datetime."""
     return datetime.now(timezone.utc)
+
+
+class RoleAssignmentType(str, Enum):
+    """
+    How a user is attached to a Role/Department (carried over from the
+    former ``org_structure.DepartmentAssignmentType`` -- same five values,
+    same meaning: a user may hold several of these simultaneously across
+    different roles, e.g. PRIMARY in Sales, SECONDARY in Marketing,
+    PROJECT in International Business).
+    """
+
+    PRIMARY = "PRIMARY"
+    SECONDARY = "SECONDARY"
+    TEMPORARY = "TEMPORARY"
+    PROJECT = "PROJECT"
+    ACTING = "ACTING"
+
+
+class RoleAssignmentStatus(str, Enum):
+    """Lifecycle status of a single user-role assignment (not the Role itself)."""
+
+    ACTIVE = "ACTIVE"
+    INACTIVE = "INACTIVE"
 
 
 class Permission(Base, UUIDPrimaryKeyMixin, TimestampMixin):
@@ -60,7 +117,12 @@ class Permission(Base, UUIDPrimaryKeyMixin, TimestampMixin):
 
 class Role(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
     """
-    A named, assignable bundle of permissions.
+    A named, assignable bundle of permissions -- and, since the Department
+    merge, ALSO a real organizational department (e.g. "Sales", "Marketing").
+    These were never required to be mutually exclusive: a Role can carry
+    permissions, organizational nesting (``parent_department_id``), both, or
+    neither (an empty department with no permissions is still valid -- it
+    just doesn't grant anything yet).
 
     ``is_system`` marks roles that are seeded by the application itself
     (currently just ``super_admin``) and must be protected from deletion or
@@ -84,6 +146,39 @@ class Role(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
     name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False, index=True)
     description: Mapped[str | None] = mapped_column(String(255), nullable=True)
     is_system: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+    code: Mapped[str | None] = mapped_column(
+        String(50), unique=True, nullable=True, index=True,
+        doc="Optional short department code (e.g. 'SALES'), carried over from the former "
+        "standalone Department entity. Purely organizational labeling -- has no effect on "
+        "the permissions this Role grants.",
+    )
+    parent_department_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("roles.id", ondelete="SET NULL"), nullable=True, index=True,
+        doc="Optional parent department/role, for a departmental hierarchy (e.g. 'International "
+        "Business' nested under 'Sales'). Purely organizational nesting -- unrelated to "
+        "reporting relationships between people, which live in EmployeeReportingRelationship, "
+        "and has no bearing on permission inheritance (a child department does NOT automatically "
+        "inherit its parent's permissions; each Role's permission grants are independent).",
+    )
+    parent_department: Mapped["Role | None"] = relationship(
+        "Role", remote_side="Role.id", foreign_keys=[parent_department_id]
+    )
+
+    parent_links: Mapped[list["DepartmentHierarchy"]] = relationship(
+        "DepartmentHierarchy",
+        foreign_keys="DepartmentHierarchy.child_department_id",
+        back_populates="child_department",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
+    child_links: Mapped[list["DepartmentHierarchy"]] = relationship(
+        "DepartmentHierarchy",
+        foreign_keys="DepartmentHierarchy.parent_department_id",
+        back_populates="parent_department",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
 
     permission_links: Mapped[list["RolePermission"]] = relationship(
         back_populates="role", cascade="all, delete-orphan", lazy="selectin"
@@ -115,7 +210,16 @@ class RolePermission(Base, UUIDPrimaryKeyMixin):
 
 
 class UserRole(Base, UUIDPrimaryKeyMixin):
-    """Many-to-many link assigning one ``Role`` to one ``User``."""
+    """
+    Many-to-many link assigning one ``Role`` to one ``User`` -- now also
+    the record of that user's organizational-department assignment, since
+    Role doubles as Department (see ``Role`` docstring). A user may hold
+    several of these simultaneously (different roles/departments, or the
+    same department with different ``assignment_type``s is prevented only
+    by the unique constraint below on ``(user_id, role_id)`` -- if a user
+    needs both a PRIMARY and a PROJECT link to literally the same
+    department, model the project work as a second, separate Role instead).
+    """
 
     __tablename__ = "user_roles"
     __table_args__ = (UniqueConstraint("user_id", "role_id", name="uq_user_role"),)
@@ -125,6 +229,20 @@ class UserRole(Base, UUIDPrimaryKeyMixin):
     assigned_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False)
     assigned_by: Mapped[uuid.UUID | None] = mapped_column(
         GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+
+    assignment_type: Mapped[RoleAssignmentType] = mapped_column(
+        SAEnum(RoleAssignmentType, name="role_assignment_type", native_enum=False, length=20),
+        default=RoleAssignmentType.PRIMARY, nullable=False,
+        doc="How this user is attached to this role/department -- carried over from the "
+        "former EmployeeDepartmentAssignment.assignment_type.",
+    )
+    is_primary: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    effective_from: Mapped[date | None] = mapped_column(Date, nullable=True)
+    effective_to: Mapped[date | None] = mapped_column(Date, nullable=True)
+    status: Mapped[RoleAssignmentStatus] = mapped_column(
+        SAEnum(RoleAssignmentStatus, name="role_assignment_status", native_enum=False, length=20),
+        default=RoleAssignmentStatus.ACTIVE, nullable=False, index=True,
     )
 
     user: Mapped["User"] = relationship(foreign_keys=[user_id])
@@ -155,3 +273,34 @@ class UserPermission(Base, UUIDPrimaryKeyMixin):
 
     def __repr__(self) -> str:
         return f"<UserPermission user_id={self.user_id} permission_id={self.permission_id} is_granted={self.is_granted}>"
+
+
+class DepartmentHierarchy(Base, UUIDPrimaryKeyMixin):
+    """
+    Many-to-many relationship supporting multi-parent and multi-child departmental hierarchy.
+    """
+
+    __tablename__ = "department_hierarchy"
+    __table_args__ = (
+        UniqueConstraint("parent_department_id", "child_department_id", name="uq_department_hierarchy"),
+    )
+
+    parent_department_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(), ForeignKey("roles.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    child_department_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(), ForeignKey("roles.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, nullable=False
+    )
+
+    parent_department: Mapped[Role] = relationship(
+        "Role", foreign_keys=[parent_department_id], back_populates="child_links"
+    )
+    child_department: Mapped[Role] = relationship(
+        "Role", foreign_keys=[child_department_id], back_populates="parent_links"
+    )
+
+    def __repr__(self) -> str:
+        return f"<DepartmentHierarchy parent_id={self.parent_department_id} child_id={self.child_department_id}>"

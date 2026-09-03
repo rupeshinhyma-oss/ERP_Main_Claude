@@ -63,6 +63,9 @@ async def _user_with_roles(
     roles = await rbac_service.list_roles_for_user(user.id)
     mgr_name = None
 
+    pos_id = None
+    pos_name = None
+
     if db is not None:
         from sqlalchemy import select
         if user.manager_id:
@@ -71,12 +74,48 @@ async def _user_with_roles(
             if mgr:
                 mgr_name = mgr.full_name
 
-    return UserWithRoles(
-        **UserRead.model_validate(user).model_dump(),
-        roles=[r.name for r in roles],
-        employee_name=user.full_name,
-        manager_name=mgr_name,
-    )
+        try:
+            from app.org_structure.models import EmployeePositionAssignment, Position, OrgRecordStatus
+            pos_stmt = (
+                select(Position.id, Position.name)
+                .join(EmployeePositionAssignment, EmployeePositionAssignment.position_id == Position.id)
+                .where(
+                    EmployeePositionAssignment.employee_id == user.id,
+                    EmployeePositionAssignment.is_primary.is_(True),
+                    EmployeePositionAssignment.status == OrgRecordStatus.ACTIVE,
+                )
+            )
+            pos_res = await db.execute(pos_stmt)
+            pos_row = pos_res.first()
+            if not pos_row:
+                fallback_stmt = (
+                    select(Position.id, Position.name)
+                    .join(EmployeePositionAssignment, EmployeePositionAssignment.position_id == Position.id)
+                    .where(
+                        EmployeePositionAssignment.employee_id == user.id,
+                        EmployeePositionAssignment.status == OrgRecordStatus.ACTIVE,
+                    )
+                )
+                pos_res = await db.execute(fallback_stmt)
+                pos_row = pos_res.first()
+            if pos_row:
+                pos_id = pos_row[0]
+                pos_name = pos_row[1]
+        except Exception:
+            pass
+
+    role_names = [r.name for r in roles]
+    if not role_names:
+        role_names = ["user"]
+
+    user_dict = UserRead.model_validate(user).model_dump()
+    user_dict["roles"] = role_names
+    user_dict["employee_name"] = user.full_name
+    user_dict["manager_name"] = mgr_name
+    user_dict["position_id"] = pos_id
+    user_dict["position_name"] = pos_name
+
+    return UserWithRoles(**user_dict)
 
 
 async def _record_user_action(
@@ -125,6 +164,7 @@ async def create_user(
         middle_name=payload.middle_name,
         last_name=payload.last_name,
         display_name=payload.display_name,
+        has_login=payload.has_login,
         employee_code=payload.employee_code,
         username=payload.username,
         email=payload.email,
@@ -145,6 +185,7 @@ async def create_user(
         role_ids=payload.role_ids,
         password=payload.password,
         individual_permission_ids=payload.individual_permission_ids,
+        position_id=payload.position_id,
         created_by=current_user.id,
     )
     user_data = await _user_with_roles(user, rbac_service, db=db)
@@ -154,7 +195,7 @@ async def create_user(
         action=AuditAction.CREATE,
         actor=current_user,
         target_user_id=user.id,
-        description=f"Created user {user.username!r}.",
+        description=f"Created {'user' if payload.has_login else 'employee'} {user.full_name!r}.",
         new_values={
             "username": payload.username,
             "email": payload.email,
@@ -206,6 +247,112 @@ async def list_users(
     return build_success_response(data=data, request_id=request.state.request_id, meta=meta)
 
 
+@router.get("/all", summary="List all users (unpaginated for manager pickers and lookups)")
+async def list_all_users(
+    request: Request,
+    user_service: UserService = Depends(get_user_service),
+    _current_user: CurrentUser = Depends(require_permission("user.view")),
+) -> dict:
+    """Return every non-deleted user, for manager dropdowns and lookups."""
+    users = await user_service.user_repository.list_all()
+    data = [UserRead.model_validate(u).model_dump(mode="json") for u in users]
+    return build_success_response(data=data, request_id=request.state.request_id)
+
+
+@router.get("/department-manager/{role_id}", summary="Get the department manager for a role/department")
+async def get_department_manager(
+    role_id: uuid.UUID,
+    request: Request,
+    db: AsyncSession = Depends(get_db_session),
+    _current_user: CurrentUser = Depends(require_permission("user.view")),
+) -> dict:
+    """Find and return the manager for a given department/role."""
+    from collections import Counter
+    from sqlalchemy import case, func, select
+    from app.org_structure.models import DepartmentLeadershipAssignment, LeadershipType, OrgRecordStatus
+    from app.rbac.models import UserRole
+
+    # 1. Primary source: DepartmentLeadershipAssignment for this department
+    lead_stmt = (
+        select(DepartmentLeadershipAssignment)
+        .where(
+            DepartmentLeadershipAssignment.department_id == role_id,
+            DepartmentLeadershipAssignment.status == OrgRecordStatus.ACTIVE,
+        )
+        .order_by(
+            case(
+                (DepartmentLeadershipAssignment.leadership_type == LeadershipType.PRIMARY_MANAGER, 1),
+                (DepartmentLeadershipAssignment.leadership_type == LeadershipType.DEPARTMENT_HEAD, 2),
+                (DepartmentLeadershipAssignment.leadership_type == LeadershipType.ACTING_MANAGER, 3),
+                (DepartmentLeadershipAssignment.leadership_type == LeadershipType.ASSISTANT_MANAGER, 4),
+                else_=5,
+            )
+        )
+    )
+    lead_res = await db.execute(lead_stmt)
+    lead = lead_res.scalar_one_or_none()
+    if lead and lead.employee_id:
+        user = await db.get(User, lead.employee_id)
+        if user and not user.deleted_at:
+            return build_success_response(
+                data={
+                    "manager_id": str(user.id),
+                    "manager_name": user.full_name,
+                    "username": user.username,
+                },
+                request_id=request.state.request_id,
+            )
+
+    # 2. Secondary source: Check users assigned to this role
+    role_users_stmt = (
+        select(User)
+        .join(UserRole, UserRole.user_id == User.id)
+        .where(UserRole.role_id == role_id, User.deleted_at.is_(None))
+    )
+    role_users = list((await db.execute(role_users_stmt)).scalars().all())
+
+    if role_users:
+        role_user_ids = {u.id for u in role_users}
+
+        # Is one of the department users managing others in this department?
+        for u in role_users:
+            sub_count_stmt = select(func.count(User.id)).where(
+                User.manager_id == u.id,
+                User.id.in_(role_user_ids),
+                User.deleted_at.is_(None),
+            )
+            cnt = (await db.execute(sub_count_stmt)).scalar() or 0
+            if cnt > 0:
+                return build_success_response(
+                    data={
+                        "manager_id": str(u.id),
+                        "manager_name": u.full_name,
+                        "username": u.username,
+                    },
+                    request_id=request.state.request_id,
+                )
+
+        # Or do the department members share a common manager?
+        managers = [u.manager_id for u in role_users if u.manager_id is not None]
+        if managers:
+            common_mgr_id = Counter(managers).most_common(1)[0][0]
+            mgr_user = await db.get(User, common_mgr_id)
+            if mgr_user and not mgr_user.deleted_at:
+                return build_success_response(
+                    data={
+                        "manager_id": str(mgr_user.id),
+                        "manager_name": mgr_user.full_name,
+                        "username": mgr_user.username,
+                    },
+                    request_id=request.state.request_id,
+                )
+
+    return build_success_response(
+        data={"manager_id": None, "manager_name": None, "username": None},
+        request_id=request.state.request_id,
+    )
+
+
 @router.get("/{user_id}", summary="Get a user (admin)")
 async def get_user(
     user_id: uuid.UUID,
@@ -229,29 +376,76 @@ async def update_user(
     user_service: UserService = Depends(get_user_service),
     current_user: CurrentUser = Depends(get_current_user),
     audit_service: AuditService = Depends(get_audit_service),
+    db: AsyncSession = Depends(get_db_session),
 ) -> dict:
     """Update a user's non-credential profile fields."""
     if current_user.id != user_id and "user.action" not in current_user.permissions and not current_user.is_super_admin:
         from app.core.exceptions import ForbiddenException
         raise ForbiddenException("You do not have permission to modify this user account.")
 
+    position_id_specified = "position_id" in payload.model_fields_set
+    target_position_id = payload.position_id if position_id_specified else None
+
     update_dict = payload.model_dump(exclude_unset=True)
+    update_dict.pop("position_id", None)
+
     user = await user_service.update_user(
         user_id,
         updated_by=current_user.id,
         **update_dict,
     )
+
+    pos_id = None
+    pos_name = None
+    if position_id_specified:
+        try:
+            from app.org_structure.assignments_repository import EmployeePositionAssignmentRepository
+            from app.org_structure.models import EmployeePositionAssignment, OrgRecordStatus, Position, PositionAssignmentType
+            assignment_repo = EmployeePositionAssignmentRepository(db)
+
+            # Deactivate previous active primary position assignments
+            active_assignments = await assignment_repo.list_for_employee(user_id, active_only=True)
+            for a in active_assignments:
+                if a.is_primary:
+                    await assignment_repo.update(a, is_primary=False, status=OrgRecordStatus.INACTIVE)
+
+            if target_position_id:
+                existing = await assignment_repo.get_exact(user_id, target_position_id, PositionAssignmentType.PRIMARY)
+                if existing is not None:
+                    await assignment_repo.update(existing, status=OrgRecordStatus.ACTIVE, is_primary=True)
+                else:
+                    await assignment_repo.create(
+                        employee_id=user_id,
+                        position_id=target_position_id,
+                        assignment_type=PositionAssignmentType.PRIMARY,
+                        is_primary=True,
+                        status=OrgRecordStatus.ACTIVE,
+                    )
+                pos_obj = await db.get(Position, target_position_id)
+                if pos_obj:
+                    pos_id = pos_obj.id
+                    pos_name = pos_obj.name
+        except Exception:
+            pass
+
+    audit_payload = dict(update_dict)
+    if position_id_specified:
+        audit_payload["position_id"] = str(target_position_id) if target_position_id else None
+
     await _record_user_action(
         audit_service=audit_service,
         request=request,
         action=AuditAction.UPDATE,
         actor=current_user,
         target_user_id=user_id,
-        description=f"Updated profile for user {user.username!r}.",
-        new_values=update_dict,
+        description=f"Updated profile for {user.full_name!r}.",
+        new_values=audit_payload,
     )
-    data = UserRead.model_validate(user).model_dump(mode="json")
-    return build_success_response(data=data, request_id=request.state.request_id)
+    user_dict = UserRead.model_validate(user).model_dump(mode="json")
+    if position_id_specified:
+        user_dict["position_id"] = str(pos_id) if pos_id else None
+        user_dict["position_name"] = pos_name
+    return build_success_response(data=user_dict, request_id=request.state.request_id)
 
 
 @router.post("/{user_id}/reset-password", summary="Admin-generated password reset or custom password set")
@@ -297,7 +491,7 @@ async def activate_user(
         action=AuditAction.USER_ACTIVATED,
         actor=current_user,
         target_user_id=user_id,
-        description=f"Activated user {user.username!r}.",
+        description=f"Activated {user.full_name!r}.",
         new_values={"status": user.status.value, "is_active": True},
     )
     data = UserRead.model_validate(user).model_dump(mode="json")
@@ -320,7 +514,7 @@ async def deactivate_user(
         action=AuditAction.USER_DEACTIVATED,
         actor=current_user,
         target_user_id=user_id,
-        description=f"Deactivated user {user.username!r}; all sessions revoked.",
+        description=f"Deactivated {user.full_name!r}; all sessions revoked.",
         new_values={"status": user.status.value, "is_active": False},
     )
     data = UserRead.model_validate(user).model_dump(mode="json")
@@ -343,7 +537,7 @@ async def suspend_user(
         action=AuditAction.STATUS_CHANGED,
         actor=current_user,
         target_user_id=user_id,
-        description=f"Suspended user {user.username!r}; all sessions revoked.",
+        description=f"Suspended {user.full_name!r}; all sessions revoked.",
         new_values={"status": user.status.value, "is_active": False},
     )
     data = UserRead.model_validate(user).model_dump(mode="json")
@@ -366,7 +560,7 @@ async def unsuspend_user(
         action=AuditAction.USER_ACTIVATED,
         actor=current_user,
         target_user_id=user_id,
-        description=f"Unsuspended user {user.username!r}; account restored to active.",
+        description=f"Unsuspended {user.full_name!r}; account restored to active.",
         new_values={"status": user.status.value, "is_active": True},
     )
     data = UserRead.model_validate(user).model_dump(mode="json")
@@ -389,7 +583,7 @@ async def unlock_user(
         action=AuditAction.USER_UNLOCKED,
         actor=current_user,
         target_user_id=user_id,
-        description=f"Cleared lockout for user {user.username!r}.",
+        description=f"Cleared lockout for {user.full_name!r}.",
     )
     data = UserRead.model_validate(user).model_dump(mode="json")
     return build_success_response(data=data, request_id=request.state.request_id)
@@ -407,7 +601,11 @@ async def assign_role(
 ) -> dict:
     """Assign a role to a user."""
     role = await rbac_service.get_role_or_raise(payload.role_id)
-    await user_service.assign_role(user_id, payload.role_id, assigned_by=current_user.id)
+    await user_service.assign_role(
+        user_id, payload.role_id, assigned_by=current_user.id,
+        assignment_type=payload.assignment_type, is_primary=payload.is_primary,
+        effective_from=payload.effective_from, effective_to=payload.effective_to,
+    )
     action = AuditAction.ADMIN_PROMOTION if role.name in ("super_admin", "admin") else AuditAction.ROLE_ASSIGNED
     await _record_user_action(
         audit_service=audit_service,

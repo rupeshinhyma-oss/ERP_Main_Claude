@@ -118,8 +118,23 @@ class RBACService:
         return sorted(link.permission.code for link in role.permission_links)
 
     # --- Role management ------------------------------------------------------------
-    async def create_role(self, *, name: str, description: str | None, permission_codes: list[str]) -> Role:
-        """Create a new role and grant it the given permission codes, by code."""
+    async def create_role(
+        self,
+        *,
+        name: str,
+        description: str | None,
+        permission_codes: list[str],
+        code: str | None = None,
+        parent_department_id: uuid.UUID | None = None,
+    ) -> Role:
+        """
+        Create a new role/department and grant it the given permission codes, by code.
+
+        ``code`` and ``parent_department_id`` are the organizational-department
+        fields carried over from the Department/Role merge (see ``Role``
+        docstring in ``app.rbac.models``) -- both optional, since a Role
+        can be a pure permission bundle with no organizational placement.
+        """
         normalized_name = name.strip()
         if not normalized_name:
             raise ConflictException("Role name cannot be empty.")
@@ -129,23 +144,30 @@ class RBACService:
             )
         if await self.role_repository.get_by_name(normalized_name) is not None:
             raise ConflictException("A role with that name already exists.")
+        if code and await self.role_repository.code_exists(code):
+            raise ConflictException(f"Department code {code!r} is already in use.")
+        if parent_department_id is not None:
+            await self.get_role_or_raise(parent_department_id)  # 404s cleanly if the parent doesn't exist
 
         # Resolve every permission code up-front, before creating anything,
         # so an unknown code fails fast without leaving a half-created role
         # behind with only some of its intended permissions granted.
         resolved_permissions: list[Permission] = []
-        for code in permission_codes:
-            permission = await self.permission_repository.get_by_code(code)
+        for perm_code in permission_codes:
+            permission = await self.permission_repository.get_by_code(perm_code)
             if permission is None:
-                raise NotFoundException(f"Unknown permission code: {code!r}.")
+                raise NotFoundException(f"Unknown permission code: {perm_code!r}.")
             resolved_permissions.append(permission)
 
         try:
             role = await self.role_repository.create(
-                name=normalized_name, description=description, is_system=False
+                name=normalized_name, description=description, is_system=False,
+                code=code, parent_department_id=parent_department_id,
             )
             for permission in resolved_permissions:
                 await self.role_repository.add_permission(role, permission)
+            if parent_department_id is not None:
+                await self.role_repository.add_parent_link(role.id, parent_department_id)
         except IntegrityError as exc:
             # Defense-in-depth against a race: two requests creating a role
             # with the same name at nearly the same instant can both pass
@@ -159,8 +181,17 @@ class RBACService:
         await self.invalidate_user_permissions_cache()
         return role
 
-    async def update_role(self, role_id: uuid.UUID, *, name: str | None, description: str | None) -> Role:
-        """Update a role's name/description. Rejects renaming a system role."""
+    async def update_role(
+        self,
+        role_id: uuid.UUID,
+        *,
+        name: str | None,
+        description: str | None,
+        code: str | None = None,
+        parent_department_id: uuid.UUID | None = None,
+        unset_parent: bool = False,
+    ) -> Role:
+        """Update a role/department's name/description/organizational fields. Rejects renaming a system role."""
         role = await self.get_role_or_raise(role_id)
         if name is not None and name.strip() != role.name:
             if role.is_system:
@@ -177,6 +208,21 @@ class RBACService:
             role.name = normalized_name
         if description is not None:
             role.description = description
+        if code is not None:
+            if code and await self.role_repository.code_exists(code, exclude_id=role_id):
+                raise ConflictException(f"Department code {code!r} is already in use.")
+            role.code = code or None
+        if unset_parent:
+            if role.parent_department_id:
+                await self.role_repository.remove_parent_link(role_id, role.parent_department_id)
+            role.parent_department_id = None
+        elif parent_department_id is not None:
+            if parent_department_id != role.parent_department_id:
+                await self.get_role_or_raise(parent_department_id)
+                if await self.role_repository.would_create_cycle(role_id, parent_department_id):
+                    raise ConflictException("This would create a circular department hierarchy.")
+                await self.role_repository.add_parent_link(role_id, parent_department_id)
+                role.parent_department_id = parent_department_id
         try:
             await self.role_repository.session.flush()
         except IntegrityError as exc:
@@ -184,6 +230,51 @@ class RBACService:
             raise ConflictException("A role with that name already exists.") from exc
         await self.invalidate_user_permissions_cache()
         return role
+
+    async def get_hierarchy(self, role_id: uuid.UUID) -> dict[str, list[Role]]:
+        """Return connected parents and children for a department."""
+        await self.get_role_or_raise(role_id)
+        parents = await self.role_repository.get_parents(role_id)
+        children = await self.role_repository.get_children(role_id)
+        return {"parents": parents, "children": children}
+
+    async def add_parent_department(self, child_id: uuid.UUID, parent_id: uuid.UUID) -> dict[str, list[Role]]:
+        """Add a parent department to this child department."""
+        if child_id == parent_id:
+            raise ConflictException("A department cannot be its own parent.")
+        await self.get_role_or_raise(child_id)
+        await self.get_role_or_raise(parent_id)
+
+        if await self.role_repository.would_create_cycle(child_id, parent_id):
+            raise ConflictException("This would create a circular department hierarchy.")
+
+        await self.role_repository.add_parent_link(child_id, parent_id)
+        return await self.get_hierarchy(child_id)
+
+    async def remove_parent_department(self, child_id: uuid.UUID, parent_id: uuid.UUID) -> dict[str, list[Role]]:
+        """Remove a parent department link."""
+        await self.get_role_or_raise(child_id)
+        await self.role_repository.remove_parent_link(child_id, parent_id)
+        return await self.get_hierarchy(child_id)
+
+    async def add_child_department(self, parent_id: uuid.UUID, child_id: uuid.UUID) -> dict[str, list[Role]]:
+        """Add a child department under this parent department."""
+        if child_id == parent_id:
+            raise ConflictException("A department cannot be its own child.")
+        await self.get_role_or_raise(parent_id)
+        await self.get_role_or_raise(child_id)
+
+        if await self.role_repository.would_create_cycle(child_id, parent_id):
+            raise ConflictException("This would create a circular department hierarchy.")
+
+        await self.role_repository.add_parent_link(child_id, parent_id)
+        return await self.get_hierarchy(parent_id)
+
+    async def remove_child_department(self, parent_id: uuid.UUID, child_id: uuid.UUID) -> dict[str, list[Role]]:
+        """Remove a child department link."""
+        await self.get_role_or_raise(parent_id)
+        await self.role_repository.remove_parent_link(child_id, parent_id)
+        return await self.get_hierarchy(parent_id)
 
     async def get_role_deletion_impact(self, role_id: uuid.UUID) -> dict:
         """

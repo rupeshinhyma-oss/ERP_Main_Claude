@@ -36,7 +36,11 @@
 25. [AUTHENTICATION: Login & Session Recovery](#25-authentication-login--session-recovery)
 26. [EXTERNAL PORTAL: Public Supplier Quotation Submission Portal](#26-external-portal-public-supplier-quotation-submission-portal)
 27. [TOPBAR: Universal Search & Record Deep-Linking](#27-topbar-universal-search--record-deep-linking)
-28. [AI Subagent Autonomous Testing Prompt Template](#28-ai-subagent-autonomous-testing-prompt-template)
+28. [USER MANAGEMENT: Unified Person & Workforce Architecture (Employee-to-User Merge)](#28-user-management-unified-person--workforce-architecture-employee-to-user-merge)
+29. [USER MANAGEMENT: Unified Departments & Organizational Units (Department-to-Role Merge)](#29-user-management-unified-departments--organizational-units-department-to-role-merge)
+30. [USER MANAGEMENT: Positions Module](#30-user-management-positions-module)
+31. [USER MANAGEMENT: Organization Chart Module](#31-user-management-organization-chart-module)
+32. [AI Subagent Autonomous Testing Prompt Template](#32-ai-subagent-autonomous-testing-prompt-template)
 
 ---
 
@@ -51,32 +55,34 @@
 
 ## 2. Master Navigation Sitemap
 
-| Sidebar Section | Navigation Label | Route Path | Active Key | Required Permission |
-| :--- | :--- | :--- | :--- | :--- |
-| **DASHBOARD** | Dashboard | `/dashboard` | `dashboard` | Public Authenticated |
-| **CONTACT** | Suppliers | `/suppliers` | `suppliers` | `supplier.view` |
-| **CONTACT** | Buyers | `/buyers` | `buyers` | `buyer.view` |
-| **INVENTORY** | Product Master | `/masters/products` | `masters-products` | `product.view` |
-| **INVENTORY** | Product Gallery | `/product-gallery` | `product-gallery` | `productgallery.view` |
-| **INVENTORY** | Categories | `/masters/categories` | `masters-categories` | `category.view` |
-| **INVENTORY** | Sub Categories | `/masters/subcategories` | `masters-subcategories` | `subcategory.view` |
-| **INVENTORY** | Brands | `/masters/brands` | `masters-brands` | `brand.view` |
-| **INVENTORY** | Supplier Types | `/masters/supplier-types` | `masters-supplier-types` | `suppliertype.view` |
-| **INVENTORY** | Buyer Types | `/masters/buyer-types` | `masters-buyer-types` | `buyertype.view` |
-| **SALE** | Inquiries | `/inquiries` | `inquiries` | Public Authenticated / `inquiry.view` |
-| **PLANNING** | Shipment Planning | `/planning` | `planning` | `planning.view` |
-| **USER MANAGEMENT** | Users | `/users` | `users` | `user.view` |
-| **USER MANAGEMENT** | Departments & Permissions | `/rbac` | `rbac` | `roles_permissions.view` |
-| **CONFIGURATIONS** | HSN Codes | `/masters/hsn` | `masters-hsn` | `hsn.view` |
-| **CONFIGURATIONS** | Countries | `/masters/countries` | `masters-countries` | `country.view` |
-| **CONFIGURATIONS** | Provinces | `/masters/states` | `masters-states` | `state.view` |
-| **CONFIGURATIONS** | City | `/masters/cities` | `masters-cities` | `city.view` |
-| **CONFIGURATIONS** | Currencies | `/masters/currencies` | `masters-currencies` | `currency.view` |
-| **CONFIGURATIONS** | Units of Measurement | `/masters/uom` | `masters-uom` | `uom.view` |
-| **CONFIGURATIONS** | Organization Settings | `/organization` | `organization` | `organization.manage` |
-| **CONFIGURATIONS** | Organization List | `/masters/company-list` | `masters-company-list` | `organizationlist.view` |
-| **CONFIGURATIONS** | Audit Log | `/audit` | `audit` | `audit.view` |
-| **CONFIGURATIONS** | Trash | `/trash` | `trash` | `trash.view` |
+| Sidebar Section | Navigation Label | Route Path | Active Key | Icon Key | Required Permission |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **DASHBOARD** | Dashboard | `/dashboard` | `dashboard` | `dashboard` | Public Authenticated |
+| **CONTACT** | Suppliers | `/suppliers` | `suppliers` | `factory` | `supplier.view` |
+| **CONTACT** | Buyers | `/buyers` | `buyers` | `shoppingBag` | `buyer.view` |
+| **INVENTORY** | Product Master | `/masters/products` | `masters-products` | `box` | `product.view` |
+| **INVENTORY** | Product Gallery | `/product-gallery` | `product-gallery` | `image` | `productgallery.view` |
+| **INVENTORY** | Categories | `/masters/categories` | `masters-categories` | `layers` | `category.view` |
+| **INVENTORY** | Sub Categories | `/masters/subcategories` | `masters-subcategories` | `folderTree` | `subcategory.view` |
+| **INVENTORY** | Brands | `/masters/brands` | `masters-brands` | `award` | `brand.view` |
+| **INVENTORY** | Supplier Types | `/masters/supplier-types` | `masters-supplier-types` | `network` | `suppliertype.view` |
+| **INVENTORY** | Buyer Types | `/masters/buyer-types` | `masters-buyer-types` | `idCard` | `buyertype.view` |
+| **SALE** | Inquiries | `/inquiries` | `inquiries` | `fileText` | Public Authenticated / `inquiry.view` |
+| **PLANNING** | Shipment Planning | `/planning` | `planning` | `truck` | `planning.view` |
+| **USER MANAGEMENT** | Users | `/users` | `users` | `user` | `user.view` |
+| **USER MANAGEMENT** | Positions | `/positions` | `positions` | `briefcase` | `position.view` |
+| **USER MANAGEMENT** | Organization Chart | `/org-chart` | `org-chart` | `orgChart` | `reporting.view` |
+| **USER MANAGEMENT** | Departments & Permissions | `/rbac` | `rbac` | `shield` | `roles_permissions.view` |
+| **CONFIGURATIONS** | HSN Codes | `/masters/hsn` | `masters-hsn` | `barcode` | `hsn.view` |
+| **CONFIGURATIONS** | Countries | `/masters/countries` | `masters-countries` | `globe` | `country.view` |
+| **CONFIGURATIONS** | Provinces | `/masters/states` | `masters-states` | `map` | `state.view` |
+| **CONFIGURATIONS** | City | `/masters/cities` | `masters-cities` | `pin` | `city.view` |
+| **CONFIGURATIONS** | Currencies | `/masters/currencies` | `masters-currencies` | `coins` | `currency.view` |
+| **CONFIGURATIONS** | Units of Measurement | `/masters/uom` | `masters-uom` | `ruler` | `uom.view` |
+| **CONFIGURATIONS** | Organization Settings | `/organization` | `organization` | `settings` | `organization.manage` |
+| **CONFIGURATIONS** | Organization List | `/masters/company-list` | `masters-company-list` | `building` | `organizationlist.view` |
+| **CONFIGURATIONS** | Audit Log | `/audit` | `audit` | `clock` | `audit.view` |
+| **CONFIGURATIONS** | Trash | `/trash` | `trash` | `trash` | `trash.view` |
 
 ---
 
@@ -657,71 +663,132 @@ Manage complete vendor team directory:
 
 ## 15. USER MANAGEMENT: Users Module
 
-- **Route:** `/users`
-- **Purpose:** Employee accounts, HR profiles, reporting hierarchy, and temporary password issuance.
+- **Route:** `/users` (also aliased from `/employees`)
+- **Purpose:** Complete enterprise person directory for both login-enabled staff and workforce personnel without system access, HR profiles, positions held, reporting hierarchy, and password governance.
 
 ### 15.1. Users Table Columns
 1. **Checkbox:** Row selector.
 2. **SR. NO.:** Index.
 3. **EMPLOYEE NAME & AVATAR:** Initials circle + Full Name.
-4. **USERNAME:** System login ID.
-5. **EMAIL:** Official corporate email.
-6. **DEPARTMENT / ROLE:** Assigned role badges (e.g. `Sales`, `Procurement`, `Admin`).
+4. **USERNAME:** System login ID (or placeholder for workforce members with `has_login=False`).
+5. **EMAIL:** Official corporate email (null for `has_login=False`).
+6. **DEPARTMENT / ROLE:** Assigned role/department badges (e.g. `Sales`, `Procurement`, `Admin`).
 7. **REPORTING MANAGER:** Manager's full name.
 8. **STATUS:** `ACTIVE`, `INACTIVE`, `SUSPENDED`, `LOCKED`, `PASSWORD_CHANGE_REQUIRED`.
 9. **ACTIONS:**
-   - 👁️ View Profile Drawer
+   - 👁️ **View Profile Drawer:**
+     - HR Profile details (contact, gender, DOB, joining date, address, emergency contact, notes)
+     - **Section 6.5: Positions & Reporting Structure:**
+       - **Positions:** Badges of all held positions (e.g. `Sales Manager (Primary)`, loaded dynamically via `/positions/holders-for-user/{id}`)
+       - **Reports To:** Listing of all managers by relationship type (e.g. `PRIMARY REPORTING: manager id ...`)
+       - **Direct Reports:** Listing of direct subordinate personnel (e.g. `PRIMARY REPORTING: employee id ...`)
+     - **Section 7: Active Login Sessions:** Lists active device sessions with remote revocation (for accounts with `has_login=True`).
    - ✏️ Edit User & HR Details
-   - 🔑 Reset Password (generates temporary password)
-   - 🛡️ Direct Permission Overrides (`🔑 Edit permissions`)
+   - 🔑 Reset Password (generates temporary password for login-enabled users)
+   - 🛡️ **Manage Departments:** Assign/remove Roles ("Departments"). A user may hold **any number of Roles/Departments at once** with assignment metadata (`assignment_type`: `PRIMARY`, `SECONDARY`, `TEMPORARY`, `PROJECT`, `ACTING`; `is_primary`; effective dates).
+   - 🔑 Direct Permission Overrides (`🔑 Edit permissions`)
    - 🔒 Suspend / Activate Account
    - 🗑️ Delete User (Soft-delete)
 
 ### 15.2. Add / Edit User Form Fields
-- **Account Identity:**
-  - **Username** (*Required*): Unique login handle.
-  - **Email** (*Required*): Corporate email address.
+- **Login Credentials Toggle:**
+  - **Give this person ERP login access (`has_login`)** (*Checkbox, default checked*).
+  - Uncheck for workforce records with no login (e.g. factory worker, driver, temporary labor, consultant) -- Username, Email, Phone, and Password become optional/disabled.
+- **Account Identity (when `has_login=True`):**
   - **First Name** (*Required*), **Middle Name**, **Last Name** (*Optional*).
+  - **Display Name** (*Required*): Shown throughout the system in place of raw username.
+  - **Position** (*Optional, not red-marked*): Dropdown placed alongside Display Name, dynamically extracted from active positions in the Positions catalog (`/positions/all`). When selected, establishes an initial primary position assignment for the user.
+  - **Username** (*Optional*): If left blank, derived automatically from email.
+  - **Work Email** (*Required if has_login=True*).
+  - **Mobile Number** (*Required if has_login=True*): Phone number with country dial code.
+  - **Password** (*Required if has_login=True*): Initial temporary password field equipped with an integrated **Eye toggle button** (`👁️` / `👁️‍🗨️`) allowing the administrator to preview or conceal the plaintext password before submitting.
 - **HR & Employment Profile:**
   - **Employee Code**: Unique staff ID (e.g. `EMP-1042`).
-  - **Contact Number**: Phone number with country dial code.
   - **Gender**: `Male`, `Female`, `Other`.
   - **Date of Birth** & **Date of Joining**: Date pickers.
   - **Employment Type**: `Full Time`, `Part Time`, `Contract`, `Intern`.
-  - **Status**: `ACTIVE`, `INACTIVE`, `SUSPENDED`, `LOCKED`.
-  - **Reporting Manager**: Dropdown of active users.
-  - **Department Roles**: Multi-select role assignment.
+  - **Employment Status**: `Active`, `Inactive`, `On Leave`, `Terminated`, `Resigned`.
+  - **Assign Initial Department**: Dropdown of available department roles (defaults to `-- Default: User (System) --`).
+    - **Default "User" Assignment:** If left unselected or if no department is specified, the system automatically assigns the individual to the default system **"User"** role (both for login users and workforce records).
+    - Selecting a department triggers automatic detection of that department's manager.
+  - **Assign Reporting Manager**: Dropdown placed directly beneath "Assign Initial Department".
+    - **Automatic Manager Auto-Wiring:** When an initial department is selected, the system immediately queries `/api/v1/users/department-manager/{role_id}` and automatically pre-fills that department's designated manager with a helpful blue confirmation badge.
+    - **Manual Override:** The administrator can change or clear the manager to any other user or `-- None (No Manager) --` as needed.
+  - **Drawer Usability & Scroll Bar:** The Create User Account modal features a responsive vertical scroll container with a styled scrollbar and sticky bottom footer (`Cancel` and `Create User Account` action buttons), ensuring all inputs remain comfortably accessible on viewports of all heights.
 
 ### 15.3. One-Time Temporary Password Modal
 - When creating a user or resetting a password, the system generates a secure temporary password.
 - Displays password in a highlighted box with a **`📋 Copy Password`** button.
+
+### 15.4. Edit User Profile & HR Details Drawer
+- **Drawer Layout & Usability:** Side-drawer overlay with full viewport height (`calc(100vh - 60px)`), smooth vertical scroll container (`flex: 1`, `overflowY: auto`), and a pinned sticky footer (`.form-actions`).
+- **Footer Action Buttons:** `Cancel` (secondary outline button) and `Save Changes` (primary blue button) pinned neatly at the bottom with fixed height (38px), aligned horizontally to the right without vertical distortion.
+- **Sections Included:**
+  - **Basic & Identity Details:** First Name, Middle Name, Last Name, Username (*Required*), Display Name, Employee Code.
+  - **Contact Information:** Work Email (*Required*), Mobile / Phone Number (*Required*), Emergency Contact.
+  - **Employment & HR Profile:**
+    - **Reporting Manager & Position:** Side-by-side dropdown selectors. The **Position** dropdown is dynamically populated from active positions in `/positions/all` and automatically pre-selected with the employee's current primary position assignment. Selecting a new position or `-- None (No Position) --` updates the assignment atomically upon clicking `Save Changes`.
+    - **Gender & Employment Type:** `Gender` (`Male`, `Female`, `Other`, `Prefer Not to Say`) and `Employment Type` (`Full Time`, `Part Time`, `Contract`, `Intern`, `Temporary`).
+    - **Employment Status & Dates:** `Employment Status` (`Active`, `Inactive`, `On Leave`, `Terminated`, `Resigned`), `Date of Joining`, and `Date of Birth`.
+  - **Address & Location Details:** Street Address, City, State / Province, Country, Postal / PIN Code.
+  - **Internal Administrator Notes:** Free-form text area for administrative annotations.
 
 ---
 
 ## 16. USER MANAGEMENT: Departments & Permissions (RBAC) Module
 
 - **Route:** `/rbac`
-- **Purpose:** Department role definitions, department managers, permission matrices, and user reassignment.
+- **Purpose:** Department role definitions, organizational hierarchy nesting, department managers, permission matrices, and user reassignment.
 
 ### 16.1. Departments Table
 - **Columns:** Checkbox, Sr. No., Department Name, Created Date, Actions.
 - **Header Actions:** `+ ADD NEW DEPARTMENT`, `Bulk Delete`.
 
 ### 16.2. Department View / Edit Modal
-- **Department Name** (*Required*): Title (reserved roles like `Admin` and `User` are protected).
+- **Department Name** (*Required*): Title (reserved system roles like `super_admin` are protected).
+- **Department Code**: Optional short organizational code (e.g. `SALES`). Purely organizational labeling.
+- **Parent Departments Section (in Department Details):**
+  - Displays all currently assigned parent departments as removable badge tags (`🏢 Department Name (CODE) [×]`).
+  - Dropdown selector (`-- Add another parent department --`) with eligible roles (excluding self, active children, active parents, and system admin) + `+ Add Parent` button.
+  - Immediately unlinks or adds parents with live real-time sync. Supports **multiple parent departments** per department.
 - **Description**: Text area.
 - **Department Managers Section:**
   - Select user to designate as **Department Manager**.
   - Roster displays manager with `⭐ MANAGER` badge.
   - **`🔑 Edit permissions` Button:** Opens per-user direct permission override drawer to grant manager extra elevated privileges without altering base role.
   - Setting a manager automatically updates reporting hierarchy for department members.
-- **Department Members Section:** Add / remove employees assigned to this department.
+- **Department Members Section ("Users in this Department"):**
+  - Add / remove employees assigned to this department with real-time membership counts.
+- **Child Departments Card (directly beneath "Users in this Department"):**
+  - Dedicated card in the left column displaying all sub-departments that report to or are nested under the active department.
+  - **Header Badge:** Displays active count of connected sub-departments (e.g. `2 sub-departments`).
+  - **Add Child Selector:** Dropdown `Select child department to add...` + `+ Add` button.
+  - **Child Department Row:**
+    - Green initial icon + Department Name + Code badge.
+    - Member count badge (`👤 X members`).
+    - `View` button: Directly navigates to and opens that child department.
+    - `Remove` button: Unlinks the child department from this parent.
+    - Clean empty state when no child departments are connected.
+- **Bidirectional Live Auto-Sync:** Connecting a child department under a parent (e.g. Sales under Operations) immediately updates both departments' rosters so Operations lists Sales as a child, and Sales lists Operations as a parent.
+- **DAG Cycle Detection:** Server-side validation prevents circular hierarchies (e.g. A -> B -> A or A -> B -> C -> A) and returns HTTP 409 Conflict with an alert.
 - **Permission Matrix Grid:**
   - Grouped by module cards: `Dashboard`, `Contact`, `Inventory`, `Sale`, `Planning`, `User Management`, `Configurations`, `Audit`, `Trash`.
   - `Select All` / `Deselect All` toggles per module.
   - Checkboxes for granular permissions (`.view`, `.create`, `.update`, `.delete`, `.export`, `.import`, `.bulk_action`, etc.).
 - **Clone Department Button:** Creates a copy of the department with all permissions pre-checked.
 - **Safe Delete with Reassignment Modal:** If users exist in a department scheduled for deletion, prompts administrator to select a replacement department to reassign those employees before deletion proceeds.
+
+### 16.3. Test Cases for Departments & Permissions Module
+- [ ] Open `/rbac`, click on a department (e.g. `Operations`), verify Left Column renders:
+  1. Department Details (Name, Description, Code, Parent Departments)
+  2. Managers in this Department
+  3. Users in this Department
+  4. **Child Departments** (directly beneath Users in this Department)
+- [ ] In **Child Departments** card, select another department (e.g. `Sales`) from the dropdown and click `+ Add`. Verify `Sales` appears in the list with member count and `View` / `Remove` buttons.
+- [ ] Click `Back to Departments` and open `Sales`. Verify `Operations` is displayed under **Parent Departments** as a removable badge tag (`🏢 Operations [×]`).
+- [ ] In `Sales`, select another parent department (e.g. `Executive Management`) and click `+ Add Parent`. Verify `Sales` now lists multiple parents (`Operations` and `Executive Management`).
+- [ ] Attempt to add `Operations` as a child department of `Sales`. Verify cycle detection triggers and rejects the circular connection with the error: *"This would create a circular department hierarchy."*
+- [ ] In `Operations` -> Child Departments, click `Remove` next to `Sales`. Verify `Sales` is unlinked and no longer appears under Child Departments or as Sales's parent.
 
 ---
 
@@ -851,7 +918,56 @@ Manage complete vendor team directory:
 
 ---
 
-## 28. AI Subagent Autonomous Testing Prompt Template
+## 28. USER MANAGEMENT: Unified Person & Workforce Architecture (Employee-to-User Merge)
+
+- **Route:** `/users` (with `/employees` as a route alias)
+- **Architecture & Merge Rationale:** Workforce personnel records and user login accounts are unified on the `User` entity (`users` table). Rather than splitting people into two separate screens (`/users` and `/employees`) requiring linking steps, the system uses a single boolean attribute: **`has_login: bool`**.
+  - **Login-Enabled Users (`has_login=True`):** Full system accounts with `username`, `email`, `phone`, and `password_hash`. Subject to session management, rate limits, lockouts, and authentication dependencies.
+  - **Workforce Members (`has_login=False`):** Offline or field workforce members (e.g. factory floor workers, drivers, warehouse temporary labor, consultants). Created without username, email, phone, or password credentials. Authentication is rejected before password hashing; account status is `INACTIVE` for login but active for organizational assignments.
+
+---
+
+## 29. USER MANAGEMENT: Unified Departments & Organizational Units (Department-to-Role Merge)
+
+- **Route:** `/rbac` (Departments & Permissions)
+- **Architecture & Merge Rationale:** Organizational departments and software permission bundles are unified onto the `Role` entity (`roles` table). This eliminates the confusion of having two separate "Departments" screens.
+  - **Organizational Structure:** Roles carry `code` (e.g. `SALES`) and multi-parent / multi-child relationships via `department_hierarchy` and `roles.parent_department_id` (supporting many-to-many parent and child departments with server-side circular dependency validation via `would_create_cycle`).
+  - **Software Permissions:** Roles bundle fine-grained permission codes (`role_permissions`).
+  - **User Role Assignments:** Modeled in `user_roles` with `assignment_type` (`PRIMARY`, `SECONDARY`, `TEMPORARY`, `PROJECT`, `ACTING`), `is_primary`, and effective date ranges.
+
+---
+
+## 30. USER MANAGEMENT: Positions Module
+
+- **Route:** `/positions` (Sidebar Icon: `briefcase`)
+- **Purpose:** Professional designations and job titles (e.g. "Sales Manager", "Marketing Advisor", "Senior Engineer") that employees hold.
+- **Independence:** Holds no reporting-hierarchy or software-permission logic -- designations do not dictate who reports to whom or software access privileges.
+- **Table Columns:** SR. NO., NAME, CODE, EMPLOYEES, STATUS, ACTION (standard master CRUD).
+  - **Employees Column:** Displays a dynamic badge (e.g. `👤 1`) showing how many employees currently hold the position.
+- **Add / Edit Form Fields:** Position Name (*Required*), Code, Description, Status (supports case-insensitive ACTIVE / INACTIVE / ARCHIVED).
+- **Safety & Deletion Freeze Rules:**
+  - **Locked/Frozen Delete Button:** If any employees are assigned to a position (`employee_count > 0`), the delete button is completely frozen and locked with a lock icon, disabled appearance, `cursor: not-allowed`, and a hover tooltip explaining that deletion is locked due to active assignments.
+  - **Warning Alert Modal:** If the user attempts to click the locked delete button, an immediate modal alert dialog appears explaining that the position cannot be deleted because employees are currently attached to it.
+  - **Bulk Delete Protection:** If multiple items are selected for bulk deletion, any positions with active employees are automatically protected and skipped, with an alert notifying the administrator.
+  - **Server-Side Conflict Enforcement:** Deletion requests (`DELETE /positions/{id}`) are rejected server-side with HTTP 409 Conflict if active assignments exist.
+- **User Profile Display:** Active positions held by a user are displayed in Section 6.5 of the User Profile Drawer via `GET /positions/holders-for-user/{user_id}`.
+
+---
+
+## 31. USER MANAGEMENT: Organization Chart Module
+
+- **Route:** `/org-chart` (Sidebar Icon: `orgChart`)
+- **Purpose:** Dynamic, real-time visual hierarchy of company reporting lines, built entirely from active `PRIMARY_REPORTING` relationships (`GET /reporting/org-chart`).
+- **Display & Rendering:**
+  - Multi-level hierarchical tree diagram with interactive node expansion and collapse.
+  - Node resolution dynamically loads person names via `UserRepository.list_all()`.
+  - Enforces mandatory server-side cycle detection (`ReportingService.would_create_cycle`) preventing any self-reporting (`A -> A`) or circular reporting (`A -> B -> C -> A`).
+  - **Drag-and-Drop Manager Assignment:** Dragging and dropping an employee's card onto a new manager calls `POST /api/v1/reporting/set-manager/{employee_id}` with `manager_employee_id`, updating the primary relationship atomically with cycle validation.
+  - Updates dynamically whenever reporting lines are reassigned or updated.
+
+---
+
+## 32. AI Subagent Autonomous Testing Prompt Template
 
 When instructing an autonomous AI agent to verify the ERP after code modifications, copy and run the following prompt:
 
@@ -862,11 +978,16 @@ Your task is to verify that all modules and features described in MODULES_AND_FE
 Checklist to execute:
 1. Compile backend: Run `python -m compileall backend/app` -> must return 0 errors.
 2. Build frontend: Run `npm run typecheck` and `npm run build` in /frontend -> must compile cleanly.
-3. Verify module routes in frontend/src/App.tsx and frontend/src/lib/nav.ts match the sitemap in Section 2.
+3. Verify module routes in frontend/src/App.tsx and frontend/src/lib/nav.ts match the sitemap in Section 2, and all 26 nav items possess distinct, non-duplicated icons.
 4. Verify all form fields, modals, and actions documented for Suppliers, Buyers, Products, Inquiries, Planning, and Users remain intact.
-5. Report any missing fields, broken endpoints, or regressions.
+5. Verify the unified User Architecture:
+   - Creating a user with `has_login=True` requires email, phone, and password.
+   - Creating a user with `has_login=False` permits saving without email, phone, or password.
+   - Profile drawer displays Section 6.5 (Positions & Reporting Structure).
+   - Positions (/positions, icon: briefcase) and Organization Chart (/org-chart, icon: orgChart) render and function.
+   - Departments (/rbac) support optional short code and parent department nesting.
+6. Report any missing fields, broken endpoints, or regressions.
 ```
 
 ---
 *End of Master Features & Testing Specification Manual. Maintained for Inhyma Solutions Enterprise ERP.*
-

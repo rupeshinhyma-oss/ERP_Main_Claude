@@ -17,6 +17,7 @@ from sqlalchemy.orm import selectinload
 
 from app.common.base_repository import BaseRepository
 from app.rbac.models import (
+    DepartmentHierarchy,
     Permission,
     Role,
     RolePermission,
@@ -74,6 +75,149 @@ class RoleRepository(BaseRepository[Role]):
         stmt = self._base_select().order_by(Role.name)
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
+
+    async def code_exists(self, code: str, *, exclude_id: uuid.UUID | None = None) -> bool:
+        """Return True if another (non-deleted) role already uses this department code."""
+        stmt = self._base_select().with_only_columns(Role.id).where(Role.code == code)
+        if exclude_id is not None:
+            stmt = stmt.where(Role.id != exclude_id)
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none() is not None
+
+    async def list_children(self, parent_department_id: uuid.UUID) -> list[Role]:
+        """Return every direct child department of a role, for the nested department tree."""
+        return await self.get_children(parent_department_id)
+
+    async def get_parents(self, role_id: uuid.UUID) -> list[Role]:
+        """Return all parent departments for a given role/department."""
+        stmt = (
+            self._base_select()
+            .join(DepartmentHierarchy, DepartmentHierarchy.parent_department_id == Role.id)
+            .where(DepartmentHierarchy.child_department_id == role_id)
+            .order_by(Role.name)
+        )
+        res = await self.session.execute(stmt)
+        parents = list(res.scalars().all())
+        parent_ids = {p.id for p in parents}
+
+        # Fallback / sync from legacy Role.parent_department_id
+        child_role = await self.get_by_id(role_id)
+        if child_role and child_role.parent_department_id and child_role.parent_department_id not in parent_ids:
+            legacy_parent = await self.get_by_id(child_role.parent_department_id)
+            if legacy_parent:
+                parents.append(legacy_parent)
+                link = DepartmentHierarchy(
+                    parent_department_id=child_role.parent_department_id,
+                    child_department_id=role_id,
+                )
+                self.session.add(link)
+                await self.session.flush()
+
+        return parents
+
+    async def get_children(self, role_id: uuid.UUID) -> list[Role]:
+        """Return all child departments for a given role/department."""
+        stmt = (
+            self._base_select()
+            .join(DepartmentHierarchy, DepartmentHierarchy.child_department_id == Role.id)
+            .where(DepartmentHierarchy.parent_department_id == role_id)
+            .order_by(Role.name)
+        )
+        res = await self.session.execute(stmt)
+        children = list(res.scalars().all())
+        child_ids = {c.id for c in children}
+
+        # Fallback / sync from legacy Role.parent_department_id == role_id
+        legacy_stmt = (
+            self._base_select()
+            .where(Role.parent_department_id == role_id)
+            .order_by(Role.name)
+        )
+        legacy_res = await self.session.execute(legacy_stmt)
+        for c in legacy_res.scalars().all():
+            if c.id not in child_ids:
+                children.append(c)
+                link = DepartmentHierarchy(
+                    parent_department_id=role_id,
+                    child_department_id=c.id,
+                )
+                self.session.add(link)
+                await self.session.flush()
+
+        return children
+
+    async def add_parent_link(self, child_id: uuid.UUID, parent_id: uuid.UUID) -> None:
+        """Add a parent-child department relationship link."""
+        if child_id == parent_id:
+            return
+        stmt = select(DepartmentHierarchy).where(
+            DepartmentHierarchy.parent_department_id == parent_id,
+            DepartmentHierarchy.child_department_id == child_id,
+        )
+        res = await self.session.execute(stmt)
+        if res.scalar_one_or_none() is None:
+            link = DepartmentHierarchy(parent_department_id=parent_id, child_department_id=child_id)
+            self.session.add(link)
+            await self.session.flush()
+
+        # Keep Role.parent_department_id populated
+        child_role = await self.get_by_id(child_id)
+        if child_role and not child_role.parent_department_id:
+            child_role.parent_department_id = parent_id
+            await self.session.flush()
+
+    async def remove_parent_link(self, child_id: uuid.UUID, parent_id: uuid.UUID) -> None:
+        """Remove a parent-child department relationship link."""
+        stmt = delete(DepartmentHierarchy).where(
+            DepartmentHierarchy.parent_department_id == parent_id,
+            DepartmentHierarchy.child_department_id == child_id,
+        )
+        await self.session.execute(stmt)
+        await self.session.flush()
+
+        # Update Role.parent_department_id if it matched the removed parent
+        child_role = await self.get_by_id(child_id)
+        if child_role and child_role.parent_department_id == parent_id:
+            remaining = await self.get_parents(child_id)
+            child_role.parent_department_id = remaining[0].id if remaining else None
+            await self.session.flush()
+
+    async def would_create_cycle(self, role_id: uuid.UUID, new_parent_id: uuid.UUID) -> bool:
+        """
+        Return True if setting new_parent_id as this role's parent would create a cycle.
+        Traverses all ancestors of new_parent_id in the DAG.
+        """
+        if role_id == new_parent_id:
+            return True
+
+        queue = [new_parent_id]
+        visited: set[uuid.UUID] = set()
+
+        while queue:
+            curr = queue.pop(0)
+            if curr == role_id:
+                return True
+            if curr in visited:
+                continue
+            visited.add(curr)
+
+            # Query all parents of curr from department_hierarchy
+            stmt = select(DepartmentHierarchy.parent_department_id).where(
+                DepartmentHierarchy.child_department_id == curr
+            )
+            res = await self.session.execute(stmt)
+            for p_id in res.scalars().all():
+                if p_id not in visited:
+                    queue.append(p_id)
+
+            # Also check Role.parent_department_id
+            stmt_role = select(Role.parent_department_id).where(Role.id == curr)
+            res_role = await self.session.execute(stmt_role)
+            legacy_p = res_role.scalar_one_or_none()
+            if legacy_p and legacy_p not in visited:
+                queue.append(legacy_p)
+
+        return False
 
     async def get_permission_codes_for_user(self, user_id: uuid.UUID) -> set[str]:
         """

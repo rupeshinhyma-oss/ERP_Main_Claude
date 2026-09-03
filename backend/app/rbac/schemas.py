@@ -24,24 +24,30 @@ class PermissionRead(BaseModel):
 
 
 class RoleCreate(BaseModel):
-    """Payload to create a new role."""
+    """Payload to create a new role/department."""
 
     name: str = Field(..., min_length=2, max_length=100)
     description: str | None = Field(default=None, max_length=255)
+    code: str | None = Field(default=None, max_length=50, description="Optional short department code, e.g. 'SALES'.")
+    parent_department_id: uuid.UUID | None = Field(
+        default=None, description="Optional parent department, for nested departments (e.g. 'International Business' under 'Sales')."
+    )
     permission_codes: list[str] = Field(
         default_factory=list, description="Permission codes to grant immediately, e.g. ['user.read']."
     )
 
 
 class RoleUpdate(BaseModel):
-    """Payload to update a role's name/description. System roles cannot be renamed."""
+    """Payload to update a role's name/description/department fields. System roles cannot be renamed."""
 
     name: str | None = Field(default=None, min_length=2, max_length=100)
     description: str | None = Field(default=None, max_length=255)
+    code: str | None = Field(default=None, max_length=50)
+    parent_department_id: uuid.UUID | None = None
 
 
 class RoleRead(BaseModel):
-    """A role, as returned by listing/detail endpoints."""
+    """A role/department, as returned by listing/detail endpoints."""
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -49,6 +55,8 @@ class RoleRead(BaseModel):
     name: str
     description: str | None
     is_system: bool
+    code: str | None = None
+    parent_department_id: uuid.UUID | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -57,6 +65,19 @@ class RoleWithPermissions(RoleRead):
     """A role with its granted permission codes expanded."""
 
     permissions: list[str] = Field(default_factory=list)
+
+
+class DepartmentHierarchyRead(BaseModel):
+    """Connected parent and child departments for a role/department."""
+
+    parents: list[RoleRead] = Field(default_factory=list)
+    children: list[RoleRead] = Field(default_factory=list)
+
+
+class AddHierarchyLinkRequest(BaseModel):
+    """Payload to add a parent or child department link."""
+
+    department_id: uuid.UUID
 
 
 class GrantPermissionRequest(BaseModel):

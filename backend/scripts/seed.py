@@ -58,6 +58,25 @@ BOOTSTRAP_PERMISSIONS: list[tuple[str, str, str, str, str, str]] = [
     ("user.view", "user", "users", "view", "ALL", "View user accounts; use search and the Active/Inactive tabs."),
     ("user.create", "user", "users", "create", "ALL", "Create user accounts."),
     ("user.action", "user", "users", "manage", "ALL", "Use the Actions menu on a user row: view details, edit profile, reset password, assign role, permission overrides, activate/deactivate, suspend/unsuspend, unlock, force logout, and delete."),
+    # Employee was merged into User (Organization/Employee/IAM upgrade,
+    # merge phase) -- there is no separate employee.* permission family
+    # anymore. Managing "the employee directory" now means managing users
+    # (some of whom have has_login=False), governed entirely by the
+    # user.* permissions above.
+    # Departments were merged into Roles (Organization/Employee/IAM upgrade,
+    # merge phase) -- department management (create/edit/delete, employee
+    # assignment, leadership) now goes through the existing
+    # "roles_permissions.*" permissions below via the same "Departments &
+    # Permissions" screen. There is no separate orgdepartment.* permission
+    # family anymore.
+    # Positions / Designations (Organization/Employee/IAM upgrade).
+    ("position.view", "position", "positions", "view", "ALL", "View positions/designations and their assigned employees."),
+    ("position.create", "position", "positions", "create", "ALL", "Create positions/designations."),
+    ("position.update", "position", "positions", "update", "ALL", "Edit positions, and manage employee position assignments."),
+    ("position.delete", "position", "positions", "delete", "ALL", "Delete positions/designations."),
+    # Reporting Structure / Org Chart (Organization/Employee/IAM upgrade).
+    ("reporting.view", "reporting", "org-chart", "view", "ALL", "View reporting relationships and the organization chart."),
+    ("reporting.manage", "reporting", "org-chart", "manage", "ALL", "Create, change, or remove employee reporting relationships."),
     # Organization Settings (Super Admin system-level)
     ("organization.manage", "organization", "organization", "manage", "ALL", "View and manage system organization profile."),
     # Organization List (Configurations > Organization List; distinct page from
@@ -228,6 +247,8 @@ USER_ROLE_NAME = "user"
 # Permissions screen.
 USER_ROLE_PERMISSION_CODES: list[str] = [
     "user.view",
+    "position.view",
+    "reporting.view",
     "country.view",
     "state.view",
     "city.view",

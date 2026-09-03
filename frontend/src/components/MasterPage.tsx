@@ -98,6 +98,13 @@ export interface MasterPageProps<T extends MasterRecord> {
   extraFilters?: Record<string, string>;
   /** Extra toolbar controls rendered after the search box. */
   toolbarExtras?: ReactNode;
+  /**
+   * Optional callback to determine whether a specific row can be deleted.
+   * Return true/false or { allowed: boolean; reason?: string }.
+   * When disallowed, the delete button is frozen/locked with a lock icon,
+   * disabled styling, tooltip, and click is blocked with an alert.
+   */
+  canDeleteItem?: (item: T) => boolean | { allowed: boolean; reason?: string };
   /** Render form as a full page view preserving sidebar instead of popup overlay. */
   useFullPageForm?: boolean;
   /** Inline style overrides for the modal card (Products widens it). */
@@ -529,6 +536,7 @@ export function MasterPage<T extends MasterRecord>({
   bannerExtras,
   getRowStyle,
   getRowClassName,
+  canDeleteItem,
 }: MasterPageProps<T>) {
   const { hasPermission } = useAuth();
 
@@ -1192,6 +1200,19 @@ export function MasterPage<T extends MasterRecord>({
   }, []);
 
   async function handleDelete(id: string) {
+    const targetItem = rows.find((r) => r.id === id);
+    if (targetItem && canDeleteItem) {
+      const check = canDeleteItem(targetItem);
+      const allowed = typeof check === "boolean" ? check : check.allowed;
+      const reason = typeof check === "object" && !check.allowed ? check.reason : null;
+      if (!allowed) {
+        setAlertPopup({
+          title: `Cannot Delete ${entityName.charAt(0).toUpperCase() + entityName.slice(1)}`,
+          message: reason || `There are already employees attached to this ${entityName}. You cannot delete it.`,
+        });
+        return;
+      }
+    }
     if (!confirm(`Delete this ${entityName}? This cannot be undone.`)) return;
     try {
       await apiDelete(`${apiBase}/${id}`);
@@ -1237,11 +1258,37 @@ export function MasterPage<T extends MasterRecord>({
 
   async function handleBulkDelete() {
     if (!selectedIds.length) return;
-    if (!confirm(`Delete ${selectedIds.length} selected ${entityName}(s)? This cannot be undone.`)) return;
+    let idsToDelete = selectedIds;
+    if (canDeleteItem) {
+      const blockedItems = selectedIds
+        .map((id) => rows.find((r) => r.id === id))
+        .filter((item): item is T => Boolean(item))
+        .filter((item) => {
+          const check = canDeleteItem(item);
+          return !(typeof check === "boolean" ? check : check.allowed);
+        });
+
+      if (blockedItems.length > 0) {
+        if (blockedItems.length === selectedIds.length) {
+          setAlertPopup({
+            title: `Cannot Delete Selected ${entityName.charAt(0).toUpperCase() + entityName.slice(1)}s`,
+            message: `None of the selected ${entityName}s can be deleted because there are already employees attached to them.`,
+          });
+          return;
+        }
+        idsToDelete = selectedIds.filter((id) => !blockedItems.some((b) => b.id === id));
+        if (!confirm(`Delete ${idsToDelete.length} deletable ${entityName}(s)? (${blockedItems.length} locked ${entityName}(s) with attached employees will be skipped). This cannot be undone.`)) return;
+      } else {
+        if (!confirm(`Delete ${selectedIds.length} selected ${entityName}(s)? This cannot be undone.`)) return;
+      }
+    } else {
+      if (!confirm(`Delete ${selectedIds.length} selected ${entityName}(s)? This cannot be undone.`)) return;
+    }
+
     try {
-      await Promise.all(selectedIds.map((id) => apiDelete(`${apiBase}/${id}`)));
-      setRows((prev) => prev.filter((row) => !selectedIds.includes(row.id)));
-      setAllRecords((prev) => prev.filter((row) => !selectedIds.includes(row.id)));
+      await Promise.all(idsToDelete.map((id) => apiDelete(`${apiBase}/${id}`)));
+      setRows((prev) => prev.filter((row) => !idsToDelete.includes(row.id)));
+      setAllRecords((prev) => prev.filter((row) => !idsToDelete.includes(row.id)));
       setSelectedIds([]);
     } catch (err) {
       setError(err);
@@ -1873,31 +1920,73 @@ export function MasterPage<T extends MasterRecord>({
                 </svg>
               </button>
             )}
-            {canDelete && (
-              <button
-                type="button"
-                title="Delete"
-                onClick={() => handleDelete(item.id)}
-                style={{
-                  width: "28px",
-                  height: "28px",
-                  borderRadius: "4px",
-                  border: "none",
-                  background: "#ef4444",
-                  color: "#ffffff",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  cursor: "pointer",
-                  boxShadow: "0 1px 2px rgba(0,0,0,0.1)",
-                }}
-              >
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <polyline points="3 6 5 6 21 6"></polyline>
-                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                </svg>
-              </button>
-            )}
+            {canDelete && (() => {
+              const deleteCheck = canDeleteItem ? canDeleteItem(item) : true;
+              const isDeleteAllowed = typeof deleteCheck === "boolean" ? deleteCheck : deleteCheck.allowed;
+              const deleteLockReason = typeof deleteCheck === "object" && !deleteCheck.allowed ? deleteCheck.reason : null;
+
+              if (!isDeleteAllowed) {
+                return (
+                  <button
+                    type="button"
+                    title={deleteLockReason || `Cannot delete: attached employees exist`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setAlertPopup({
+                        title: `Cannot Delete ${entityName.charAt(0).toUpperCase() + entityName.slice(1)}`,
+                        message: deleteLockReason || `There are already employees attached to this position. You cannot delete it.`,
+                      });
+                    }}
+                    style={{
+                      width: "28px",
+                      height: "28px",
+                      borderRadius: "4px",
+                      border: "1px solid #cbd5e1",
+                      background: "#e2e8f0",
+                      color: "#64748b",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      cursor: "not-allowed",
+                      boxShadow: "none",
+                      opacity: 0.85,
+                      transition: "all 0.15s ease",
+                    }}
+                  >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                      <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                    </svg>
+                  </button>
+                );
+              }
+
+              return (
+                <button
+                  type="button"
+                  title="Delete"
+                  onClick={() => handleDelete(item.id)}
+                  style={{
+                    width: "28px",
+                    height: "28px",
+                    borderRadius: "4px",
+                    border: "none",
+                    background: "#ef4444",
+                    color: "#ffffff",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    cursor: "pointer",
+                    boxShadow: "0 1px 2px rgba(0,0,0,0.1)",
+                  }}
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="3 6 5 6 21 6"></polyline>
+                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                  </svg>
+                </button>
+              );
+            })()}
           </div>
         </td>
       );

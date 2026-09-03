@@ -759,6 +759,29 @@ svg {
   min-height: 64px;
 }
 
+/* --- Universal Select Dropdowns (Consistent Left-Shifted Chevron) --- */
+select:not([multiple]):not([size]),
+select:not([multiple])[size="1"] {
+  appearance: none !important;
+  -webkit-appearance: none !important;
+  -moz-appearance: none !important;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E") !important;
+  background-repeat: no-repeat !important;
+  background-position: right 14px center !important;
+  padding-right: 34px !important;
+  cursor: pointer;
+}
+
+select:not([multiple]):not([size]):disabled,
+select:not([multiple])[size="1"]:disabled {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E") !important;
+  cursor: not-allowed;
+}
+
+select::-ms-expand {
+  display: none;
+}
+
 .form-actions {
   display: flex;
   gap: var(--space-2);
@@ -824,21 +847,60 @@ svg {
   display: flex;
   flex-direction: column;
   flex: 1;
+  min-height: 0;
   height: calc(100vh - 60px);
   overflow: hidden;
 }
 
-.modal-card form > :not(.form-actions) {
-  padding: 16px 24px;
+.modal-card form > :not(.form-actions):not(.modal-footer) {
+  padding: 20px 24px;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
 }
 
-.modal-card .form-actions {
+.modal-card form > :not(.form-actions):not(.modal-footer)::-webkit-scrollbar {
+  width: 6px;
+}
+
+.modal-card form > :not(.form-actions):not(.modal-footer)::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+
+.modal-card form > :not(.form-actions):not(.modal-footer)::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+
+.modal-card form > :not(.form-actions):not(.modal-footer)::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+.modal-card .form-actions,
+.modal-card form > .form-actions,
+.modal-card form > .modal-footer {
   padding: 16px 24px;
   background: #ffffff;
   border-top: 1px solid #e2e8f0;
   display: flex;
+  align-items: center;
+  justify-content: flex-end;
   gap: 12px;
   margin-top: auto;
+  flex: 0 0 auto !important;
+  flex-grow: 0 !important;
+  flex-shrink: 0 !important;
+  min-height: auto !important;
+  height: auto !important;
+}
+
+.modal-card .form-actions button,
+.modal-card form > .form-actions button {
+  height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
 }
 
 .modal-close {

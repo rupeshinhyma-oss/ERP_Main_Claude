@@ -5,13 +5,16 @@ from __future__ import annotations
 import uuid
 from datetime import date, datetime
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, model_validator
 
 from app.users.models import EmploymentStatus, EmploymentType, Gender
 
 
 class UserCreate(BaseModel):
-    """Payload for an admin creating a new user account + profile."""
+    """
+    Payload for an admin creating a new person record, with login access OPTIONAL
+    (Employee/User merge -- see ``User`` model docstring in ``app.users.models``).
+    """
 
     first_name: str = Field(..., min_length=1, max_length=100)
     middle_name: str | None = Field(default=None, max_length=100)
@@ -20,17 +23,27 @@ class UserCreate(BaseModel):
         ..., min_length=1, max_length=200, description="Required. Shown throughout the system in place of the username."
     )
 
+    has_login: bool = Field(
+        default=True,
+        description="Whether this person gets ERP login credentials. False creates a workforce "
+        "record with no login access (e.g. factory worker, driver, temporary labor, consultant) "
+        "-- email/phone/password are not required in that case.",
+    )
+
     employee_code: str | None = Field(default=None, max_length=50)
     username: str | None = Field(
         default=None,
         min_length=3,
         max_length=100,
-        description="Optional. If omitted, the system generates a unique username automatically.",
+        description="Optional. If omitted (and has_login=True), the system generates a unique username automatically.",
     )
-    email: EmailStr
-    phone: str = Field(..., min_length=6, max_length=30, description="Required. Used as a login identifier.")
-    
+    email: EmailStr | None = Field(default=None, description="Required if has_login=True.")
+    phone: str | None = Field(
+        default=None, min_length=6, max_length=30, description="Required if has_login=True. Used as a login identifier."
+    )
+
     manager_id: uuid.UUID | None = None
+    position_id: uuid.UUID | None = None
 
     date_of_birth: date | None = None
     gender: Gender | None = None
@@ -46,13 +59,27 @@ class UserCreate(BaseModel):
     emergency_contact: str | None = Field(default=None, max_length=255)
     notes: str | None = None
 
-    password: str = Field(
-        ..., min_length=1, description="Required. The initial password for the new account."
+    password: str | None = Field(
+        default=None, min_length=1, description="Required if has_login=True. The initial password for the new account."
     )
     role_ids: list[uuid.UUID] = Field(default_factory=list)
     individual_permission_ids: list[uuid.UUID] = Field(
         default_factory=list, description="Optional direct individual permission override IDs to assign to the new user."
     )
+
+    @model_validator(mode="after")
+    def _require_login_fields_when_has_login(self) -> "UserCreate":
+        """When has_login is True, email/phone/password must actually be present."""
+        if self.has_login:
+            missing = [
+                name for name, value in (("email", self.email), ("phone", self.phone), ("password", self.password))
+                if not value
+            ]
+            if missing:
+                raise ValueError(
+                    f"{', '.join(missing)} required when has_login is true (the default)."
+                )
+        return self
 
 
 class UserRead(BaseModel):
@@ -68,11 +95,14 @@ class UserRead(BaseModel):
     full_name: str | None = None
 
     employee_code: str | None = None
-    username: str
-    email: str
-    phone: str
+    has_login: bool = True
+    username: str | None = None
+    email: str | None = None
+    phone: str | None = None
 
     manager_id: uuid.UUID | None = None
+    position_id: uuid.UUID | None = None
+    position_name: str | None = None
 
     date_of_birth: date | None = None
     gender: str | None = None
@@ -107,6 +137,8 @@ class UserWithRoles(UserRead):
     created_by_username: str | None = None
     employee_name: str | None = None
     manager_name: str | None = None
+    position_id: uuid.UUID | None = None
+    position_name: str | None = None
 
 
 class UserUpdate(BaseModel):
@@ -124,6 +156,7 @@ class UserUpdate(BaseModel):
     phone: str | None = Field(default=None, max_length=30)
 
     manager_id: uuid.UUID | None = None
+    position_id: uuid.UUID | None = None
 
     date_of_birth: date | None = None
     gender: Gender | None = None
@@ -141,9 +174,22 @@ class UserUpdate(BaseModel):
 
 
 class AssignRoleRequest(BaseModel):
-    """Payload to assign or remove a role for a user."""
+    """
+    Payload to assign a role/department for a user.
+
+    The assignment-metadata fields are optional and default to a plain
+    PRIMARY, active, no-end-date assignment -- exactly what the old
+    (pre-Department-merge) single-field request did -- so existing callers
+    that only ever sent ``role_id`` keep working unchanged.
+    """
 
     role_id: uuid.UUID
+    assignment_type: str = Field(
+        default="PRIMARY", description="PRIMARY, SECONDARY, TEMPORARY, PROJECT, or ACTING."
+    )
+    is_primary: bool = False
+    effective_from: date | None = None
+    effective_to: date | None = None
 
 
 class ResetPasswordRequest(BaseModel):
@@ -171,4 +217,3 @@ class ResetPasswordResponse(BaseModel):
 
     temporary_password: str
     message: str = "Password has been updated."
-

@@ -42,6 +42,19 @@ class UserRepository(BaseRepository[User]):
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
+    async def list_all(self) -> list[User]:
+        """
+        Return every non-deleted user, ordered by display name/username.
+
+        Used for lookup maps (manager pickers, org chart node resolution)
+        where the caller needs every person, not a paginated page -- the
+        equivalent of the former ``app.employees.repository.EmployeeRepository.list_all()``,
+        now that Employee has been merged into User.
+        """
+        stmt = self._base_select().order_by(User.display_name, User.username)
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
     async def get_by_identifier(self, identifier: str) -> User | None:
         """
         Fetch a user whose username, email, OR phone number matches ``identifier``.
@@ -162,4 +175,3 @@ class UserRepository(BaseRepository[User]):
         users = list(users_res.scalars().all())
         total = count_res.scalar_one() or 0
         return users, total
-

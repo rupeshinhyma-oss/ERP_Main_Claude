@@ -34,6 +34,8 @@ from app.masters.buyer_types.routes import router as buyer_types_router
 from app.masters.supplier_types.routes import router as supplier_types_router
 from app.masters.uom.routes import router as uom_router
 from app.organizations.routes import router as organizations_router
+from app.org_structure.position_routes import router as positions_router
+from app.org_structure.reporting_routes import router as reporting_router
 from app.planning.routes import router as planning_router
 from app.queue.routes import router as queue_router
 from app.rbac.routes import router as rbac_router
@@ -48,6 +50,16 @@ api_router.include_router(health_router)
 api_router.include_router(auth_router)
 api_router.include_router(users_router)
 api_router.include_router(rbac_router)
+
+# Positions/Designations, and the employee Reporting Structure / dynamic
+# Org Chart. Department was merged into Role (app.rbac) -- department/
+# organizational management now happens through the existing
+# "Departments & Permissions" routes (rbac_router) above, which now also
+# accept the code/parent_department_id fields. See app/rbac/models.py
+# (Role docstring) for the full merge rationale.
+api_router.include_router(positions_router)
+api_router.include_router(reporting_router)
+
 api_router.include_router(queue_router)
 api_router.include_router(cache_router)
 api_router.include_router(audit_router)

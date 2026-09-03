@@ -62,6 +62,27 @@ class UserStatus(str, Enum):
 class User(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin, SoftDeleteMixin):
     """
     A single unified user record (incorporating login account + profile information).
+
+    Merge history (Employee -> User)
+    -----------------------------------------------------------------------
+    This app previously had a separate ``Employee`` table (workforce/person
+    records, deliberately independent of login access) alongside ``User``
+    (login accounts). The business decided that separation created more
+    day-to-day friction than value -- adding a new staff member meant
+    deciding upfront "is this a User or an Employee?", and the common case
+    (a person who also needs to log in) required creating and then linking
+    two separate records across two separate screens. ``Employee`` has been
+    merged back into ``User`` (this table already carried every HR/profile
+    field ``Employee`` had -- see the field list below -- since it was never
+    actually stripped down when ``Employee`` was first split out).
+
+    Login is now OPTIONAL per user (``has_login``), rather than a separate
+    entity's presence/absence: a workforce member with no ERP access
+    (factory worker, driver, temporary labor, consultant) is simply a
+    ``User`` row with ``has_login=False`` and no ``username``/``email``/
+    ``phone``/``password_hash`` -- not a different kind of record. This
+    keeps the "person" concept singular while still supporting the
+    no-login case the original Employee/User split existed to cover.
     """
 
     __tablename__ = "users"
@@ -73,10 +94,20 @@ class User(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin, SoftDeleteMi
     display_name: Mapped[str | None] = mapped_column(String(200), nullable=True, index=True)
 
     employee_code: Mapped[str | None] = mapped_column(String(50), unique=True, nullable=True, index=True)
-    username: Mapped[str] = mapped_column(String(100), unique=True, nullable=False, index=True)
-    email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
-    phone: Mapped[str] = mapped_column(String(30), unique=True, nullable=False, index=True)
-    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+
+    has_login: Mapped[bool] = mapped_column(
+        Boolean, default=True, nullable=False, index=True,
+        doc="Whether this person has ERP login credentials. False for workforce members "
+        "tracked for organizational purposes only (factory worker, driver, temporary labor, "
+        "consultant) -- see the Employee/User merge note above. When False, username/email/"
+        "phone/password_hash are NULL and every auth-related check "
+        "(app.auth.dependencies.get_current_user, login, etc.) treats this account as "
+        "unable to authenticate, independent of `status`/`is_active`.",
+    )
+    username: Mapped[str | None] = mapped_column(String(100), unique=True, nullable=True, index=True)
+    email: Mapped[str | None] = mapped_column(String(255), unique=True, nullable=True, index=True)
+    phone: Mapped[str | None] = mapped_column(String(30), unique=True, nullable=True, index=True)
+    password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     # Manager
     manager_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -139,13 +170,13 @@ class User(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin, SoftDeleteMi
 
     @property
     def full_name(self) -> str:
-        """Return computed full name or fallback to username."""
+        """Return computed full name, falling back to username, then employee_code, then a placeholder."""
         if self.display_name:
             return self.display_name
         parts = [p for p in (self.first_name, self.middle_name, self.last_name) if p]
         if parts:
             return " ".join(parts)
-        return self.username
+        return self.username or self.employee_code or "Unnamed"
 
     def __repr__(self) -> str:
         """Return a debug-friendly representation (never includes the password hash)."""
@@ -163,7 +194,9 @@ class User(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin, SoftDeleteMi
 
     @property
     def can_login(self) -> bool:
-        """Return True if the account is active and in a status that permits authentication."""
+        """Return True if this person has login credentials AND the account is active and in a status that permits authentication."""
+        if not self.has_login:
+            return False
         if self.is_locked:
             return False
         # If locked_until has passed, temporary lockout has expired

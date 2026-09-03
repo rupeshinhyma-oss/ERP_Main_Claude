@@ -19,6 +19,7 @@ import { useAuth, usePendingGuard } from "@/lib/hooks";
 import { useToast } from "@/lib/toast";
 import type {
   BulkPermissionOverrideItem,
+  DepartmentHierarchy,
   EffectivePermissionsBreakdown,
   ItemsPage,
   Permission,
@@ -129,10 +130,37 @@ export function RbacPage() {
   const [viewingRole, setViewingRole] = useState<Role | null>(null);
   const [roleName, setRoleName] = useState("");
   const [roleDescription, setRoleDescription] = useState("");
+  const [roleCode, setRoleCode] = useState("");
+  const [roleParentId, setRoleParentId] = useState("");
   const [checkedCodes, setCheckedCodes] = useState<Set<string>>(new Set());
   const [selectedUserToAdd, setSelectedUserToAdd] = useState("");
   const [userActionLoading, setUserActionLoading] = useState(false);
   const [selectedManagerToAdd, setSelectedManagerToAdd] = useState("");
+
+  /* Department Hierarchy state */
+  const [parentDepartments, setParentDepartments] = useState<Role[]>([]);
+  const [childDepartments, setChildDepartments] = useState<Role[]>([]);
+  const [selectedParentToAdd, setSelectedParentToAdd] = useState("");
+  const [selectedChildToAdd, setSelectedChildToAdd] = useState("");
+  const [hierarchyActionLoading, setHierarchyActionLoading] = useState(false);
+
+  const loadHierarchy = useCallback(async (roleId: string) => {
+    if (!roleId) {
+      setParentDepartments([]);
+      setChildDepartments([]);
+      return;
+    }
+    try {
+      const res = await apiGet<DepartmentHierarchy>(`/rbac/roles/${roleId}/hierarchy`);
+      if (res.data) {
+        setParentDepartments(res.data.parents || []);
+        setChildDepartments(res.data.children || []);
+      }
+    } catch {
+      setParentDepartments([]);
+      setChildDepartments([]);
+    }
+  }, []);
 
   /* Per-user Permission Overrides drawer (opened from "Managers in this
    * Department" -- "Edit permissions" for one specific manager). Ported
@@ -214,7 +242,7 @@ export function RbacPage() {
 
   /* --- Open Role in View / Edit Permission screen --- */
   function openRoleView(role: Role | null) {
-    if (!role) {
+    if (!role || !role.id) {
       // Create new role
       setViewingRole({
         id: "",
@@ -225,24 +253,39 @@ export function RbacPage() {
       });
       setRoleName("");
       setRoleDescription("");
+      setRoleCode("");
+      setRoleParentId("");
       setCheckedCodes(new Set());
+      setParentDepartments([]);
+      setChildDepartments([]);
     } else {
       setViewingRole(role);
       setRoleName(role.name || "");
       setRoleDescription(role.description || "");
+      setRoleCode(role.code || "");
+      setRoleParentId(role.parent_department_id || "");
       setCheckedCodes(new Set(role.permissions || []));
+      loadHierarchy(role.id);
     }
     setSelectedUserToAdd("");
     setSelectedManagerToAdd("");
+    setSelectedParentToAdd("");
+    setSelectedChildToAdd("");
   }
 
   function closeRoleView() {
     setViewingRole(null);
     setRoleName("");
     setRoleDescription("");
+    setRoleCode("");
+    setRoleParentId("");
     setCheckedCodes(new Set());
     setSelectedUserToAdd("");
     setSelectedManagerToAdd("");
+    setParentDepartments([]);
+    setChildDepartments([]);
+    setSelectedParentToAdd("");
+    setSelectedChildToAdd("");
   }
 
   function toggleCode(code: string) {
@@ -457,6 +500,86 @@ export function RbacPage() {
     }
   }
 
+  async function handleAddParentDepartment(parentId?: string) {
+    const targetParentId = parentId || selectedParentToAdd;
+    if (!viewingRole?.id || !targetParentId) return;
+    setHierarchyActionLoading(true);
+    try {
+      const res = await apiPost<DepartmentHierarchy>(`/rbac/roles/${viewingRole.id}/parents`, {
+        department_id: targetParentId,
+      });
+      if (res.data) {
+        setParentDepartments(res.data.parents || []);
+        setChildDepartments(res.data.children || []);
+      }
+      setSelectedParentToAdd("");
+      showToast("Parent department linked successfully!", "success");
+      await loadRoles();
+    } catch (err) {
+      setError(err);
+    } finally {
+      setHierarchyActionLoading(false);
+    }
+  }
+
+  async function handleRemoveParentDepartment(parentId: string) {
+    if (!viewingRole?.id || !parentId) return;
+    setHierarchyActionLoading(true);
+    try {
+      const res = await apiDelete<DepartmentHierarchy>(`/rbac/roles/${viewingRole.id}/parents/${parentId}`);
+      if (res.data) {
+        setParentDepartments(res.data.parents || []);
+        setChildDepartments(res.data.children || []);
+      }
+      showToast("Parent department unlinked.", "info");
+      await loadRoles();
+    } catch (err) {
+      setError(err);
+    } finally {
+      setHierarchyActionLoading(false);
+    }
+  }
+
+  async function handleAddChildDepartment(childId?: string) {
+    const targetChildId = childId || selectedChildToAdd;
+    if (!viewingRole?.id || !targetChildId) return;
+    setHierarchyActionLoading(true);
+    try {
+      const res = await apiPost<DepartmentHierarchy>(`/rbac/roles/${viewingRole.id}/children`, {
+        department_id: targetChildId,
+      });
+      if (res.data) {
+        setParentDepartments(res.data.parents || []);
+        setChildDepartments(res.data.children || []);
+      }
+      setSelectedChildToAdd("");
+      showToast("Child department linked successfully!", "success");
+      await loadRoles();
+    } catch (err) {
+      setError(err);
+    } finally {
+      setHierarchyActionLoading(false);
+    }
+  }
+
+  async function handleRemoveChildDepartment(childId: string) {
+    if (!viewingRole?.id || !childId) return;
+    setHierarchyActionLoading(true);
+    try {
+      const res = await apiDelete<DepartmentHierarchy>(`/rbac/roles/${viewingRole.id}/children/${childId}`);
+      if (res.data) {
+        setParentDepartments(res.data.parents || []);
+        setChildDepartments(res.data.children || []);
+      }
+      showToast("Child department unlinked.", "info");
+      await loadRoles();
+    } catch (err) {
+      setError(err);
+    } finally {
+      setHierarchyActionLoading(false);
+    }
+  }
+
   async function handleSaveRoleView() {
     if (!roleName.trim()) {
       showToast("Department name cannot be empty", "error");
@@ -470,17 +593,21 @@ export function RbacPage() {
     try {
       const name = roleName.trim();
       const description = roleDescription.trim() || undefined;
+      const code = roleCode.trim() || undefined;
+      const parent_department_id = roleParentId ? roleParentId : null;
       const desiredCodes = checkedCodes;
 
       let roleId = viewingRole?.id || "";
       if (roleId) {
         // Update existing role
-        await apiPatch(`/rbac/roles/${roleId}`, { name, description });
+        await apiPatch(`/rbac/roles/${roleId}`, { name, description, code, parent_department_id });
       } else {
         // Create new role
         const newRole = await apiPost<Role>("/rbac/roles", {
           name,
           description,
+          code,
+          parent_department_id: roleParentId || undefined,
           permission_codes: [],
         });
         roleId = newRole.data.id;
@@ -688,6 +815,158 @@ export function RbacPage() {
                       readOnly={!canManageOrCreate}
                     />
                   </div>
+                  <div className="field" style={{ marginTop: "14px" }}>
+                    <TextField
+                      id="role-code-input"
+                      label="Department Code"
+                      value={roleCode}
+                      onChange={setRoleCode}
+                      readOnly={!canManageOrCreate}
+                      placeholder="e.g. SALES"
+                    />
+                    <span className="muted" style={{ fontSize: "12px", marginTop: "4px", display: "block" }}>
+                      Optional short code for this organizational department. Purely a label -- has no
+                      effect on permissions.
+                    </span>
+                  </div>
+                  <div className="field" style={{ marginTop: "14px" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
+                      <label style={{ margin: 0, fontWeight: 600, color: "#1e293b", fontSize: "13px" }}>
+                        Parent Departments
+                      </label>
+                      {viewingRole.id && (
+                        <span style={{ fontSize: "11px", background: "#f1f5f9", color: "#475569", padding: "1px 7px", borderRadius: "10px", fontWeight: 700 }}>
+                          {parentDepartments.length} parent{parentDepartments.length === 1 ? "" : "s"}
+                        </span>
+                      )}
+                    </div>
+
+                    {viewingRole.id ? (
+                      <div>
+                        {parentDepartments.length > 0 ? (
+                          <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginBottom: "8px" }}>
+                            {parentDepartments.map((p) => (
+                              <span
+                                key={p.id}
+                                style={{
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: "6px",
+                                  background: "#eff6ff",
+                                  border: "1px solid #bfdbfe",
+                                  borderRadius: "6px",
+                                  padding: "3px 8px",
+                                  fontSize: "12px",
+                                  fontWeight: 600,
+                                  color: "#1d4ed8",
+                                }}
+                              >
+                                <span>🏢 {roleDisplayName(p.name)} {p.code ? `(${p.code})` : ""}</span>
+                                {canManageOrCreate && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRemoveParentDepartment(p.id)}
+                                    disabled={hierarchyActionLoading}
+                                    style={{
+                                      border: "none",
+                                      background: "none",
+                                      color: "#dc2626",
+                                      cursor: "pointer",
+                                      padding: "0 2px",
+                                      fontWeight: 700,
+                                      fontSize: "14px",
+                                      lineHeight: 1,
+                                    }}
+                                    title="Unlink this parent department"
+                                  >
+                                    ×
+                                  </button>
+                                )}
+                              </span>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="muted" style={{ fontSize: "12px", margin: "0 0 8px" }}>
+                            None (top-level department).
+                          </p>
+                        )}
+
+                        {canManageOrCreate && (
+                          <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                            <select
+                              id="add-parent-to-role-select"
+                              value={selectedParentToAdd}
+                              onChange={(e) => setSelectedParentToAdd(e.target.value)}
+                              style={{
+                                flex: 1,
+                                minWidth: 0,
+                                height: "34px",
+                                paddingLeft: "10px",
+                                paddingRight: "32px",
+                                borderRadius: "6px",
+                                border: "1px solid #cbd5e1",
+                                fontSize: "12.5px",
+                                background: "#ffffff",
+                                color: "#1e293b",
+                                appearance: "none",
+                                WebkitAppearance: "none",
+                                MozAppearance: "none",
+                                backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E")`,
+                                backgroundRepeat: "no-repeat",
+                                backgroundPosition: "right 14px center",
+                                cursor: "pointer",
+                                outline: "none",
+                              }}
+                            >
+                              <option value="">-- Add another parent department --</option>
+                              {allRoles
+                                .filter(
+                                  (r) =>
+                                    r.id !== viewingRole.id &&
+                                    !parentDepartments.some((p) => p.id === r.id) &&
+                                    !childDepartments.some((c) => c.id === r.id) &&
+                                    r.name !== "super_admin"
+                                )
+                                .map((r) => (
+                                  <option key={r.id} value={r.id}>
+                                    {roleDisplayName(r.name)} {r.code ? `(${r.code})` : ""}
+                                  </option>
+                                ))}
+                            </select>
+                            <button
+                              type="button"
+                              className="btn btn-secondary btn-small"
+                              disabled={!selectedParentToAdd || hierarchyActionLoading}
+                              onClick={() => handleAddParentDepartment()}
+                              style={{ height: "34px", whiteSpace: "nowrap", padding: "0 10px", fontSize: "12px" }}
+                            >
+                              + Add Parent
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <select
+                        id="role-parent-input"
+                        value={roleParentId}
+                        onChange={(e) => setRoleParentId(e.target.value)}
+                        disabled={!canManageOrCreate}
+                      >
+                        <option value="">-- None (top-level) --</option>
+                        {allRoles
+                          .filter((r) => r.id !== viewingRole.id)
+                          .map((r) => (
+                            <option key={r.id} value={r.id}>
+                              {r.name}
+                            </option>
+                          ))}
+                      </select>
+                    )}
+
+                    <span className="muted" style={{ fontSize: "12px", marginTop: "4px", display: "block" }}>
+                      Departments can be nested under multiple parent departments. Does not affect permission inheritance.
+                    </span>
+                  </div>
                 </div>
 
                 {viewingRole.id && (
@@ -716,11 +995,12 @@ export function RbacPage() {
                             flex: 1,
                             minWidth: 0,
                             height: "38px",
-                            padding: "0 10px",
+                            paddingLeft: "10px",
+                            paddingRight: "34px",
                             borderRadius: "6px",
                             border: "1px solid #cbd5e1",
                             fontSize: "13px",
-                            background: "#ffffff",
+                            backgroundColor: "#ffffff",
                             color: "#1e293b",
                             outline: "none",
                             boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
@@ -805,10 +1085,10 @@ export function RbacPage() {
                                   </div>
                                   <div style={{ minWidth: 0 }}>
                                     <div style={{ fontWeight: 600, color: "#1e293b", fontSize: "13px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                                      {u.display_name || u.username}
+                                      {u.display_name || u.username || u.full_name || "Unnamed"}
                                     </div>
                                     <div style={{ fontSize: "11.5px", color: "#64748b", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                                      {u.email || u.username}
+                                      {u.email || u.username || "No login access"}
                                     </div>
                                   </div>
                                 </div>
@@ -827,7 +1107,7 @@ export function RbacPage() {
                                         fontWeight: 600,
                                         padding: "4px 8px",
                                       }}
-                                      onClick={() => openUserOverridesModal(u.id, u.display_name || u.username)}
+                                      onClick={() => openUserOverridesModal(u.id, u.display_name || u.username || u.full_name || "this user")}
                                       title="Set this manager's individual extra permissions"
                                     >
                                       🔑 Edit permissions
@@ -895,11 +1175,12 @@ export function RbacPage() {
                             flex: 1,
                             minWidth: 0,
                             height: "38px",
-                            padding: "0 10px",
+                            paddingLeft: "10px",
+                            paddingRight: "34px",
                             borderRadius: "6px",
                             border: "1px solid #cbd5e1",
                             fontSize: "13px",
-                            background: "#ffffff",
+                            backgroundColor: "#ffffff",
                             color: "#1e293b",
                             outline: "none",
                             boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
@@ -1043,6 +1324,219 @@ export function RbacPage() {
                             <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
                           </svg>
                           No users currently assigned.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {viewingRole.id && (
+                  <div className="card" style={{ padding: "20px" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                        <span style={{ fontSize: "16px" }}>🌿</span>
+                        <h3 style={{ fontSize: "15px", fontWeight: 700, margin: 0, color: "#0f172a" }}>
+                          Child Departments
+                        </h3>
+                      </div>
+                      <span
+                        style={{
+                          fontSize: "11.5px",
+                          background: "#f0fdf4",
+                          color: "#166534",
+                          border: "1px solid #bbf7d0",
+                          padding: "2px 8px",
+                          borderRadius: "10px",
+                          fontWeight: 700,
+                        }}
+                      >
+                        {childDepartments.length} sub-department{childDepartments.length === 1 ? "" : "s"}
+                      </span>
+                    </div>
+                    <p style={{ fontSize: "12.5px", color: "#64748b", margin: "0 0 14px" }}>
+                      Sub-departments that report to or are nested under{" "}
+                      <strong>{roleDisplayName(viewingRole.name)}</strong>.
+                    </p>
+
+                    {canManageOrCreate && (
+                      <div style={{ display: "flex", gap: "8px", marginBottom: "16px", alignItems: "center", width: "100%" }}>
+                        <select
+                          id="add-child-to-role-select"
+                          value={selectedChildToAdd}
+                          onChange={(e) => setSelectedChildToAdd(e.target.value)}
+                          style={{
+                            flex: 1,
+                            minWidth: 0,
+                            height: "38px",
+                            paddingLeft: "10px",
+                            paddingRight: "34px",
+                            borderRadius: "6px",
+                            border: "1px solid #cbd5e1",
+                            fontSize: "13px",
+                            background: "#ffffff",
+                            color: "#1e293b",
+                            outline: "none",
+                            boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
+                            cursor: "pointer",
+                            textOverflow: "ellipsis",
+                            overflow: "hidden",
+                            appearance: "none",
+                            WebkitAppearance: "none",
+                            MozAppearance: "none",
+                            backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E")`,
+                            backgroundRepeat: "no-repeat",
+                            backgroundPosition: "right 14px center",
+                          }}
+                        >
+                          <option value="">-- Select child department to add --</option>
+                          {allRoles
+                            .filter(
+                              (r) =>
+                                r.id !== viewingRole.id &&
+                                !childDepartments.some((c) => c.id === r.id) &&
+                                !parentDepartments.some((p) => p.id === r.id) &&
+                                r.name !== "super_admin"
+                            )
+                            .map((r) => (
+                              <option key={r.id} value={r.id}>
+                                {roleDisplayName(r.name)} {r.code ? `(${r.code})` : ""}
+                              </option>
+                            ))}
+                        </select>
+                        <button
+                          type="button"
+                          className="btn btn-primary"
+                          disabled={!selectedChildToAdd || hierarchyActionLoading}
+                          onClick={() => handleAddChildDepartment()}
+                          style={{
+                            flexShrink: 0,
+                            whiteSpace: "nowrap",
+                            height: "38px",
+                            padding: "0 14px",
+                            borderRadius: "6px",
+                            fontWeight: 600,
+                            fontSize: "13px",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "6px",
+                            cursor: !selectedChildToAdd || hierarchyActionLoading ? "not-allowed" : "pointer",
+                            opacity: !selectedChildToAdd ? 0.6 : 1,
+                          }}
+                        >
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                            <line x1="12" y1="5" x2="12" y2="19"></line>
+                            <line x1="5" y1="12" x2="19" y2="12"></line>
+                          </svg>
+                          {hierarchyActionLoading ? "Adding..." : "Add"}
+                        </button>
+                      </div>
+                    )}
+
+                    <div style={{ maxHeight: "280px", overflowY: "auto", border: "1px solid #e2e8f0", borderRadius: "8px", background: "#f8fafc" }}>
+                      {childDepartments.length ? (
+                        <div style={{ display: "flex", flexDirection: "column" }}>
+                          {childDepartments.map((c) => {
+                            const childUsersCount = allUsers.filter((u) => u.roles?.includes(c.name)).length;
+                            const initials = (c.name || "D").slice(0, 2).toUpperCase();
+                            return (
+                              <div
+                                key={c.id}
+                                style={{
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "space-between",
+                                  padding: "10px 14px",
+                                  borderBottom: "1px solid #f1f5f9",
+                                  background: "#ffffff",
+                                }}
+                              >
+                                <div style={{ display: "flex", alignItems: "center", gap: "10px", minWidth: 0 }}>
+                                  <div
+                                    style={{
+                                      width: "32px",
+                                      height: "32px",
+                                      borderRadius: "6px",
+                                      background: "#f0fdf4",
+                                      color: "#166534",
+                                      fontWeight: 700,
+                                      fontSize: "12px",
+                                      display: "flex",
+                                      alignItems: "center",
+                                      justifyContent: "center",
+                                      flexShrink: 0,
+                                      border: "1px solid #bbf7d0",
+                                    }}
+                                  >
+                                    {initials}
+                                  </div>
+                                  <div style={{ minWidth: 0 }}>
+                                    <div style={{ fontWeight: 600, color: "#1e293b", fontSize: "13px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", display: "flex", alignItems: "center", gap: "6px" }}>
+                                      <span>{roleDisplayName(c.name)}</span>
+                                      {c.code && (
+                                        <span style={{ fontSize: "11px", color: "#64748b", background: "#f1f5f9", padding: "1px 5px", borderRadius: "4px", fontFamily: "monospace" }}>
+                                          {c.code}
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div style={{ fontSize: "11.5px", color: "#64748b" }}>
+                                      👤 {childUsersCount} member{childUsersCount === 1 ? "" : "s"}
+                                    </div>
+                                  </div>
+                                </div>
+                                <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                                  <button
+                                    type="button"
+                                    className="btn btn-small"
+                                    style={{
+                                      color: "#2563eb",
+                                      background: "#eff6ff",
+                                      border: "1px solid #bfdbfe",
+                                      borderRadius: "4px",
+                                      cursor: "pointer",
+                                      fontSize: "12px",
+                                      fontWeight: 600,
+                                      padding: "4px 8px",
+                                    }}
+                                    onClick={() => openRoleView(c)}
+                                    title="Open and edit this child department"
+                                  >
+                                    View
+                                  </button>
+                                  {canManageOrCreate && (
+                                    <button
+                                      type="button"
+                                      className="btn btn-small"
+                                      style={{
+                                        color: "#ef4444",
+                                        background: "#fef2f2",
+                                        border: "1px solid #fecaca",
+                                        borderRadius: "4px",
+                                        cursor: "pointer",
+                                        fontSize: "12px",
+                                        fontWeight: 600,
+                                        padding: "4px 8px",
+                                      }}
+                                      disabled={hierarchyActionLoading}
+                                      onClick={() => handleRemoveChildDepartment(c.id)}
+                                      title="Unlink child department from this parent"
+                                    >
+                                      Remove
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <div style={{ textAlign: "center", padding: "28px 16px", color: "#64748b", fontSize: "13px" }}>
+                          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth="1.5" style={{ margin: "0 auto 8px", display: "block" }}>
+                            <path d="M6 3v12"></path>
+                            <circle cx="18" cy="6" r="3"></circle>
+                            <circle cx="6" cy="18" r="3"></circle>
+                            <path d="M18 9a9 9 0 0 1-9 9"></path>
+                          </svg>
+                          No child departments connected.
                         </div>
                       )}
                     </div>
@@ -1499,11 +1993,12 @@ export function RbacPage() {
                   style={{
                     width: "100%",
                     height: "38px",
-                    padding: "0 12px",
+                    paddingLeft: "12px",
+                    paddingRight: "34px",
                     borderRadius: "6px",
                     border: "1px solid #cbd5e1",
                     fontSize: "13px",
-                    background: "#ffffff",
+                    backgroundColor: "#ffffff",
                     color: "#1e293b",
                   }}
                 >

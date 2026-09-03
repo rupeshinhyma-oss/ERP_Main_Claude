@@ -25,6 +25,9 @@ import type {
   ItemsPage,
   Permission,
   PaginationMeta,
+  Position,
+  PositionAssignment,
+  ReportingRelationship,
   Role,
   User,
   UserPermissionOverride,
@@ -231,12 +234,15 @@ const EMPTY_CREATE = {
   first_name: "",
   last_name: "",
   display_name: "",
+  has_login: true,
   username: "",
   email: "",
   employee_code: "",
   phone: "",
   password: "",
   role_id: "",
+  manager_id: "",
+  position_id: "",
 };
 
 const EMPTY_EDIT = {
@@ -250,6 +256,7 @@ const EMPTY_EDIT = {
   email: "",
   phone: "",
   manager_id: "",
+  position_id: "",
   date_of_birth: "",
   gender: "",
   date_of_joining: "",
@@ -284,10 +291,17 @@ export function UsersPage() {
 
   const [createOpen, setCreateOpen] = useState(false);
   const [createForm, setCreateForm] = useState(EMPTY_CREATE);
+  const [allUsers, setAllUsers] = useState<User[]>([]);
+  const [autoManagerNotice, setAutoManagerNotice] = useState<string | null>(null);
   const [editOpen, setEditOpen] = useState(false);
   const [editForm, setEditForm] = useState(EMPTY_EDIT);
   const [viewUser, setViewUser] = useState<User | null>(null);
   const [viewSessions, setViewSessions] = useState<UserSession[] | null>(null);
+  const [viewPositions, setViewPositions] = useState<PositionAssignment[] | null>(null);
+  const [viewManagers, setViewManagers] = useState<ReportingRelationship[] | null>(null);
+  const [viewDirectReports, setViewDirectReports] = useState<ReportingRelationship[] | null>(null);
+  const [positions, setPositions] = useState<Position[]>([]);
+  const [positionNames, setPositionNames] = useState<Record<string, string>>({});
   const [viewLoading, setViewLoading] = useState(false);
 
   const [searchParams, setSearchParams] = useSearchParams();
@@ -330,6 +344,10 @@ export function UsersPage() {
   }, [deepLinkUserId, setSearchParams]);
 
   const [roleModalUserId, setRoleModalUserId] = useState<string | null>(null);
+  const [roleModalUsername, setRoleModalUsername] = useState<string>("");
+  // Tracks in-flight per-role removals inside the Manage Departments modal
+  // so each "Remove" button can show its own busy state independently.
+  const [removingRoleId, setRemovingRoleId] = useState<string | null>(null);
   const [assignRoleId, setAssignRoleId] = useState("");
   const [tempPassword, setTempPassword] = useState<string | null>(null);
 
@@ -375,10 +393,29 @@ export function UsersPage() {
     })();
     (async () => {
       try {
+        const { data } = await apiGet<User[]>("/users/all");
+        setAllUsers(data || []);
+      } catch {
+        /* manager select will fallback to loaded rows */
+      }
+    })();
+    (async () => {
+      try {
         const { data } = await apiGet<Permission[]>("/rbac/permissions");
         setAllPermissions(data || []);
       } catch {
         /* the overrides modal degrades to "no permissions found" */
+      }
+    })();
+    (async () => {
+      try {
+        const { data } = await apiGet<Position[]>("/positions/all");
+        setPositions(data || []);
+        const map: Record<string, string> = {};
+        for (const p of data || []) map[p.id] = p.name;
+        setPositionNames(map);
+      } catch {
+        /* position names in the profile drawer degrade to raw IDs */
       }
     })();
   }, []);
@@ -486,6 +523,9 @@ export function UsersPage() {
     setViewLoading(true);
     setViewUser(null);
     setViewSessions(null);
+    setViewPositions(null);
+    setViewManagers(null);
+    setViewDirectReports(null);
     try {
       const { data } = await apiGet<User>(`/users/${userId}`);
       setViewUser(data);
@@ -495,6 +535,20 @@ export function UsersPage() {
       } catch {
         setViewSessions([]);
       }
+      try {
+        const [posRes, mgrRes, reportsRes] = await Promise.all([
+          apiGet<PositionAssignment[]>(`/positions/holders-for-user/${userId}`).catch(() => ({ data: [] as PositionAssignment[] })),
+          apiGet<ReportingRelationship[]>(`/reporting/managers/${userId}`).catch(() => ({ data: [] as ReportingRelationship[] })),
+          apiGet<ReportingRelationship[]>(`/reporting/direct-reports/${userId}`).catch(() => ({ data: [] as ReportingRelationship[] })),
+        ]);
+        setViewPositions(posRes.data || []);
+        setViewManagers(mgrRes.data || []);
+        setViewDirectReports(reportsRes.data || []);
+      } catch {
+        setViewPositions([]);
+        setViewManagers([]);
+        setViewDirectReports([]);
+      }
     } catch (err) {
       setError(err);
     } finally {
@@ -502,7 +556,23 @@ export function UsersPage() {
     }
   }
 
-  function openEditUser(user: User) {
+  async function openEditUser(user: User) {
+    let currentPositionId = user.position_id || "";
+    if (!currentPositionId) {
+      try {
+        const { data } = await apiGet<PositionAssignment[]>(`/positions/holders-for-user/${user.id}`);
+        const primaryPos =
+          (data || []).find((p) => p.is_primary && p.status === "ACTIVE") ||
+          (data || []).find((p) => p.status === "ACTIVE") ||
+          (data || [])[0];
+        if (primaryPos) {
+          currentPositionId = primaryPos.position_id;
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+
     setEditForm({
       id: user.id,
       username: user.username || "",
@@ -514,6 +584,7 @@ export function UsersPage() {
       email: user.email || "",
       phone: user.phone || "",
       manager_id: user.manager_id || "",
+      position_id: currentPositionId,
       date_of_birth: user.date_of_birth ? user.date_of_birth.split("T")[0] : "",
       gender: user.gender || "",
       date_of_joining: user.date_of_joining ? user.date_of_joining.split("T")[0] : "",
@@ -531,27 +602,80 @@ export function UsersPage() {
     setEditOpen(true);
   }
 
+  async function handleDepartmentChange(roleId: string) {
+    setCreateForm((f) => ({ ...f, role_id: roleId }));
+    setAutoManagerNotice(null);
+
+    // If empty/default is chosen, resolve the default "user" role
+    const effectiveRoleId = roleId || roles.find((r) => r.name.toLowerCase() === "user")?.id || "";
+    if (!effectiveRoleId) {
+      setCreateForm((f) => ({ ...f, manager_id: "" }));
+      return;
+    }
+    try {
+      const { data } = await apiGet<{ manager_id: string | null; manager_name: string | null }>(
+        `/users/department-manager/${effectiveRoleId}`
+      );
+      if (data && data.manager_id) {
+        setCreateForm((f) => ({ ...f, manager_id: data.manager_id || "" }));
+        if (data.manager_name) {
+          setAutoManagerNotice(`Automatically selected ${data.manager_name} as Department Manager.`);
+        }
+      } else {
+        setCreateForm((f) => ({ ...f, manager_id: "" }));
+      }
+    } catch {
+      /* ignore lookup errors */
+    }
+  }
+
   async function handleCreateSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (createSubmitting) return; // Phase 7: ignore a second click while the first save is still in flight
     setError(null);
     setCreateSubmitting(true);
     try {
+      // If an individual is not assigned anything, default to the system "User" department/role
+      let selectedRoleId = createForm.role_id;
+      if (!selectedRoleId) {
+        const defaultRole = roles.find((r) => r.name.toLowerCase() === "user");
+        if (defaultRole) {
+          selectedRoleId = defaultRole.id;
+        }
+      }
+
       const { data } = await apiPost<User>("/users", {
         first_name: createForm.first_name.trim(),
         last_name: createForm.last_name.trim(),
         display_name: createForm.display_name.trim(),
-        username: createForm.username.trim() || null,
-        email: createForm.email.trim(),
+        has_login: createForm.has_login,
+        username: createForm.has_login ? createForm.username.trim() || null : null,
+        email: createForm.has_login ? createForm.email.trim() : null,
         employee_code: createForm.employee_code.trim() || null,
-        phone: createForm.phone.trim(),
-        password: createForm.password,
-        role_ids: createForm.role_id ? [createForm.role_id] : [],
+        phone: createForm.has_login ? createForm.phone.trim() : null,
+        password: createForm.has_login ? createForm.password : null,
+        role_ids: selectedRoleId ? [selectedRoleId] : [],
+        manager_id: createForm.manager_id || null,
+        position_id: createForm.position_id || null,
       });
       setCreateOpen(false);
       setCreateForm(EMPTY_CREATE);
+      setAutoManagerNotice(null);
       if (data) {
+        if (createForm.position_id) {
+          try {
+            await apiPost("/positions/assignments", {
+              employee_id: data.id,
+              position_id: createForm.position_id,
+              assignment_type: "PRIMARY",
+              is_primary: true,
+            });
+          } catch {
+            /* already handled by create_user backend */
+          }
+        }
         setRows((prev) => [data, ...prev]);
+        setAllUsers((prev) => [data, ...prev]);
         setPagination((prev) => (prev ? { ...prev, total_records: (prev.total_records || 0) + 1 } : prev));
         if (data.temporary_password) setTempPassword(data.temporary_password);
       } else {
@@ -582,6 +706,7 @@ export function UsersPage() {
         employee_code: editForm.employee_code.trim() || null,
         phone: editForm.phone.trim() || null,
         manager_id: editForm.manager_id || null,
+        position_id: editForm.position_id || null,
         date_of_birth: editForm.date_of_birth || null,
         gender: editForm.gender || null,
         date_of_joining: editForm.date_of_joining || null,
@@ -600,9 +725,31 @@ export function UsersPage() {
       setEditOpen(false);
       showToast(`User profile updated successfully.`, "success");
       if (updatedUser) {
-        setRows((prev) => prev.map((u) => (u.id === editForm.id ? { ...u, ...updatedUser } : u)));
+        const nextPosId = editForm.position_id || null;
+        const nextPosName = nextPosId ? positionNames[nextPosId] : null;
+        setRows((prev) =>
+          prev.map((u) =>
+            u.id === editForm.id
+              ? { ...u, ...updatedUser, position_id: nextPosId, position_name: nextPosName }
+              : u
+          )
+        );
+        setAllUsers((prev) =>
+          prev.map((u) =>
+            u.id === editForm.id
+              ? { ...u, ...updatedUser, position_id: nextPosId, position_name: nextPosName }
+              : u
+          )
+        );
         if (viewUser && viewUser.id === editForm.id) {
-          setViewUser((prev) => (prev ? { ...prev, ...updatedUser } : updatedUser));
+          setViewUser((prev) =>
+            prev
+              ? { ...prev, ...updatedUser, position_id: nextPosId, position_name: nextPosName }
+              : updatedUser
+          );
+          apiGet<PositionAssignment[]>(`/positions/holders-for-user/${editForm.id}`)
+            .then((r) => setViewPositions(r.data || []))
+            .catch(() => {});
         }
       } else {
         reload();
@@ -621,13 +768,30 @@ export function UsersPage() {
     setAssignRoleSubmitting(true);
     try {
       await apiPost(`/users/${roleModalUserId}/roles`, { role_id: assignRoleId });
-      setRoleModalUserId(null);
+      // A user can hold several departments/roles at once now, so keep the
+      // modal open (instead of closing it) and just clear the picker + reload
+      // the row data -- lets an admin add a second, third, ... role in one
+      // sitting without reopening the modal each time.
       setAssignRoleId("");
       reload();
     } catch (err) {
       setError(err);
     } finally {
       setAssignRoleSubmitting(false);
+    }
+  }
+
+  /** Remove one currently-held department/role from the user open in the "Manage Departments" modal. */
+  async function handleRemoveRoleFromModal(roleId: string) {
+    if (!roleModalUserId || removingRoleId) return;
+    setRemovingRoleId(roleId);
+    try {
+      await apiDelete(`/users/${roleModalUserId}/roles/${roleId}`);
+      reload();
+    } catch (err) {
+      setError(err);
+    } finally {
+      setRemovingRoleId(null);
     }
   }
 
@@ -833,7 +997,7 @@ export function UsersPage() {
                         actions.push({
                           key: "reset-password",
                           label: resettingPassword ? "🔑 Resetting..." : "🔑 Reset Password",
-                          onClick: () => handleResetPassword(u.id, u.username),
+                          onClick: () => handleResetPassword(u.id, u.username ?? u.full_name ?? u.display_name ?? "this user"),
                         });
                         const changingAdminRole = isRowActionPending(`admin-role:${u.id}`);
                         if (hasAdminRole && !isTargetSuperAdmin) {
@@ -841,21 +1005,22 @@ export function UsersPage() {
                             key: "remove-admin",
                             label: changingAdminRole ? "🛡️ Removing..." : "🛡️ Remove Legacy Admin Role",
                             danger: true,
-                            onClick: () => removeAdminRole(u.id, u.username),
+                            onClick: () => removeAdminRole(u.id, u.username ?? u.full_name ?? u.display_name ?? "this user"),
                           });
                         }
                         actions.push({
                           key: "assign-role",
-                          label: "🛡️ Assign Department",
+                          label: "🛡️ Manage Departments",
                           onClick: () => {
                             setRoleModalUserId(u.id);
+                            setRoleModalUsername(u.username ?? u.full_name ?? u.display_name ?? "this user");
                             setAssignRoleId("");
                           },
                         });
                         actions.push({
                           key: "permission-overrides",
                           label: "🔑 Permission Overrides",
-                          onClick: () => openUserOverridesModal(u.id, u.username),
+                          onClick: () => openUserOverridesModal(u.id, u.username ?? u.full_name ?? u.display_name ?? "this user"),
                         });
 
                         actions.push("divider");
@@ -911,7 +1076,7 @@ export function UsersPage() {
                             ? "🚪 Logging out..."
                             : "🚪 Force Logout All",
                           danger: true,
-                          onClick: () => handleForceLogout(u.id, u.username),
+                          onClick: () => handleForceLogout(u.id, u.username ?? u.full_name ?? u.display_name ?? "this user"),
                         });
                         if (!isTargetSuperAdmin) {
                           actions.push({
@@ -920,7 +1085,7 @@ export function UsersPage() {
                               ? "🗑️ Deleting..."
                               : "🗑️ Delete User",
                             danger: true,
-                            onClick: () => handleDeleteUser(u.id, u.username, u.email),
+                            onClick: () => handleDeleteUser(u.id, u.username ?? u.full_name ?? u.display_name ?? "this user", u.email ?? ""),
                           });
                         }
                       }
@@ -958,7 +1123,7 @@ export function UsersPage() {
                               </span>
                             ))
                           ) : (
-                            <em>No Department</em>
+                            <span className="badge badge-neutral">User</span>
                           )}
                         </td>
                         <td>
@@ -997,11 +1162,30 @@ export function UsersPage() {
       <Modal
         open={createOpen}
         title="Create User Account"
-        onClose={() => setCreateOpen(false)}
+        onClose={() => {
+          setCreateOpen(false);
+          setAutoManagerNotice(null);
+        }}
         cardStyle={{ maxWidth: "650px" }}
       >
-        <form onSubmit={handleCreateSubmit}>
-          <div className="form-grid">
+        <form
+          onSubmit={handleCreateSubmit}
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            height: "calc(100vh - 60px)",
+            overflow: "hidden",
+          }}
+        >
+          <div
+            className="form-grid"
+            style={{
+              padding: "20px 24px",
+              overflowY: "auto",
+              flex: 1,
+              minHeight: 0,
+            }}
+          >
             <TextField
               id="first_name"
               label="First Name *"
@@ -1050,19 +1234,50 @@ export function UsersPage() {
               value={createForm.display_name}
               onChange={(v) => setCreateForm((f) => ({ ...f, display_name: v }))}
             />
-            <TextField id="username" label="Username (optional)" minLength={3} maxLength={100} placeholder="Leave blank to auto-generate" value={createForm.username} onChange={(v) => setCreateForm((f) => ({ ...f, username: v }))} />
-            <TextField id="email" label="Work Email *" type="email" required placeholder="e.g. john@inhyma.com" value={createForm.email} onChange={(v) => setCreateForm((f) => ({ ...f, email: v }))} />
+            <SelectField
+              id="create_position_id"
+              label="Position"
+              value={createForm.position_id}
+              onChange={(v) => setCreateForm((f) => ({ ...f, position_id: v }))}
+            >
+              <option value="">-- None (No Position) --</option>
+              {positions
+                .filter((p) => p.status === "ACTIVE" || (p.status as string) === "active")
+                .map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name} {p.code ? `(${p.code})` : ""}
+                  </option>
+                ))}
+            </SelectField>
+            <div className="field" style={{ gridColumn: "1 / -1" }}>
+              <label style={{ display: "flex", alignItems: "center", gap: "8px", fontWeight: 500 }}>
+                <input
+                  type="checkbox"
+                  checked={createForm.has_login}
+                  onChange={(e) => setCreateForm((f) => ({ ...f, has_login: e.target.checked }))}
+                />
+                Give this person ERP login access
+              </label>
+              <span className="muted" style={{ fontSize: "12px", marginTop: "4px", display: "block" }}>
+                Uncheck for a workforce record with no login (e.g. factory worker, driver, temporary
+                labor, consultant) -- username, email, phone, and password won't be required.
+              </span>
+            </div>
+            <TextField id="username" label="Username (optional)" minLength={3} maxLength={100} placeholder="Leave blank to auto-generate" value={createForm.username} onChange={(v) => setCreateForm((f) => ({ ...f, username: v }))} readOnly={!createForm.has_login} />
+            <TextField id="email" label={createForm.has_login ? "Work Email *" : "Work Email"} type="email" required={createForm.has_login} placeholder="e.g. john@inhyma.com" value={createForm.email} onChange={(v) => setCreateForm((f) => ({ ...f, email: v }))} readOnly={!createForm.has_login} />
             <TextField id="employee_code" label="Employee Code" disableAutoCapitalize placeholder="e.g. EMP-001" value={createForm.employee_code} onChange={(v) => setCreateForm((f) => ({ ...f, employee_code: v }))} />
-            <TextField id="phone" label="Mobile Number *" required placeholder="+256..." value={createForm.phone} onChange={(v) => setCreateForm((f) => ({ ...f, phone: v }))} />
-            <TextField id="password" label="Password *" type="password" required minLength={1} placeholder="Set the user's initial password" value={createForm.password} onChange={(v) => setCreateForm((f) => ({ ...f, password: v }))} />
+            <TextField id="phone" label={createForm.has_login ? "Mobile Number *" : "Mobile Number"} required={createForm.has_login} placeholder="+256..." value={createForm.phone} onChange={(v) => setCreateForm((f) => ({ ...f, phone: v }))} readOnly={!createForm.has_login} />
+            {createForm.has_login && (
+              <TextField id="password" label="Password *" type="password" required minLength={1} placeholder="Set the user's initial password" value={createForm.password} onChange={(v) => setCreateForm((f) => ({ ...f, password: v }))} />
+            )}
             <SelectField
               id="role_id"
               label="Assign Initial Department"
               value={createForm.role_id}
-              onChange={(v) => setCreateForm((f) => ({ ...f, role_id: v }))}
+              onChange={handleDepartmentChange}
               style={{ gridColumn: "span 2" }}
             >
-              <option value="">-- Default: User --</option>
+              <option value="">-- Default: User (System) --</option>
               {roles
                 .filter((r) => r.name !== "super_admin")
                 .map((r) => (
@@ -1072,15 +1287,61 @@ export function UsersPage() {
                 ))}
             </SelectField>
             <span className="muted" style={{ fontSize: "12px", gridColumn: "span 2", marginTop: "-8px" }}>
-              Leave unselected to assign the default "User" department automatically. The Admin
-              department is reserved for the system's bootstrap account and cannot be assigned here.
+              Defaults to "User" if not assigned anything. The Admin department is reserved for the
+              system's bootstrap account and cannot be assigned here.
             </span>
+
+            <SelectField
+              id="create_manager_id"
+              label="Assign Reporting Manager"
+              value={createForm.manager_id}
+              onChange={(v) => {
+                setCreateForm((f) => ({ ...f, manager_id: v }));
+                setAutoManagerNotice(null);
+              }}
+              style={{ gridColumn: "span 2" }}
+            >
+              <option value="">-- None (No Manager) --</option>
+              {(allUsers.length > 0 ? allUsers : rows).map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.full_name || u.display_name || u.employee_name || u.username} ({u.username || u.email || "No Login"})
+                </option>
+              ))}
+            </SelectField>
+            {autoManagerNotice ? (
+              <span
+                className="muted"
+                style={{
+                  fontSize: "12px",
+                  gridColumn: "span 2",
+                  marginTop: "-8px",
+                  color: "#2563eb",
+                  fontWeight: 500,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "5px",
+                }}
+              >
+                <span>ℹ️</span> {autoManagerNotice}
+              </span>
+            ) : (
+              <span className="muted" style={{ fontSize: "12px", gridColumn: "span 2", marginTop: "-8px" }}>
+                Select who this person reports to directly. Automatically updates when a department with a designated manager is chosen.
+              </span>
+            )}
           </div>
           <div className="form-actions">
             <button type="submit" className="btn btn-primary" disabled={createSubmitting}>
               {createSubmitting ? "Creating…" : "Create User Account"}
             </button>
-            <button type="button" className="btn" onClick={() => setCreateOpen(false)}>
+            <button
+              type="button"
+              className="btn"
+              onClick={() => {
+                setCreateOpen(false);
+                setAutoManagerNotice(null);
+              }}
+            >
               Cancel
             </button>
           </div>
@@ -1102,12 +1363,21 @@ export function UsersPage() {
         }}
         cardStyle={{ width: "100%", maxWidth: "720px", padding: 0 }}
       >
-        <form onSubmit={handleEditSubmit}>
+        <form
+          onSubmit={handleEditSubmit}
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            height: "calc(100vh - 60px)",
+            overflow: "hidden",
+          }}
+        >
           <div
             style={{
               padding: "20px 24px",
-              maxHeight: "calc(100vh - 170px)",
               overflowY: "auto",
+              flex: 1,
+              minHeight: 0,
               background: "#f8fafc",
             }}
           >
@@ -1164,7 +1434,7 @@ export function UsersPage() {
                   onChange={(v) => setEditForm((f) => ({ ...f, manager_id: v }))}
                 >
                   <option value="">-- None (No Manager) --</option>
-                  {rows
+                  {(allUsers.length > 0 ? allUsers : rows)
                     .filter((u) => u.id !== editForm.id)
                     .map((u) => (
                       <option key={u.id} value={u.id}>
@@ -1172,6 +1442,23 @@ export function UsersPage() {
                       </option>
                     ))}
                 </SelectField>
+                <SelectField
+                  id="editPosition"
+                  label="Position"
+                  value={editForm.position_id}
+                  onChange={(v) => setEditForm((f) => ({ ...f, position_id: v }))}
+                >
+                  <option value="">-- None (No Position) --</option>
+                  {positions
+                    .filter((p) => p.status === "ACTIVE" || (p.status as string) === "active" || p.id === editForm.position_id)
+                    .map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name} {p.code ? `(${p.code})` : ""}
+                      </option>
+                    ))}
+                </SelectField>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "14px", marginBottom: "14px" }}>
                 <SelectField
                   id="editGender"
                   label="Gender"
@@ -1184,8 +1471,6 @@ export function UsersPage() {
                   <option value="OTHER">Other</option>
                   <option value="PREFER_NOT_TO_SAY">Prefer Not to Say</option>
                 </SelectField>
-              </div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "14px", marginBottom: "14px" }}>
                 <SelectField
                   id="editEmploymentType"
                   label="Employment Type"
@@ -1198,6 +1483,8 @@ export function UsersPage() {
                   <option value="INTERN">Intern</option>
                   <option value="TEMPORARY">Temporary</option>
                 </SelectField>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "14px", marginBottom: "14px" }}>
                 <SelectField
                   id="editEmploymentStatus"
                   label="Employment Status"
@@ -1210,9 +1497,9 @@ export function UsersPage() {
                   <option value="TERMINATED">Terminated</option>
                   <option value="RESIGNED">Resigned</option>
                 </SelectField>
+                <TextField id="editDateOfJoining" label="Date of Joining" type="date" value={editForm.date_of_joining} onChange={(v) => setEditForm((f) => ({ ...f, date_of_joining: v }))} />
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "14px" }}>
-                <TextField id="editDateOfJoining" label="Date of Joining" type="date" value={editForm.date_of_joining} onChange={(v) => setEditForm((f) => ({ ...f, date_of_joining: v }))} />
                 <TextField id="editDateOfBirth" label="Date of Birth" type="date" value={editForm.date_of_birth} onChange={(v) => setEditForm((f) => ({ ...f, date_of_birth: v }))} />
               </div>
             </div>
@@ -1249,13 +1536,18 @@ export function UsersPage() {
           </div>
 
           <div
+            className="form-actions"
             style={{
-              padding: "14px 24px",
+              padding: "16px 24px",
               borderTop: "1px solid #e2e8f0",
               background: "#ffffff",
               display: "flex",
               justifyContent: "flex-end",
+              alignItems: "center",
               gap: "12px",
+              flexShrink: 0,
+              flexGrow: 0,
+              marginTop: "auto",
             }}
           >
             <button
@@ -1497,8 +1789,98 @@ export function UsersPage() {
                       ))}
                     </div>
                   ) : (
-                    <span style={{ color: "#94a3b8", fontStyle: "italic", fontSize: "13px" }}>— (No departments assigned)</span>
+                    <span
+                      style={{
+                        background: "#eff6ff",
+                        color: "#1e40af",
+                        border: "1px solid #bfdbfe",
+                        borderRadius: "6px",
+                        padding: "4px 10px",
+                        fontSize: "12.5px",
+                        fontWeight: 600,
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "6px",
+                      }}
+                    >
+                      <span>🛡️</span> User (Default)
+                    </span>
                   )}
+                </div>
+              )}
+
+              {/* Section 6.5: Positions & Reporting Structure */}
+              {renderDetailSection(
+                "🧭",
+                "Positions & Reporting Structure",
+                <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                  <div
+                    style={{
+                      padding: "12px 14px",
+                      background: "#ffffff",
+                      borderRadius: "6px",
+                      border: "1px solid #e2e8f0",
+                    }}
+                  >
+                    <div style={{ fontWeight: 700, fontSize: "12.5px", color: "#475569", marginBottom: "6px" }}>Positions</div>
+                    {viewPositions && viewPositions.length > 0 ? (
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+                        {viewPositions.map((a) => (
+                          <span
+                            key={a.id}
+                            style={{
+                              background: "#fef3c7", color: "#92400e", border: "1px solid #fde68a",
+                              borderRadius: "6px", padding: "4px 10px", fontSize: "12.5px", fontWeight: 600,
+                            }}
+                          >
+                            {positionNames[a.position_id] || a.position_id}
+                            {a.is_primary ? " (Primary)" : ""}
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <span style={{ color: "#94a3b8", fontStyle: "italic", fontSize: "13px" }}>
+                        {viewPositions === null ? "Loading…" : "— (No positions assigned)"}
+                      </span>
+                    )}
+                  </div>
+                  <div
+                    style={{
+                      padding: "12px 14px",
+                      background: "#ffffff",
+                      borderRadius: "6px",
+                      border: "1px solid #e2e8f0",
+                    }}
+                  >
+                    <div style={{ fontWeight: 700, fontSize: "12.5px", color: "#475569", marginBottom: "6px" }}>
+                      Reports To ({viewManagers?.length ?? 0})
+                    </div>
+                    {viewManagers && viewManagers.length > 0 ? (
+                      <div style={{ display: "flex", flexDirection: "column", gap: "4px", fontSize: "13px" }}>
+                        {viewManagers.map((r) => (
+                          <span key={r.id}>{r.relationship_type.replace(/_/g, " ")}: manager id {r.manager_employee_id}</span>
+                        ))}
+                      </div>
+                    ) : (
+                      <span style={{ color: "#94a3b8", fontStyle: "italic", fontSize: "13px" }}>
+                        {viewManagers === null ? "Loading…" : "— (No manager assigned)"}
+                      </span>
+                    )}
+                    <div style={{ fontWeight: 700, fontSize: "12.5px", color: "#475569", margin: "10px 0 6px" }}>
+                      Direct Reports ({viewDirectReports?.length ?? 0})
+                    </div>
+                    {viewDirectReports && viewDirectReports.length > 0 ? (
+                      <div style={{ display: "flex", flexDirection: "column", gap: "4px", fontSize: "13px" }}>
+                        {viewDirectReports.map((r) => (
+                          <span key={r.id}>{r.relationship_type.replace(/_/g, " ")}: employee id {r.employee_id}</span>
+                        ))}
+                      </div>
+                    ) : (
+                      <span style={{ color: "#94a3b8", fontStyle: "italic", fontSize: "13px" }}>
+                        {viewDirectReports === null ? "Loading…" : "— (No direct reports)"}
+                      </span>
+                    )}
+                  </div>
                 </div>
               )}
 
@@ -1610,44 +1992,96 @@ export function UsersPage() {
         )}
       </Modal>
 
-      {/* Assign Department */}
+      {/* Manage Departments (multi-role: a user can hold several at once) */}
       <Modal
         open={Boolean(roleModalUserId)}
-        title="Assign Department"
+        title="Manage Departments"
         onClose={() => setRoleModalUserId(null)}
         cardStyle={{ maxWidth: "500px" }}
       >
-        <form onSubmit={handleAssignRole}>
-          <div className="field" style={{ marginBottom: "16px" }}>
-            <label htmlFor="assignRoleId">Select Department to Assign</label>
-            <select
-              id="assignRoleId"
-              required
-              value={assignRoleId}
-              onChange={(e) => setAssignRoleId(e.target.value)}
-            >
-              <option value="">-- Select Department --</option>
-              {roles
-                .filter((r) => r.name !== "super_admin")
-                .map((r) => (
-                  <option key={r.id} value={r.id}>
-                    {roleDisplayName(r.name) + (RESERVED_ROLE_NAMES.has(r.name) ? " (System)" : "")}
-                  </option>
-                ))}
-            </select>
-            <span className="muted" style={{ fontSize: "12px", marginTop: "4px", display: "block" }}>
-              The Admin department is reserved for the system's bootstrap account and cannot be assigned here.
-            </span>
-          </div>
-          <div className="form-actions">
-            <button type="submit" className="btn btn-primary" disabled={assignRoleSubmitting}>
-              {assignRoleSubmitting ? "Assigning…" : "Assign Department"}
-            </button>
-            <button type="button" className="btn" onClick={() => setRoleModalUserId(null)}>
-              Cancel
-            </button>
-          </div>
-        </form>
+        {(() => {
+          const targetUser = rows.find((u) => u.id === roleModalUserId);
+          const currentRoleNames = targetUser?.roles ?? [];
+          // Resolve each held role name back to its id (needed for the
+          // DELETE /users/{id}/roles/{role_id} call) via the full roles list.
+          const currentRoles = currentRoleNames
+            .map((name) => roles.find((r) => r.name === name))
+            .filter((r): r is Role => Boolean(r));
+          return (
+            <>
+              <div className="field" style={{ marginBottom: "16px" }}>
+                <label>Currently Assigned ({roleModalUsername})</label>
+                {currentRoles.length ? (
+                  <ul style={{ listStyle: "none", padding: 0, margin: "8px 0 0" }}>
+                    {currentRoles.map((r) => (
+                      <li
+                        key={r.id}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          padding: "6px 10px",
+                          borderRadius: "6px",
+                          background: "var(--surface-muted, #f4f4f5)",
+                          marginBottom: "6px",
+                        }}
+                      >
+                        <span>
+                          {roleDisplayName(r.name)}
+                          {RESERVED_ROLE_NAMES.has(r.name) ? " (System)" : ""}
+                        </span>
+                        {r.name !== "super_admin" && (
+                          <button
+                            type="button"
+                            className="btn btn-sm"
+                            disabled={removingRoleId === r.id}
+                            onClick={() => handleRemoveRoleFromModal(r.id)}
+                          >
+                            {removingRoleId === r.id ? "Removing…" : "Remove"}
+                          </button>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="muted" style={{ fontSize: "13px" }}>No departments assigned yet.</p>
+                )}
+              </div>
+              <form onSubmit={handleAssignRole}>
+                <div className="field" style={{ marginBottom: "16px" }}>
+                  <label htmlFor="assignRoleId">Add Another Department</label>
+                  <select
+                    id="assignRoleId"
+                    required
+                    value={assignRoleId}
+                    onChange={(e) => setAssignRoleId(e.target.value)}
+                  >
+                    <option value="">-- Select Department --</option>
+                    {roles
+                      .filter((r) => r.name !== "super_admin" && !currentRoleNames.includes(r.name))
+                      .map((r) => (
+                        <option key={r.id} value={r.id}>
+                          {roleDisplayName(r.name) + (RESERVED_ROLE_NAMES.has(r.name) ? " (System)" : "")}
+                        </option>
+                      ))}
+                  </select>
+                  <span className="muted" style={{ fontSize: "12px", marginTop: "4px", display: "block" }}>
+                    A user can belong to more than one department at once. The Admin department is reserved for
+                    the system's bootstrap account and cannot be assigned here.
+                  </span>
+                </div>
+                <div className="form-actions">
+                  <button type="submit" className="btn btn-primary" disabled={assignRoleSubmitting || !assignRoleId}>
+                    {assignRoleSubmitting ? "Assigning…" : "Add Department"}
+                  </button>
+                  <button type="button" className="btn" onClick={() => setRoleModalUserId(null)}>
+                    Close
+                  </button>
+                </div>
+              </form>
+            </>
+          );
+        })()}
       </Modal>
 
       {/* Permission Overrides (per-user checkbox grid) */}

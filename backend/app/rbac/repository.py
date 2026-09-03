@@ -173,13 +173,21 @@ class RoleRepository(BaseRepository[Role]):
             DepartmentHierarchy.child_department_id == child_id,
         )
         await self.session.execute(stmt)
-        await self.session.flush()
 
-        # Update Role.parent_department_id if it matched the removed parent
         child_role = await self.get_by_id(child_id)
         if child_role and child_role.parent_department_id == parent_id:
-            remaining = await self.get_parents(child_id)
-            child_role.parent_department_id = remaining[0].id if remaining else None
+            child_role.parent_department_id = None
+        await self.session.flush()
+
+        # Update Role.parent_department_id with any remaining parent from DepartmentHierarchy
+        if child_role:
+            stmt_rem = (
+                select(DepartmentHierarchy.parent_department_id)
+                .where(DepartmentHierarchy.child_department_id == child_id)
+                .limit(1)
+            )
+            rem_parent_id = (await self.session.execute(stmt_rem)).scalar_one_or_none()
+            child_role.parent_department_id = rem_parent_id
             await self.session.flush()
 
     async def would_create_cycle(self, role_id: uuid.UUID, new_parent_id: uuid.UUID) -> bool:

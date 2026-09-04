@@ -592,7 +592,7 @@ function Topbar() {
     }
   }
 
-  function handleEditProfile() {
+  function handleProfile() {
     setProfileOpen(false);
     navigate("/profile");
   }
@@ -778,10 +778,10 @@ function Topbar() {
 
             <div style={{ width: "100%", height: "1px", background: "#f1f5f9", margin: "2px 0 6px 0" }} />
 
-            {/* Edit Profile */}
+            {/* Profile */}
             <button
               type="button"
-              onClick={handleEditProfile}
+              onClick={handleProfile}
               style={{
                 width: "100%",
                 padding: "9px 16px",
@@ -801,10 +801,10 @@ function Topbar() {
               onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
             >
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: "#64748b" }}>
-                <path d="M12 20h9"></path>
-                <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                <circle cx="12" cy="7" r="4" />
               </svg>
-              Edit Profile
+              Profile
             </button>
 
             {/* Sign Out */}

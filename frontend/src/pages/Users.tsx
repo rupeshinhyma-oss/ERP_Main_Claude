@@ -272,7 +272,7 @@ const EMPTY_EDIT = {
 };
 
 export function UsersPage() {
-  const { hasPermission, isSuperAdmin } = useAuth();
+  const { profile, hasPermission, isSuperAdmin } = useAuth();
   const showToast = useToast();
 
   const [rows, setRows] = useState<User[]>([]);
@@ -343,12 +343,10 @@ export function UsersPage() {
     void openViewUser(targetId);
   }, [deepLinkUserId, setSearchParams]);
 
-  const [roleModalUserId, setRoleModalUserId] = useState<string | null>(null);
-  const [roleModalUsername, setRoleModalUsername] = useState<string>("");
-  // Tracks in-flight per-role removals inside the Manage Departments modal
-  // so each "Remove" button can show its own busy state independently.
+  const [editUserRoles, setEditUserRoles] = useState<string[]>([]);
+  const [editAddRoleId, setEditAddRoleId] = useState<string>("");
+  const [editAddRoleSubmitting, setEditAddRoleSubmitting] = useState(false);
   const [removingRoleId, setRemovingRoleId] = useState<string | null>(null);
-  const [assignRoleId, setAssignRoleId] = useState("");
   const [tempPassword, setTempPassword] = useState<string | null>(null);
 
   /* Per-user permission overrides modal (checkbox grid, opened from the row
@@ -377,7 +375,6 @@ export function UsersPage() {
   const [createSubmitting, setCreateSubmitting] = useState(false);
   const [editSubmitting, setEditSubmitting] = useState(false);
   const [editError, setEditError] = useState<unknown>(null);
-  const [assignRoleSubmitting, setAssignRoleSubmitting] = useState(false);
 
   const reload = useCallback(() => setReloadCounter((n) => n + 1), []);
 
@@ -458,9 +455,15 @@ export function UsersPage() {
   async function runAction(path: string, confirmMessage?: string, onDone?: () => void) {
     if (confirmMessage && !confirm(confirmMessage)) return;
     try {
-      const { data } = await apiPost<{ revoked_sessions?: number }>(path);
+      const res = await apiPost<any>(path);
+      const data = res?.data;
+      if (data && data.id) {
+        setRows((prev) => prev.map((u) => (u.id === data.id ? { ...u, ...data } : u)));
+        showToast("User account status updated successfully.", "success");
+      } else {
+        setReloadCounter((prev) => prev + 1);
+      }
       onDone?.();
-      // Targeted action complete: no full list reload
       return data;
     } catch (err) {
       setError(err);
@@ -468,13 +471,13 @@ export function UsersPage() {
   }
 
   async function handleForceLogout(userId: string, username: string) {
-    if (!confirm(`Force logout user '${username}' from all devices?`)) return;
+    if (!confirm(`Force logout user '${username}'? This will immediately terminate all their active sessions and disconnect them.`)) return;
     await guardRowAction(`force-logout:${userId}`, async () => {
       try {
         const { data } = await apiPost<{ revoked_sessions?: number }>(
           `/users/${userId}/force-logout`
         );
-        alert(`Successfully revoked ${data.revoked_sessions || 0} active session(s).`);
+        showToast(`User '${username}' has been forced to log out. (${data?.revoked_sessions || 0} session(s) revoked)`, "success");
       } catch (err) {
         setError(err);
       }
@@ -498,25 +501,76 @@ export function UsersPage() {
     });
   }
 
-  async function handleDeleteUser(userId: string, username: string, email: string) {
-    if (
-      !confirm(
-        `Are you sure you want to delete user '${username}' (${email || "no email"})?\n\nThis will remove the user account, terminate active sessions, and unassign roles.`
-      )
-    )
+  const [bulkDeactivateLoading, setBulkDeactivateLoading] = useState(false);
+
+  async function handleBulkDeactivate() {
+    if (selectedIds.size === 0) return;
+
+    const selectedList = rows.filter((u) => selectedIds.has(u.id));
+    const isSelfSelected = selectedList.some((u) => u.id === profile?.id);
+    const hasSuperAdmin = selectedList.some((u) => u.roles?.includes("super_admin"));
+
+    const eligibleUsers = selectedList.filter(
+      (u) =>
+        u.id !== profile?.id &&
+        !u.roles?.includes("super_admin") &&
+        (u.status || "").toUpperCase() !== "INACTIVE"
+    );
+
+    if (eligibleUsers.length === 0) {
+      alert(
+        "None of the selected accounts can be deactivated.\n\n" +
+          (isSelfSelected ? "• You cannot deactivate your own account.\n" : "") +
+          (hasSuperAdmin ? "• Super Administrator accounts cannot be deactivated.\n" : "") +
+          "• Accounts already inactive cannot be deactivated again."
+      );
       return;
-    await guardRowAction(`delete:${userId}`, async () => {
-      try {
-        await apiDelete(`/users/${userId}`);
-        showToast(`User '${username}' was deleted successfully.`, "success");
-        setRows((prev) => prev.filter((u) => u.id !== userId));
-        setPagination((prev) =>
-          prev ? { ...prev, total_records: Math.max(0, (prev.total_records || 0) - 1) } : prev
+    }
+
+    let warningMsg = `Are you sure you want to deactivate ${eligibleUsers.length} selected user account(s)?\n\nThis will prevent them from logging in and immediately terminate all active sessions.`;
+    if (isSelfSelected || hasSuperAdmin) {
+      const skippedItems: string[] = [];
+      if (isSelfSelected) skippedItems.push("Your own account");
+      if (hasSuperAdmin) skippedItems.push("Super Administrator account(s)");
+      warningMsg += `\n\nNote: ${skippedItems.join(" and ")} will be skipped.`;
+    }
+
+    if (!confirm(warningMsg)) return;
+
+    setBulkDeactivateLoading(true);
+    try {
+      const results = await Promise.allSettled(
+        eligibleUsers.map((u) => apiPost<User>(`/users/${u.id}/deactivate`))
+      );
+
+      const successfulIds = new Set<string>();
+      let failureCount = 0;
+      results.forEach((res, index) => {
+        if (res.status === "fulfilled") {
+          successfulIds.add(eligibleUsers[index].id);
+        } else {
+          failureCount++;
+        }
+      });
+
+      if (successfulIds.size > 0) {
+        showToast(`Successfully deactivated ${successfulIds.size} user account(s).`, "success");
+        setRows((prev) =>
+          prev.map((u) =>
+            successfulIds.has(u.id) ? { ...u, status: "INACTIVE", is_active: false } : u
+          )
         );
-      } catch (err) {
-        setError(err);
+        setSelectedIds(new Set());
       }
-    });
+
+      if (failureCount > 0) {
+        showToast(`${failureCount} user(s) could not be deactivated.`, "warning");
+      }
+    } catch (err) {
+      setError(err);
+    } finally {
+      setBulkDeactivateLoading(false);
+    }
   }
 
   async function openViewUser(userId: string) {
@@ -557,6 +611,7 @@ export function UsersPage() {
   }
 
   async function openEditUser(user: User) {
+    setEditUserRoles(user.roles || []);
     let currentPositionId = user.position_id || "";
     if (!currentPositionId) {
       try {
@@ -599,7 +654,17 @@ export function UsersPage() {
       notes: user.notes || "",
     });
     setEditError(null);
+    setEditAddRoleId("");
     setEditOpen(true);
+
+    // Fetch fresh user details to ensure assigned departments/roles are completely up to date
+    apiGet<User>(`/users/${user.id}`)
+      .then((res) => {
+        if (res.data?.roles) {
+          setEditUserRoles(res.data.roles);
+        }
+      })
+      .catch(() => {});
   }
 
   async function handleDepartmentChange(roleId: string) {
@@ -761,35 +826,52 @@ export function UsersPage() {
     }
   }
 
-  async function handleAssignRole(e: React.FormEvent) {
-    e.preventDefault();
-    if (assignRoleSubmitting) return; // Phase 7: ignore a second click while the first save is still in flight
-    if (!roleModalUserId) return;
-    setAssignRoleSubmitting(true);
+  async function handleAddRoleInEdit() {
+    if (!editForm.id || !editAddRoleId || editAddRoleSubmitting) return;
+    setEditAddRoleSubmitting(true);
     try {
-      await apiPost(`/users/${roleModalUserId}/roles`, { role_id: assignRoleId });
-      // A user can hold several departments/roles at once now, so keep the
-      // modal open (instead of closing it) and just clear the picker + reload
-      // the row data -- lets an admin add a second, third, ... role in one
-      // sitting without reopening the modal each time.
-      setAssignRoleId("");
-      reload();
+      await apiPost(`/users/${editForm.id}/roles`, { role_id: editAddRoleId });
+      const addedRole = roles.find((r) => r.id === editAddRoleId);
+      if (addedRole) {
+        const nextRoles = [...editUserRoles, addedRole.name];
+        setEditUserRoles(nextRoles);
+        setRows((prev) =>
+          prev.map((u) =>
+            u.id === editForm.id
+              ? { ...u, roles: nextRoles }
+              : u
+          )
+        );
+      }
+      setEditAddRoleId("");
+      showToast("Department assigned successfully.", "success");
     } catch (err) {
-      setError(err);
+      setEditError(err);
     } finally {
-      setAssignRoleSubmitting(false);
+      setEditAddRoleSubmitting(false);
     }
   }
 
-  /** Remove one currently-held department/role from the user open in the "Manage Departments" modal. */
-  async function handleRemoveRoleFromModal(roleId: string) {
-    if (!roleModalUserId || removingRoleId) return;
+  async function handleRemoveRoleFromEdit(roleId: string) {
+    if (!editForm.id || removingRoleId) return;
     setRemovingRoleId(roleId);
     try {
-      await apiDelete(`/users/${roleModalUserId}/roles/${roleId}`);
-      reload();
+      await apiDelete(`/users/${editForm.id}/roles/${roleId}`);
+      const removedRole = roles.find((r) => r.id === roleId);
+      if (removedRole) {
+        const nextRoles = editUserRoles.filter((name) => name !== removedRole.name);
+        setEditUserRoles(nextRoles);
+        setRows((prev) =>
+          prev.map((u) =>
+            u.id === editForm.id
+              ? { ...u, roles: nextRoles }
+              : u
+          )
+        );
+      }
+      showToast("Department removed successfully.", "success");
     } catch (err) {
-      setError(err);
+      setEditError(err);
     } finally {
       setRemovingRoleId(null);
     }
@@ -915,7 +997,35 @@ export function UsersPage() {
               sessions.
             </div>
           </div>
-          <div className="page-header-actions">
+          <div className="page-header-actions" style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            {selectedIds.size > 0 && canManage && (
+              <button
+                type="button"
+                className="btn"
+                onClick={handleBulkDeactivate}
+                disabled={bulkDeactivateLoading}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  background: "#d97706",
+                  color: "#ffffff",
+                  border: "none",
+                  borderRadius: "6px",
+                  padding: "8px 16px",
+                  fontWeight: 600,
+                  fontSize: "13px",
+                  cursor: bulkDeactivateLoading ? "not-allowed" : "pointer",
+                  boxShadow: "0 1px 3px rgba(217, 119, 6, 0.3)",
+                }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="6" y="4" width="4" height="16"></rect>
+                  <rect x="14" y="4" width="4" height="16"></rect>
+                </svg>
+                {bulkDeactivateLoading ? "Deactivating..." : `Deactivate Selected (${selectedIds.size})`}
+              </button>
+            )}
             <Can permission="user.create">
               <button className="btn btn-primary" onClick={() => setCreateOpen(true)}>
                 + Create User Account
@@ -926,21 +1036,78 @@ export function UsersPage() {
         <Banner error={error} />
 
         <div className="card">
-          <div className="toolbar">
-            <input
-              type="text"
-              placeholder="Search username, email, employee code..."
-              value={searchInput}
-              onChange={(e) => setSearchInput(e.target.value)}
-            />
-            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
-              <option value="">All statuses</option>
-              {STATUS_OPTIONS.map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
-            </select>
+          <div className="toolbar" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
+            <div style={{ display: "flex", gap: "10px", alignItems: "center", flex: 1, minWidth: "280px" }}>
+              <input
+                type="text"
+                placeholder="Search username, email, employee code..."
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+              />
+              <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+                <option value="">All statuses</option>
+                {STATUS_OPTIONS.map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            {selectedIds.size > 0 && canManage && (
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "10px",
+                  background: "#fffbeb",
+                  border: "1px solid #fde68a",
+                  padding: "5px 12px",
+                  borderRadius: "6px",
+                }}
+              >
+                <span style={{ fontSize: "13px", color: "#92400e", fontWeight: 600 }}>
+                  {selectedIds.size} user{selectedIds.size === 1 ? "" : "s"} selected
+                </span>
+                <button
+                  type="button"
+                  onClick={handleBulkDeactivate}
+                  disabled={bulkDeactivateLoading}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    background: "#d97706",
+                    color: "#ffffff",
+                    border: "none",
+                    borderRadius: "5px",
+                    padding: "6px 12px",
+                    fontWeight: 600,
+                    fontSize: "12.5px",
+                    cursor: bulkDeactivateLoading ? "not-allowed" : "pointer",
+                  }}
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="6" y="4" width="4" height="16"></rect>
+                    <rect x="14" y="4" width="4" height="16"></rect>
+                  </svg>
+                  {bulkDeactivateLoading ? "Deactivating..." : `Deactivate (${selectedIds.size})`}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedIds(new Set())}
+                  style={{
+                    background: "transparent",
+                    border: "none",
+                    color: "#78350f",
+                    fontSize: "12px",
+                    cursor: "pointer",
+                    textDecoration: "underline",
+                  }}
+                >
+                  Deselect all
+                </button>
+              </div>
+            )}
           </div>
 
           <div className="table-scroll">
@@ -1009,37 +1176,32 @@ export function UsersPage() {
                           });
                         }
                         actions.push({
-                          key: "assign-role",
-                          label: "🛡️ Manage Departments",
-                          onClick: () => {
-                            setRoleModalUserId(u.id);
-                            setRoleModalUsername(u.username ?? u.full_name ?? u.display_name ?? "this user");
-                            setAssignRoleId("");
-                          },
-                        });
-                        actions.push({
                           key: "permission-overrides",
                           label: "🔑 Permission Overrides",
                           onClick: () => openUserOverridesModal(u.id, u.username ?? u.full_name ?? u.display_name ?? "this user"),
                         });
 
                         actions.push("divider");
-                        if (statusUpper === "ACTIVE") {
+                        if (statusUpper !== "INACTIVE") {
                           actions.push({
                             key: "deactivate",
-                            label: "⏸️ Inactive",
+                            label: "⏸️ Deactivate User",
+                            danger: true,
                             onClick: () =>
                               runAction(
                                 `/users/${u.id}/deactivate`,
-                                `Set user '${u.username}' to Inactive? This will block their login and revoke all active sessions.`
+                                `Are you sure you want to deactivate user '${u.username ?? u.full_name ?? u.display_name ?? "this user"}'?\n\nThis will immediately prevent them from logging in and terminate all active sessions.`
                               ),
                           });
-                        }
-                        if (statusUpper === "INACTIVE" || statusUpper === "PENDING") {
+                        } else {
                           actions.push({
                             key: "activate",
-                            label: "▶️ Activate",
-                            onClick: () => runAction(`/users/${u.id}/activate`),
+                            label: "▶️ Activate User",
+                            onClick: () =>
+                              runAction(
+                                `/users/${u.id}/activate`,
+                                `Activate user '${u.username ?? u.full_name ?? u.display_name ?? "this user"}'? This will restore their ability to log in.`
+                              ),
                           });
                         }
                         if (statusUpper === "SUSPENDED") {
@@ -1050,16 +1212,6 @@ export function UsersPage() {
                               runAction(
                                 `/users/${u.id}/unsuspend`,
                                 `Unsuspend account for user '${u.username}'? This will restore active login status.`
-                              ),
-                          });
-                        } else {
-                          actions.push({
-                            key: "suspend",
-                            label: "⚡ Suspend Account",
-                            onClick: () =>
-                              runAction(
-                                `/users/${u.id}/suspend`,
-                                `Suspend account for user '${u.username}'? This will block login and revoke all sessions.`
                               ),
                           });
                         }
@@ -1074,20 +1226,9 @@ export function UsersPage() {
                           key: "force-logout",
                           label: isRowActionPending(`force-logout:${u.id}`)
                             ? "🚪 Logging out..."
-                            : "🚪 Force Logout All",
-                          danger: true,
+                            : "🚪 Force Logout",
                           onClick: () => handleForceLogout(u.id, u.username ?? u.full_name ?? u.display_name ?? "this user"),
                         });
-                        if (!isTargetSuperAdmin) {
-                          actions.push({
-                            key: "delete-user",
-                            label: isRowActionPending(`delete:${u.id}`)
-                              ? "🗑️ Deleting..."
-                              : "🗑️ Delete User",
-                            danger: true,
-                            onClick: () => handleDeleteUser(u.id, u.username ?? u.full_name ?? u.display_name ?? "this user", u.email ?? ""),
-                          });
-                        }
                       }
                     }
 
@@ -1501,6 +1642,111 @@ export function UsersPage() {
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "14px" }}>
                 <TextField id="editDateOfBirth" label="Date of Birth" type="date" value={editForm.date_of_birth} onChange={(v) => setEditForm((f) => ({ ...f, date_of_birth: v }))} />
+              </div>
+            </div>
+
+            {/* Section 3.5: Departments & Roles */}
+            <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "16px 18px", marginBottom: "16px", boxShadow: "0 1px 2px rgba(0,0,0,0.03)" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "14px", borderBottom: "1px solid #f1f5f9", paddingBottom: "8px" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", fontWeight: 700, color: "#1e293b" }}>
+                  <span>🛡️</span>
+                  <span>Departments &amp; Roles</span>
+                </div>
+                <span className="muted" style={{ fontSize: "12px" }}>
+                  A user can belong to multiple departments at once.
+                </span>
+              </div>
+
+              {/* Currently Assigned Departments */}
+              <div style={{ marginBottom: "14px" }}>
+                <label style={{ fontSize: "12px", fontWeight: 600, color: "#475569", display: "block", marginBottom: "6px" }}>
+                  Assigned Departments
+                </label>
+                {(() => {
+                  const currentRoles = editUserRoles
+                    .map((name) => roles.find((r) => r.name === name))
+                    .filter((r): r is Role => Boolean(r));
+
+                  return currentRoles.length > 0 ? (
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+                      {currentRoles.map((r) => (
+                        <div
+                          key={r.id}
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "8px",
+                            padding: "5px 12px",
+                            borderRadius: "6px",
+                            background: "#f1f5f9",
+                            border: "1px solid #e2e8f0",
+                            fontSize: "13px",
+                            fontWeight: 500,
+                            color: "#1e293b",
+                          }}
+                        >
+                          <span>{roleDisplayName(r.name)}{RESERVED_ROLE_NAMES.has(r.name) ? " (System)" : ""}</span>
+                          {r.name !== "super_admin" && (
+                            <button
+                              type="button"
+                              disabled={removingRoleId === r.id}
+                              onClick={() => handleRemoveRoleFromEdit(r.id)}
+                              style={{
+                                border: "none",
+                                background: "transparent",
+                                color: "#94a3b8",
+                                cursor: removingRoleId === r.id ? "not-allowed" : "pointer",
+                                fontSize: "14px",
+                                lineHeight: 1,
+                                padding: "0 2px",
+                              }}
+                              title="Remove department"
+                              onMouseEnter={(e) => (e.currentTarget.style.color = "#ef4444")}
+                              onMouseLeave={(e) => (e.currentTarget.style.color = "#94a3b8")}
+                            >
+                              {removingRoleId === r.id ? "…" : "✕"}
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="muted" style={{ fontSize: "13px", margin: 0 }}>No departments assigned yet.</p>
+                  );
+                })()}
+              </div>
+
+              {/* Add Another Department */}
+              <div style={{ display: "flex", gap: "10px", alignItems: "flex-end" }}>
+                <div style={{ flex: 1 }}>
+                  <label htmlFor="editAddRoleSelect" style={{ fontSize: "12px", fontWeight: 600, color: "#475569", display: "block", marginBottom: "4px" }}>
+                    Add Department
+                  </label>
+                  <select
+                    id="editAddRoleSelect"
+                    value={editAddRoleId}
+                    onChange={(e) => setEditAddRoleId(e.target.value)}
+                    style={{ width: "100%", padding: "7px 10px", fontSize: "13px", borderRadius: "6px", border: "1px solid #cbd5e1" }}
+                  >
+                    <option value="">-- Select Department to Add --</option>
+                    {roles
+                      .filter((r) => r.name !== "super_admin" && !editUserRoles.includes(r.name))
+                      .map((r) => (
+                        <option key={r.id} value={r.id}>
+                          {roleDisplayName(r.name) + (RESERVED_ROLE_NAMES.has(r.name) ? " (System)" : "")}
+                        </option>
+                      ))}
+                  </select>
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  disabled={!editAddRoleId || editAddRoleSubmitting}
+                  onClick={handleAddRoleInEdit}
+                  style={{ padding: "8px 14px", fontSize: "13px", whiteSpace: "nowrap" }}
+                >
+                  {editAddRoleSubmitting ? "Adding…" : "+ Add Department"}
+                </button>
               </div>
             </div>
 
@@ -1990,98 +2236,6 @@ export function UsersPage() {
             </div>
           </>
         )}
-      </Modal>
-
-      {/* Manage Departments (multi-role: a user can hold several at once) */}
-      <Modal
-        open={Boolean(roleModalUserId)}
-        title="Manage Departments"
-        onClose={() => setRoleModalUserId(null)}
-        cardStyle={{ maxWidth: "500px" }}
-      >
-        {(() => {
-          const targetUser = rows.find((u) => u.id === roleModalUserId);
-          const currentRoleNames = targetUser?.roles ?? [];
-          // Resolve each held role name back to its id (needed for the
-          // DELETE /users/{id}/roles/{role_id} call) via the full roles list.
-          const currentRoles = currentRoleNames
-            .map((name) => roles.find((r) => r.name === name))
-            .filter((r): r is Role => Boolean(r));
-          return (
-            <>
-              <div className="field" style={{ marginBottom: "16px" }}>
-                <label>Currently Assigned ({roleModalUsername})</label>
-                {currentRoles.length ? (
-                  <ul style={{ listStyle: "none", padding: 0, margin: "8px 0 0" }}>
-                    {currentRoles.map((r) => (
-                      <li
-                        key={r.id}
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "space-between",
-                          padding: "6px 10px",
-                          borderRadius: "6px",
-                          background: "var(--surface-muted, #f4f4f5)",
-                          marginBottom: "6px",
-                        }}
-                      >
-                        <span>
-                          {roleDisplayName(r.name)}
-                          {RESERVED_ROLE_NAMES.has(r.name) ? " (System)" : ""}
-                        </span>
-                        {r.name !== "super_admin" && (
-                          <button
-                            type="button"
-                            className="btn btn-sm"
-                            disabled={removingRoleId === r.id}
-                            onClick={() => handleRemoveRoleFromModal(r.id)}
-                          >
-                            {removingRoleId === r.id ? "Removing…" : "Remove"}
-                          </button>
-                        )}
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p className="muted" style={{ fontSize: "13px" }}>No departments assigned yet.</p>
-                )}
-              </div>
-              <form onSubmit={handleAssignRole}>
-                <div className="field" style={{ marginBottom: "16px" }}>
-                  <label htmlFor="assignRoleId">Add Another Department</label>
-                  <select
-                    id="assignRoleId"
-                    required
-                    value={assignRoleId}
-                    onChange={(e) => setAssignRoleId(e.target.value)}
-                  >
-                    <option value="">-- Select Department --</option>
-                    {roles
-                      .filter((r) => r.name !== "super_admin" && !currentRoleNames.includes(r.name))
-                      .map((r) => (
-                        <option key={r.id} value={r.id}>
-                          {roleDisplayName(r.name) + (RESERVED_ROLE_NAMES.has(r.name) ? " (System)" : "")}
-                        </option>
-                      ))}
-                  </select>
-                  <span className="muted" style={{ fontSize: "12px", marginTop: "4px", display: "block" }}>
-                    A user can belong to more than one department at once. The Admin department is reserved for
-                    the system's bootstrap account and cannot be assigned here.
-                  </span>
-                </div>
-                <div className="form-actions">
-                  <button type="submit" className="btn btn-primary" disabled={assignRoleSubmitting || !assignRoleId}>
-                    {assignRoleSubmitting ? "Assigning…" : "Add Department"}
-                  </button>
-                  <button type="button" className="btn" onClick={() => setRoleModalUserId(null)}>
-                    Close
-                  </button>
-                </div>
-              </form>
-            </>
-          );
-        })()}
       </Modal>
 
       {/* Permission Overrides (per-user checkbox grid) */}

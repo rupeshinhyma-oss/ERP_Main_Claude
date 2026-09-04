@@ -195,7 +195,9 @@ class User(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin, SoftDeleteMi
     @property
     def can_login(self) -> bool:
         """Return True if this person has login credentials AND the account is active and in a status that permits authentication."""
-        if not self.has_login:
+        if self.deleted_at is not None:
+            return False
+        if self.has_login is False:
             return False
         if self.is_locked:
             return False
@@ -205,9 +207,13 @@ class User(Base, UUIDPrimaryKeyMixin, TimestampMixin, VersionMixin, SoftDeleteMi
             return False
         if self.status in (UserStatus.INACTIVE, UserStatus.SUSPENDED):
             return False
-        return self.is_active and self.status in (
-            UserStatus.ACTIVE,
-            UserStatus.PENDING,
-            UserStatus.PASSWORD_CHANGE_REQUIRED,
-            UserStatus.LOCKED,
+        return bool(
+            self.is_active
+            and self.status
+            in (
+                UserStatus.ACTIVE,
+                UserStatus.PENDING,
+                UserStatus.PASSWORD_CHANGE_REQUIRED,
+                UserStatus.LOCKED,
+            )
         )

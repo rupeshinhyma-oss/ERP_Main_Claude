@@ -131,7 +131,7 @@ export function setUnauthorizedHandler(handler: UnauthorizedHandler | null): voi
   unauthorizedHandler = handler;
 }
 
-function handleSessionExpired(): void {
+export function handleSessionExpired(): void {
   Auth.clear();
   if (unauthorizedHandler) unauthorizedHandler();
   else window.location.assign("/login");

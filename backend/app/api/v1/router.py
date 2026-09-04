@@ -34,6 +34,7 @@ from app.masters.buyer_types.routes import router as buyer_types_router
 from app.masters.supplier_types.routes import router as supplier_types_router
 from app.masters.uom.routes import router as uom_router
 from app.organizations.routes import router as organizations_router
+from app.org_structure.leadership_routes import router as leadership_router
 from app.org_structure.position_routes import router as positions_router
 from app.org_structure.reporting_routes import router as reporting_router
 from app.planning.routes import router as planning_router
@@ -59,6 +60,7 @@ api_router.include_router(rbac_router)
 # (Role docstring) for the full merge rationale.
 api_router.include_router(positions_router)
 api_router.include_router(reporting_router)
+api_router.include_router(leadership_router)
 
 api_router.include_router(queue_router)
 api_router.include_router(cache_router)

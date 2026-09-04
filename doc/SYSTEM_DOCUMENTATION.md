@@ -241,6 +241,13 @@ Passwords are hashed using Argon2id with strict parameters:
 ### 6.3. Active Session Governance
 Every authentication creates a record in the `sessions` table capturing IP address, location, browser user-agent, and device category. Users and administrators can inspect active sessions and revoke compromised devices remotely.
 
+### 6.4. Soft-Deleted Account Authentication Immunity
+In accordance with system security standards, soft-deleted user accounts (`deleted_at IS NOT NULL`) are strictly prevented from authenticating:
+- **Login Defense**: `UserRepository.get_by_identifier` automatically excludes soft-deleted accounts via `_base_select()`. Attempts to log in with credentials of a soft-deleted user fail immediately with `401 Unauthorized: Invalid username/email/phone number or password.`, mirroring the exact security response of hard-deleted accounts without leaking account existence.
+- **Active Token Rejection**: Any in-flight JWT access token presented for a soft-deleted user is rejected during dependency verification (`verify_access_token`) with `401 Unauthorized: User account no longer exists.`.
+- **Property Guard**: `User.can_login` evaluates strictly to `False` if `deleted_at` is set.
+- **Restoration**: If an administrator restores the user from the Recycle Bin (clearing `deleted_at`), normal authentication capabilities are restored.
+
 ---
 
 ## 7. RBAC Engine, Departments & Effective Permissions
@@ -290,6 +297,10 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
   - **Department & Manager Auto-Wiring:** When selecting an initial department in the Create User modal, the system calls `/users/department-manager/{role_id}` to automatically detect and pre-fill the department's active manager, with manual override capability.
   - **Positions & Reporting:** Profile Drawer displays held positions (`GET /positions/holders-for-user/{id}`), reporting managers (`GET /reporting/managers/{id}`), and direct reports (`GET /reporting/direct-reports/{id}`).
   - **Multi-Role Assignment:** Assign any number of roles/departments with `assignment_type` (PRIMARY, SECONDARY, TEMPORARY, PROJECT, ACTING), `is_primary`, and effective date ranges.
+  - **Account Deactivation Policy & Permanent Retirement of User Deletion:** User deletion is permanently retired and disabled system-wide (`DELETE /users/{id}` returns 400 Bad Request) to preserve audit integrity and historical transaction data. Deactivating a user (`POST /users/{id}/deactivate`) marks their account `INACTIVE` (`is_active=False`), immediately terminates all active sessions, and prevents login or token refresh. Deactivated accounts can be reactivated by administrators (`POST /users/{id}/activate`).
+  - **Collective Multi-Select & Bulk Deactivation:** The Users directory supports selecting multiple accounts via row/header checkboxes to execute bulk deactivation with built-in safety guardrails (protecting the administrator's own account, super-admin accounts, and already inactive accounts).
+  - **Unified Edit User Profile & HR Details Drawer (Integrated Department Management):** The previous separate "Manage Departments" row action is now consolidated directly into the "Edit Profile" drawer. Administrators can manage basic identity, contact info, HR attributes, reporting manager, positions, and add/remove **Department & Role Assignments** (with assignment types and primary flags) in one unified interface without switching modals.
+  - **Immediate Real-Time Force Logout:** "Force Logout" (`POST /users/{id}/force-logout`) provides guaranteed real-time session termination. It revokes device sessions in the database, caches a revocation timestamp (`auth_force_logout:{user_id}`) to instantly reject any in-flight access tokens on subsequent API calls, and pushes a real-time WebSocket disconnect event (`FORCE_LOGOUT`, code `4001`) that immediately clears client storage and redirects the active user to the login screen.
 
 ### 8.3. Departments & Permissions (RBAC & Org Structure)
 - **Endpoints:** `GET /rbac/roles`, `POST /rbac/roles`, `PATCH /rbac/roles/{id}`, `DELETE /rbac/roles/{id}`, `POST /rbac/roles/{id}/delete-with-reassignment`, `PUT /rbac/users/{id}/permissions/bulk`, `GET /rbac/roles/{id}/hierarchy`, `POST /rbac/roles/{id}/parents`, `DELETE /rbac/roles/{id}/parents/{parent_id}`, `POST /rbac/roles/{id}/children`, `DELETE /rbac/roles/{id}/children/{child_id}`.
@@ -407,6 +418,7 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
 - **Routing:** React Router v6 with `ProtectedRoute` guards and deep-link redirect preservation.
 - **Error Boundaries:** Multi-layer error boundary protection with an application-level root boundary in `main.tsx` and a route-keyed boundary (`ErrorBoundary key={location.pathname}`) in `App.tsx` ensuring crashed page states do not leak across navigation transitions.
 - **Component Design System:** Predefined accessible UI tokens in `frontend/src/components/ui.tsx` and `fields.tsx` (including interactive `TextField` with automatic password visibility eye toggle `showPasswordToggle`).
+- **Universal Inward Dropdown Chevron Styling:** To prevent browser-native chevron overlap and provide clean visual balance, native selects (`select:not([multiple])`) across all modules utilize custom SVG arrows positioned inward (`right: 14px; padding-right: 34px;`), matched by `SelectField`'s animated SVG chevron with dynamic 180° flip transition upon focus/open.
 - **Hooks Architecture:** Custom hooks for asynchronous state management: `useAuth`, `usePendingGuard`, `useToast`, `usePagination`.
 
 ---
@@ -429,7 +441,9 @@ A user may be assigned any number of Roles simultaneously (`POST /users/{id}/rol
 | **Users** | `PATCH` | `/api/v1/users/{id}` | Update user profile / reporting manager | `user.update` |
 | **Users** | `POST` | `/api/v1/users/{id}/reset-password` | Generate temporary login password | `user.reset_password` |
 | **Users** | `POST` | `/api/v1/users/{id}/roles` | Assign Role/Department (with assignment_type, is_primary, effective dates) | `user.action` |
-| **Users** | `DELETE`| `/api/v1/users/{id}/roles/{role_id}` | Remove one Role from a user | `user.action` |
+| **Users** | `POST` | `/api/v1/users/{id}/deactivate` | Deactivate a user, terminate all active sessions, and block login | `user.action` |
+| **Users** | `POST` | `/api/v1/users/{id}/activate` | Reactivate an inactive user, restoring login ability | `user.action` |
+| **Users** | `DELETE`| `/api/v1/users/{id}` | Permanently disabled (returns 400 Bad Request to preserve audit integrity) | `user.action` |
 | **RBAC** | `GET` | `/api/v1/rbac/roles` | List all Roles / Departments | `roles_permissions.view` |
 | **RBAC** | `POST` | `/api/v1/rbac/roles` | Create new Role / Department (with optional `code` and `parent_department_id`) | `roles_permissions.create` |
 | **RBAC** | `PATCH` | `/api/v1/rbac/roles/{id}` | Update Role name/description/code/parent (with cycle detection) | `roles_permissions.action` |
@@ -619,4 +633,4 @@ VITE_WS_BASE_URL=ws://localhost:8000/api/v1/events/ws
 - **Native React State Dispatch**: Seamlessly triggers React's synthetic `onChange` and `input` events so form state updates immediately without manual backspacing. Excludes password and file upload inputs.
 
 ---
-*Maintained and verified for Inhyma Solutions Enterprise ERP. Last updated: September 2, 2026 (Organization, Employee & Identity/Access Management upgrade: multi-role assignment, Employee directory, Departments/Positions/Leadership/Reporting Structure, dynamic Organization Chart -- see section 8.14).*
+*Maintained and verified for Inhyma Solutions Enterprise ERP. Last updated: September 4, 2026 (Permanent User Deletion Retirement, Account Deactivation Policy & Bulk Deactivation, Unified Edit Profile with Integrated Department Management, and Real-Time Force Logout).*

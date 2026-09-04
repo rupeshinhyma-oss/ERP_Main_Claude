@@ -42,5 +42,5 @@ def get_reporting_service(db: AsyncSession = Depends(get_db_session)) -> Reporti
 
 
 def get_department_leadership_repository(db: AsyncSession = Depends(get_db_session)) -> DepartmentLeadershipAssignmentRepository:
-    """Build a request-scoped :class:`DepartmentLeadershipAssignmentRepository` (used directly by department_routes)."""
+    """Build a request-scoped :class:`DepartmentLeadershipAssignmentRepository` (used by leadership_routes)."""
     return DepartmentLeadershipAssignmentRepository(db)

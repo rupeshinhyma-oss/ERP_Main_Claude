@@ -28,7 +28,7 @@
  */
 
 import { Auth } from "@/lib/auth";
-import { API_BASE } from "@/lib/api";
+import { API_BASE, handleSessionExpired } from "@/lib/api";
 import type { LiveClientMessage, LiveControlMessage, LiveEvent } from "./liveEvent";
 import { isLiveEvent } from "./liveEvent";
 
@@ -152,9 +152,15 @@ export class LiveClient {
       this.handleMessage(parsed);
     };
 
-    socket.onclose = () => {
+    socket.onclose = (ev) => {
       this.socket = null;
       this.confirmedChannels.clear();
+      if (ev.code === 4001 || ev.reason === "force_logout") {
+        this.intentionallyClosed = true;
+        this._setStatus("disconnected");
+        handleSessionExpired();
+        return;
+      }
       if (this.intentionallyClosed) {
         this._setStatus("disconnected");
         return;
@@ -239,6 +245,12 @@ export class LiveClient {
       return;
     }
     if (typeof parsed === "object" && parsed !== null && "type" in parsed) {
+      const msg = parsed as Record<string, unknown>;
+      if (msg.type === "FORCE_LOGOUT") {
+        this.disconnect();
+        handleSessionExpired();
+        return;
+      }
       const control = parsed as LiveControlMessage;
       if (control.type === "subscribed") this.confirmedChannels.add(control.channel);
       if (control.type === "unsubscribed") this.confirmedChannels.delete(control.channel);

@@ -683,12 +683,29 @@ Manage complete vendor team directory:
        - **Reports To:** Listing of all managers by relationship type (e.g. `PRIMARY REPORTING: manager id ...`)
        - **Direct Reports:** Listing of direct subordinate personnel (e.g. `PRIMARY REPORTING: employee id ...`)
      - **Section 7: Active Login Sessions:** Lists active device sessions with remote revocation (for accounts with `has_login=True`).
-   - ✏️ Edit User & HR Details
+   - ✏️ **Edit Profile:** Opens unified profile drawer, now integrating basic identity details, contact information, employment profile, position assignments, and **Department & Role Assignments** (consolidating the previously separate "Manage Departments" action into one unified interface).
    - 🔑 Reset Password (generates temporary password for login-enabled users)
-   - 🛡️ **Manage Departments:** Assign/remove Roles ("Departments"). A user may hold **any number of Roles/Departments at once** with assignment metadata (`assignment_type`: `PRIMARY`, `SECONDARY`, `TEMPORARY`, `PROJECT`, `ACTING`; `is_primary`; effective dates).
    - 🔑 Direct Permission Overrides (`🔑 Edit permissions`)
-   - 🔒 Suspend / Activate Account
-   - 🗑️ Delete User (Soft-delete)
+   - ⏸️ **Deactivate User:** Immediately deactivates the user account (`status=INACTIVE`, `is_active=False`), revokes all active device sessions, and prevents login or access token usage. Available for all accounts that are not already inactive (including Active, Password Change Required, Pending, and Locked).
+   - ▶️ **Activate User:** Restores an inactive account to `ACTIVE` (`is_active=True`), immediately restoring the ability to log in.
+   - ⚡ **Unsuspend Account:** Restores a suspended user back to active status.
+   - 🔓 **Unlock Account:** Clears temporary failed-login lockout.
+   - 🚪 **Force Logout:** Immediately and forcibly logs out the user across all devices in real time. Sets a revocation timestamp, disconnects live WebSockets, terminates active sessions, and immediately invalidates in-flight access tokens so any ongoing user activity instantly triggers session expiry and redirects them to the login page.
+   - 🚫 **Permanent Removal of User Deletion:** User deletion is completely removed from the UI and disabled backend-wide (`DELETE /users/{id}` returns 400 Bad Request) to maintain transactional integrity, foreign key relations, and audit history.
+
+### 15.1.1. Multi-Select & Collective Bulk Deactivation
+- **Select All Checkbox (Header):** Selects or deselects all visible user accounts across the current page.
+- **Row Checkboxes:** Click to select individual user accounts for collective action.
+- **Collective Action Bar & Buttons:**
+  - Whenever 1 or more user accounts are selected:
+    - **Header Collective Deactivate:** An amber `Deactivate Selected (N)` button appears in the page header actions alongside `+ Create User Account`.
+    - **Toolbar Selection Bar:** Renders count pill `N users selected` + `⏸️ Deactivate (N)` amber button + `Deselect all` link.
+  - **Account Safety & Protection Guards:**
+    - Automatically guards the administrator's currently authenticated account: attempting to collective-deactivate self is excluded with notification.
+    - Automatically guards `super_admin` accounts: attempting to collective-deactivate Super Administrators is excluded.
+    - Automatically skips accounts that are already inactive.
+    - Displays confirmation dialog indicating total accounts to be deactivated and any skipped accounts.
+    - Executes batch deactivation via `POST /users/{id}/deactivate` using `Promise.allSettled`, immediately setting account status to `Inactive`, terminating sessions, and clearing selection.
 
 ### 15.2. Add / Edit User Form Fields
 - **Login Credentials Toggle:**
@@ -732,6 +749,30 @@ Manage complete vendor team directory:
     - **Employment Status & Dates:** `Employment Status` (`Active`, `Inactive`, `On Leave`, `Terminated`, `Resigned`), `Date of Joining`, and `Date of Birth`.
   - **Address & Location Details:** Street Address, City, State / Province, Country, Postal / PIN Code.
   - **Internal Administrator Notes:** Free-form text area for administrative annotations.
+  - **Department & Role Assignments (Integrated):**
+    - Displays active department/role memberships with badges, primary indicator (`PRIMARY`), assignment types (`PRIMARY`, `SECONDARY`, `TEMPORARY`, `PROJECT`, `ACTING`), and remove action (`×`).
+    - Inline selector to add new departments with role dropdown, assignment type, and effective dates.
+    - Synchronizes changes immediately upon addition or removal without closing the drawer, eliminating the need for a separate modal.
+
+### 15.5. Test Cases for Users Module
+- [ ] Open `/users`, verify User Accounts & Passwords table loads with search bar, status dropdown filter, and `+ Create User Account` button.
+- [ ] Verify each row has a checkbox and the table header has a `select-all-checkbox`.
+- [ ] Check multiple user checkboxes. Verify:
+  - Header actions render an amber **`Deactivate Selected (N)`** button.
+  - Toolbar renders a selection indicator: `N users selected` with a **`⏸️ Deactivate (N)`** button and a **`Deselect all`** link.
+- [ ] Click `Deselect all`. Verify all checkboxes are cleared and the bulk deactivate buttons disappear.
+- [ ] Check a selection that includes your own authenticated account or a `super_admin`. Click `Deactivate Selected`. Verify:
+  - Confirmation modal pops up warning that own account and Super Admin accounts cannot be deactivated and will be skipped.
+  - Remaining eligible accounts are deactivated (`status=Inactive`, `is_active=False`) and active sessions terminated in real-time.
+- [ ] **Deactivation Login Block**: Verify that any deactivated user cannot log in at `/login`, receiving an immediate `403 Forbidden: Account is inactive or locked.` and cannot authenticate.
+- [ ] **Real-Time Force Logout**: Click `🚪 Force Logout` on an active user account. Verify:
+  - User's active session is terminated in the database.
+  - User's active browser tabs receive a real-time WebSocket disconnect (`code 4001`) and are immediately redirected to `/login`.
+  - In-flight access tokens are invalidated via cache timestamp check (`auth_force_logout:{user_id}`).
+- [ ] Click `✏️ Edit Profile` on a user row. Verify:
+  - Drawer opens with identity, HR attributes, and dynamically populated **Position** dropdown.
+  - **Department & Role Assignments** section is displayed directly inside the drawer.
+  - Adding or removing departments updates the user's role assignments immediately with live table sync.
 
 ---
 
@@ -885,6 +926,7 @@ Manage complete vendor team directory:
 - **Route:** `/login`
 - **Form Fields:** Username or Corporate Email (*Required*), Password (*Required*), "Remember Me" checkbox, `Sign In` button.
 - **Security Logic:** Rate-limiting protection on failed attempts; automated single-flight token refresh upon access token expiration (`/auth/refresh`).
+- **Deactivated Account Immunity & Permanent Deletion Retirement:** User deletion is completely disabled across the system. Deactivated accounts (`is_active=False`, `status=INACTIVE`) cannot log in under any circumstances. Submitting credentials for a deactivated user fails immediately with `403 Forbidden: Account is inactive or locked.`, preventing authentication. Any existing active JWT access tokens are immediately rejected on API calls, and clicking `Force Logout` instantly expels active sessions via real-time WebSocket termination and token invalidation.
 
 ---
 

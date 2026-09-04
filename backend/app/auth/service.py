@@ -119,7 +119,7 @@ class AuthService:
         await self._check_rate_limit(identifier)
 
         user = await self.user_repository.get_by_identifier(identifier)
-        if user is None:
+        if user is None or user.deleted_at is not None:
             await self._record_rate_limit_attempt(identifier)
             raise UnauthorizedException("Invalid username/email/phone number or password.")
 
@@ -162,6 +162,8 @@ class AuthService:
             user.status = UserStatus.PASSWORD_CHANGE_REQUIRED if user.must_change_password else UserStatus.ACTIVE
         user.last_login_at = datetime.now(timezone.utc)
         await self.user_repository.update(user)
+        # Clear any prior force-logout timestamp upon successful login
+        await self.cache.delete(CacheBackend.build_key("auth_force_logout", str(user.id)))
 
         access_token, refresh_token = await self._issue_token_pair(user, context)
         return user, access_token, refresh_token
@@ -252,8 +254,19 @@ class AuthService:
             )
 
     async def force_logout_user(self, user_id: uuid.UUID, *, reason: str = "admin_force_logout") -> int:
-        """Revoke every active session for a user."""
-        return await self.session_repository.revoke_all_for_user(user_id, reason=reason)
+        """Revoke every active session for a user, terminate live connections, and invalidate access tokens."""
+        revoked_count = await self.session_repository.revoke_all_for_user(user_id, reason=reason)
+        # Record revocation timestamp in cache to invalidate any in-flight access tokens
+        logout_key = CacheBackend.build_key("auth_force_logout", str(user_id))
+        now_ts = int(datetime.now(timezone.utc).timestamp())
+        await self.cache.set(logout_key, now_ts, ttl_seconds=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60 * 2)
+        # Disconnect any open WebSocket connections for this user in real time
+        try:
+            from app.events.manager import connection_manager
+            await connection_manager.disconnect_user(user_id)
+        except Exception:
+            pass
+        return revoked_count
 
     # --- Sessions -----------------------------------------------------------------
     async def list_sessions(self, user_id: uuid.UUID) -> list[Session]:
@@ -328,8 +341,17 @@ class AuthService:
             raise UnauthorizedException("This access token has been revoked.")
 
         user_id = uuid.UUID(payload["sub"])
+
+        # Check if user was force-logged-out after this token was issued
+        logout_key = CacheBackend.build_key("auth_force_logout", str(user_id))
+        forced_ts = await self.cache.get(logout_key)
+        if forced_ts is not None:
+            token_iat = payload.get("iat", 0)
+            if token_iat <= int(forced_ts):
+                raise UnauthorizedException("Your session has been terminated by an administrator. Please log in again.")
+
         user = await self.user_repository.get_by_id(user_id)
-        if user is None:
+        if user is None or user.deleted_at is not None:
             raise UnauthorizedException("User account no longer exists.")
         if not user.can_login:
             raise ForbiddenException("This account is not active.")

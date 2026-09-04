@@ -10,8 +10,9 @@ and the permission calculation resolving effective permissions across:
 from __future__ import annotations
 
 import uuid
+from datetime import date
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -20,6 +21,7 @@ from app.rbac.models import (
     DepartmentHierarchy,
     Permission,
     Role,
+    RoleAssignmentStatus,
     RolePermission,
     UserPermission,
     UserRole,
@@ -247,10 +249,34 @@ class RoleRepository(BaseRepository[Role]):
         # anyone still assigned to it -- i.e. deleting a role would have no
         # actual security effect until it was purged from Trash, which
         # could be up to ``settings.TRASH_RETENTION_DAYS`` (4 years) later.
+        #
+        # ``assignment_in_effect`` is required for the same reason on the
+        # ASSIGNMENT side: a UserRole row can be marked
+        # ``status=INACTIVE`` (the assignment was ended) or carry
+        # ``effective_from``/``effective_to`` dates that have lapsed (a
+        # TEMPORARY/ACTING department assignment past its end date).
+        # Before this fix, an assignment in either state still granted
+        # every permission its role carried, indefinitely -- confirmed as
+        # a real gap: an assignment explicitly marked INACTIVE and expired
+        # years ago still returned its role's permissions. A department/
+        # role assignment must be ACTIVE and within its effective window
+        # (if any is set) to count, exactly like every other assignment
+        # table in this app (EmployeePositionAssignment,
+        # EmployeeReportingRelationship, etc.) already requires.
+        today = date.today()
+        assignment_in_effect = and_(
+            UserRole.status == RoleAssignmentStatus.ACTIVE,
+            or_(UserRole.effective_from.is_(None), UserRole.effective_from <= today),
+            or_(UserRole.effective_to.is_(None), UserRole.effective_to >= today),
+        )
+
         stmt_super_admin = (
             select(Role.name)
             .join(UserRole, UserRole.role_id == Role.id)
-            .where(UserRole.user_id == user_id, Role.name == "super_admin", Role.deleted_at.is_(None))
+            .where(
+                UserRole.user_id == user_id, Role.name == "super_admin", Role.deleted_at.is_(None),
+                assignment_in_effect,
+            )
         )
         if (await self.session.execute(stmt_super_admin)).scalar_one_or_none() is not None:
             all_perms_stmt = select(Permission.code)
@@ -263,7 +289,7 @@ class RoleRepository(BaseRepository[Role]):
             .join(RolePermission, RolePermission.permission_id == Permission.id)
             .join(UserRole, UserRole.role_id == RolePermission.role_id)
             .join(Role, Role.id == RolePermission.role_id)
-            .where(UserRole.user_id == user_id, Role.deleted_at.is_(None))
+            .where(UserRole.user_id == user_id, Role.deleted_at.is_(None), assignment_in_effect)
             .distinct()
         )
         role_perms = set((await self.session.execute(stmt_roles)).scalars().all())
@@ -293,14 +319,23 @@ class RoleRepository(BaseRepository[Role]):
         if not user:
             return {}
 
-        # Fetch System / Custom Roles (excludes soft-deleted roles -- see
-        # the note in get_permission_codes_for_user above for why this
-        # matters, not just for display but for what "is_super_admin"
-        # correctly means below).
+        # Fetch System / Custom Roles (excludes soft-deleted roles, and
+        # excludes assignments that are inactive or outside their
+        # effective-date window -- see the matching note in
+        # get_permission_codes_for_user above; this inspector must show
+        # exactly the same picture the real enforcement engine uses, or an
+        # admin could look at "why does this user have X" and see a
+        # role/department listed that no longer actually grants anything).
+        today = date.today()
+        assignment_in_effect = and_(
+            UserRole.status == RoleAssignmentStatus.ACTIVE,
+            or_(UserRole.effective_from.is_(None), UserRole.effective_from <= today),
+            or_(UserRole.effective_to.is_(None), UserRole.effective_to >= today),
+        )
         stmt_user_roles = (
             select(Role.name)
             .join(UserRole, UserRole.role_id == Role.id)
-            .where(UserRole.user_id == user_id, Role.deleted_at.is_(None))
+            .where(UserRole.user_id == user_id, Role.deleted_at.is_(None), assignment_in_effect)
         )
         system_roles = list((await self.session.execute(stmt_user_roles)).scalars().all())
         is_super_admin = "super_admin" in system_roles
@@ -311,7 +346,7 @@ class RoleRepository(BaseRepository[Role]):
             .join(RolePermission, RolePermission.permission_id == Permission.id)
             .join(UserRole, UserRole.role_id == RolePermission.role_id)
             .join(Role, Role.id == UserRole.role_id)
-            .where(UserRole.user_id == user_id)
+            .where(UserRole.user_id == user_id, Role.deleted_at.is_(None), assignment_in_effect)
         )
         role_name_map: dict[str, list[str]] = {}
         for code, rname in (await self.session.execute(stmt_roles_with_names)).all():

@@ -235,6 +235,24 @@ class ConnectionManager:
         except Exception:  # noqa: BLE001
             return False
 
+    async def disconnect_user(self, user_id: uuid.UUID) -> int:
+        """
+        Close and disconnect every open WebSocket connection belonging to a given user.
+
+        Sends a force_logout control message and closes with code 4001.
+        """
+        closed_count = 0
+        for ws, conn in list(self._connections.items()):
+            if conn.user_id == user_id:
+                try:
+                    await ws.send_json({"type": "FORCE_LOGOUT", "message": "You have been logged out by an administrator."})
+                    await ws.close(code=4001, reason="force_logout")
+                except Exception:
+                    pass
+                self.disconnect(ws)
+                closed_count += 1
+        return closed_count
+
 
 # Single process-wide instance. Every route/service that needs to publish
 # or manage connections imports this same object -- exactly the pattern

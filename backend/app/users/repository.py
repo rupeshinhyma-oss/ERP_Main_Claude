@@ -60,10 +60,10 @@ class UserRepository(BaseRepository[User]):
         Fetch a user whose username, email, OR phone number matches ``identifier``.
 
         Used at login time, where the client submits a single field that
-        may be any of the three -- this lets users authenticate with
-        whichever they remember (username, email address, or phone number).
+        may be any of the three. Automatically excludes soft-deleted users
+        via ``_base_select()`` so soft-deleted accounts cannot log in.
         """
-        stmt = select(User).where(
+        stmt = self._base_select().where(
             or_(
                 User.username == identifier,
                 User.email == identifier,
@@ -84,8 +84,8 @@ class UserRepository(BaseRepository[User]):
         return await self.get_by_identifier(identifier)
 
     async def get_by_employee_code(self, employee_code: str) -> User | None:
-        """Fetch a user by their exact employee_code."""
-        stmt = select(User).where(User.employee_code == employee_code)
+        """Fetch an active, non-deleted user by their exact employee_code."""
+        stmt = self._base_select().where(User.employee_code == employee_code)
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 

@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 from app.auth.security import generate_temporary_password, hash_password
 from app.auth.service import AuthService
 from app.core.config import settings
-from app.core.exceptions import ConflictException, ForbiddenException, NotFoundException
+from app.core.exceptions import BadRequestException, ConflictException, ForbiddenException, NotFoundException
 from app.rbac.repository import UserRoleRepository
 from app.rbac.service import RBACService
 from app.users.models import User, UserStatus
@@ -419,6 +419,10 @@ class UserService:
     async def deactivate_user(self, user_id: uuid.UUID, *, updated_by: uuid.UUID) -> User:
         """Deactivate a user account and force-logout all of their active sessions."""
         user = await self.get_by_id_or_raise(user_id)
+        if self._is_bootstrap_admin_username(user.username):
+            raise ForbiddenException("The system bootstrap administrator account cannot be deactivated.")
+        if user.id == updated_by:
+            raise ForbiddenException("You cannot deactivate your own account.")
         if await self.is_super_admin(user_id) and not await self.is_super_admin(updated_by):
             raise ForbiddenException("Only Super Administrators can modify Super Administrator accounts.")
         await self._ensure_not_last_super_admin(user_id)
@@ -557,33 +561,9 @@ class UserService:
         await self.get_by_id_or_raise(user_id)
         return await self.auth_service.force_logout_user(user_id, reason="admin_force_logout")
 
-    # --- Admin: Delete User -----------------------------------------------------------
+    # --- Admin: Delete User (Disabled) ------------------------------------------------
     async def delete_user(self, user_id: uuid.UUID, *, deleted_by: uuid.UUID) -> None:
-        """Soft-delete a user account, terminating all active sessions and cleaning up role assignments."""
-        user = await self.get_by_id_or_raise(user_id)
-
-        # 1. Guard: Bootstrap admin account can never be deleted
-        if self._is_bootstrap_admin_username(user.username):
-            raise ForbiddenException("The system bootstrap administrator account cannot be deleted.")
-
-        # 2. Guard: Cannot delete own account
-        if user.id == deleted_by:
-            raise ForbiddenException("You cannot delete your own account.")
-
-        # 3. Guard: Cannot delete the last active Super Administrator
-        if await self.is_super_admin(user.id):
-            await self._ensure_not_last_super_admin(user.id)
-
-        # 4. Force logout from all active login sessions
-        await self.force_logout_user(user.id)
-
-        # 5. Remove any role assignments
-        user_roles = await self.user_role_repository.list_for_user(user.id)
-        for ur in user_roles:
-            await self.user_role_repository.delete(ur)
-
-        # 6. Invalidate permissions cache
-        await self.rbac_service.invalidate_user_permissions_cache(user.id)
-
-        # 7. Soft-delete the user record
-        await self.user_repository.delete(user)
+        """User deletion has been permanently disabled across the ERP system."""
+        raise BadRequestException(
+            "User deletion is permanently disabled. User accounts cannot be deleted to preserve audit and transaction history. Please deactivate the user instead."
+        )

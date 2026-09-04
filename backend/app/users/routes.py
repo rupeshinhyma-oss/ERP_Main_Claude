@@ -21,6 +21,7 @@ from app.auth.dependencies import get_auth_service, get_current_user
 from app.auth.schemas import SessionRead
 from app.auth.service import AuthService, CurrentUser
 from app.common.pagination import PageMeta, PageParams
+from app.core.exceptions import BadRequestException
 from app.core.responses import build_success_response
 from app.database.session import get_db_session
 from app.rbac.dependencies import get_rbac_service, require_permission
@@ -682,26 +683,12 @@ async def force_logout(
     )
 
 
-@router.delete("/{user_id}", summary="Delete a user (admin)")
+@router.delete("/{user_id}", summary="Delete a user (permanently disabled)")
 async def delete_user(
     user_id: uuid.UUID,
-    request: Request,
-    user_service: UserService = Depends(get_user_service),
     current_user: CurrentUser = Depends(require_permission("user.action")),
-    audit_service: AuditService = Depends(get_audit_service),
 ) -> dict:
-    """Delete (soft-delete) a user account, revoking active sessions and role assignments."""
-    target_user = await user_service.get_by_id_or_raise(user_id)
-    target_username = target_user.username
-    await user_service.delete_user(user_id, deleted_by=current_user.id)
-    await _record_user_action(
-        audit_service=audit_service,
-        request=request,
-        action=AuditAction.DELETE,
-        actor=current_user,
-        target_user_id=user_id,
-        description=f"Deleted user {target_username!r}.",
-    )
-    return build_success_response(
-        data={"deleted": True, "id": str(user_id)}, request_id=request.state.request_id
+    """User deletion has been permanently disabled; users must only be deactivated."""
+    raise BadRequestException(
+        "User deletion has been permanently disabled. User accounts cannot be deleted to preserve audit and transaction history. Please deactivate the user instead."
     )
